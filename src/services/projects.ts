@@ -117,7 +117,7 @@ export const projects = {
   async update(id: string, params: UpdateProjectParams): Promise<Project> {
     const headers = await getAuthHeaders();
     const response = await fetch(`${apiBase}/projects/${id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers,
       body: JSON.stringify(params),
     });

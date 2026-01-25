@@ -1,3 +1,6 @@
+// ABOUTME: Models service for fetching available AI models from Seren.
+// ABOUTME: Uses the seren-models publisher through the Seren Gateway API.
+
 import { apiBase } from "@/lib/config";
 import { getToken } from "@/services/auth";
 
@@ -7,6 +10,15 @@ export interface Model {
   provider: string;
   contextWindow: number;
 }
+
+interface AgentApiPayload {
+  publisher: string;
+  path: string;
+  method: string;
+}
+
+const PUBLISHER_SLUG = "seren-models";
+const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
 
 let cachedModels: Model[] | null = null;
 let cacheTimestamp = 0;
@@ -26,8 +38,19 @@ export const modelsService = {
         return getDefaultModels();
       }
 
-      const response = await fetch(`${apiBase}/models`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const agentPayload: AgentApiPayload = {
+        publisher: PUBLISHER_SLUG,
+        path: "/models",
+        method: "GET",
+      };
+
+      const response = await fetch(AGENT_API_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(agentPayload),
       });
 
       if (!response.ok) {
