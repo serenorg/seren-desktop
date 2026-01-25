@@ -1,0 +1,180 @@
+/* ABOUTME: Styles for low balance warning components. */
+
+/* Inline warning (for status bar or embedded use) */
+.low-balance-warning--inline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-warning, rgba(255, 193, 7, 0.1));
+  border: 1px solid var(--border-warning, rgba(255, 193, 7, 0.3));
+  border-radius: 8px;
+}
+
+/* Modal variant */
+.low-balance-warning--modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.low-balance-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.low-balance-icon {
+  font-size: 20px;
+  color: var(--warning, #ffc107);
+  flex-shrink: 0;
+}
+
+.low-balance-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.low-balance-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.low-balance-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.low-balance-error {
+  font-size: 12px;
+  color: var(--error, #dc3545);
+  padding: 8px;
+  background: var(--bg-error, rgba(220, 53, 69, 0.1));
+  border-radius: 4px;
+}
+
+.low-balance-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.low-balance-actions .btn-primary,
+.low-balance-actions .btn-secondary {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.low-balance-actions .btn-primary {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  border: none;
+}
+
+.low-balance-actions .btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.low-balance-actions .btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.low-balance-actions .btn-secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+}
+
+.low-balance-actions .btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.low-balance-actions .btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Modal backdrop */
+.low-balance-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.low-balance-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: var(--shadow-lg);
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.low-balance-modal-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 16px;
+}
+
+/* Status bar indicator */
+.low-balance-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  color: var(--warning, #ffc107);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.low-balance-indicator:hover {
+  background: var(--bg-hover);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .low-balance-modal-backdrop,
+  .low-balance-modal {
+    animation: none;
+  }
+}

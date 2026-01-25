@@ -1,12 +1,13 @@
 // ABOUTME: Main application component with layout and auth integration.
 // ABOUTME: Shows SignIn when not authenticated, main app when authenticated.
 
-import { createSignal, Match, onMount, Show, Switch } from "solid-js";
+import { createSignal, createEffect, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { Header } from "@/components/common/Header";
 import { Sidebar, Panel } from "@/components/common/Sidebar";
 import { StatusBar } from "@/components/common/StatusBar";
 import { SignIn } from "@/components/auth/SignIn";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import {
   authStore,
@@ -15,6 +16,12 @@ import {
   setAuthenticated,
 } from "@/stores/auth.store";
 import { telemetry } from "@/services/telemetry";
+import {
+  startAutoRefresh,
+  stopAutoRefresh,
+  resetWalletState,
+} from "@/stores/wallet.store";
+import { initAutoTopUp } from "@/services/autoTopUp";
 import "./App.css";
 
 // Initialize telemetry early to capture startup errors
@@ -29,6 +36,25 @@ function App() {
 
   onMount(() => {
     checkAuth();
+  });
+
+  // Initialize wallet features when authenticated
+  createEffect(() => {
+    if (authStore.isAuthenticated) {
+      // Start wallet balance refresh
+      startAutoRefresh();
+
+      // Initialize auto top-up monitoring
+      const cleanupAutoTopUp = initAutoTopUp();
+
+      onCleanup(() => {
+        stopAutoRefresh();
+        cleanupAutoTopUp();
+      });
+    } else {
+      // Reset wallet state on logout
+      resetWalletState();
+    }
   });
 
   const handleLoginSuccess = () => {
@@ -72,6 +98,7 @@ function App() {
             </main>
           </div>
           <StatusBar />
+          <LowBalanceModal />
         </div>
       </Show>
     </Show>
