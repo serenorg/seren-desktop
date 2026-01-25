@@ -14,7 +14,11 @@ import {
   logout,
   setAuthenticated,
 } from "@/stores/auth.store";
+import { telemetry } from "@/services/telemetry";
 import "./App.css";
+
+// Initialize telemetry early to capture startup errors
+telemetry.init();
 
 function App() {
   if (shouldRenderPhase3Playground()) {
