@@ -1,0 +1,132 @@
+# Contributing to Seren Desktop
+
+Thank you for your interest in contributing!
+
+## Code of Conduct
+
+Be respectful. We're all here to build something useful.
+
+## Getting Started
+
+1. Fork the repository
+2. Clone your fork: `git clone git@github.com:YOUR_USERNAME/seren-desktop.git`
+3. Create a branch: `git checkout -b feature/your-feature`
+4. Make changes
+5. Test: `pnpm test`
+6. Commit: `git commit -m "feat: add your feature"`
+7. Push: `git push origin feature/your-feature`
+8. Open a Pull Request
+
+## Development Setup
+
+### Prerequisites
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install Node.js (use nvm)
+nvm install 20
+nvm use 20
+
+# Install pnpm
+npm install -g pnpm
+
+# Install Tauri CLI
+cargo install tauri-cli
+
+# Optional: Install faster linker (recommended)
+# macOS:
+brew install michaeleisel/zld/zld
+# Linux:
+sudo apt install mold
+```
+
+### Running Locally
+
+```bash
+# Install dependencies
+pnpm install
+
+# Start development server
+pnpm tauri dev
+
+# Fast Rust type checking (no full build)
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+### Project Structure
+
+```
+seren-desktop/
+├── src/                    # SolidJS frontend
+│   ├── components/         # UI components
+│   ├── services/           # API services
+│   ├── stores/             # State management
+│   └── lib/                # Utilities
+├── src-tauri/              # Rust backend
+│   ├── src/
+│   │   ├── commands/       # Tauri IPC commands
+│   │   ├── services/       # Backend services
+│   │   └── mcp/            # MCP client
+│   └── Cargo.toml
+├── docs/                   # Documentation
+└── tests/                  # Tests
+```
+
+## Commit Messages
+
+We use [Conventional Commits](https://www.conventionalcommits.org/):
+
+- `feat:` New feature
+- `fix:` Bug fix
+- `docs:` Documentation only
+- `style:` Formatting (no code change)
+- `refactor:` Code change that neither fixes nor adds
+- `test:` Adding tests
+- `chore:` Maintenance
+
+Examples:
+
+- `feat: add model selection dropdown`
+- `fix: handle SSE connection timeout`
+- `docs: update API authentication section`
+
+## Pull Request Process
+
+1. Update documentation if needed
+2. Add tests for new features
+3. Ensure `pnpm test` passes
+4. Ensure `pnpm lint` passes
+5. Request review from maintainers
+
+## Security
+
+**NEVER commit:**
+
+- API keys or tokens
+- Passwords
+- Private keys
+- User data
+
+If you find a security issue, email security@serendb.com instead of opening an issue.
+
+See [SECURITY.md](SECURITY.md) for full security policy.
+
+## Testing
+
+```bash
+# Run frontend tests
+pnpm test
+
+# Run Rust tests
+cargo test --manifest-path src-tauri/Cargo.toml
+
+# Run with coverage
+pnpm test --coverage
+```
+
+## Questions?
+
+- Open a [Discussion](https://github.com/serenorg/seren-desktop/discussions)
+- Join [Discord](https://discord.gg/seren)

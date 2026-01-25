@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+target/
+src-tauri/target/
+
+# Environment files (NEVER commit these)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# Tauri
+src-tauri/WixTools/
+
+# Generated icons (keep source icons)
+src-tauri/icons/*.ico
+
+# OS files
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Lock files (keep pnpm-lock.yaml)
+package-lock.json
+yarn.lock
