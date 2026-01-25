@@ -4,26 +4,14 @@
 /**
  * Seren Gateway API base URL.
  * SECURITY: Must always be HTTPS in production.
+ * NOTE: Seren Gateway API does NOT use a version prefix.
  */
-export const API_URL =
+export const API_BASE =
   import.meta.env.VITE_SEREN_API_URL ?? "https://api.serendb.com";
 
-/**
- * API version prefix.
- */
-export const API_VERSION = import.meta.env.VITE_SEREN_API_VERSION ?? "v1";
-
-const DEFAULT_API_BASE = `${API_URL}/${API_VERSION}`;
-
-/**
- * Full API base path for requests.
- * Example: https://api.serendb.com/v1
- */
-export const apiBase =
-  import.meta.env.VITE_SEREN_API_BASE ?? DEFAULT_API_BASE;
-
-// Backwards-compat constant used by legacy modules.
-export const API_BASE = apiBase;
+// Backwards-compat alias
+export const apiBase = API_BASE;
+export const API_URL = API_BASE;
 
 export const config = {
   apiBase,
