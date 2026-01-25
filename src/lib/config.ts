@@ -22,6 +22,9 @@ const DEFAULT_API_BASE = `${API_URL}/${API_VERSION}`;
 export const apiBase =
   import.meta.env.VITE_SEREN_API_BASE ?? DEFAULT_API_BASE;
 
+// Backwards-compat constant used by legacy modules.
+export const API_BASE = apiBase;
+
 export const config = {
   apiBase,
 };

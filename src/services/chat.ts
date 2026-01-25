@@ -5,11 +5,6 @@ import { getToken } from "@/services/auth";
 
 export type ChatRole = "user" | "assistant" | "system";
 
-export interface ChatMessage {
-  role: ChatRole;
-  content: string;
-}
-
 export interface ChatContextRange {
   startLine: number;
   endLine: number;
