@@ -20,3 +20,4 @@ export {
   isRecoverableError,
   formatErrorForLogging,
 } from "./errors";
+export { getToolRiskLevel, getRiskLabel } from "./risk";
