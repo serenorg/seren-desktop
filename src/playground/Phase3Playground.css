@@ -1,0 +1,62 @@
+.phase3-playground {
+  display: flex;
+  height: 100vh;
+  background: radial-gradient(circle at top, #111827, #020617 70%);
+  color: #fff;
+}
+
+.phase3-sidebar {
+  width: 280px;
+  padding: 16px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(2, 6, 23, 0.85);
+}
+
+.phase3-sidebar h2 {
+  margin-top: 0;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.phase3-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.phase3-tabs {
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.phase3-editor-surface {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px 12px 12px;
+}
+
+.phase3-editor-header {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  margin: 12px 0;
+}
+
+.phase3-editor-container {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0f172a;
+}
+
+.phase3-editor-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+}

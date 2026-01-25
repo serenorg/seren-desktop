@@ -15,7 +15,12 @@ interface FileTreeProps {
 
 export const FileTree: Component<FileTreeProps> = (props) => {
   return (
-    <div class="file-tree" role="tree" aria-label="File explorer">
+    <div
+      class="file-tree"
+      role="tree"
+      aria-label="File explorer"
+      data-testid="file-tree"
+    >
       <Show
         when={fileTreeState.nodes.length > 0}
         fallback={<div class="file-tree-empty">No folder open</div>}
@@ -88,6 +93,9 @@ const FileTreeNode: Component<FileTreeNodeProps> = (props) => {
         aria-expanded={props.node.isDirectory ? expanded() : undefined}
         aria-selected={isSelected()}
         tabIndex={0}
+        data-testid="file-tree-item"
+        data-file-path={props.node.path}
+        data-file-type={props.node.isDirectory ? "directory" : "file"}
       >
         <span class="file-tree-icon">{icon()}</span>
         <span class="file-tree-name">{props.node.name}</span>

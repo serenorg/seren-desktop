@@ -34,6 +34,20 @@ pnpm install
 pnpm tauri dev
 ```
 
+### Testing
+
+```bash
+# Unit tests (Vitest)
+pnpm test
+
+# Playwright E2E (headless)
+pnpm test:e2e
+
+# Debug helpers
+pnpm test:e2e:ui
+pnpm test:e2e:headed
+```
+
 ### Build
 
 ```bash
