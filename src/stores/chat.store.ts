@@ -82,22 +82,34 @@ export const chatStore = {
   },
 
   async persistMessage(message: Message) {
-    await invoke("save_message", {
-      id: message.id,
-      role: message.role,
-      content: message.content,
-      model: message.model ?? null,
-      timestamp: message.timestamp,
-    });
+    try {
+      await invoke("save_message", {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        model: message.model ?? null,
+        timestamp: message.timestamp,
+      });
+    } catch (error) {
+      console.warn("Unable to persist message", error);
+    }
   },
 
   async loadHistory(limit = MAX_MESSAGES) {
-    const messages = (await invoke("get_messages", { limit })) as Message[];
-    this.setMessages(messages);
+    try {
+      const messages = (await invoke("get_messages", { limit })) as Message[];
+      this.setMessages(messages);
+    } catch (error) {
+      console.warn("Unable to load history", error);
+    }
   },
 
   async clearHistory() {
-    await invoke("clear_history");
+    try {
+      await invoke("clear_history");
+    } catch (error) {
+      console.warn("Unable to clear history", error);
+    }
     this.clearMessages();
   },
 };

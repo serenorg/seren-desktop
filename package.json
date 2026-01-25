@@ -23,6 +23,8 @@
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-opener": "^2",
     "monaco-editor": "^0.55.1",
+    "highlight.js": "^11.11.1",
+    "marked": "^17.0.1",
     "solid-js": "^1.9.3"
   },
   "devDependencies": {

@@ -21,7 +21,12 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: #ccc;
-  background-color: #1e1e1e;
+  background-color: #0b1220;
+  background-image: radial-gradient(circle at top, #1f2937, #0f172a 40%, #020617 100%);
+}
+
+button {
+  cursor: pointer;
 }
 
 .app {
@@ -39,7 +44,7 @@ body {
 .app-main {
   flex: 1;
   overflow: auto;
-  background-color: #1e1e1e;
+  background-color: transparent;
 }
 
 .panel-placeholder {

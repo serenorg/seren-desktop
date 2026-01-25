@@ -1,82 +1,295 @@
-// ABOUTME: Chat panel component for AI conversation.
-// ABOUTME: Displays message history and input for sending messages.
-
-import { Component, createSignal, For } from "solid-js";
-import { sendMessage, ChatMessage } from "@/services/chat";
+/* eslint-disable solid/no-innerhtml */
+import type { Component } from "solid-js";
+import { For, Show, createMemo, createSignal, onMount } from "solid-js";
+import {
+  type ChatContext,
+  type Message,
+  streamMessage,
+  sendMessageWithRetry,
+  CHAT_MAX_RETRIES,
+} from "@/services/chat";
+import { chatStore } from "@/stores/chat.store";
+import { editorStore } from "@/stores/editor.store";
+import { StreamingMessage } from "./StreamingMessage";
+import { ModelSelector } from "./ModelSelector";
+import { formatRelativeTime } from "@/lib/format-time";
+import { renderMarkdown } from "@/lib/render-markdown";
+import { escapeHtml } from "@/lib/escape-html";
 import "./ChatPanel.css";
+import "highlight.js/styles/github.css";
+
+interface StreamingSession {
+  id: string;
+  userMessageId: string;
+  prompt: string;
+  model: string;
+  context?: ChatContext;
+  stream: AsyncGenerator<string>;
+}
 
 export const ChatPanel: Component = () => {
-  const [messages, setMessages] = createSignal<ChatMessage[]>([]);
   const [input, setInput] = createSignal("");
-  const [isLoading, setIsLoading] = createSignal(false);
-  const [error, setError] = createSignal("");
+  const [streamingSession, setStreamingSession] = createSignal<StreamingSession | null>(null);
 
-  const handleSend = async () => {
-    const text = input().trim();
-    if (!text || isLoading()) return;
+  onMount(async () => {
+    try {
+      await chatStore.loadHistory();
+    } catch (error) {
+      chatStore.setError((error as Error).message);
+    }
+  });
 
-    setError("");
-    const userMessage: ChatMessage = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMessage]);
+  const contextPreview = createMemo(() => {
+    if (!editorStore.selectedText) return null;
+    return {
+      text: editorStore.selectedText,
+      file: editorStore.selectedFile,
+      range: editorStore.selectedRange,
+    };
+  });
+
+  const buildContext = (): ChatContext | undefined => {
+    if (!editorStore.selectedText) return undefined;
+    return {
+      content: editorStore.selectedText,
+      file: editorStore.selectedFile,
+      range: editorStore.selectedRange ?? undefined,
+    };
+  };
+
+  const sendMessage = async () => {
+    const trimmed = input().trim();
+    if (!trimmed) return;
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: trimmed,
+      timestamp: Date.now(),
+      model: chatStore.selectedModel,
+      status: "complete",
+    };
+
+    chatStore.addMessage(userMessage);
+    await chatStore.persistMessage(userMessage);
+
+    const context = buildContext();
+    const assistantId = crypto.randomUUID();
+
+    const session: StreamingSession = {
+      id: assistantId,
+      userMessageId: userMessage.id,
+      prompt: trimmed,
+      model: chatStore.selectedModel,
+      context,
+      stream: streamMessage(trimmed, chatStore.selectedModel, context),
+    };
+
+    chatStore.setLoading(true);
+    setStreamingSession(session);
+    chatStore.setError(null);
     setInput("");
-    setIsLoading(true);
+  };
+
+  const handleStreamingComplete = async (session: StreamingSession, content: string) => {
+    const assistantMessage: Message = {
+      id: session.id,
+      role: "assistant",
+      content,
+      timestamp: Date.now(),
+      model: session.model,
+      status: "complete",
+      request: { prompt: session.prompt, context: session.context },
+    };
+
+    chatStore.addMessage(assistantMessage);
+    await chatStore.persistMessage(assistantMessage);
+    setStreamingSession(null);
+    chatStore.setLoading(false);
+  };
+
+  const handleStreamingError = async (session: StreamingSession, error: Error) => {
+    setStreamingSession(null);
+    chatStore.setLoading(false);
+    chatStore.setError(error.message);
+
+    const failedMessage: Message = {
+      id: session.id,
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+      model: session.model,
+      status: "error",
+      error: error.message,
+      request: { prompt: session.prompt, context: session.context },
+    };
+
+    chatStore.addMessage(failedMessage);
+    await attemptRetry(failedMessage, false);
+  };
+
+  const attemptRetry = async (message: Message, isManual: boolean) => {
+    if (!message.request) return;
+
+    chatStore.setRetrying(message.id);
+    chatStore.updateMessage(message.id, {
+      status: "pending",
+      attemptCount: message.attemptCount ?? 1,
+    });
 
     try {
-      const response = await sendMessage([...messages(), userMessage]);
-      setMessages((prev) => [...prev, response]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send message");
+      const content = await sendMessageWithRetry(
+        message.request.prompt,
+        message.model ?? chatStore.selectedModel,
+        message.request.context,
+        (attempt) => {
+          chatStore.updateMessage(message.id, {
+            status: "pending",
+            attemptCount: attempt + 1,
+          });
+        }
+      );
+
+      const updated = {
+        ...message,
+        content,
+        status: "complete" as const,
+        error: null,
+        timestamp: Date.now(),
+      };
+
+      chatStore.updateMessage(message.id, updated);
+      await chatStore.persistMessage(updated);
+    } catch (error) {
+      const messageError = (error as Error).message;
+      chatStore.updateMessage(message.id, {
+        status: "error",
+        error: messageError,
+      });
+      if (isManual) {
+        chatStore.setError(messageError);
+      }
     } finally {
-      setIsLoading(false);
+      chatStore.setRetrying(null);
     }
   };
 
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+  const handleManualRetry = async (message: Message) => {
+    await attemptRetry(message, true);
+  };
+
+  const clearHistory = async () => {
+    const confirmClear = window.confirm("Clear all chat history?");
+    if (!confirmClear) return;
+    await chatStore.clearHistory();
   };
 
   return (
-    <div class="chat-panel">
+    <section class="chat-panel">
+      <header class="chat-header">
+        <div>
+          <h1>Seren Chat</h1>
+          <p class="chat-subtitle">Ask questions with streaming responses.</p>
+        </div>
+        <div class="chat-actions">
+          <ModelSelector />
+          <button class="secondary" onClick={clearHistory}>
+            Clear history
+          </button>
+        </div>
+      </header>
+
       <div class="chat-messages">
-        <For each={messages()}>
+        <For each={chatStore.messages}>
           {(message) => (
-            <div class={`chat-message chat-message-${message.role}`}>
-              <div class="chat-message-role">
-                {message.role === "user" ? "You" : "Assistant"}
+            <article class={`chat-message ${message.role}`}>
+              <div class="message-header">
+                <span class="role">{message.role === "user" ? "You" : "Seren"}</span>
+                <span class="timestamp">{formatRelativeTime(message.timestamp)}</span>
               </div>
-              <div class="chat-message-content">{message.content}</div>
-            </div>
+              <div
+                class="message-body"
+                innerHTML={
+                  message.role === "assistant"
+                    ? renderMarkdown(message.content)
+                    : escapeHtml(message.content)
+                }
+              />
+              <Show when={message.status === "error"}>
+                <div class="message-error">
+                  <span>{message.error ?? "Message failed"}</span>
+                  <Show when={chatStore.retryingMessageId === message.id}>
+                    <span>
+                      Retrying ({Math.min(message.attemptCount ?? 1, CHAT_MAX_RETRIES)}/
+                      {CHAT_MAX_RETRIES})…
+                    </span>
+                  </Show>
+                  <Show when={message.request}>
+                    <button onClick={() => handleManualRetry(message)}>Retry</button>
+                  </Show>
+                </div>
+              </Show>
+            </article>
           )}
         </For>
-        {isLoading() && (
-          <div class="chat-message chat-message-assistant">
-            <div class="chat-message-role">Assistant</div>
-            <div class="chat-message-content chat-typing">Thinking...</div>
+
+        <Show when={streamingSession()}>
+          {(sessionAccessor) => (
+            <StreamingMessage
+              stream={sessionAccessor().stream}
+              onComplete={(content) => handleStreamingComplete(sessionAccessor(), content)}
+              onError={(error) => handleStreamingError(sessionAccessor(), error)}
+            />
+          )}
+        </Show>
+      </div>
+
+      <Show when={contextPreview()}>
+        {(ctx) => (
+          <div class="chat-context">
+            <div class="context-header">
+              <span>
+                Context from {ctx().file ?? "selection"}
+                {ctx().range &&
+                  ` (${ctx().range.startLine}-${ctx().range.endLine})`}
+              </span>
+              <button class="icon" onClick={() => editorStore.clearSelection()}>
+                ×
+              </button>
+            </div>
+            <pre>{ctx().text}</pre>
           </div>
         )}
-        {error() && <div class="chat-error">{error()}</div>}
-      </div>
-      <div class="chat-input-container">
+      </Show>
+
+      <form
+        class="chat-input"
+        onSubmit={(event) => {
+          event.preventDefault();
+          sendMessage();
+        }}
+      >
         <textarea
-          class="chat-input"
           value={input()}
-          onInput={(e) => setInput(e.currentTarget.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type a message... (Enter to send)"
-          disabled={isLoading()}
-          rows={3}
+          placeholder="Ask Seren anything…"
+          onInput={(event) => setInput(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault();
+              sendMessage();
+            }
+          }}
+          disabled={chatStore.isLoading}
         />
-        <button
-          class="chat-send"
-          onClick={handleSend}
-          disabled={isLoading() || !input().trim()}
-        >
-          Send
-        </button>
-      </div>
-    </div>
+        <div class="input-footer">
+          <span class="helper-text">
+            {chatStore.isLoading ? "Streaming…" : "Ctrl+Enter to send"}
+          </span>
+          <button type="submit" disabled={chatStore.isLoading}>
+            Send
+          </button>
+        </div>
+      </form>
+    </section>
   );
 };

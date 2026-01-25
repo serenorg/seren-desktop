@@ -3,6 +3,14 @@
 
 use tauri_plugin_store::StoreExt;
 
+pub mod commands {
+    pub mod chat;
+}
+
+pub mod services {
+    pub mod database;
+}
+
 mod files;
 
 const AUTH_STORE: &str = "auth.json";
@@ -16,8 +24,7 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 fn store_token(app: tauri::AppHandle, token: String) -> Result<(), String> {
     let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    store
-        .set(TOKEN_KEY, serde_json::json!(token));
+    store.set(TOKEN_KEY, serde_json::json!(token));
     store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -59,6 +66,9 @@ pub fn run() {
             files::create_directory,
             files::delete_path,
             files::rename_path,
+            commands::chat::save_message,
+            commands::chat::get_messages,
+            commands::chat::clear_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
