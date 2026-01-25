@@ -7,6 +7,7 @@ import { Sidebar, Panel } from "@/components/common/Sidebar";
 import { StatusBar } from "@/components/common/StatusBar";
 import { SignIn } from "@/components/auth/SignIn";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { Phase3Playground } from "@/playground/Phase3Playground";
 import {
   authStore,
   checkAuth,
@@ -16,6 +17,10 @@ import {
 import "./App.css";
 
 function App() {
+  if (shouldRenderPhase3Playground()) {
+    return <Phase3Playground />;
+  }
+
   const [activePanel, setActivePanel] = createSignal<Panel>("chat");
 
   onMount(() => {
@@ -70,3 +75,10 @@ function App() {
 }
 
 export default App;
+
+function shouldRenderPhase3Playground(): boolean {
+  if (!import.meta.env.DEV) return false;
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get("test") === "phase3";
+}

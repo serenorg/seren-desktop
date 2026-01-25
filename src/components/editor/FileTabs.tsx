@@ -59,6 +59,8 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
               aria-controls={`panel-${tab.id}`}
               tabIndex={tab.id === tabsState.activeTabId ? 0 : -1}
               title={tab.filePath}
+              data-testid="file-tab"
+              data-file-path={tab.filePath}
             >
               <Show when={tab.isDirty}>
                 <span class="file-tab-dirty-indicator" aria-label="Unsaved changes">●</span>
@@ -69,6 +71,7 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
                 onClick={(e) => handleTabClose(e, tab)}
                 aria-label={`Close ${tab.fileName}`}
                 tabIndex={-1}
+                data-testid="file-tab-close"
               >
                 ×
               </button>
