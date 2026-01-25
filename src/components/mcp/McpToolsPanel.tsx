@@ -31,10 +31,6 @@ export const McpToolsPanel: Component = () => {
     setExecution(null);
   }
 
-  function getRequiredArgs(tool: McpTool): string[] {
-    return tool.inputSchema.required || [];
-  }
-
   function getArgProperties(tool: McpTool): Array<{
     name: string;
     schema: Record<string, unknown>;
