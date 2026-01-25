@@ -1,0 +1,4 @@
+// ABOUTME: Barrel export for MCP module.
+// ABOUTME: Re-exports all MCP types, client, and utilities.
+
+export * from "./types";
