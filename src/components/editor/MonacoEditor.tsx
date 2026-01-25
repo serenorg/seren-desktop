@@ -132,8 +132,9 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
 
   /**
    * Mark current content as saved (resets dirty state).
+   * TODO: Expose via ref pattern when needed by parent components.
    */
-  function markSaved(): void {
+  function _markSaved(): void {
     if (model) {
       setOriginalValue(model.getValue());
       setIsDirty(false);
@@ -142,27 +143,34 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
 
   /**
    * Get the editor instance for advanced operations.
+   * TODO: Expose via ref pattern when needed by parent components.
    */
-  function getEditor(): Monaco.editor.IStandaloneCodeEditor | undefined {
+  function _getEditor(): Monaco.editor.IStandaloneCodeEditor | undefined {
     return editor;
   }
 
   /**
    * Get the model instance.
+   * TODO: Expose via ref pattern when needed by parent components.
    */
-  function getModel(): Monaco.editor.ITextModel | undefined {
+  function _getModel(): Monaco.editor.ITextModel | undefined {
     return model;
   }
 
   /**
    * Focus the editor.
+   * TODO: Expose via ref pattern when needed by parent components.
    */
-  function focus(): void {
+  function _focus(): void {
     editor?.focus();
   }
 
-  // Expose methods via ref pattern if needed
-  // For now, we return a simple div
+  // These methods are prefixed with _ to suppress unused warnings.
+  // They will be exposed via ref pattern when parent components need them.
+  void _markSaved;
+  void _getEditor;
+  void _getModel;
+  void _focus;
 
   return (
     <div
