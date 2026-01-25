@@ -11,7 +11,8 @@ export type ToolCallStatus =
   | "denied"
   | "executing"
   | "completed"
-  | "error";
+  | "error"
+  | "canceled";
 
 export interface ToolCallRequest {
   id: string;
@@ -22,6 +23,8 @@ export interface ToolCallRequest {
   error?: string;
   createdAt: number;
   completedAt?: number;
+  attemptCount?: number;
+  maxRetries?: number;
 }
 
 interface McpChatState {

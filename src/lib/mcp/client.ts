@@ -3,6 +3,7 @@
 
 import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { parseMcpError, isRecoverableError } from "./errors";
 import type {
   McpConnection,
   McpConnectionStatus,
@@ -147,14 +148,120 @@ function createMcpClient() {
   /**
    * Call a tool on an MCP server.
    */
+  type CallToolOptions = {
+    signal?: AbortSignal;
+  };
+
+  type RetryToolOptions = CallToolOptions & {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    onAttempt?: (attempt: number) => void;
+  };
+
+  function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!signal) {
+      return promise;
+    }
+
+    if (signal.aborted) {
+      return Promise.reject(new DOMException("Operation aborted", "AbortError"));
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => {
+        signal.removeEventListener("abort", onAbort);
+        reject(new DOMException("Operation aborted", "AbortError"));
+      };
+
+      signal.addEventListener("abort", onAbort);
+
+      promise
+        .then((value) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        })
+        .catch((error) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(error);
+        });
+    });
+  }
+
   async function callTool(
     serverName: string,
-    call: McpToolCall
+    call: McpToolCall,
+    options?: CallToolOptions
   ): Promise<McpToolResult> {
-    return invoke<McpToolResult>("mcp_call_tool", {
+    const invocation = invoke<McpToolResult>("mcp_call_tool", {
       serverName,
       toolName: call.name,
       arguments: call.arguments,
+    }).catch((error) => {
+      throw parseMcpError(error, serverName);
+    });
+
+    return withAbort(invocation, options?.signal);
+  }
+
+  async function retryToolCall(
+    serverName: string,
+    call: McpToolCall,
+    options?: RetryToolOptions
+  ): Promise<McpToolResult> {
+    const maxAttempts = options?.maxAttempts ?? 3;
+    let delay = options?.initialDelayMs ?? 1000;
+    let attempt = 0;
+    let lastError: unknown = null;
+
+    while (attempt < maxAttempts) {
+      attempt += 1;
+      options?.onAttempt?.(attempt);
+
+      try {
+        return await callTool(serverName, call, { signal: options?.signal });
+      } catch (error) {
+        lastError = error;
+
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw error;
+        }
+
+        if (!isRecoverableError(error) || attempt >= maxAttempts) {
+          throw error;
+        }
+
+        await waitWithAbort(delay, options?.signal);
+        delay *= 2;
+      }
+    }
+
+    throw lastError ?? new Error("Tool call failed");
+  }
+
+  function waitWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+      return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+      });
+    }
+
+    if (signal.aborted) {
+      return Promise.reject(new DOMException("Operation aborted", "AbortError"));
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+
+      const onAbort = () => {
+        clearTimeout(timeout);
+        signal.removeEventListener("abort", onAbort);
+        reject(new DOMException("Operation aborted", "AbortError"));
+      };
+
+      signal.addEventListener("abort", onAbort);
     });
   }
 
@@ -237,6 +344,7 @@ function createMcpClient() {
     listTools,
     listResources,
     callTool,
+    retryToolCall,
     readResource,
     isConnected,
     listConnected,
