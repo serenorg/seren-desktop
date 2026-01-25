@@ -1,0 +1,62 @@
+/* ABOUTME: Styles for the SyncIndicator component. */
+
+.sync-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: default;
+  transition: all 0.2s ease;
+}
+
+.sync-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.sync-text {
+  font-size: 11px;
+}
+
+/* Idle state */
+.sync-indicator.sync-idle {
+  color: var(--text-muted, #888888);
+}
+
+.sync-indicator.sync-idle .sync-icon {
+  opacity: 0.5;
+}
+
+/* Syncing state */
+.sync-indicator.sync-syncing {
+  color: var(--info-text, #75beff);
+}
+
+.sync-indicator.sync-syncing .sync-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Synced state */
+.sync-indicator.sync-synced {
+  color: var(--success-color, #89d185);
+}
+
+/* Error state */
+.sync-indicator.sync-error {
+  color: var(--error-text, #f48771);
+}
+
+.sync-indicator.sync-error:hover {
+  background: var(--error-bg, rgba(90, 29, 29, 0.5));
+}

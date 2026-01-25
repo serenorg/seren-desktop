@@ -1,0 +1,140 @@
+/* ABOUTME: Styles for the SettingsPanel component. */
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 12px;
+  background: var(--sidebar-bg, #1e1e1e);
+  color: var(--text-color, #cccccc);
+  overflow-y: auto;
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color, #3c3c3c);
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted, #888888);
+}
+
+.reset-all-btn {
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--text-muted, #888888);
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.reset-all-btn:hover {
+  background: var(--error-bg, #5a1d1d);
+  color: var(--error-text, #f48771);
+  border-color: var(--error-text, #f48771);
+}
+
+.settings-section {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color, #3c3c3c);
+}
+
+.settings-section:last-child {
+  border-bottom: none;
+}
+
+.settings-section h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-color, #cccccc);
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.setting-item:last-child {
+  margin-bottom: 0;
+}
+
+.setting-item label {
+  font-size: 13px;
+  color: var(--text-color, #cccccc);
+}
+
+.setting-item.checkbox {
+  justify-content: flex-start;
+}
+
+.setting-item.checkbox label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.setting-item.checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.setting-item input[type="number"],
+.setting-item select {
+  width: 100px;
+  padding: 6px 8px;
+  background: var(--input-bg, #3c3c3c);
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 4px;
+  color: var(--text-color, #cccccc);
+  font-size: 13px;
+}
+
+.setting-item input[type="number"]:focus,
+.setting-item select:focus {
+  outline: none;
+  border-color: var(--focus-border, #007fd4);
+}
+
+.setting-hint {
+  margin: 8px 0 0;
+  padding: 8px;
+  background: var(--info-bg, #063b49);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--info-text, #75beff);
+  line-height: 1.4;
+}
+
+.logout-btn {
+  width: 100%;
+  padding: 10px;
+  background: transparent;
+  color: var(--error-text, #f48771);
+  border: 1px solid var(--error-text, #f48771);
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.logout-btn:hover {
+  background: var(--error-bg, #5a1d1d);
+}

@@ -12,6 +12,7 @@ pub mod services {
 }
 
 mod files;
+mod sync;
 
 const AUTH_STORE: &str = "auth.json";
 const TOKEN_KEY: &str = "token";
@@ -68,7 +69,10 @@ pub fn run() {
             files::rename_path,
             commands::chat::save_message,
             commands::chat::get_messages,
-            commands::chat::clear_history
+            commands::chat::clear_history,
+            sync::start_watching,
+            sync::stop_watching,
+            sync::get_sync_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

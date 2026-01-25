@@ -3,3 +3,5 @@
 
 export * as auth from "./auth";
 export * as chat from "./chat";
+export * as projects from "./projects";
+export * as catalog from "./catalog";
