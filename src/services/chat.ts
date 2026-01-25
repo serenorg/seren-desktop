@@ -37,7 +37,16 @@ interface ChatCompletionPayload {
   stream?: boolean;
 }
 
-const CHAT_ENDPOINT = `${apiBase}/chat/completions`;
+interface AgentApiPayload {
+  publisher: string;
+  path: string;
+  method: string;
+  body: ChatCompletionPayload;
+}
+
+const PUBLISHER_SLUG = "seren-models";
+const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
+const AGENT_STREAM_ENDPOINT = `${apiBase}/agent/stream`;
 export const CHAT_MAX_RETRIES = 3;
 const INITIAL_DELAY = 1000;
 
@@ -47,15 +56,21 @@ export async function sendMessage(
   context?: ChatContext
 ): Promise<string> {
   const token = await requireToken();
-  const payload = buildPayload(content, model, context, false);
+  const chatPayload = buildPayload(content, model, context, false);
+  const agentPayload: AgentApiPayload = {
+    publisher: PUBLISHER_SLUG,
+    path: "/chat/completions",
+    method: "POST",
+    body: chatPayload,
+  };
 
-  const response = await fetch(CHAT_ENDPOINT, {
+  const response = await fetch(AGENT_API_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(agentPayload),
   });
 
   if (!response.ok) {
@@ -72,15 +87,21 @@ export async function* streamMessage(
   context?: ChatContext
 ): AsyncGenerator<string> {
   const token = await requireToken();
-  const payload = buildPayload(content, model, context, true);
+  const chatPayload = buildPayload(content, model, context, true);
+  const agentPayload: AgentApiPayload = {
+    publisher: PUBLISHER_SLUG,
+    path: "/chat/completions",
+    method: "POST",
+    body: chatPayload,
+  };
 
-  const response = await fetch(CHAT_ENDPOINT, {
+  const response = await fetch(AGENT_STREAM_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(agentPayload),
   });
 
   if (!response.ok || !response.body) {
