@@ -1,0 +1,17 @@
+// ABOUTME: Application status bar at the bottom.
+// ABOUTME: Displays status messages and connection state.
+
+import { Component } from "solid-js";
+import "./StatusBar.css";
+
+interface StatusBarProps {
+  message?: string;
+}
+
+export const StatusBar: Component<StatusBarProps> = (props) => {
+  return (
+    <footer class="status-bar">
+      <span class="status-message">{props.message || "Ready"}</span>
+    </footer>
+  );
+};

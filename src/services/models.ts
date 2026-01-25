@@ -1,5 +1,5 @@
-import { config } from "@/lib/config";
-import { auth } from "./auth";
+import { apiBase } from "@/lib/config";
+import { getToken } from "@/services/auth";
 
 export interface Model {
   id: string;
@@ -21,8 +21,12 @@ export const modelsService = {
     }
 
     try {
-      const token = await auth.getToken();
-      const response = await fetch(`${config.apiBase}/models`, {
+      const token = await getToken();
+      if (!token) {
+        return getDefaultModels();
+      }
+
+      const response = await fetch(`${apiBase}/models`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 

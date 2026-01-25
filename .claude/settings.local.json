@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/create-labels.sh:*)",
+      "Bash(./scripts/create-phase1-issues.sh:*)",
+      "Bash(/Users/taariqlewis/Projects/Seren_Projects/seren-desktop/scripts/create-phase2-issues.sh:*)",
+      "Bash(./scripts/create-phase3-issues.sh:*)",
+      "Bash(./scripts/create-phase4-issues.sh:*)",
+      "Bash(./scripts/create-phase5-issues.sh:*)",
+      "Bash(pnpm approve-builds:*)",
+      "Bash(rustc:*)",
+      "Bash(cargo --version:*)",
+      "Bash(timeout 90 pnpm tauri dev:*)",
+      "Bash(cargo check:*)",
+      "Bash(pnpm tsc:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm format:check:*)",
+      "Bash(pnpm test:*)",
+      "Bash(git worktree:*)",
+      "Bash(git worktree add:*)",
+      "Bash(gh pr create:*)",
+      "Bash(for i in 5 6 7 8 9 10 11 12)",
+      "Bash(do gh issue close $i --repo serenorg/seren-desktop --comment \"Completed in PR #63\")",
+      "Bash(done)",
+      "Bash(git fetch:*)",
+      "Bash(git rebase:*)",
+      "WebFetch(domain:docs.serendb.com)",
+      "Bash(__NEW_LINE_887152ebc66c6e68__ gh issue create --repo serenorg/seren-desktop --title \"Set up Playwright browser testing for Phase 3 components\" --label \"type:test,phase:3-editor,agent: codex\" --body \"$\\(cat <<''EOF''\n## Overview\nSet up Playwright browser/e2e testing to verify Phase 3 Code Intelligence components work correctly.\n\n## Tasks\n\n### 1. Install and Configure Playwright\n```bash\npnpm add -D @playwright/test\nnpx playwright install chromium\n```\n\n### 2. Create playwright.config.ts\nConfigure to:\n- Run against Tauri dev server \\(localhost:1420\\)\n- Start `pnpm tauri dev` before tests\n- Use Chromium for testing\n\n### 3. Create E2E Tests\n\n**tests/e2e/editor.spec.ts** - Monaco Editor tests:\n- [ ] Editor renders and is interactive\n- [ ] File opens in editor when selected\n- [ ] Content changes trigger dirty state\n- [ ] Syntax highlighting works for TypeScript\n\n**tests/e2e/file-tree.spec.ts** - File Tree tests:\n- [ ] File tree displays directories\n- [ ] Directories expand/collapse on click\n- [ ] Files can be selected\n- [ ] Selection triggers file open\n\n**tests/e2e/tabs.spec.ts** - File Tabs tests:\n- [ ] Tab appears when file opens\n- [ ] Active tab is highlighted\n- [ ] Dirty indicator shows for unsaved files\n- [ ] Tab closes on X click\n\n**tests/e2e/completions.spec.ts** - AI Completions tests:\n- [ ] Typing triggers completion \\(after debounce\\)\n- [ ] Completions appear in editor\n- [ ] Tab accepts completion\n\n### 4. Add npm scripts\n```json\n{\n  \"test:e2e\": \"playwright test\",\n  \"test:e2e:ui\": \"playwright test --ui\",\n  \"test:e2e:headed\": \"playwright test --headed\"\n}\n```\n\n## Running Tests\n```bash\n# Run all e2e tests \\(headless\\)\npnpm test:e2e\n\n# Run with UI for debugging\npnpm test:e2e:ui\n\n# Run headed \\(visible browser\\)\npnpm test:e2e:headed\n```\n\n## Definition of Done\n- [ ] Playwright installed and configured\n- [ ] All Phase 3 components have e2e tests\n- [ ] Tests pass in CI\n- [ ] Test scripts added to package.json\n\nTaariq Lewis, SerenAI, Paloma, and Volume at https://serendb.com\nEOF\n\\)\")"
+    ]
+  }
+}

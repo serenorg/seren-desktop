@@ -48,6 +48,15 @@ export const ChatPanel: Component = () => {
     };
   });
 
+  const buildContext = (): ChatContext | undefined => {
+    if (!editorStore.selectedText) return undefined;
+    return {
+      content: editorStore.selectedText,
+      file: editorStore.selectedFile,
+      range: editorStore.selectedRange ?? undefined,
+    };
+  };
+
   const sendMessage = async () => {
     const trimmed = input().trim();
     if (!trimmed) return;
@@ -64,7 +73,7 @@ export const ChatPanel: Component = () => {
     chatStore.addMessage(userMessage);
     await chatStore.persistMessage(userMessage);
 
-    const context = getContextForApi();
+    const context = buildContext();
     const assistantId = crypto.randomUUID();
 
     const session: StreamingSession = {
@@ -80,15 +89,6 @@ export const ChatPanel: Component = () => {
     setStreamingSession(session);
     chatStore.setError(null);
     setInput("");
-  };
-
-  const getContextForApi = (): ChatContext | undefined => {
-    if (!editorStore.selectedText) return undefined;
-    return {
-      content: editorStore.selectedText,
-      file: editorStore.selectedFile,
-      range: editorStore.selectedRange ?? undefined,
-    };
   };
 
   const handleStreamingComplete = async (session: StreamingSession, content: string) => {
@@ -150,27 +150,24 @@ export const ChatPanel: Component = () => {
         }
       );
 
-      chatStore.updateMessage(message.id, {
-        content,
-        status: "complete",
-        error: null,
-        timestamp: Date.now(),
-      });
-
-      await chatStore.persistMessage({
+      const updated = {
         ...message,
         content,
-        status: "complete",
+        status: "complete" as const,
         error: null,
         timestamp: Date.now(),
-      });
+      };
+
+      chatStore.updateMessage(message.id, updated);
+      await chatStore.persistMessage(updated);
     } catch (error) {
+      const messageError = (error as Error).message;
       chatStore.updateMessage(message.id, {
         status: "error",
-        error: (error as Error).message,
+        error: messageError,
       });
       if (isManual) {
-        chatStore.setError((error as Error).message);
+        chatStore.setError(messageError);
       }
     } finally {
       chatStore.setRetrying(null);

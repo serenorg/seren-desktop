@@ -16,6 +16,22 @@ export default defineConfig(async () => ({
     },
   },
 
+  // Optimize Monaco Editor
+  optimizeDeps: {
+    include: ["monaco-editor"],
+  },
+
+  // Build configuration for Monaco workers
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "monaco-editor": ["monaco-editor"],
+        },
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
