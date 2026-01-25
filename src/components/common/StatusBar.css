@@ -1,0 +1,15 @@
+/* ABOUTME: Styles for the application status bar component. */
+/* ABOUTME: Fixed at bottom with minimal height. */
+
+.status-bar {
+  height: 24px;
+  padding: 0 12px;
+  background-color: #007acc;
+  display: flex;
+  align-items: center;
+}
+
+.status-message {
+  font-size: 12px;
+  color: #fff;
+}
