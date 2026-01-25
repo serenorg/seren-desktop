@@ -3,3 +3,9 @@
 
 export * from "./types";
 export { mcpClient } from "./client";
+export {
+  initMcpAutoConnect,
+  retryFailedConnections,
+  connectAllEnabledServers,
+  disconnectAllServers,
+} from "./auto-connect";
