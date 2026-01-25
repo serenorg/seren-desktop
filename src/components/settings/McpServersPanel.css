@@ -1,0 +1,274 @@
+/* ABOUTME: Styles for MCP servers configuration panel. */
+/* ABOUTME: Provides layout and theming for server management UI. */
+
+.mcp-servers-panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.btn-add {
+  padding: 8px 16px;
+  background: var(--accent-color, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn-add:hover {
+  background: var(--accent-hover, #2563eb);
+}
+
+.error-message {
+  padding: 12px;
+  background: var(--error-bg, #fef2f2);
+  color: var(--error-color, #dc2626);
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.add-server-form {
+  padding: 16px;
+  background: var(--surface-color, #f8fafc);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-field.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-field label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary, #64748b);
+}
+
+.form-field input[type="text"] {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  font-size: 14px;
+  background: var(--input-bg, white);
+  color: var(--text-primary, #1e293b);
+}
+
+.form-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent-color, #3b82f6);
+  box-shadow: 0 0 0 3px var(--accent-ring, rgba(59, 130, 246, 0.1));
+}
+
+.form-field input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.btn-primary {
+  padding: 8px 16px;
+  background: var(--accent-color, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover, #2563eb);
+}
+
+.btn-secondary {
+  padding: 8px 16px;
+  background: var(--surface-color, #f1f5f9);
+  color: var(--text-primary, #1e293b);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn-secondary:hover {
+  background: var(--surface-hover, #e2e8f0);
+}
+
+.server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty-state {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-secondary, #64748b);
+  font-size: 14px;
+}
+
+.server-item {
+  padding: 12px 16px;
+  background: var(--surface-color, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.server-item.disabled {
+  opacity: 0.6;
+}
+
+.server-item.connected {
+  border-color: var(--success-color, #22c55e);
+}
+
+.server-item.error {
+  border-color: var(--error-color, #dc2626);
+}
+
+.server-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.server-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.server-name .name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.status-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.status-badge.disconnected {
+  background: var(--surface-color, #f1f5f9);
+  color: var(--text-secondary, #64748b);
+}
+
+.status-badge.connecting {
+  background: var(--warning-bg, #fef9c3);
+  color: var(--warning-color, #ca8a04);
+}
+
+.status-badge.connected {
+  background: var(--success-bg, #dcfce7);
+  color: var(--success-color, #16a34a);
+}
+
+.status-badge.error {
+  background: var(--error-bg, #fef2f2);
+  color: var(--error-color, #dc2626);
+}
+
+.server-command {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  font-family: monospace;
+}
+
+.auto-connect-badge {
+  font-size: 11px;
+  color: var(--accent-color, #3b82f6);
+}
+
+.server-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.server-actions button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn-connect {
+  background: var(--success-color, #22c55e);
+  color: white;
+  border: none;
+}
+
+.btn-connect:hover:not(:disabled) {
+  background: var(--success-hover, #16a34a);
+}
+
+.btn-connect:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-disconnect {
+  background: var(--warning-color, #f59e0b);
+  color: white;
+  border: none;
+}
+
+.btn-disconnect:hover {
+  background: var(--warning-hover, #d97706);
+}
+
+.btn-toggle {
+  background: var(--surface-color, #f1f5f9);
+  color: var(--text-primary, #1e293b);
+  border: 1px solid var(--border-color, #e2e8f0);
+}
+
+.btn-toggle:hover {
+  background: var(--surface-hover, #e2e8f0);
+}
+
+.btn-remove {
+  background: var(--error-color, #ef4444);
+  color: white;
+  border: none;
+}
+
+.btn-remove:hover {
+  background: var(--error-hover, #dc2626);
+}

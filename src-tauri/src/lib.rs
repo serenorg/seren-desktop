@@ -48,6 +48,23 @@ fn clear_token(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_setting(app: tauri::AppHandle, store: String, key: String) -> Result<Option<String>, String> {
+    let store_handle = app.store(&store).map_err(|e| e.to_string())?;
+    let value = store_handle
+        .get(&key)
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    Ok(value)
+}
+
+#[tauri::command]
+fn set_setting(app: tauri::AppHandle, store: String, key: String, value: String) -> Result<(), String> {
+    let store_handle = app.store(&store).map_err(|e| e.to_string())?;
+    store_handle.set(&key, serde_json::json!(value));
+    store_handle.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -60,6 +77,8 @@ pub fn run() {
             store_token,
             get_token,
             clear_token,
+            get_setting,
+            set_setting,
             files::read_file,
             files::write_file,
             files::list_directory,
