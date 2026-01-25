@@ -145,7 +145,7 @@ import { chat } from "@/services/chat";
 const response = await chat.sendMessage(message);
 
 // WRONG - don't do this in components
-const response = await fetch("https://api.serendb.com/v1/chat/completions");
+const response = await fetch("https://api.serendb.com/agent/stream");
 ```
 
 ### Tauri IPC
