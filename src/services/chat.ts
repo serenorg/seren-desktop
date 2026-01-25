@@ -1,7 +1,7 @@
 // ABOUTME: Chat service for sending messages to the AI.
 // ABOUTME: Non-streaming implementation for Phase 1; streaming added in Phase 2.
 
-import { apiBase } from "@/lib/config";
+import { API_BASE } from "@/lib/config";
 import { getToken } from "@/lib/tauri-bridge";
 
 export interface ChatMessage {
@@ -15,6 +15,7 @@ export interface ChatResponse {
 
 /**
  * Send a message to the chat API and get a response.
+ * Uses the agent/api endpoint for AI completions.
  * This is a non-streaming implementation.
  */
 export async function sendMessage(
@@ -25,7 +26,7 @@ export async function sendMessage(
     throw new Error("Not authenticated");
   }
 
-  const response = await fetch(`${apiBase}/chat/completions`, {
+  const response = await fetch(`${API_BASE}/agent/api`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

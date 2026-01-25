@@ -1,7 +1,7 @@
 // ABOUTME: Authentication service for login, logout, and token management.
 // ABOUTME: Communicates with Seren Gateway API and uses secure Tauri storage.
 
-import { apiBase } from "@/lib/config";
+import { API_BASE } from "@/lib/config";
 import { storeToken, getToken, clearToken } from "@/lib/tauri-bridge";
 
 export interface LoginResponse {
@@ -19,7 +19,7 @@ export interface AuthError {
 }
 
 /**
- * Login with email and password.
+ * Login with email verification.
  * Stores token securely on success.
  * @throws Error on authentication failure
  */
@@ -27,7 +27,7 @@ export async function login(
   email: string,
   password: string
 ): Promise<LoginResponse> {
-  const response = await fetch(`${apiBase}/auth/login`, {
+  const response = await fetch(`${API_BASE}/auth/verify-email`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
