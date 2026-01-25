@@ -130,6 +130,7 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
     }
   });
 
+  /* eslint-disable @typescript-eslint/no-unused-vars */
   /**
    * Mark current content as saved (resets dirty state).
    */
@@ -160,6 +161,7 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
   function focus(): void {
     editor?.focus();
   }
+  /* eslint-enable @typescript-eslint/no-unused-vars */
 
   // Expose methods via ref pattern if needed
   // For now, we return a simple div

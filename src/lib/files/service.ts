@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { setNodes, setRootPath, type FileNode } from "@/stores/fileTree";
-import { openTab, updateTabContent, setTabDirty } from "@/stores/tabs";
+import { openTab, setTabDirty } from "@/stores/tabs";
 
 export interface FileEntry {
   name: string;
