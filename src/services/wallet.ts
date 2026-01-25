@@ -40,7 +40,7 @@ export async function fetchBalance(): Promise<WalletBalance> {
     throw new Error("Not authenticated");
   }
 
-  const response = await fetch(`${API_BASE}/v1/wallet/balance`, {
+  const response = await fetch(`${API_BASE}/agent/wallet/balance`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -74,7 +74,7 @@ export async function initiateTopUp(amount: number): Promise<TopUpCheckout> {
     throw new Error("Not authenticated");
   }
 
-  const response = await fetch(`${API_BASE}/v1/wallet/topup`, {
+  const response = await fetch(`${API_BASE}/agent/wallet/deposit`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
