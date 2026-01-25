@@ -9,3 +9,14 @@ export {
   connectAllEnabledServers,
   disconnectAllServers,
 } from "./auto-connect";
+export {
+  McpError,
+  McpConnectionError,
+  McpToolError,
+  McpResourceError,
+  McpErrorCode,
+  parseMcpError,
+  getErrorMessage,
+  isRecoverableError,
+  formatErrorForLogging,
+} from "./errors";
