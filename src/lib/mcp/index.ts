@@ -2,3 +2,4 @@
 // ABOUTME: Re-exports all MCP types, client, and utilities.
 
 export * from "./types";
+export { mcpClient } from "./client";

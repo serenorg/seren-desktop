@@ -12,6 +12,7 @@ pub mod services {
 }
 
 mod files;
+mod mcp;
 mod sync;
 
 const AUTH_STORE: &str = "auth.json";
@@ -53,6 +54,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .manage(mcp::McpState::new())
         .invoke_handler(tauri::generate_handler![
             greet,
             store_token,
@@ -73,6 +75,14 @@ pub fn run() {
             sync::start_watching,
             sync::stop_watching,
             sync::get_sync_status,
+            mcp::mcp_connect,
+            mcp::mcp_disconnect,
+            mcp::mcp_list_tools,
+            mcp::mcp_list_resources,
+            mcp::mcp_call_tool,
+            mcp::mcp_read_resource,
+            mcp::mcp_is_connected,
+            mcp::mcp_list_connected,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
