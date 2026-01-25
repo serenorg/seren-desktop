@@ -111,12 +111,23 @@ Only pause to ask for confirmation when:
 
 ## Test Driven Development (TDD)
 
-- FOR EVERY NEW FEATURE OR BUGFIX, YOU MUST follow Test Driven Development:
-    1. Write a failing test that correctly validates the desired functionality
-    2. Run the test to confirm it fails as expected
-    3. Write ONLY enough code to make the failing test pass
-    4. Run the test to confirm success
-    5. Refactor if needed while keeping tests green
+TDD is ONLY for critical and security-sensitive functionality:
+- Security utilities (escapeHtml, input validation, auth)
+- Core business logic (billing, wallet, API integrations)
+- Complex algorithms or data transformations
+
+DO NOT write tests for:
+- UI components (unless they contain business logic)
+- Simple CRUD operations
+- Duplicative tests that test the same behavior multiple ways
+- Mocked behavior (tests MUST NOT just test mocks)
+
+When TDD applies, follow this process:
+1. Write a failing test that validates the desired functionality
+2. Run the test to confirm it fails as expected
+3. Write ONLY enough code to make the test pass
+4. Run the test to confirm success
+5. Refactor if needed while keeping tests green
 
 ---
 

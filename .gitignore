@@ -29,6 +29,7 @@ coverage/
 
 # Tauri
 src-tauri/WixTools/
+src-tauri/gen/schemas/
 
 # Generated icons (keep source icons)
 src-tauri/icons/*.ico
