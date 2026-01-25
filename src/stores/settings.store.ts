@@ -1,7 +1,13 @@
-// ABOUTME: Settings store for managing user preferences.
+// ABOUTME: Settings store for managing user preferences and MCP configuration.
 // ABOUTME: Persists settings to Tauri store for cross-session persistence.
 
 import { createStore } from "solid-js/store";
+import { invoke } from "@tauri-apps/api/core";
+import type { McpServerConfig, McpSettings } from "@/lib/mcp/types";
+
+const SETTINGS_STORE = "settings.json";
+const MCP_SETTINGS_KEY = "mcp";
+const APP_SETTINGS_KEY = "app";
 
 /**
  * Application settings.
@@ -48,36 +54,60 @@ const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
 };
 
-const STORAGE_KEY = "seren:settings";
+const defaultMcpSettings: McpSettings = {
+  servers: [],
+  defaultTimeout: 30000,
+};
+
+interface SettingsState {
+  app: Settings;
+  mcp: McpSettings;
+  isLoading: boolean;
+}
+
+const [settingsState, setSettingsState] = createStore<SettingsState>({
+  app: { ...DEFAULT_SETTINGS },
+  mcp: defaultMcpSettings,
+  isLoading: true,
+});
+
+// ============================================================================
+// App Settings Functions
+// ============================================================================
 
 /**
- * Load settings from Tauri store.
+ * Load app settings from storage.
  */
-async function loadSettings(): Promise<Partial<Settings>> {
+async function loadAppSettings(): Promise<void> {
   try {
-    // Try to load from localStorage (Tauri store integration can be added later)
-    const localSaved = localStorage.getItem(STORAGE_KEY);
-    if (localSaved) {
-      return JSON.parse(localSaved);
+    const stored = await invoke<string | null>("get_setting", {
+      store: SETTINGS_STORE,
+      key: APP_SETTINGS_KEY,
+    });
+
+    if (stored) {
+      const parsed = JSON.parse(stored) as Partial<Settings>;
+      setSettingsState("app", { ...DEFAULT_SETTINGS, ...parsed });
     }
   } catch {
-    // Ignore parse errors
+    // Use defaults if loading fails
   }
-  return {};
 }
 
 /**
- * Save settings to storage.
+ * Save app settings to storage.
  */
-async function saveSettings(settings: Settings): Promise<void> {
+async function saveAppSettings(): Promise<void> {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch {
-    // Ignore save errors
+    await invoke("set_setting", {
+      store: SETTINGS_STORE,
+      key: APP_SETTINGS_KEY,
+      value: JSON.stringify(settingsState.app),
+    });
+  } catch (error) {
+    console.error("Failed to save app settings:", error);
   }
 }
-
-const [state, setState] = createStore<Settings>({ ...DEFAULT_SETTINGS });
 
 /**
  * Settings store with reactive state and actions.
@@ -87,61 +117,53 @@ export const settingsStore = {
    * Get all settings.
    */
   get settings(): Settings {
-    return state;
+    return settingsState.app;
   },
 
   /**
    * Get a specific setting.
    */
   get<K extends keyof Settings>(key: K): Settings[K] {
-    return state[key];
+    return settingsState.app[key];
   },
 
   /**
    * Set a specific setting.
    */
   set<K extends keyof Settings>(key: K, value: Settings[K]): void {
-    setState(key, value);
-    saveSettings(state);
+    setSettingsState("app", key, value);
+    saveAppSettings();
   },
 
   /**
    * Update multiple settings at once.
    */
   update(updates: Partial<Settings>): void {
-    setState(updates);
-    saveSettings(state);
+    setSettingsState("app", (prev) => ({ ...prev, ...updates }));
+    saveAppSettings();
   },
 
   /**
    * Reset all settings to defaults.
    */
   reset(): void {
-    setState({ ...DEFAULT_SETTINGS });
-    saveSettings(state);
+    setSettingsState("app", { ...DEFAULT_SETTINGS });
+    saveAppSettings();
   },
 
   /**
    * Reset a specific setting to default.
    */
   resetKey<K extends keyof Settings>(key: K): void {
-    setState(key, DEFAULT_SETTINGS[key]);
-    saveSettings(state);
-  },
-
-  /**
-   * Load settings from storage.
-   */
-  async load(): Promise<void> {
-    const saved = await loadSettings();
-    setState({ ...DEFAULT_SETTINGS, ...saved });
+    setSettingsState("app", key, DEFAULT_SETTINGS[key]);
+    saveAppSettings();
   },
 
   /**
    * Check if a setting differs from default.
    */
   isModified<K extends keyof Settings>(key: K): boolean {
-    return state[key] !== DEFAULT_SETTINGS[key];
+    return settingsState.app[key] !== DEFAULT_SETTINGS[key];
   },
 
   /**
@@ -152,5 +174,162 @@ export const settingsStore = {
   },
 };
 
-// Auto-load settings on import
-settingsStore.load();
+// ============================================================================
+// MCP Settings Functions
+// ============================================================================
+
+/**
+ * Load MCP settings from persistent storage.
+ */
+async function loadMcpSettings(): Promise<void> {
+  try {
+    const stored = await invoke<string | null>("get_setting", {
+      store: SETTINGS_STORE,
+      key: MCP_SETTINGS_KEY,
+    });
+
+    if (stored) {
+      const parsed = JSON.parse(stored) as McpSettings;
+      setSettingsState("mcp", parsed);
+    }
+  } catch {
+    // Use defaults if loading fails
+  }
+}
+
+/**
+ * Save MCP settings to persistent storage.
+ */
+async function saveMcpSettings(): Promise<void> {
+  try {
+    await invoke("set_setting", {
+      store: SETTINGS_STORE,
+      key: MCP_SETTINGS_KEY,
+      value: JSON.stringify(settingsState.mcp),
+    });
+  } catch (error) {
+    console.error("Failed to save MCP settings:", error);
+    throw error;
+  }
+}
+
+/**
+ * Update MCP settings and persist.
+ */
+async function updateMcpSettings(
+  updater: (prev: McpSettings) => McpSettings
+): Promise<void> {
+  const updated = updater(settingsState.mcp);
+  setSettingsState("mcp", updated);
+  await saveMcpSettings();
+}
+
+/**
+ * Add a new MCP server configuration.
+ */
+async function addMcpServer(server: McpServerConfig): Promise<void> {
+  await updateMcpSettings((prev) => ({
+    ...prev,
+    servers: [...prev.servers, server],
+  }));
+}
+
+/**
+ * Remove an MCP server configuration by name.
+ */
+async function removeMcpServer(name: string): Promise<void> {
+  await updateMcpSettings((prev) => ({
+    ...prev,
+    servers: prev.servers.filter((s) => s.name !== name),
+  }));
+}
+
+/**
+ * Update an existing MCP server configuration.
+ */
+async function updateMcpServer(
+  name: string,
+  updates: Partial<McpServerConfig>
+): Promise<void> {
+  await updateMcpSettings((prev) => ({
+    ...prev,
+    servers: prev.servers.map((s) =>
+      s.name === name ? { ...s, ...updates } : s
+    ),
+  }));
+}
+
+/**
+ * Toggle an MCP server's enabled state.
+ */
+async function toggleMcpServer(name: string): Promise<void> {
+  await updateMcpSettings((prev) => ({
+    ...prev,
+    servers: prev.servers.map((s) =>
+      s.name === name ? { ...s, enabled: !s.enabled } : s
+    ),
+  }));
+}
+
+/**
+ * Get all enabled MCP server configs.
+ */
+function getEnabledMcpServers(): McpServerConfig[] {
+  return settingsState.mcp.servers.filter((s) => s.enabled);
+}
+
+/**
+ * Get all auto-connect MCP server configs.
+ */
+function getAutoConnectMcpServers(): McpServerConfig[] {
+  return settingsState.mcp.servers.filter((s) => s.enabled && s.autoConnect);
+}
+
+/**
+ * Set the default timeout for MCP operations.
+ */
+async function setMcpDefaultTimeout(timeout: number): Promise<void> {
+  await updateMcpSettings((prev) => ({
+    ...prev,
+    defaultTimeout: timeout,
+  }));
+}
+
+/**
+ * Convenience accessor for MCP settings.
+ */
+function mcpSettings(): McpSettings {
+  return settingsState.mcp;
+}
+
+// ============================================================================
+// Combined Load Function
+// ============================================================================
+
+/**
+ * Load all settings from storage.
+ */
+async function loadAllSettings(): Promise<void> {
+  setSettingsState("isLoading", true);
+  try {
+    await Promise.all([loadAppSettings(), loadMcpSettings()]);
+  } finally {
+    setSettingsState("isLoading", false);
+  }
+}
+
+// Export store and actions
+export {
+  settingsState,
+  loadAllSettings,
+  loadMcpSettings,
+  updateMcpSettings,
+  addMcpServer,
+  removeMcpServer,
+  updateMcpServer,
+  toggleMcpServer,
+  getEnabledMcpServers,
+  getAutoConnectMcpServers,
+  setMcpDefaultTimeout,
+  mcpSettings,
+};

@@ -130,7 +130,6 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
     }
   });
 
-  /* eslint-disable @typescript-eslint/no-unused-vars */
   /**
    * Mark current content as saved (resets dirty state).
    * TODO: Expose via ref pattern when needed by parent components.
@@ -165,8 +164,6 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
   function _focus(): void {
     editor?.focus();
   }
-  /* eslint-enable @typescript-eslint/no-unused-vars */
-
   // These methods are prefixed with _ to suppress unused warnings.
   // They will be exposed via ref pattern when parent components need them.
   void _markSaved;
