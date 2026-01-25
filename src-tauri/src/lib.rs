@@ -3,6 +3,8 @@
 
 use tauri_plugin_store::StoreExt;
 
+mod files;
+
 const AUTH_STORE: &str = "auth.json";
 const TOKEN_KEY: &str = "token";
 
@@ -42,11 +44,21 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             store_token,
             get_token,
-            clear_token
+            clear_token,
+            files::read_file,
+            files::write_file,
+            files::list_directory,
+            files::path_exists,
+            files::is_directory,
+            files::create_file,
+            files::create_directory,
+            files::delete_path,
+            files::rename_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
