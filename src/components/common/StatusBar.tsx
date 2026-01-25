@@ -1,7 +1,8 @@
 // ABOUTME: Application status bar at the bottom.
-// ABOUTME: Displays status messages and connection state.
+// ABOUTME: Displays status messages, MCP state, and connection state.
 
 import { Component } from "solid-js";
+import { McpStatusIndicator } from "./McpStatusIndicator";
 import "./StatusBar.css";
 
 interface StatusBarProps {
@@ -12,6 +13,9 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
   return (
     <footer class="status-bar">
       <span class="status-message">{props.message || "Ready"}</span>
+      <div class="status-bar-right">
+        <McpStatusIndicator />
+      </div>
     </footer>
   );
 };
