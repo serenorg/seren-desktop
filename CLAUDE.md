@@ -60,17 +60,19 @@ seren-desktop/
 
 ### API Endpoints
 
-The app connects to `https://api.serendb.com`:
+The app connects to `https://api.serendb.com` (no version prefix):
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/v1/auth/login` | POST | User login |
-| `/v1/auth/refresh` | POST | Token refresh |
-| `/v1/auth/me` | GET | Get user profile |
-| `/v1/chat/completions` | POST | Chat (streaming SSE) |
-| `/v1/wallet/balance` | GET | SerenBucks balance |
-| `/v1/publishers` | GET | Publisher catalog |
-| `/v1/diagnostics/errors` | POST | Error telemetry |
+| `/auth/verify-email` | POST | User login |
+| `/auth/me` | GET | Get user profile |
+| `/auth/api-key` | GET | Get/create API key |
+| `/agent/api` | POST | Execute AI/API requests |
+| `/agent/wallet/balance` | GET | SerenBucks balance |
+| `/agent/wallet/deposit` | POST | Deposit via Stripe |
+| `/agent/publishers` | GET | Publisher catalog |
+
+See full API docs at [docs.serendb.com](https://docs.serendb.com)
 
 ---
 
