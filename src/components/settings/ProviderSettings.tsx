@@ -52,11 +52,6 @@ export const ProviderSettings: Component = () => {
   const unconfiguredProviders = () =>
     CONFIGURABLE_PROVIDERS.filter(p => !providerStore.configuredProviders.includes(p));
 
-  const maskApiKey = (key: string): string => {
-    if (key.length <= 8) return "••••••••";
-    return `${"•".repeat(key.length - 4)}${key.slice(-4)}`;
-  };
-
   return (
     <section class="settings-section">
       <h3>AI Providers</h3>

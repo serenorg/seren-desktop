@@ -96,8 +96,12 @@ fn get_configured_providers(app: tauri::AppHandle) -> Result<Vec<String>, String
     let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
     let providers: Vec<String> = store
         .keys()
-        .filter(|k| store.get(k).and_then(|v| v.as_str()).is_some())
-        .cloned()
+        .into_iter()
+        .filter(|k| {
+            store.get(k)
+                .map(|v| v.as_str().is_some())
+                .unwrap_or(false)
+        })
         .collect();
     Ok(providers)
 }
