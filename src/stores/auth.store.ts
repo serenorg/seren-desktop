@@ -3,6 +3,7 @@
 
 import { createStore } from "solid-js/store";
 import { isLoggedIn, logout as authLogout } from "@/services/auth";
+import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
 
 export interface User {
   id: string;
@@ -24,12 +25,22 @@ const [state, setState] = createStore<AuthState>({
 
 /**
  * Check authentication status on app startup.
+ * If authenticated, ensures SerenDB MCP server is configured.
  */
 export async function checkAuth(): Promise<void> {
   setState("isLoading", true);
   try {
     const authenticated = await isLoggedIn();
     setState("isAuthenticated", authenticated);
+
+    // Ensure SerenDB is configured for authenticated users
+    if (authenticated) {
+      try {
+        await addSerenDbServer();
+      } catch (error) {
+        console.error("Failed to add SerenDB MCP server:", error);
+      }
+    }
   } finally {
     setState("isLoading", false);
   }
@@ -37,19 +48,35 @@ export async function checkAuth(): Promise<void> {
 
 /**
  * Set user as authenticated after successful login.
+ * Also adds SerenDB as the default MCP server.
  */
-export function setAuthenticated(user: User): void {
+export async function setAuthenticated(user: User): Promise<void> {
   setState({
     user,
     isAuthenticated: true,
     isLoading: false,
   });
+
+  // Add SerenDB as default MCP server on sign-in
+  try {
+    await addSerenDbServer();
+  } catch (error) {
+    console.error("Failed to add SerenDB MCP server:", error);
+  }
 }
 
 /**
  * Log out and clear authentication state.
+ * Also removes SerenDB MCP server.
  */
 export async function logout(): Promise<void> {
+  // Remove SerenDB MCP server on sign-out
+  try {
+    await removeSerenDbServer();
+  } catch (error) {
+    console.error("Failed to remove SerenDB MCP server:", error);
+  }
+
   await authLogout();
   setState({
     user: null,

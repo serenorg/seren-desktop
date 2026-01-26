@@ -1,7 +1,8 @@
 // ABOUTME: MCP auto-connect service for startup connection.
-// ABOUTME: Connects to servers marked with autoConnect when app loads.
+// ABOUTME: Connects to local servers marked with autoConnect when app loads.
 
 import { mcpClient } from "./client";
+import { isLocalServer } from "./types";
 import {
   loadMcpSettings,
   getAutoConnectMcpServers,
@@ -29,9 +30,16 @@ export async function initMcpAutoConnect(): Promise<AutoConnectResult[]> {
     return [];
   }
 
-  // Connect to each server in parallel
+  // Filter to only local servers (builtin servers connect via gateway)
+  const localServers = autoConnectServers.filter(isLocalServer);
+
+  if (localServers.length === 0) {
+    return [];
+  }
+
+  // Connect to each local server in parallel
   const results = await Promise.allSettled(
-    autoConnectServers.map(async (server) => {
+    localServers.map(async (server) => {
       try {
         await mcpClient.connect(server.name, server.command, server.args, server.env);
         return {
@@ -54,7 +62,7 @@ export async function initMcpAutoConnect(): Promise<AutoConnectResult[]> {
       return result.value;
     }
     return {
-      serverName: autoConnectServers[index].name,
+      serverName: localServers[index].name,
       success: false,
       error: result.reason instanceof Error ? result.reason.message : String(result.reason),
     };
@@ -63,13 +71,18 @@ export async function initMcpAutoConnect(): Promise<AutoConnectResult[]> {
 
 /**
  * Retry failed auto-connect servers.
+ * Only retries local servers (builtin servers connect via gateway).
  */
 export async function retryFailedConnections(
   failedServers: string[]
 ): Promise<AutoConnectResult[]> {
-  const servers = mcpSettings().servers.filter(
-    (s) => failedServers.includes(s.name) && s.enabled
-  );
+  const servers = mcpSettings()
+    .servers.filter((s) => failedServers.includes(s.name) && s.enabled)
+    .filter(isLocalServer);
+
+  if (servers.length === 0) {
+    return [];
+  }
 
   const results = await Promise.allSettled(
     servers.map(async (server) => {
@@ -102,11 +115,12 @@ export async function retryFailedConnections(
 }
 
 /**
- * Connect all enabled servers (not just auto-connect).
+ * Connect all enabled local servers (not just auto-connect).
  * Useful for manual "connect all" action.
+ * Only connects local servers (builtin servers connect via gateway).
  */
 export async function connectAllEnabledServers(): Promise<AutoConnectResult[]> {
-  const servers = mcpSettings().servers.filter((s) => s.enabled);
+  const servers = mcpSettings().servers.filter((s) => s.enabled).filter(isLocalServer);
 
   // Skip already connected servers
   const toConnect = servers.filter((s) => {

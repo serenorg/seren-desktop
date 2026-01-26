@@ -2,12 +2,25 @@
 // ABOUTME: Persists settings to Tauri store for cross-session persistence.
 
 import { createStore } from "solid-js/store";
-import { invoke } from "@tauri-apps/api/core";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
 import type { McpServerConfig, McpSettings } from "@/lib/mcp/types";
 
 const SETTINGS_STORE = "settings.json";
 const MCP_SETTINGS_KEY = "mcp";
 const APP_SETTINGS_KEY = "app";
+const BROWSER_SETTINGS_KEY = "seren_settings";
+const BROWSER_MCP_KEY = "seren_mcp_settings";
+
+/**
+ * Get invoke function only when in Tauri runtime.
+ */
+async function getInvoke(): Promise<typeof import("@tauri-apps/api/core").invoke | null> {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke;
+}
 
 /**
  * Application settings.
@@ -101,10 +114,18 @@ const [settingsState, setSettingsState] = createStore<SettingsState>({
  */
 async function loadAppSettings(): Promise<void> {
   try {
-    const stored = await invoke<string | null>("get_setting", {
-      store: SETTINGS_STORE,
-      key: APP_SETTINGS_KEY,
-    });
+    const invoke = await getInvoke();
+    let stored: string | null = null;
+
+    if (invoke) {
+      stored = await invoke<string | null>("get_setting", {
+        store: SETTINGS_STORE,
+        key: APP_SETTINGS_KEY,
+      });
+    } else {
+      // Browser fallback
+      stored = localStorage.getItem(BROWSER_SETTINGS_KEY);
+    }
 
     if (stored) {
       const parsed = JSON.parse(stored) as Partial<Settings>;
@@ -120,11 +141,19 @@ async function loadAppSettings(): Promise<void> {
  */
 async function saveAppSettings(): Promise<void> {
   try {
-    await invoke("set_setting", {
-      store: SETTINGS_STORE,
-      key: APP_SETTINGS_KEY,
-      value: JSON.stringify(settingsState.app),
-    });
+    const invoke = await getInvoke();
+    const value = JSON.stringify(settingsState.app);
+
+    if (invoke) {
+      await invoke("set_setting", {
+        store: SETTINGS_STORE,
+        key: APP_SETTINGS_KEY,
+        value,
+      });
+    } else {
+      // Browser fallback
+      localStorage.setItem(BROWSER_SETTINGS_KEY, value);
+    }
   } catch (error) {
     console.error("Failed to save app settings:", error);
   }
@@ -204,10 +233,18 @@ export const settingsStore = {
  */
 async function loadMcpSettings(): Promise<void> {
   try {
-    const stored = await invoke<string | null>("get_setting", {
-      store: SETTINGS_STORE,
-      key: MCP_SETTINGS_KEY,
-    });
+    const invoke = await getInvoke();
+    let stored: string | null = null;
+
+    if (invoke) {
+      stored = await invoke<string | null>("get_setting", {
+        store: SETTINGS_STORE,
+        key: MCP_SETTINGS_KEY,
+      });
+    } else {
+      // Browser fallback
+      stored = localStorage.getItem(BROWSER_MCP_KEY);
+    }
 
     if (stored) {
       const parsed = JSON.parse(stored) as McpSettings;
@@ -223,11 +260,19 @@ async function loadMcpSettings(): Promise<void> {
  */
 async function saveMcpSettings(): Promise<void> {
   try {
-    await invoke("set_setting", {
-      store: SETTINGS_STORE,
-      key: MCP_SETTINGS_KEY,
-      value: JSON.stringify(settingsState.mcp),
-    });
+    const invoke = await getInvoke();
+    const value = JSON.stringify(settingsState.mcp);
+
+    if (invoke) {
+      await invoke("set_setting", {
+        store: SETTINGS_STORE,
+        key: MCP_SETTINGS_KEY,
+        value,
+      });
+    } else {
+      // Browser fallback
+      localStorage.setItem(BROWSER_MCP_KEY, value);
+    }
   } catch (error) {
     console.error("Failed to save MCP settings:", error);
     throw error;
@@ -270,12 +315,12 @@ async function removeMcpServer(name: string): Promise<void> {
  */
 async function updateMcpServer(
   name: string,
-  updates: Partial<McpServerConfig>
+  updates: Partial<Omit<McpServerConfig, "type">>
 ): Promise<void> {
   await updateMcpSettings((prev) => ({
     ...prev,
     servers: prev.servers.map((s) =>
-      s.name === name ? { ...s, ...updates } : s
+      s.name === name ? ({ ...s, ...updates } as McpServerConfig) : s
     ),
   }));
 }

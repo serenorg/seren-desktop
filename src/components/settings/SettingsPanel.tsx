@@ -10,6 +10,7 @@ import {
   toggleMcpServer,
   type Settings,
 } from "@/stores/settings.store";
+import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
 import "./SettingsPanel.css";
 
 type SettingsSection = "chat" | "editor" | "wallet" | "appearance" | "general" | "mcp";
@@ -427,9 +428,11 @@ export const SettingsPanel: Component = () => {
                           </Show>
                         </div>
                         <span class="mcp-server-transport">
-                          {server.transport.type === "stdio"
-                            ? `Command: ${server.transport.command}`
-                            : `URL: ${server.transport.url}`}
+                          {isLocalServer(server)
+                            ? `Command: ${server.command} ${server.args.join(" ")}`
+                            : isBuiltinServer(server)
+                              ? server.description || "Built-in server"
+                              : "Unknown type"}
                         </span>
                       </div>
                       <div class="mcp-server-actions">

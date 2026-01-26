@@ -272,3 +272,25 @@
 .btn-remove:hover {
   background: var(--error-hover, #dc2626);
 }
+
+/* Builtin server styles */
+.server-item.builtin {
+  background: var(--builtin-bg, #f0f9ff);
+  border-color: var(--accent-color, #3b82f6);
+}
+
+.builtin-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: var(--accent-color, #3b82f6);
+  color: white;
+}
+
+.server-description {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  font-style: italic;
+}

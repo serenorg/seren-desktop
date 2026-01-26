@@ -2,7 +2,8 @@
 // ABOUTME: Allows adding, removing, enabling/disabling MCP servers.
 
 import { createSignal, For, Show, type Component } from "solid-js";
-import type { McpServerConfig } from "@/lib/mcp/types";
+import type { McpServerConfig, McpLocalServerConfig } from "@/lib/mcp/types";
+import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
 import {
   mcpSettings,
   addMcpServer,
@@ -10,6 +11,7 @@ import {
   toggleMcpServer,
 } from "@/stores/settings.store";
 import { mcpClient } from "@/lib/mcp/client";
+import { authStore } from "@/stores/auth.store";
 import "./McpServersPanel.css";
 
 export const McpServersPanel: Component = () => {
@@ -41,7 +43,8 @@ export const McpServersPanel: Component = () => {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
-    const server: McpServerConfig = {
+    const server: McpLocalServerConfig = {
+      type: "local",
       name,
       command,
       args,
@@ -90,6 +93,11 @@ export const McpServersPanel: Component = () => {
   }
 
   async function handleConnect(server: McpServerConfig): Promise<void> {
+    // Only local servers can be manually connected
+    if (!isLocalServer(server)) {
+      return;
+    }
+
     setConnecting(server.name);
     setError(null);
 
@@ -110,8 +118,13 @@ export const McpServersPanel: Component = () => {
     }
   }
 
-  function getConnectionStatus(name: string): string {
-    const conn = mcpClient.getConnection(name);
+  function getConnectionStatus(server: McpServerConfig): string {
+    // Builtin servers are connected via gateway when user is authenticated
+    if (isBuiltinServer(server)) {
+      return authStore.isAuthenticated ? "connected" : "disconnected";
+    }
+
+    const conn = mcpClient.getConnection(server.name);
     return conn?.status || "disconnected";
   }
 
@@ -198,8 +211,10 @@ export const McpServersPanel: Component = () => {
         >
           <For each={mcpSettings().servers}>
             {(server) => {
-              const status = () => getConnectionStatus(server.name);
+              const status = () => getConnectionStatus(server);
               const isConnecting = () => connecting() === server.name;
+              const isBuiltin = () => isBuiltinServer(server);
+              const isLocal = () => isLocalServer(server);
 
               return (
                 <div
@@ -208,57 +223,75 @@ export const McpServersPanel: Component = () => {
                     disabled: !server.enabled,
                     connected: status() === "connected",
                     error: status() === "error",
+                    builtin: isBuiltin(),
                   }}
                 >
                   <div class="server-info">
                     <div class="server-name">
                       <span class="name">{server.name}</span>
+                      <Show when={isBuiltin()}>
+                        <span class="builtin-badge">Built-in</span>
+                      </Show>
                       <span class={`status-badge ${status()}`}>
-                        {status()}
+                        {isBuiltin() && status() === "connected"
+                          ? "Connected (Gateway)"
+                          : status()}
                       </span>
                     </div>
-                    <div class="server-command">
-                      {server.command} {server.args.join(" ")}
-                    </div>
-                    <Show when={server.autoConnect}>
+                    <Show
+                      when={isLocal()}
+                      fallback={
+                        <div class="server-description">
+                          {isBuiltinServer(server) && server.description}
+                        </div>
+                      }
+                    >
+                      <div class="server-command">
+                        {isLocalServer(server) &&
+                          `${server.command} ${server.args.join(" ")}`}
+                      </div>
+                    </Show>
+                    <Show when={server.autoConnect && isLocal()}>
                       <span class="auto-connect-badge">Auto-connect</span>
                     </Show>
                   </div>
 
                   <div class="server-actions">
-                    <Show
-                      when={status() === "connected"}
-                      fallback={
-                        <button
-                          class="btn-connect"
-                          onClick={() => handleConnect(server)}
-                          disabled={!server.enabled || isConnecting()}
-                        >
-                          {isConnecting() ? "Connecting..." : "Connect"}
-                        </button>
-                      }
-                    >
-                      <button
-                        class="btn-disconnect"
-                        onClick={() => handleDisconnect(server.name)}
+                    <Show when={isLocal()}>
+                      <Show
+                        when={status() === "connected"}
+                        fallback={
+                          <button
+                            class="btn-connect"
+                            onClick={() => handleConnect(server)}
+                            disabled={!server.enabled || isConnecting()}
+                          >
+                            {isConnecting() ? "Connecting..." : "Connect"}
+                          </button>
+                        }
                       >
-                        Disconnect
+                        <button
+                          class="btn-disconnect"
+                          onClick={() => handleDisconnect(server.name)}
+                        >
+                          Disconnect
+                        </button>
+                      </Show>
+
+                      <button
+                        class="btn-toggle"
+                        onClick={() => handleToggle(server.name)}
+                      >
+                        {server.enabled ? "Disable" : "Enable"}
+                      </button>
+
+                      <button
+                        class="btn-remove"
+                        onClick={() => handleRemove(server.name)}
+                      >
+                        Remove
                       </button>
                     </Show>
-
-                    <button
-                      class="btn-toggle"
-                      onClick={() => handleToggle(server.name)}
-                    >
-                      {server.enabled ? "Disable" : "Enable"}
-                    </button>
-
-                    <button
-                      class="btn-remove"
-                      onClick={() => handleRemove(server.name)}
-                    >
-                      Remove
-                    </button>
                   </div>
                 </div>
               );

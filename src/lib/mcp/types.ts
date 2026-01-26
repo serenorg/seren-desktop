@@ -100,13 +100,48 @@ export interface JsonRpcNotification {
 
 // MCP Server Configuration Types
 
-export interface McpServerConfig {
+/**
+ * Server type discriminator.
+ * - "local": Spawns a local process with command/args (stdio transport)
+ * - "builtin": Built-in remote server (e.g., SerenDB) that uses gateway API
+ */
+export type McpServerType = "local" | "builtin";
+
+export interface McpServerConfigBase {
   name: string;
+  enabled: boolean;
+  autoConnect: boolean;
+}
+
+export interface McpLocalServerConfig extends McpServerConfigBase {
+  type: "local";
   command: string;
   args: string[];
   env?: Record<string, string>;
-  enabled: boolean;
-  autoConnect: boolean;
+}
+
+export interface McpBuiltinServerConfig extends McpServerConfigBase {
+  type: "builtin";
+  /** Identifier for the builtin server (e.g., "serendb") */
+  builtinId: string;
+  /** Description shown in UI */
+  description?: string;
+}
+
+export type McpServerConfig = McpLocalServerConfig | McpBuiltinServerConfig;
+
+/**
+ * Type guard for local server config.
+ */
+export function isLocalServer(config: McpServerConfig): config is McpLocalServerConfig {
+  return config.type === "local";
+}
+
+/**
+ * Type guard for builtin server config.
+ */
+export function isBuiltinServer(config: McpServerConfig): config is McpBuiltinServerConfig {
+  return config.type === "builtin";
 }
 
 export interface McpSettings {

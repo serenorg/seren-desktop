@@ -21,3 +21,12 @@ export {
   formatErrorForLogging,
 } from "./errors";
 export { getToolRiskLevel, getRiskLabel } from "./risk";
+export {
+  SERENDB_SERVER_NAME,
+  SERENDB_BUILTIN_ID,
+  serenDbServerConfig,
+  isSerenDbConfigured,
+  addSerenDbServer,
+  removeSerenDbServer,
+  ensureSerenDbServer,
+} from "./serendb";

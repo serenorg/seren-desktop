@@ -1,7 +1,7 @@
 // ABOUTME: Frontend wrapper for Tauri IPC commands.
 // ABOUTME: Provides typed functions for secure token storage and Rust communication.
 
-import { invoke } from "@tauri-apps/api/core";
+const TOKEN_STORAGE_KEY = "seren_token";
 
 /**
  * Check if running in Tauri runtime (vs browser).
@@ -11,10 +11,28 @@ export function isTauriRuntime(): boolean {
 }
 
 /**
+ * Get invoke function only when in Tauri runtime.
+ */
+async function getInvoke(): Promise<typeof import("@tauri-apps/api/core").invoke | null> {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke;
+}
+
+/**
  * Store authentication token securely using OS keychain.
+ * Falls back to localStorage in browser environments (for testing).
  */
 export async function storeToken(token: string): Promise<void> {
-  await invoke("store_token", { token });
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("store_token", { token });
+  } else {
+    // Browser fallback for testing
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  }
 }
 
 /**
@@ -22,14 +40,25 @@ export async function storeToken(token: string): Promise<void> {
  * Returns null if no token is stored.
  */
 export async function getToken(): Promise<string | null> {
-  return await invoke<string | null>("get_token");
+  const invoke = await getInvoke();
+  if (invoke) {
+    return await invoke<string | null>("get_token");
+  }
+  // Browser fallback for testing
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
 }
 
 /**
  * Clear stored authentication token (logout).
  */
 export async function clearToken(): Promise<void> {
-  await invoke("clear_token");
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("clear_token");
+  } else {
+    // Browser fallback for testing
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
 }
 
 // ============================================================================
