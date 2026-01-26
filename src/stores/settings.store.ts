@@ -64,7 +64,7 @@ export interface Settings {
  */
 const DEFAULT_SETTINGS: Settings = {
   // Chat
-  chatDefaultModel: "claude-sonnet-4-20250514",
+  chatDefaultModel: "anthropic/claude-sonnet-4",
   chatMaxHistoryMessages: 50,
   chatEnterToSend: true,
   // Editor
@@ -75,7 +75,7 @@ const DEFAULT_SETTINGS: Settings = {
   completionEnabled: true,
   completionDelay: 300,
   completionMaxSuggestionLines: 6,
-  completionModelId: "claude-sonnet-4-20250514",
+  completionModelId: "anthropic/claude-sonnet-4",
   completionDisabledLanguages: ["markdown", "plaintext"],
   // Wallet
   showBalance: true,

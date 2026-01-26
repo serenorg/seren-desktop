@@ -25,10 +25,18 @@ interface AgentApiPayload {
  * Default models available through Seren Gateway.
  */
 const DEFAULT_MODELS: ProviderModel[] = [
-  { id: "anthropic/claude-sonnet-4-20250514", name: "Claude Sonnet 4", contextWindow: 200000 },
-  { id: "anthropic/claude-opus-4-20250514", name: "Claude Opus 4", contextWindow: 200000 },
+  // Anthropic
+  { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5", contextWindow: 200000 },
+  { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", contextWindow: 200000 },
+  { id: "anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5", contextWindow: 200000 },
+  // OpenAI
+  { id: "openai/gpt-5", name: "GPT-5", contextWindow: 128000 },
   { id: "openai/gpt-4o", name: "GPT-4o", contextWindow: 128000 },
   { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", contextWindow: 128000 },
+  // Google Gemini
+  { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 1000000 },
+  { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000 },
+  { id: "google/gemini-3-flash-preview", name: "Gemini 3 Flash", contextWindow: 1000000 },
 ];
 
 async function requireToken(): Promise<string> {
@@ -168,7 +176,13 @@ export const serenProvider: ProviderAdapter = {
     });
 
     if (!response.ok || !response.body) {
-      throw new Error(`Seren streaming failed: ${response.status}`);
+      const errorText = await response.text().catch(() => "");
+      console.error("[Seren Stream Error]", {
+        status: response.status,
+        body: errorText,
+        payload: agentPayload,
+      });
+      throw new Error(`Seren streaming failed: ${response.status} - ${errorText}`);
     }
 
     const reader = response.body.getReader();

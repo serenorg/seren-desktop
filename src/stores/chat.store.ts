@@ -2,7 +2,7 @@ import { createStore } from "solid-js/store";
 import { invoke } from "@tauri-apps/api/core";
 import type { Message } from "@/services/chat";
 
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4-20250514";
+const DEFAULT_MODEL = "anthropic/claude-sonnet-4";
 const MAX_MESSAGES = 50;
 
 type MessagePatch = Partial<Omit<Message, "id" | "timestamp" | "role" | "model" | "content">> &

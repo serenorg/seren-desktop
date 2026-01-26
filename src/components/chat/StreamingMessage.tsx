@@ -43,11 +43,11 @@ export const StreamingMessage: Component<StreamingMessageProps> = (props) => {
   });
 
   return (
-    <div class="chat-message assistant">
+    <article class="chat-message assistant streaming">
       <div class="message-content">
         {content()}
-        {isStreaming() && <span class="cursor">|</span>}
+        {isStreaming() && <span class="streaming-cursor" />}
       </div>
-    </div>
+    </article>
   );
 };

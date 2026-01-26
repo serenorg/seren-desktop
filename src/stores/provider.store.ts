@@ -60,10 +60,18 @@ interface ProviderState {
  */
 const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
   seren: [
-    { id: "anthropic/claude-sonnet-4-20250514", name: "Claude Sonnet 4", contextWindow: 200000 },
-    { id: "anthropic/claude-opus-4-20250514", name: "Claude Opus 4", contextWindow: 200000 },
+    // Anthropic
+    { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5", contextWindow: 200000 },
+    { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", contextWindow: 200000 },
+    { id: "anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5", contextWindow: 200000 },
+    // OpenAI
+    { id: "openai/gpt-5", name: "GPT-5", contextWindow: 128000 },
     { id: "openai/gpt-4o", name: "GPT-4o", contextWindow: 128000 },
     { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", contextWindow: 128000 },
+    // Google Gemini
+    { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 1000000 },
+    { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000 },
+    { id: "google/gemini-3-flash-preview", name: "Gemini 3 Flash", contextWindow: 1000000 },
   ],
   anthropic: [
     { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", contextWindow: 200000 },
@@ -80,15 +88,15 @@ const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
     { id: "o1-mini", name: "o1 Mini", contextWindow: 128000 },
   ],
   gemini: [
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 1000000 },
+    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000 },
     { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", contextWindow: 1000000 },
-    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", contextWindow: 2000000 },
-    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", contextWindow: 1000000 },
   ],
 };
 
 const DEFAULT_STATE: ProviderState = {
   activeProvider: "seren",
-  activeModel: "anthropic/claude-sonnet-4-20250514",
+  activeModel: "anthropic/claude-sonnet-4",
   configuredProviders: ["seren"],
   providerModels: { ...DEFAULT_MODELS },
   isValidating: false,
