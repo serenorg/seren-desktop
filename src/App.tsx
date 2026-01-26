@@ -1,5 +1,5 @@
-// ABOUTME: Main application component with layout and auth integration.
-// ABOUTME: Shows SignIn when not authenticated, main app when authenticated.
+// ABOUTME: Main application component with layout and optional auth.
+// ABOUTME: App is fully usable without login; auth unlocks AI features.
 
 import { createSignal, createEffect, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { Header } from "@/components/common/Header";
@@ -32,7 +32,7 @@ function App() {
     return <Phase3Playground />;
   }
 
-  const [activePanel, setActivePanel] = createSignal<Panel>("chat");
+  const [activePanel, setActivePanel] = createSignal<Panel>("editor");
 
   onMount(() => {
     checkAuth();
@@ -59,10 +59,16 @@ function App() {
 
   const handleLoginSuccess = () => {
     setAuthenticated({ id: "", email: "", name: "" });
+    // Switch to chat panel after successful login
+    setActivePanel("chat");
   };
 
   const handleLogout = async () => {
     await logout();
+  };
+
+  const handleSignInClick = () => {
+    setActivePanel("account");
   };
 
   return (
@@ -75,32 +81,41 @@ function App() {
         </div>
       }
     >
-      <Show when={authStore.isAuthenticated} fallback={<SignIn onSuccess={handleLoginSuccess} />}>
-        <div class="app">
-          <Header onLogout={handleLogout} />
-          <div class="app-body">
-            <Sidebar activePanel={activePanel()} onPanelChange={setActivePanel} />
-            <main class="app-main">
-              <Switch fallback={<div class="panel-placeholder">Select a panel</div>}>
-                <Match when={activePanel() === "chat"}>
-                  <ChatPanel />
-                </Match>
-                <Match when={activePanel() === "editor"}>
-                  <div class="panel-placeholder">Editor Panel (Coming Soon)</div>
-                </Match>
-                <Match when={activePanel() === "catalog"}>
-                  <div class="panel-placeholder">Catalog Panel (Coming Soon)</div>
-                </Match>
-                <Match when={activePanel() === "settings"}>
-                  <div class="panel-placeholder">Settings Panel (Coming Soon)</div>
-                </Match>
-              </Switch>
-            </main>
-          </div>
-          <StatusBar />
-          <LowBalanceModal />
+      <div class="app">
+        <Header
+          onLogout={handleLogout}
+          onSignIn={handleSignInClick}
+          isAuthenticated={authStore.isAuthenticated}
+        />
+        <div class="app-body">
+          <Sidebar
+            activePanel={activePanel()}
+            onPanelChange={setActivePanel}
+            isAuthenticated={authStore.isAuthenticated}
+          />
+          <main class="app-main">
+            <Switch fallback={<div class="panel-placeholder">Select a panel</div>}>
+              <Match when={activePanel() === "chat"}>
+                <ChatPanel onSignInClick={handleSignInClick} />
+              </Match>
+              <Match when={activePanel() === "editor"}>
+                <div class="panel-placeholder">Editor Panel (Coming Soon)</div>
+              </Match>
+              <Match when={activePanel() === "catalog"}>
+                <div class="panel-placeholder">Catalog Panel (Coming Soon)</div>
+              </Match>
+              <Match when={activePanel() === "settings"}>
+                <div class="panel-placeholder">Settings Panel (Coming Soon)</div>
+              </Match>
+              <Match when={activePanel() === "account"}>
+                <SignIn onSuccess={handleLoginSuccess} />
+              </Match>
+            </Switch>
+          </main>
         </div>
-      </Show>
+        <StatusBar />
+        <LowBalanceModal />
+      </div>
     </Show>
   );
 }

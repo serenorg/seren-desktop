@@ -10,6 +10,7 @@ import {
 } from "@/services/chat";
 import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
+import { authStore } from "@/stores/auth.store";
 import { StreamingMessage } from "./StreamingMessage";
 import { ModelSelector } from "./ModelSelector";
 import { formatRelativeTime } from "@/lib/format-time";
@@ -27,7 +28,11 @@ interface StreamingSession {
   stream: AsyncGenerator<string>;
 }
 
-export const ChatPanel: Component = () => {
+interface ChatPanelProps {
+  onSignInClick?: () => void;
+}
+
+export const ChatPanel: Component<ChatPanelProps> = (props) => {
   const [input, setInput] = createSignal("");
   const [streamingSession, setStreamingSession] = createSignal<StreamingSession | null>(null);
 
@@ -186,6 +191,21 @@ export const ChatPanel: Component = () => {
 
   return (
     <section class="chat-panel">
+      <Show
+        when={authStore.isAuthenticated}
+        fallback={
+          <div class="chat-signin-prompt">
+            <div class="signin-prompt-content">
+              <span class="signin-prompt-icon">💬</span>
+              <h2>Sign in to chat with AI</h2>
+              <p>Connect with Seren to access AI-powered chat, code completions, and more.</p>
+              <button type="button" class="signin-prompt-button" onClick={() => props.onSignInClick?.()}>
+                Sign In
+              </button>
+            </div>
+          </div>
+        }
+      >
       <header class="chat-header">
         <div>
           <h1>Seren Chat</h1>
@@ -193,7 +213,7 @@ export const ChatPanel: Component = () => {
         </div>
         <div class="chat-actions">
           <ModelSelector />
-          <button class="secondary" onClick={clearHistory}>
+          <button type="button" class="secondary" onClick={clearHistory}>
             Clear history
           </button>
         </div>
@@ -225,7 +245,7 @@ export const ChatPanel: Component = () => {
                     </span>
                   </Show>
                   <Show when={message.request}>
-                    <button onClick={() => handleManualRetry(message)}>Retry</button>
+                    <button type="button" onClick={() => handleManualRetry(message)}>Retry</button>
                   </Show>
                 </div>
               </Show>
@@ -253,7 +273,7 @@ export const ChatPanel: Component = () => {
                 {ctx().range &&
                   ` (${ctx().range.startLine}-${ctx().range.endLine})`}
               </span>
-              <button class="icon" onClick={() => editorStore.clearSelection()}>
+              <button type="button" class="icon" onClick={() => editorStore.clearSelection()}>
                 ×
               </button>
             </div>
@@ -290,6 +310,7 @@ export const ChatPanel: Component = () => {
           </button>
         </div>
       </form>
+      </Show>
     </section>
   );
 };

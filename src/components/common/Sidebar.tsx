@@ -1,28 +1,44 @@
 // ABOUTME: Navigation sidebar with panel switching.
-// ABOUTME: Provides navigation between Chat, Editor, Catalog, and Settings.
+// ABOUTME: Provides navigation between Chat, Editor, Catalog, Settings, and Account.
 
-import { Component, For } from "solid-js";
+import { Component, For, createMemo } from "solid-js";
 import "./Sidebar.css";
 
-export type Panel = "chat" | "editor" | "catalog" | "settings";
+export type Panel = "chat" | "editor" | "catalog" | "settings" | "account";
 
 interface SidebarProps {
   activePanel: Panel;
   onPanelChange: (panel: Panel) => void;
+  isAuthenticated?: boolean;
 }
 
-const NAV_ITEMS: Array<{ id: Panel; label: string; icon: string }> = [
+interface NavItem {
+  id: Panel;
+  label: string;
+  icon: string;
+  showWhenAuthenticated?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "editor", label: "Editor", icon: "📝" },
   { id: "catalog", label: "Catalog", icon: "📚" },
   { id: "settings", label: "Settings", icon: "⚙️" },
+  { id: "account", label: "Sign In", icon: "👤", showWhenAuthenticated: false },
 ];
 
 export const Sidebar: Component<SidebarProps> = (props) => {
+  const visibleItems = createMemo(() =>
+    NAV_ITEMS.filter((item) => {
+      if (item.showWhenAuthenticated === undefined) return true;
+      return item.showWhenAuthenticated === !!props.isAuthenticated;
+    })
+  );
+
   return (
     <nav class="sidebar">
       <ul class="sidebar-nav">
-        <For each={NAV_ITEMS}>
+        <For each={visibleItems()}>
           {(item) => (
             <li>
               <button

@@ -71,6 +71,14 @@ export const SignIn: Component<SignInProps> = (props) => {
               autocomplete="off"
               disabled={isLoading()}
             />
+            <a
+              href="https://console.serendb.com/forgot-password"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="signin-forgot"
+            >
+              Forgot password?
+            </a>
           </div>
 
           <button
@@ -81,6 +89,17 @@ export const SignIn: Component<SignInProps> = (props) => {
             {isLoading() ? "Signing in..." : "Sign In"}
           </button>
         </form>
+
+        <p class="signin-signup">
+          Don't have an account?{" "}
+          <a
+            href="https://console.serendb.com/signup"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Sign up for Seren
+          </a>
+        </p>
       </div>
     </div>
   );
