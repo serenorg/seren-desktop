@@ -484,6 +484,34 @@ export const SettingsPanel: Component = () => {
                     </button>
                   </div>
                 </div>
+
+                <div class="settings-group">
+                  <label class="settings-label">
+                    <span class="label-text">USDC Balance (Base)</span>
+                    <span class="label-hint">Your current USDC balance on Base mainnet</span>
+                  </label>
+                  <div class="crypto-balance-display">
+                    <Show
+                      when={!cryptoWalletStore.state().balanceLoading}
+                      fallback={<span class="balance-loading">Loading balance...</span>}
+                    >
+                      <span class="balance-value">
+                        {cryptoWalletStore.state().usdcBalance !== null
+                          ? `${cryptoWalletStore.state().usdcBalance} USDC`
+                          : "—"}
+                      </span>
+                    </Show>
+                    <button
+                      type="button"
+                      class="refresh-balance-btn"
+                      onClick={() => cryptoWalletStore.fetchBalance()}
+                      disabled={cryptoWalletStore.state().balanceLoading}
+                      title="Refresh balance"
+                    >
+                      ↻
+                    </button>
+                  </div>
+                </div>
               </div>
             </Show>
           </section>

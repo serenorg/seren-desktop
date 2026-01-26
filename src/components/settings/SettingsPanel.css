@@ -588,6 +588,61 @@ button.danger-outline:hover {
   border-color: #ef4444;
 }
 
+/* Crypto balance display */
+.crypto-balance-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.balance-value {
+  padding: 10px 16px;
+  background: var(--surface-elevated, rgba(30, 30, 30, 0.6));
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.2));
+  border-radius: 6px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary, #f8fafc);
+  font-family: monospace;
+  min-width: 140px;
+}
+
+.balance-loading {
+  padding: 10px 16px;
+  background: var(--surface-elevated, rgba(30, 30, 30, 0.6));
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.2));
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: var(--text-muted, #64748b);
+  min-width: 140px;
+}
+
+.refresh-balance-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-elevated, rgba(30, 30, 30, 0.6));
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.2));
+  border-radius: 6px;
+  font-size: 1.2rem;
+  color: var(--text-secondary, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.refresh-balance-btn:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.4);
+  color: var(--text-primary, #f8fafc);
+}
+
+.refresh-balance-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .settings-sidebar {
