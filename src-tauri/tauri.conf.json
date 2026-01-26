@@ -51,6 +51,14 @@
     ],
     "resources": {
       "embedded-runtime/": "embedded-runtime/"
+    },
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "10.13"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "timestampUrl": "http://timestamp.digicert.com"
     }
   }
 }
