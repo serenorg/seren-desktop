@@ -16,6 +16,7 @@ import {
   setAuthenticated,
 } from "@/stores/auth.store";
 import { telemetry } from "@/services/telemetry";
+import { updaterStore } from "@/stores/updater.store";
 import {
   startAutoRefresh,
   stopAutoRefresh,
@@ -36,6 +37,7 @@ function App() {
 
   onMount(() => {
     checkAuth();
+    updaterStore.initUpdater();
   });
 
   // Initialize wallet features when authenticated

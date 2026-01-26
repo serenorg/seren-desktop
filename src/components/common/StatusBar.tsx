@@ -3,6 +3,7 @@
 
 import { Component } from "solid-js";
 import { McpStatusIndicator } from "./McpStatusIndicator";
+import { UpdateIndicator } from "./UpdateIndicator";
 import { WalletStatus } from "./WalletStatus";
 import "./StatusBar.css";
 
@@ -15,6 +16,7 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
     <footer class="status-bar">
       <span class="status-message">{props.message || "Ready"}</span>
       <div class="status-bar-right">
+        <UpdateIndicator />
         <WalletStatus />
         <McpStatusIndicator />
       </div>

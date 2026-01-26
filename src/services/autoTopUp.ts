@@ -1,7 +1,7 @@
 // ABOUTME: Auto top-up service for automatic balance replenishment.
 // ABOUTME: Monitors balance and triggers Stripe checkout when below threshold.
 
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect } from "solid-js";
 import {
   walletState,
   refreshBalance,
@@ -68,8 +68,6 @@ function logEvent(
   // Log to console for debugging
   if (type === "failed") {
     console.error("[AutoTopUp]", type, event);
-  } else {
-    console.info("[AutoTopUp]", type, event);
   }
 }
 
@@ -179,7 +177,7 @@ function debouncedTrigger(): void {
  */
 export function initAutoTopUp(): () => void {
   // Create reactive effect that monitors balance
-  const cleanup = createEffect(() => {
+  createEffect(() => {
     const balance = walletState.balance;
     const isEnabled = settingsStore.get("autoTopUpEnabled");
     const threshold = settingsStore.get("autoTopUpThreshold");
