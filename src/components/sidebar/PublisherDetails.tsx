@@ -1,8 +1,8 @@
 // ABOUTME: Publisher details view component.
-// ABOUTME: Shows full publisher information including pricing and capabilities.
+// ABOUTME: Shows full publisher information including pricing and categories.
 
 import { Component, Show, createResource, For } from "solid-js";
-import { catalog } from "@/services/catalog";
+import { catalog, getPricingDisplay, formatPrice } from "@/services/catalog";
 import "./PublisherDetails.css";
 
 interface PublisherDetailsProps {
@@ -74,36 +74,36 @@ export const PublisherDetails: Component<PublisherDetailsProps> = (props) => {
               <h3>Pricing</h3>
               <div class="pricing-grid">
                 <div class="pricing-item">
-                  <span class="pricing-label">Per Call</span>
-                  <span class="pricing-value">${pub().pricing.price_per_call}</span>
+                  <span class="pricing-label">Price</span>
+                  <span class="pricing-value">{getPricingDisplay(pub())}</span>
                 </div>
-                <Show when={pub().pricing.price_per_query}>
+                <Show when={pub().price_per_call !== null}>
                   <div class="pricing-item">
-                    <span class="pricing-label">Per Query</span>
-                    <span class="pricing-value">${pub().pricing.price_per_query}</span>
+                    <span class="pricing-label">Per Call</span>
+                    <span class="pricing-value">{formatPrice(pub().price_per_call)}</span>
                   </div>
                 </Show>
-                <Show when={pub().pricing.min_charge}>
+                <Show when={pub().base_price_per_1000_rows !== null}>
                   <div class="pricing-item">
-                    <span class="pricing-label">Min Charge</span>
-                    <span class="pricing-value">${pub().pricing.min_charge}</span>
+                    <span class="pricing-label">Per 1K Rows</span>
+                    <span class="pricing-value">{formatPrice(pub().base_price_per_1000_rows)}</span>
                   </div>
                 </Show>
-                <Show when={pub().pricing.max_charge}>
+                <Show when={pub().price_per_execution !== null}>
                   <div class="pricing-item">
-                    <span class="pricing-label">Max Charge</span>
-                    <span class="pricing-value">${pub().pricing.max_charge}</span>
+                    <span class="pricing-label">Per Execution</span>
+                    <span class="pricing-value">{formatPrice(pub().price_per_execution)}</span>
                   </div>
                 </Show>
               </div>
             </section>
 
-            <Show when={pub().capabilities.length > 0}>
+            <Show when={pub().categories.length > 0}>
               <section class="publisher-section">
-                <h3>Capabilities</h3>
+                <h3>Categories</h3>
                 <ul class="capabilities-list">
-                  <For each={pub().capabilities}>
-                    {(capability) => <li>{capability}</li>}
+                  <For each={pub().categories}>
+                    {(category) => <li>{category}</li>}
                   </For>
                 </ul>
               </section>
@@ -113,8 +113,8 @@ export const PublisherDetails: Component<PublisherDetailsProps> = (props) => {
               <h3>Details</h3>
               <div class="details-grid">
                 <div class="details-item">
-                  <span class="details-label">Category</span>
-                  <span class="details-value">{pub().category}</span>
+                  <span class="details-label">Type</span>
+                  <span class="details-value">{pub().publisher_type}</span>
                 </div>
                 <div class="details-item">
                   <span class="details-label">Status</span>

@@ -41,7 +41,7 @@ export const StreamingMessage: Component<StreamingMessageProps> = (props) => {
 
   onCleanup(() => {
     isCancelled = true;
-    props.stream.return?.();
+    void props.stream.return?.(undefined);
   });
 
   return (

@@ -2,7 +2,7 @@
 // ABOUTME: Provides search, filtering, and navigation to publisher details.
 
 import { Component, For, createSignal, createResource, Show } from "solid-js";
-import { catalog, Publisher } from "@/services/catalog";
+import { catalog, getPricingDisplay, type Publisher, type PublisherType } from "@/services/catalog";
 import "./CatalogPanel.css";
 
 interface CatalogPanelProps {
@@ -11,7 +11,7 @@ interface CatalogPanelProps {
 
 export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
   const [search, setSearch] = createSignal("");
-  const [selectedCategory, setSelectedCategory] = createSignal<string | null>(null);
+  const [selectedType, setSelectedType] = createSignal<PublisherType | null>(null);
 
   const [publishers, { refetch }] = createResource(async () => {
     try {
@@ -24,7 +24,7 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
   const filtered = () => {
     const list = publishers() || [];
     const query = search().toLowerCase().trim();
-    const category = selectedCategory();
+    const type = selectedType();
 
     return list.filter((p) => {
       // Filter by search query
@@ -32,20 +32,21 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
         !query ||
         p.name.toLowerCase().includes(query) ||
         p.description.toLowerCase().includes(query) ||
-        p.capabilities.some((c) => c.toLowerCase().includes(query));
+        p.categories.some((c) => c.toLowerCase().includes(query));
 
-      // Filter by category
-      const matchesCategory = !category || p.category === category;
+      // Filter by type
+      const matchesType = !type || p.publisher_type === type;
 
-      return matchesSearch && matchesCategory;
+      return matchesSearch && matchesType;
     });
   };
 
-  const categories = () => {
-    const list = publishers() || [];
-    const cats = new Set(list.map((p) => p.category));
-    return Array.from(cats).sort();
-  };
+  const publisherTypes: { id: PublisherType; label: string }[] = [
+    { id: "database", label: "Databases" },
+    { id: "api", label: "APIs" },
+    { id: "mcp", label: "MCP" },
+    { id: "compute", label: "Compute" },
+  ];
 
   const handleSelectPublisher = (publisher: Publisher) => {
     if (props.onSelectPublisher) {
@@ -77,18 +78,18 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
 
       <div class="catalog-categories">
         <button
-          class={`category-btn ${!selectedCategory() ? "active" : ""}`}
-          onClick={() => setSelectedCategory(null)}
+          class={`category-btn ${!selectedType() ? "active" : ""}`}
+          onClick={() => setSelectedType(null)}
         >
           All
         </button>
-        <For each={categories()}>
-          {(category) => (
+        <For each={publisherTypes}>
+          {(type) => (
             <button
-              class={`category-btn ${selectedCategory() === category ? "active" : ""}`}
-              onClick={() => setSelectedCategory(category)}
+              class={`category-btn ${selectedType() === type.id ? "active" : ""}`}
+              onClick={() => setSelectedType(type.id)}
             >
-              {category}
+              {type.label}
             </button>
           )}
         </For>
@@ -138,9 +139,9 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
                 </div>
                 <p class="publisher-description">{publisher.description}</p>
                 <div class="publisher-meta">
-                  <span class="publisher-category">{publisher.category}</span>
+                  <span class="publisher-category">{publisher.publisher_type}</span>
                   <span class="publisher-price">
-                    ${publisher.pricing.price_per_call}/call
+                    {getPricingDisplay(publisher)}
                   </span>
                 </div>
               </div>
@@ -152,7 +153,7 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
       <Show when={!publishers.loading && filtered().length === 0}>
         <div class="catalog-empty">
           <Show
-            when={search() || selectedCategory()}
+            when={search() || selectedType()}
             fallback="No publishers available"
           >
             No publishers match your search

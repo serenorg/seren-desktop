@@ -232,6 +232,8 @@
 
 /* Publisher cards */
 .publisher-card {
+  display: flex;
+  flex-direction: column;
   background: var(--surface-elevated, rgba(30, 30, 30, 0.6));
   border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.2));
   border-radius: 12px;
@@ -450,7 +452,8 @@
   gap: 6px;
 }
 
-.detail-slug code {
+.detail-slug code,
+.detail-type code {
   display: inline-block;
   padding: 4px 8px;
   background: rgba(148, 163, 184, 0.15);
@@ -458,6 +461,119 @@
   font-family: monospace;
   font-size: 0.85rem;
   color: var(--text-primary, #f8fafc);
+}
+
+/* Publisher byline */
+.publisher-byline {
+  margin: -8px 0 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted, #64748b);
+}
+
+.detail-byline {
+  margin: -12px 0 16px;
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+}
+
+/* Categories */
+.publisher-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.category-tag {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  background: rgba(99, 102, 241, 0.15);
+  border-radius: 4px;
+  color: var(--accent-light, #a5b4fc);
+}
+
+.category-more {
+  font-size: 0.7rem;
+  color: var(--text-muted, #64748b);
+}
+
+.detail-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Publisher footer with stats and pricing */
+.publisher-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-muted, rgba(148, 163, 184, 0.1));
+}
+
+.publisher-stats {
+  display: flex;
+  gap: 12px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted, #64748b);
+}
+
+.stat-icon {
+  font-size: 0.85rem;
+}
+
+/* Detail stats */
+.detail-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  padding: 12px;
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-primary, #f8fafc);
+}
+
+.stat-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted, #64748b);
+  margin-top: 4px;
+}
+
+/* Pricing badge */
+.pricing-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--accent-light, #a5b4fc);
+}
+
+.pricing-model {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
 }
 
 /* Responsive adjustments */

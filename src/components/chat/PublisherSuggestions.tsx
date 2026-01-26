@@ -2,7 +2,7 @@
 // ABOUTME: Shows clickable suggestions with name, description, and pricing info.
 
 import { Component, For, Show } from "solid-js";
-import type { Publisher } from "@/services/catalog";
+import { getPricingDisplay, type Publisher } from "@/services/catalog";
 import "./PublisherSuggestions.css";
 
 interface PublisherSuggestionsProps {
@@ -73,7 +73,7 @@ export const PublisherSuggestions: Component<PublisherSuggestionsProps> = (props
                       </span>
                     </div>
                     <span class="publisher-suggestion__price">
-                      ${publisher.pricing.price_per_call}/call
+                      {getPricingDisplay(publisher)}
                     </span>
                   </button>
                 </li>

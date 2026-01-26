@@ -41,7 +41,7 @@ export const McpToolsPanel: Component = () => {
 
     return Object.entries(props).map(([name, schema]) => ({
       name,
-      schema: schema as Record<string, unknown>,
+      schema: schema as unknown as Record<string, unknown>,
       required: required.has(name),
     }));
   }
@@ -62,7 +62,7 @@ export const McpToolsPanel: Component = () => {
       const propSchema = tool.inputSchema.properties[key];
       if (!propSchema) continue;
 
-      const schemaType = (propSchema as Record<string, unknown>).type;
+      const schemaType = (propSchema as unknown as Record<string, unknown>).type;
 
       if (schemaType === "number") {
         args[key] = parseFloat(value) || 0;

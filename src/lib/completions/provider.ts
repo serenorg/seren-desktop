@@ -51,7 +51,7 @@ export function registerInlineCompletionProvider(): Monaco.IDisposable {
       provideInlineCompletions: async (
         model: Monaco.editor.ITextModel,
         position: Monaco.Position,
-        context: Monaco.languages.InlineCompletionContext,
+        _context: Monaco.languages.InlineCompletionContext,
         token: Monaco.CancellationToken
       ): Promise<Monaco.languages.InlineCompletions | null> => {
         if (!completionHandler) {
@@ -90,7 +90,7 @@ export function registerInlineCompletionProvider(): Monaco.IDisposable {
         }
       },
 
-      freeInlineCompletions: () => {
+      disposeInlineCompletions: () => {
         // Cleanup if needed
       },
     }

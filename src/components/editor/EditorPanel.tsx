@@ -90,9 +90,8 @@ export const EditorPanel: Component = () => {
       try {
         const children = await loadDirectoryChildren(path);
         // Update the node's children in the tree
-        setNodes((nodes) =>
-          updateNodeChildren(nodes, path, children)
-        );
+        const updatedNodes = updateNodeChildren(fileTreeState.nodes, path, children);
+        setNodes(updatedNodes);
       } catch (error) {
         console.error("Failed to load directory:", error);
       }

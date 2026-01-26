@@ -1,5 +1,5 @@
-// ABOUTME: Searchable dropdown for selecting AI models.
-// ABOUTME: Fetches models from Seren API and allows filtering by name/provider.
+// ABOUTME: Searchable dropdown for selecting AI models from OpenRouter.
+// ABOUTME: Fetches full model list and allows filtering by name/provider.
 
 import { createSignal, createEffect, For, Show, onCleanup, type Component } from "solid-js";
 import { modelsService, type Model } from "@/services/models";
@@ -11,22 +11,12 @@ interface SearchableModelSelectProps {
   placeholder?: string;
 }
 
-// Default models to show if API fails
-const DEFAULT_MODELS: Model[] = [
-  { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", provider: "Anthropic", contextWindow: 200000 },
-  { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5", provider: "Anthropic", contextWindow: 200000 },
-  { id: "anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5", provider: "Anthropic", contextWindow: 200000 },
-  { id: "openai/gpt-4o", name: "GPT-4o", provider: "OpenAI", contextWindow: 128000 },
-  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", contextWindow: 128000 },
-  { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google", contextWindow: 1000000 },
-  { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google", contextWindow: 1000000 },
-];
-
 export const SearchableModelSelect: Component<SearchableModelSelectProps> = (props) => {
   const [isOpen, setIsOpen] = createSignal(false);
   const [search, setSearch] = createSignal("");
-  const [models, setModels] = createSignal<Model[]>(DEFAULT_MODELS);
-  const [isLoading, setIsLoading] = createSignal(false);
+  const [models, setModels] = createSignal<Model[]>([]);
+  const [isLoading, setIsLoading] = createSignal(true);
+  const [loadError, setLoadError] = createSignal<string | null>(null);
   let containerRef: HTMLDivElement | undefined;
   let inputRef: HTMLInputElement | undefined;
 
@@ -37,13 +27,16 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (pro
 
   async function loadModels() {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const fetched = await modelsService.getAvailable();
-      if (fetched.length > 0) {
-        setModels(fetched);
+      setModels(fetched);
+      if (fetched.length === 0) {
+        setLoadError("No models available");
       }
-    } catch {
-      // Keep default models on error
+    } catch (err) {
+      setLoadError("Failed to load models");
+      console.error("Error loading models:", err);
     } finally {
       setIsLoading(false);
     }
@@ -128,15 +121,25 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (pro
               onInput={(e) => setSearch(e.currentTarget.value)}
               onKeyDown={handleKeyDown}
             />
+            <Show when={!isLoading() && models().length > 0}>
+              <span class="select-count">{filteredModels().length} of {models().length}</span>
+            </Show>
           </div>
 
           <div class="select-options">
             <Show when={isLoading()}>
-              <div class="select-loading">Loading models...</div>
+              <div class="select-loading">Loading models from OpenRouter...</div>
             </Show>
 
-            <Show when={!isLoading() && filteredModels().length === 0}>
-              <div class="select-empty">No models found</div>
+            <Show when={!isLoading() && loadError()}>
+              <div class="select-error">
+                {loadError()}
+                <button type="button" onClick={loadModels}>Retry</button>
+              </div>
+            </Show>
+
+            <Show when={!isLoading() && !loadError() && filteredModels().length === 0}>
+              <div class="select-empty">No models match "{search()}"</div>
             </Show>
 
             <For each={filteredModels()}>

@@ -61,10 +61,13 @@
 .select-search {
   padding: 8px;
   border-bottom: 1px solid #21262d;
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .select-search input {
-  width: 100%;
+  flex: 1;
   padding: 8px 12px;
   background: #0d1117;
   border: 1px solid #30363d;
@@ -80,6 +83,12 @@
 
 .select-search input::placeholder {
   color: #484f58;
+}
+
+.select-count {
+  font-size: 11px;
+  color: #8b949e;
+  white-space: nowrap;
 }
 
 .select-options {
@@ -129,4 +138,31 @@
   text-align: center;
   color: #8b949e;
   font-size: 13px;
+}
+
+.select-error {
+  padding: 16px;
+  text-align: center;
+  color: #f85149;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.select-error button {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #8b949e;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.select-error button:hover {
+  background: #21262d;
+  color: #e6edf3;
 }

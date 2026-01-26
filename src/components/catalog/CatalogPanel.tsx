@@ -1,8 +1,8 @@
 // ABOUTME: Publisher catalog panel for browsing available API and database publishers.
-// ABOUTME: Shows searchable list of publishers with pricing and capabilities.
+// ABOUTME: Shows searchable list of publishers with pricing, stats, and categories.
 
 import { createSignal, createEffect, For, Show, type Component } from "solid-js";
-import { catalog, type Publisher } from "@/services/catalog";
+import { catalog, getPricingDisplay, formatNumber, type Publisher } from "@/services/catalog";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { SignIn } from "@/components/auth/SignIn";
 import "./CatalogPanel.css";
@@ -15,15 +15,16 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
   const [publishers, setPublishers] = createSignal<Publisher[]>([]);
   const [filteredPublishers, setFilteredPublishers] = createSignal<Publisher[]>([]);
   const [searchQuery, setSearchQuery] = createSignal("");
-  const [selectedCategory, setSelectedCategory] = createSignal<string | null>(null);
+  const [selectedType, setSelectedType] = createSignal<string | null>(null);
   const [isLoading, setIsLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [selectedPublisher, setSelectedPublisher] = createSignal<Publisher | null>(null);
 
-  const categories = [
+  const publisherTypes = [
     { id: "database", label: "Databases", icon: "🗄️" },
-    { id: "integration", label: "APIs", icon: "🔌" },
-    { id: "compute", label: "AI & Compute", icon: "🤖" },
+    { id: "api", label: "APIs", icon: "🔌" },
+    { id: "mcp", label: "MCP", icon: "🔗" },
+    { id: "compute", label: "Compute", icon: "🤖" },
   ];
 
   // Load publishers when authenticated
@@ -33,22 +34,23 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
     }
   });
 
-  // Filter publishers based on search and category
+  // Filter publishers based on search and type
   createEffect(() => {
     const query = searchQuery().toLowerCase();
-    const category = selectedCategory();
+    const type = selectedType();
 
     let filtered = publishers();
 
-    if (category) {
-      filtered = filtered.filter(p => p.category === category);
+    if (type) {
+      filtered = filtered.filter(p => p.publisher_type === type);
     }
 
     if (query) {
       filtered = filtered.filter(p =>
         p.name.toLowerCase().includes(query) ||
+        (p.resource_name?.toLowerCase().includes(query)) ||
         p.description.toLowerCase().includes(query) ||
-        p.capabilities.some(c => c.toLowerCase().includes(query))
+        p.categories.some(c => c.toLowerCase().includes(query))
       );
     }
 
@@ -68,23 +70,18 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
     }
   }
 
-  function formatPrice(pricing: Publisher["pricing"]): string {
-    if (pricing.price_per_call) {
-      const price = parseFloat(pricing.price_per_call);
-      if (price === 0) return "Free";
-      if (price < 0.01) return `$${(price * 1000).toFixed(2)}/1K calls`;
-      return `$${price.toFixed(4)}/call`;
-    }
-    if (pricing.price_per_query) {
-      const price = parseFloat(pricing.price_per_query);
-      if (price === 0) return "Free";
-      return `$${price.toFixed(4)}/query`;
-    }
-    return "Contact for pricing";
+  function handleTypeClick(typeId: string) {
+    setSelectedType(prev => prev === typeId ? null : typeId);
   }
 
-  function handleCategoryClick(categoryId: string) {
-    setSelectedCategory(prev => prev === categoryId ? null : categoryId);
+  // Get display name - prefer resource_name
+  function getDisplayName(publisher: Publisher): string {
+    return publisher.resource_name || publisher.name;
+  }
+
+  // Get publisher name if resource_name is different
+  function getPublisherName(publisher: Publisher): string | null {
+    return publisher.resource_name ? publisher.name : null;
   }
 
   return (
@@ -121,15 +118,15 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
             />
           </div>
           <div class="catalog-categories">
-            <For each={categories}>
-              {(cat) => (
+            <For each={publisherTypes}>
+              {(type) => (
                 <button
                   type="button"
-                  class={`category-btn ${selectedCategory() === cat.id ? "active" : ""}`}
-                  onClick={() => handleCategoryClick(cat.id)}
+                  class={`category-btn ${selectedType() === type.id ? "active" : ""}`}
+                  onClick={() => handleTypeClick(type.id)}
                 >
-                  <span class="category-icon">{cat.icon}</span>
-                  {cat.label}
+                  <span class="category-icon">{type.icon}</span>
+                  {type.label}
                 </button>
               )}
             </For>
@@ -160,7 +157,7 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                     <span class="empty-icon">🔍</span>
                     <p>No publishers found</p>
                     <p class="empty-hint">
-                      {searchQuery() || selectedCategory()
+                      {searchQuery() || selectedType()
                         ? "Try adjusting your search or filters"
                         : "Publishers will appear here once available"}
                     </p>
@@ -178,7 +175,7 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                           when={publisher.logo_url}
                           fallback={
                             <div class="publisher-logo-placeholder">
-                              {publisher.name.charAt(0).toUpperCase()}
+                              {getDisplayName(publisher).charAt(0).toUpperCase()}
                             </div>
                           }
                         >
@@ -189,29 +186,47 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                           />
                         </Show>
                         <div class="publisher-title">
-                          <h3>{publisher.name}</h3>
+                          <h3>{getDisplayName(publisher)}</h3>
                           <Show when={publisher.is_verified}>
                             <span class="verified-badge" title="Verified publisher">✓</span>
                           </Show>
                         </div>
                       </div>
+
+                      <Show when={getPublisherName(publisher)}>
+                        <p class="publisher-byline">by {getPublisherName(publisher)}</p>
+                      </Show>
+
                       <p class="publisher-description">{publisher.description}</p>
-                      <div class="publisher-meta">
-                        <span class="publisher-category">{publisher.category}</span>
-                        <span class="publisher-price">{formatPrice(publisher.pricing)}</span>
-                      </div>
-                      <Show when={publisher.capabilities.length > 0}>
-                        <div class="publisher-capabilities">
-                          <For each={publisher.capabilities.slice(0, 3)}>
-                            {(cap) => <span class="capability-tag">{cap}</span>}
+
+                      {/* Categories */}
+                      <Show when={publisher.categories.length > 0}>
+                        <div class="publisher-categories">
+                          <For each={publisher.categories.slice(0, 3)}>
+                            {(cat) => <span class="category-tag">{cat}</span>}
                           </For>
-                          <Show when={publisher.capabilities.length > 3}>
-                            <span class="capability-more">
-                              +{publisher.capabilities.length - 3} more
+                          <Show when={publisher.categories.length > 3}>
+                            <span class="category-more">
+                              +{publisher.categories.length - 3}
                             </span>
                           </Show>
                         </div>
                       </Show>
+
+                      {/* Footer with stats and pricing */}
+                      <div class="publisher-footer">
+                        <div class="publisher-stats">
+                          <span class="stat-item" title="Total transactions">
+                            <span class="stat-icon">📊</span>
+                            {formatNumber(publisher.total_transactions)} txns
+                          </span>
+                          <span class="stat-item" title="Agents served">
+                            <span class="stat-icon">🤖</span>
+                            {formatNumber(publisher.unique_agents_served)} agents
+                          </span>
+                        </div>
+                        <span class="publisher-price">{getPricingDisplay(publisher)}</span>
+                      </div>
                     </article>
                   )}
                 </For>
@@ -221,7 +236,7 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
             <Show when={selectedPublisher()}>
               <aside class="publisher-detail">
                 <div class="detail-header">
-                  <h2>{selectedPublisher()!.name}</h2>
+                  <h2>{getDisplayName(selectedPublisher()!)}</h2>
                   <button
                     type="button"
                     class="detail-close"
@@ -238,51 +253,61 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                       class="detail-logo"
                     />
                   </Show>
+
+                  <Show when={getPublisherName(selectedPublisher()!)}>
+                    <p class="detail-byline">by {getPublisherName(selectedPublisher()!)}</p>
+                  </Show>
+
                   <p class="detail-description">{selectedPublisher()!.description}</p>
 
+                  {/* Stats section */}
+                  <div class="detail-section">
+                    <h4>Usage</h4>
+                    <div class="detail-stats">
+                      <div class="stat-card">
+                        <span class="stat-value">{formatNumber(selectedPublisher()!.total_transactions)}</span>
+                        <span class="stat-label">Transactions</span>
+                      </div>
+                      <div class="stat-card">
+                        <span class="stat-value">{formatNumber(selectedPublisher()!.unique_agents_served)}</span>
+                        <span class="stat-label">Agents</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pricing section */}
                   <div class="detail-section">
                     <h4>Pricing</h4>
                     <div class="detail-pricing">
-                      <div class="pricing-item">
-                        <span class="pricing-label">Per Call</span>
-                        <span class="pricing-value">
-                          {formatPrice(selectedPublisher()!.pricing)}
-                        </span>
-                      </div>
-                      <Show when={selectedPublisher()!.pricing.min_charge}>
-                        <div class="pricing-item">
-                          <span class="pricing-label">Min Charge</span>
-                          <span class="pricing-value">
-                            ${selectedPublisher()!.pricing.min_charge}
-                          </span>
-                        </div>
-                      </Show>
-                      <Show when={selectedPublisher()!.pricing.max_charge}>
-                        <div class="pricing-item">
-                          <span class="pricing-label">Max Charge</span>
-                          <span class="pricing-value">
-                            ${selectedPublisher()!.pricing.max_charge}
-                          </span>
-                        </div>
+                      <span class="pricing-badge">{getPricingDisplay(selectedPublisher()!)}</span>
+                      <Show when={selectedPublisher()!.billing_model}>
+                        <p class="pricing-model">
+                          Model: {selectedPublisher()!.billing_model === "prepaid_credits" ? "Prepaid Credits" : "Pay per Request"}
+                        </p>
                       </Show>
                     </div>
                   </div>
 
-                  <Show when={selectedPublisher()!.capabilities.length > 0}>
+                  {/* Categories section */}
+                  <Show when={selectedPublisher()!.categories.length > 0}>
                     <div class="detail-section">
-                      <h4>Capabilities</h4>
-                      <div class="detail-capabilities">
-                        <For each={selectedPublisher()!.capabilities}>
-                          {(cap) => <span class="capability-tag">{cap}</span>}
+                      <h4>Categories</h4>
+                      <div class="detail-categories">
+                        <For each={selectedPublisher()!.categories}>
+                          {(cat) => <span class="category-tag">{cat}</span>}
                         </For>
                       </div>
                     </div>
                   </Show>
 
+                  {/* Integration section */}
                   <div class="detail-section">
                     <h4>Integration</h4>
                     <p class="detail-slug">
                       Slug: <code>{selectedPublisher()!.slug}</code>
+                    </p>
+                    <p class="detail-type">
+                      Type: <code>{selectedPublisher()!.publisher_type}</code>
                     </p>
                   </div>
                 </div>

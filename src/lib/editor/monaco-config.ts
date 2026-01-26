@@ -19,12 +19,13 @@ export async function initMonaco(): Promise<typeof Monaco> {
     },
   });
 
-  monacoInstance = await loader.init();
+  const monaco = await loader.init();
+  monacoInstance = monaco;
 
   // Register custom themes
-  registerThemes(monacoInstance);
+  registerThemes(monaco);
 
-  return monacoInstance;
+  return monaco;
 }
 
 /**
