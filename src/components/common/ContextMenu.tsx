@@ -9,7 +9,6 @@ import {
   onCleanup,
   Show,
 } from "solid-js";
-import "./ContextMenu.css";
 
 export interface ContextMenuItem {
   label: string;
@@ -94,7 +93,7 @@ export const ContextMenu: Component<ContextMenuProps> = (props) => {
   return (
     <div
       ref={menuRef}
-      class="context-menu"
+      class="fixed z-[10000] min-w-[180px] bg-[#1c2128] border border-[#30363d] rounded-md py-1 shadow-[0_8px_24px_rgba(0,0,0,0.4)] animate-[context-menu-appear_0.1s_ease-out]"
       style={{
         left: `${position().x}px`,
         top: `${position().y}px`,
@@ -106,20 +105,23 @@ export const ContextMenu: Component<ContextMenuProps> = (props) => {
         {(item) => (
           <Show
             when={!item.separator}
-            fallback={<div class="context-menu-separator" role="separator" />}
+            fallback={<div class="h-px bg-[#30363d] my-1 mx-2" role="separator" />}
           >
             <button
               type="button"
-              class="context-menu-item"
-              classList={{ disabled: item.disabled }}
+              class={`flex items-center gap-2 w-full py-2 px-3 border-none bg-transparent text-[#e6edf3] text-[13px] text-left cursor-pointer transition-colors duration-100 focus:outline-none focus:bg-[#30363d] focus-visible:outline-2 focus-visible:outline-[#58a6ff] focus-visible:outline-offset-[-2px] ${
+                item.disabled
+                  ? "text-[#6e7681] cursor-not-allowed"
+                  : "hover:bg-[#30363d] active:bg-[#3d444d]"
+              }`}
               onClick={() => handleItemClick(item)}
               role="menuitem"
               disabled={item.disabled}
             >
               <Show when={item.icon}>
-                <span class="context-menu-icon">{item.icon}</span>
+                <span class="w-4 text-center text-sm">{item.icon}</span>
               </Show>
-              <span class="context-menu-label">{item.label}</span>
+              <span class="flex-1">{item.label}</span>
             </button>
           </Show>
         )}

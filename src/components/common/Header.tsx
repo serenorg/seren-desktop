@@ -3,7 +3,6 @@
 
 import { type Component, For, Show } from "solid-js";
 import { BalanceDisplay } from "./BalanceDisplay";
-import "./Header.css";
 
 export type Panel =
   | "chat"
@@ -38,38 +37,44 @@ interface HeaderProps {
 
 export const Header: Component<HeaderProps> = (props) => {
   return (
-    <header class="header">
-      <div class="header-left">
-        <h1 class="header-title">Seren</h1>
-        <nav class="header-nav">
+    <header class="flex items-center justify-between h-10 px-3 bg-card border-b border-border [-webkit-app-region:drag]">
+      <div class="flex items-center gap-4 [-webkit-app-region:no-drag]">
+        <h1 class="text-[13px] font-medium text-gray-400 m-0 tracking-tight">Seren</h1>
+        <nav class="flex items-center gap-0.5">
           <For each={NAV_ITEMS}>
             {(item) => (
               <button
                 type="button"
-                class="header-nav-item"
-                classList={{ active: props.activePanel === item.id }}
+                class={`flex items-center gap-1.5 py-1.5 px-2.5 text-[13px] font-normal bg-transparent border-none rounded cursor-pointer transition-all duration-100 [-webkit-app-region:no-drag] ${
+                  props.activePanel === item.id
+                    ? "text-white bg-white/10"
+                    : "text-gray-400 hover:text-gray-200 hover:bg-white/[0.06]"
+                }`}
                 onClick={() => props.onPanelChange?.(item.id)}
               >
-                <span class="nav-icon">{item.icon}</span>
-                <span class="nav-label">{item.label}</span>
+                <span class="text-sm leading-none">{item.icon}</span>
+                <span class="leading-none">{item.label}</span>
               </button>
             )}
           </For>
         </nav>
       </div>
-      <div class="header-actions">
+      <div class="flex items-center gap-2 [-webkit-app-region:no-drag]">
         <Show
           when={props.isAuthenticated}
           fallback={
             <button
               type="button"
-              class="header-nav-item signin"
-              classList={{ active: props.activePanel === "account" }}
+              class={`flex items-center gap-1.5 py-1.5 px-2.5 ml-1 text-[13px] font-normal bg-transparent border-none rounded cursor-pointer transition-all duration-100 ${
+                props.activePanel === "account"
+                  ? "text-white bg-white/10"
+                  : "text-gray-400 hover:text-gray-200 hover:bg-white/[0.06]"
+              }`}
               data-testid="header-signin-button"
               onClick={() => props.onPanelChange?.("account")}
             >
-              <span class="nav-icon">👤</span>
-              <span class="nav-label">Sign In</span>
+              <span class="text-sm leading-none">👤</span>
+              <span class="leading-none">Sign In</span>
             </button>
           }
         >
@@ -77,7 +82,7 @@ export const Header: Component<HeaderProps> = (props) => {
           {props.onLogout && (
             <button
               type="button"
-              class="header-logout"
+              class="py-1.5 px-2.5 text-xs font-normal text-gray-400 bg-transparent border border-white/10 rounded cursor-pointer transition-all duration-100 hover:text-gray-200 hover:border-white/20 hover:bg-white/5"
               onClick={props.onLogout}
             >
               Logout

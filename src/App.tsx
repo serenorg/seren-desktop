@@ -40,7 +40,7 @@ import {
   startAutoRefresh,
   stopAutoRefresh,
 } from "@/stores/wallet.store";
-import "./App.css";
+import "./styles.css";
 
 // Initialize telemetry early to capture startup errors
 telemetry.init();
@@ -139,22 +139,22 @@ function App() {
     <Show
       when={!authStore.isLoading}
       fallback={
-        <div class="app-loading">
+        <div class="flex flex-col items-center justify-center h-screen gap-4 text-muted-foreground">
           <div class="loading-spinner" />
           <p>Loading...</p>
         </div>
       }
     >
-      <div class="app">
+      <div class="flex flex-col h-full">
         <Header
           activePanel={activePanel()}
           onPanelChange={setActivePanel}
           onLogout={handleLogout}
           isAuthenticated={authStore.isAuthenticated}
         />
-        <main class="app-main">
+        <main class="flex-1 overflow-hidden bg-transparent">
           <Switch
-            fallback={<div class="panel-placeholder">Select a panel</div>}
+            fallback={<div class="flex items-center justify-center h-full text-muted-foreground text-base">Select a panel</div>}
           >
             <Match when={activePanel() === "chat"}>
               <ChatPanel onSignInClick={handleSignInClick} />

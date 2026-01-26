@@ -9,7 +9,6 @@ import {
   Show,
 } from "solid-js";
 import { databases } from "@/services/databases";
-import "./CreateProjectModal.css";
 
 interface CreateProjectModalProps {
   onClose: () => void;
@@ -76,13 +75,13 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (
   };
 
   return (
-    <div class="create-project-modal-backdrop" onClick={handleBackdropClick}>
-      <div class="create-project-modal">
-        <div class="modal-header">
-          <h2>Create Project</h2>
+    <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_0.15s_ease-out]" onClick={handleBackdropClick}>
+      <div class="bg-popover border border-border rounded-lg w-[400px] max-w-[90vw] shadow-xl animate-[slideUp_0.2s_ease-out]">
+        <div class="flex justify-between items-center py-4 px-5 border-b border-border">
+          <h2 class="m-0 text-base font-semibold text-foreground">Create Project</h2>
           <button
             type="button"
-            class="modal-close-btn"
+            class="bg-transparent border-none text-muted-foreground text-2xl leading-none cursor-pointer py-1 px-2 rounded transition-all duration-150 hover:bg-muted hover:text-foreground"
             onClick={props.onClose}
             title="Close"
           >
@@ -90,21 +89,22 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (
           </button>
         </div>
 
-        <div class="modal-body">
+        <div class="p-5">
           <Show when={error()}>
-            <div class="modal-error">{error()}</div>
+            <div class="py-2.5 px-3 mb-4 bg-destructive/20 text-destructive rounded text-[13px]">{error()}</div>
           </Show>
 
-          <div class="form-group">
-            <label for="organization">Organization</label>
+          <div class="mb-4">
+            <label for="organization" class="block mb-1.5 text-[13px] font-medium text-foreground">Organization</label>
             <Show
               when={!organizations.loading}
               fallback={
-                <div class="form-loading">Loading organizations...</div>
+                <div class="py-2.5 px-3 text-muted-foreground text-[13px] italic">Loading organizations...</div>
               }
             >
               <select
                 id="organization"
+                class="w-full py-2.5 px-3 bg-card text-foreground border border-border rounded text-sm transition-colors duration-150 focus:outline-none focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
                 value={selectedOrgId()}
                 onChange={(e) => setSelectedOrgId(e.currentTarget.value)}
                 disabled={isCreating()}
@@ -119,11 +119,12 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (
             </Show>
           </div>
 
-          <div class="form-group">
-            <label for="project-name">Project Name</label>
+          <div class="mb-0">
+            <label for="project-name" class="block mb-1.5 text-[13px] font-medium text-foreground">Project Name</label>
             <input
               id="project-name"
               type="text"
+              class="w-full py-2.5 px-3 bg-card text-foreground border border-border rounded text-sm transition-colors duration-150 focus:outline-none focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed placeholder:text-muted-foreground"
               value={projectName()}
               onInput={(e) => setProjectName(e.currentTarget.value)}
               placeholder="Enter project name"
@@ -135,10 +136,10 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (
           </div>
         </div>
 
-        <div class="modal-footer">
+        <div class="flex justify-end gap-2 py-4 px-5 border-t border-border">
           <button
             type="button"
-            class="modal-btn modal-btn-secondary"
+            class="py-2 px-4 rounded text-[13px] font-medium cursor-pointer transition-all duration-150 bg-transparent text-foreground border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={props.onClose}
             disabled={isCreating()}
           >
@@ -146,7 +147,7 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (
           </button>
           <button
             type="button"
-            class="modal-btn modal-btn-primary"
+            class="py-2 px-4 rounded text-[13px] font-medium cursor-pointer transition-all duration-150 bg-primary text-primary-foreground border border-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleCreate}
             disabled={isCreating() || !projectName().trim() || !selectedOrgId()}
           >

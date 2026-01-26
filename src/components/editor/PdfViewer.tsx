@@ -8,7 +8,6 @@ import {
   createSignal,
   onCleanup,
 } from "solid-js";
-import "./PdfViewer.css";
 
 // Set up the worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -163,27 +162,29 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
     return parts[parts.length - 1];
   };
 
+  const btnClass = "bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-base cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)] disabled:opacity-40 disabled:cursor-not-allowed";
+
   return (
-    <div class="pdf-viewer">
-      <div class="pdf-viewer-toolbar">
-        <div class="pdf-viewer-info">
-          <span class="pdf-viewer-filename">{fileName()}</span>
+    <div class="flex flex-col h-full bg-card">
+      <div class="flex items-center justify-between px-4 py-2 bg-popover border-b border-[rgba(148,163,184,0.15)] shrink-0 gap-4">
+        <div class="flex-1 min-w-0">
+          <span class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">{fileName()}</span>
         </div>
 
-        <div class="pdf-viewer-navigation">
+        <div class="flex items-center gap-2">
           <button
             type="button"
-            class="pdf-viewer-btn"
+            class={btnClass}
             onClick={handlePrevPage}
             disabled={currentPage() <= 1}
             title="Previous Page"
           >
             ◀
           </button>
-          <span class="pdf-viewer-page-info">
+          <span class="flex items-center gap-1 text-muted-foreground text-[13px]">
             <input
               type="number"
-              class="pdf-viewer-page-input"
+              class="w-[50px] px-2 py-1 bg-card border border-[rgba(148,163,184,0.25)] rounded text-foreground text-[13px] text-center focus:outline-none focus:border-accent [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               value={currentPage()}
               min={1}
               max={totalPages()}
@@ -193,7 +194,7 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
           </span>
           <button
             type="button"
-            class="pdf-viewer-btn"
+            class={btnClass}
             onClick={handleNextPage}
             disabled={currentPage() >= totalPages()}
             title="Next Page"
@@ -202,19 +203,19 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
           </button>
         </div>
 
-        <div class="pdf-viewer-controls">
+        <div class="flex items-center gap-2">
           <button
             type="button"
-            class="pdf-viewer-btn"
+            class={btnClass}
             onClick={handleZoomOut}
             title="Zoom Out"
           >
             −
           </button>
-          <span class="pdf-viewer-zoom">{zoom()}%</span>
+          <span class="min-w-[50px] text-center text-[13px] text-muted-foreground">{zoom()}%</span>
           <button
             type="button"
-            class="pdf-viewer-btn"
+            class={btnClass}
             onClick={handleZoomIn}
             title="Zoom In"
           >
@@ -222,7 +223,7 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="pdf-viewer-btn"
+            class={btnClass}
             onClick={handleZoomReset}
             title="Reset Zoom"
           >
@@ -231,13 +232,13 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
         </div>
       </div>
 
-      <div class="pdf-viewer-container">
+      <div class="flex-1 overflow-auto flex justify-center p-5 bg-[#525659]">
         {isLoading() ? (
-          <div class="pdf-viewer-loading">Loading PDF...</div>
+          <div class="flex items-center justify-center h-full w-full text-muted-foreground text-sm">Loading PDF...</div>
         ) : error() ? (
-          <div class="pdf-viewer-error">{error()}</div>
+          <div class="flex items-center justify-center h-full w-full text-destructive text-sm">{error()}</div>
         ) : (
-          <canvas ref={canvasRef} class="pdf-viewer-canvas" />
+          <canvas ref={canvasRef} class="shadow-[0_4px_20px_rgba(0,0,0,0.3)] bg-white" />
         )}
       </div>
     </div>

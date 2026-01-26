@@ -3,7 +3,6 @@
 
 import { type Component, onCleanup, onMount } from "solid-js";
 import { type SyncStatus, syncStore } from "@/stores/sync.store";
-import "./SyncIndicator.css";
 
 /**
  * Get icon for sync status.
@@ -37,6 +36,22 @@ function getStatusLabel(status: SyncStatus): string {
   }
 }
 
+/**
+ * Get status-specific classes.
+ */
+function getStatusClasses(status: SyncStatus): string {
+  switch (status) {
+    case "syncing":
+      return "text-blue-400 [&_.sync-icon]:animate-spin";
+    case "synced":
+      return "text-success";
+    case "error":
+      return "text-destructive hover:bg-destructive/20";
+    default:
+      return "text-muted-foreground [&_.sync-icon]:opacity-50";
+  }
+}
+
 export const SyncIndicator: Component = () => {
   onMount(() => {
     syncStore.init();
@@ -48,11 +63,11 @@ export const SyncIndicator: Component = () => {
 
   return (
     <div
-      class={`sync-indicator sync-${syncStore.status}`}
+      class={`flex items-center gap-1 py-0.5 px-2 rounded text-xs cursor-default transition-all duration-200 ${getStatusClasses(syncStore.status)}`}
       title={syncStore.message || getStatusLabel(syncStore.status)}
     >
-      <span class="sync-icon">{getStatusIcon(syncStore.status)}</span>
-      <span class="sync-text">{getStatusLabel(syncStore.status)}</span>
+      <span class="sync-icon text-sm leading-none">{getStatusIcon(syncStore.status)}</span>
+      <span class="text-[11px]">{getStatusLabel(syncStore.status)}</span>
     </div>
   );
 };

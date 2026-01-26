@@ -39,7 +39,6 @@ import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { StreamingMessage } from "./StreamingMessage";
 import { ToolStreamingMessage } from "./ToolStreamingMessage";
-import "./ChatPanel.css";
 import "highlight.js/styles/github-dark.css";
 
 // Keywords that trigger publisher suggestions
@@ -470,21 +469,22 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   };
 
   return (
-    <section class="chat-panel">
+    <section class="flex flex-row h-full bg-[#0d1117] text-[#e6edf3]">
       {/* File Explorer Sidebar */}
-      <aside class="chat-sidebar">
-        <div class="chat-sidebar-header">
+      <aside class="w-60 min-w-[200px] max-w-[400px] flex flex-col bg-[#161b22] border-r border-[#21262d]">
+        <div class="flex justify-between items-center px-3 py-2.5 border-b border-[#21262d] text-[11px] font-semibold uppercase tracking-wide text-[#8b949e]">
           <span>Explorer</span>
           <button
             type="button"
             onClick={handleOpenFolder}
             disabled={isLoadingFolder()}
             title="Open Folder"
+            class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1 py-0.5 text-sm leading-none transition-colors hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoadingFolder() ? "..." : "+"}
           </button>
         </div>
-        <div class="chat-file-tree">
+        <div class="flex-1 overflow-y-auto py-1">
           <FileTree
             onFileSelect={handleFileSelect}
             onDirectoryToggle={handleDirectoryToggle}
@@ -493,14 +493,14 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
       </aside>
 
       {/* Main Chat Area */}
-      <div class="chat-main">
+      <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Show
           when={authStore.isAuthenticated}
           fallback={
-            <div class="chat-signin-prompt">
-              <div class="signin-prompt-header">
-                <h2>Sign in to chat</h2>
-                <p>
+            <div class="flex-1 flex flex-col items-center justify-center gap-6 p-10">
+              <div class="text-center max-w-[360px]">
+                <h2 class="m-0 mb-2 text-lg font-semibold text-[#e6edf3]">Sign in to chat</h2>
+                <p class="m-0 text-sm text-[#8b949e] leading-normal">
                   Connect with Seren to access AI-powered conversations and code
                   assistance.
                 </p>
@@ -510,24 +510,28 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
           }
         >
           <ChatTabBar />
-          <header class="chat-header">
-            <div class="chat-header-left">
+          <header class="shrink-0 flex justify-between items-center px-4 py-3 border-b border-[#21262d] bg-[#161b22]">
+            <div class="flex items-center gap-3">
               {/* Model selector in input area, tab bar above */}
             </div>
-            <div class="chat-actions">
-              <button type="button" class="clear-btn" onClick={clearHistory}>
+            <div class="flex gap-2 items-center">
+              <button
+                type="button"
+                class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1 rounded-md text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] hover:border-[#484f58]"
+                onClick={clearHistory}
+              >
                 Clear
               </button>
             </div>
           </header>
 
-          <div class="chat-messages" ref={messagesRef}>
+          <div class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb:hover]:bg-[#484f58]" ref={messagesRef}>
             <Show
               when={chatStore.messages.length > 0}
               fallback={
-                <div class="chat-empty">
-                  <h3>Start a conversation</h3>
-                  <p>
+                <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
+                  <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">Start a conversation</h3>
+                  <p class="m-0 text-sm text-center max-w-[280px]">
                     Ask questions about code, get explanations, or request help
                     with programming tasks.
                   </p>
@@ -536,9 +540,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             >
               <For each={chatStore.messages}>
                 {(message) => (
-                  <article class={`chat-message ${message.role}`}>
+                  <article class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}>
                     <div
-                      class="message-content"
+                      class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
                       innerHTML={
                         message.role === "assistant"
                           ? renderMarkdown(message.content)
@@ -546,7 +550,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                       }
                     />
                     <Show when={message.status === "error"}>
-                      <div class="message-error">
+                      <div class="mt-3 px-3 py-2 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded-md flex items-center gap-3 text-[13px] text-[#f85149]">
                         <span>{message.error ?? "Message failed"}</span>
                         <Show when={chatStore.retryingMessageId === message.id}>
                           <span>
@@ -561,6 +565,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                         <Show when={message.request}>
                           <button
                             type="button"
+                            class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2.5 py-1 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
                             onClick={() => handleManualRetry(message)}
                           >
                             Retry
@@ -609,8 +614,8 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
 
           <Show when={contextPreview()}>
             {(ctx) => (
-              <div class="chat-context">
-                <div class="context-header">
+              <div class="mx-4 my-3 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
+                <div class="flex justify-between items-center px-3 py-2 bg-[#21262d] text-xs text-[#8b949e]">
                   <span>
                     Context from {ctx().file ?? "selection"}
                     {ctx().range &&
@@ -618,20 +623,20 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                   </span>
                   <button
                     type="button"
-                    class="icon"
+                    class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-[#e6edf3]"
                     onClick={() => editorStore.clearSelection()}
                   >
                     ×
                   </button>
                 </div>
-                <pre>{ctx().text}</pre>
+                <pre class="m-0 p-3 max-h-[120px] overflow-y-auto text-xs leading-normal bg-transparent">{ctx().text}</pre>
               </div>
             )}
           </Show>
 
-          <div class="chat-input-container">
+          <div class="shrink-0 p-4 border-t border-[#21262d] bg-[#161b22]">
             <form
-              class="chat-input"
+              class="flex flex-col gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
                 sendMessage();
@@ -647,6 +652,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                 ref={inputRef}
                 value={input()}
                 placeholder="Ask Seren anything…"
+                class="w-full min-h-[80px] max-h-[200px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
                 onInput={(event) => {
                   setInput(event.currentTarget.value);
                   // Reset history browsing when user types manually
@@ -719,16 +725,20 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                 }}
                 disabled={chatStore.isLoading}
               />
-              <div class="input-footer">
-                <div class="input-footer-left">
+              <div class="flex justify-between items-center">
+                <div class="flex items-center gap-3">
                   <ModelSelector />
-                  <span class="input-hint">
+                  <span class="text-xs text-[#484f58]">
                     {settingsStore.get("chatEnterToSend")
                       ? "Enter to send"
                       : "Ctrl+Enter to send"}
                   </span>
                 </div>
-                <button type="submit" disabled={chatStore.isLoading}>
+                <button
+                  type="submit"
+                  class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-md text-[13px] font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
+                  disabled={chatStore.isLoading}
+                >
                   Send
                 </button>
               </div>

@@ -10,7 +10,6 @@ import {
 } from "solid-js";
 import { type Database, databases } from "@/services/databases";
 import { CreateProjectModal } from "./CreateProjectModal";
-import "./DatabasePanel.css";
 
 interface DatabasePanelProps {
   onSelectDatabase?: (
@@ -167,13 +166,15 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
     expanded().branches.has(branchId);
 
   return (
-    <div class="database-panel">
-      <div class="database-header">
-        <h2>Databases</h2>
-        <div class="database-header-actions">
+    <div class="flex flex-col h-full p-3 bg-card text-foreground">
+      <div class="flex justify-between items-center mb-3 pb-2 border-b border-border">
+        <h2 class="m-0 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Databases
+        </h2>
+        <div class="flex items-center gap-1">
           <button
             type="button"
-            class="database-action-btn"
+            class="px-2 py-1 bg-transparent text-muted-foreground border border-border rounded text-sm cursor-pointer transition-all hover:bg-muted hover:text-foreground"
             onClick={() => setShowCreateModal(true)}
             title="Create project"
           >
@@ -181,7 +182,7 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
           </button>
           <button
             type="button"
-            class="database-action-btn"
+            class="px-2 py-1 bg-transparent text-muted-foreground border border-border rounded text-sm cursor-pointer transition-all hover:bg-muted hover:text-foreground"
             onClick={() => refetchProjects()}
             title="Refresh projects"
           >
@@ -191,32 +192,42 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
       </div>
 
       <Show when={copyStatus()}>
-        <div class="database-copy-status">{copyStatus()}</div>
+        <div class="px-3 py-1.5 mb-2 bg-green-500/20 text-green-500 rounded text-xs text-center animate-[fadeIn_0.2s_ease-out]">
+          {copyStatus()}
+        </div>
       </Show>
 
       <Show when={projects.loading}>
-        <div class="database-loading">Loading projects...</div>
+        <div class="px-4 py-6 text-center text-muted-foreground text-[13px]">
+          Loading projects...
+        </div>
       </Show>
 
       <Show when={projects.error}>
-        <div class="database-error">Failed to load projects</div>
+        <div class="px-4 py-6 text-center text-destructive text-[13px]">
+          Failed to load projects
+        </div>
       </Show>
 
-      <div class="database-tree">
+      <div class="flex-1 overflow-y-auto">
         <For each={projects()}>
           {(project) => (
-            <div class="tree-node project-node">
+            <div class="flex flex-col">
               <div
-                class={`tree-item project-item ${isProjectExpanded(project.id) ? "expanded" : ""}`}
+                class={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors select-none group ${
+                  isProjectExpanded(project.id) ? "bg-muted" : "hover:bg-muted"
+                }`}
                 onClick={() => toggleProject(project.id)}
               >
-                <span class="tree-icon">
+                <span class="text-sm flex-shrink-0">
                   {isProjectExpanded(project.id) ? "📂" : "📁"}
                 </span>
-                <span class="tree-label">{project.name}</span>
+                <span class="flex-1 text-[13px] font-medium whitespace-nowrap overflow-hidden text-ellipsis">
+                  {project.name}
+                </span>
                 <button
                   type="button"
-                  class="tree-action-btn delete-btn"
+                  class="px-1.5 py-0.5 bg-transparent border-none rounded text-xs cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/20"
                   onClick={(e) =>
                     handleDeleteProject(e, project.id, project.name)
                   }
@@ -224,19 +235,21 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                 >
                   🗑️
                 </button>
-                <span class="tree-chevron">
+                <span class="text-[8px] text-muted-foreground flex-shrink-0">
                   {isProjectExpanded(project.id) ? "▼" : "▶"}
                 </span>
               </div>
 
               <Show when={isProjectExpanded(project.id)}>
-                <div class="tree-children">
+                <div class="pl-5">
                   <Show
                     when={
                       branches.loading && selectedProjectId() === project.id
                     }
                   >
-                    <div class="tree-loading">Loading branches...</div>
+                    <div class="px-2 py-1.5 text-xs text-muted-foreground italic">
+                      Loading branches...
+                    </div>
                   </Show>
 
                   <Show
@@ -246,23 +259,29 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                   >
                     <For each={branches()}>
                       {(branch) => (
-                        <div class="tree-node branch-node">
+                        <div class="flex flex-col">
                           <div
-                            class={`tree-item branch-item ${isBranchExpanded(branch.id) ? "expanded" : ""} ${branch.is_default ? "default-branch" : ""}`}
+                            class={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors select-none group text-xs ${
+                              isBranchExpanded(branch.id)
+                                ? "bg-muted"
+                                : "hover:bg-muted"
+                            } ${branch.is_default ? "text-green-500" : ""}`}
                             onClick={() => toggleBranch(branch.id, project.id)}
                           >
-                            <span class="tree-icon">
+                            <span class="text-sm flex-shrink-0">
                               {isBranchExpanded(branch.id) ? "🔓" : "🔒"}
                             </span>
-                            <span class="tree-label">
+                            <span class="flex-1 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-ellipsis">
                               {branch.name}
                               <Show when={branch.is_default}>
-                                <span class="default-badge">default</span>
+                                <span class="px-1 py-px bg-green-500 text-background rounded text-[9px] font-semibold uppercase">
+                                  default
+                                </span>
                               </Show>
                             </span>
                             <button
                               type="button"
-                              class="tree-action-btn copy-btn"
+                              class="px-1.5 py-0.5 bg-transparent border-none rounded text-xs cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity hover:bg-green-500/20"
                               onClick={(e) =>
                                 handleCopyConnectionString(
                                   e,
@@ -274,20 +293,20 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                             >
                               📋
                             </button>
-                            <span class="tree-chevron">
+                            <span class="text-[8px] text-muted-foreground flex-shrink-0">
                               {isBranchExpanded(branch.id) ? "▼" : "▶"}
                             </span>
                           </div>
 
                           <Show when={isBranchExpanded(branch.id)}>
-                            <div class="tree-children">
+                            <div class="pl-5">
                               <Show
                                 when={
                                   databaseList.loading &&
                                   selectedBranchId() === branch.id
                                 }
                               >
-                                <div class="tree-loading">
+                                <div class="px-2 py-1.5 text-xs text-muted-foreground italic">
                                   Loading databases...
                                 </div>
                               </Show>
@@ -304,17 +323,19 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                                     (databaseList()?.length ?? 0) > 0
                                   }
                                   fallback={
-                                    <div class="tree-empty">No databases</div>
+                                    <div class="px-2 py-1.5 text-xs text-muted-foreground italic">
+                                      No databases
+                                    </div>
                                   }
                                 >
                                   <For each={databaseList()}>
                                     {(db) => (
                                       <div
-                                        class="tree-item database-item"
+                                        class="flex items-center gap-2 px-2 py-1.5 pl-3 rounded cursor-pointer transition-colors text-xs hover:bg-accent hover:border-l-2 hover:border-l-ring hover:pl-2.5"
                                         onClick={() => handleSelectDatabase(db)}
                                       >
-                                        <span class="tree-icon">🗄️</span>
-                                        <span class="tree-label">
+                                        <span class="text-sm">🗄️</span>
+                                        <span class="flex-1 whitespace-nowrap overflow-hidden text-ellipsis">
                                           {db.name}
                                         </span>
                                       </div>
@@ -329,7 +350,9 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                     </For>
 
                     <Show when={branches() && branches()?.length === 0}>
-                      <div class="tree-empty">No branches</div>
+                      <div class="px-2 py-1.5 text-xs text-muted-foreground italic">
+                        No branches
+                      </div>
                     </Show>
                   </Show>
                 </div>
@@ -340,10 +363,12 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
       </div>
 
       <Show when={!projects.loading && projects() && projects()?.length === 0}>
-        <div class="database-empty">
-          <div class="empty-icon">🗄️</div>
-          <p>No projects found</p>
-          <p class="empty-hint">Click + to create your first project.</p>
+        <div class="flex flex-col items-center gap-2 px-4 py-6 text-center text-muted-foreground text-[13px]">
+          <div class="text-[32px] opacity-50">🗄️</div>
+          <p class="m-0">No projects found</p>
+          <p class="text-[11px] text-muted-foreground">
+            Click + to create your first project.
+          </p>
         </div>
       </Show>
 

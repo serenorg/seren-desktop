@@ -9,7 +9,6 @@ import {
   walletState,
   walletStore,
 } from "@/stores/wallet.store";
-import "./BalanceDisplay.css";
 
 /**
  * Balance display component for the header.
@@ -28,6 +27,20 @@ export const BalanceDisplay: Component = () => {
     if (balance < 0.1) return "critical";
     if (balance < lowThreshold()) return "low";
     return "normal";
+  };
+
+  // Get state-specific classes
+  const stateClasses = () => {
+    switch (balanceState()) {
+      case "critical":
+        return "text-destructive border-destructive animate-pulse";
+      case "low":
+        return "text-warning border-warning";
+      case "unknown":
+        return "text-muted-foreground";
+      default:
+        return "text-foreground";
+    }
   };
 
   // Format last updated time for tooltip
@@ -49,35 +62,35 @@ export const BalanceDisplay: Component = () => {
 
   return (
     <Show when={showBalance()}>
-      <div class="balance-display-wrapper">
+      <div class="flex items-center gap-1">
         <button
-          class={`balance-display balance-display--${balanceState()}`}
+          class={`flex items-center gap-1.5 py-1.5 px-3 bg-muted border border-border rounded-md text-sm font-medium cursor-pointer transition-all duration-150 hover:bg-secondary hover:border-secondary ${stateClasses()}`}
           onClick={handleClick}
           title={lastUpdatedText()}
           aria-label={`SerenBucks balance: ${walletStore.formattedBalance}. Click to add funds.`}
         >
           <Show when={walletState.isLoading}>
-            <span class="balance-loading">
-              <span class="balance-spinner" />
+            <span class="flex items-center justify-center w-[60px]">
+              <span class="w-3.5 h-3.5 border-2 border-border border-t-primary rounded-full animate-spin" />
             </span>
           </Show>
 
           <Show when={!walletState.isLoading && walletState.error}>
-            <span class="balance-error-icon" title={walletState.error || ""}>
+            <span class="text-destructive mr-1" title={walletState.error || ""}>
               &#9888;
             </span>
           </Show>
 
           <Show when={!walletState.isLoading}>
-            <span class="balance-icon" aria-hidden="true">
+            <span class="text-base" aria-hidden="true">
               &#128176;
             </span>
-            <span class="balance-amount">{walletStore.formattedBalance}</span>
+            <span class="tabular-nums">{walletStore.formattedBalance}</span>
           </Show>
         </button>
 
         <button
-          class="balance-refresh"
+          class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-none rounded text-base text-secondary-foreground cursor-pointer transition-all duration-150 hover:bg-secondary hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={handleRefresh}
           title="Refresh balance"
           aria-label="Refresh balance"

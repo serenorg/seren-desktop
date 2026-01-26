@@ -14,7 +14,6 @@ import {
   type Publisher,
   type PublisherType,
 } from "@/services/catalog";
-import "./CatalogPanel.css";
 
 interface CatalogPanelProps {
   onSelectPublisher?: (slug: string) => void;
@@ -68,11 +67,13 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
   };
 
   return (
-    <div class="catalog-panel">
-      <div class="catalog-header">
-        <h2>Publishers</h2>
+    <div class="flex flex-col h-full p-3 bg-card text-foreground">
+      <div class="flex justify-between items-center mb-3 pb-2 border-b border-border">
+        <h2 class="m-0 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Publishers
+        </h2>
         <button
-          class="catalog-refresh-btn"
+          class="px-2 py-1 bg-transparent text-muted-foreground border border-border rounded text-sm cursor-pointer transition-all hover:bg-muted hover:text-foreground"
           onClick={() => refetch()}
           title="Refresh publishers"
         >
@@ -80,18 +81,23 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
         </button>
       </div>
 
-      <div class="catalog-search">
+      <div class="mb-3">
         <input
           type="search"
           placeholder="Search publishers..."
           value={search()}
           onInput={(e) => setSearch(e.currentTarget.value)}
+          class="w-full px-2.5 py-2 bg-muted border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring placeholder:text-muted-foreground"
         />
       </div>
 
-      <div class="catalog-categories">
+      <div class="flex flex-wrap gap-1.5 mb-3">
         <button
-          class={`category-btn ${!selectedType() ? "active" : ""}`}
+          class={`px-2.5 py-1 border-none rounded-full text-[11px] cursor-pointer transition-all ${
+            !selectedType()
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+          }`}
           onClick={() => setSelectedType(null)}
         >
           All
@@ -99,7 +105,11 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
         <For each={publisherTypes}>
           {(type) => (
             <button
-              class={`category-btn ${selectedType() === type.id ? "active" : ""}`}
+              class={`px-2.5 py-1 border-none rounded-full text-[11px] cursor-pointer transition-all ${
+                selectedType() === type.id
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`}
               onClick={() => setSelectedType(type.id)}
             >
               {type.label}
@@ -109,25 +119,29 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
       </div>
 
       <Show when={publishers.loading}>
-        <div class="catalog-loading">Loading publishers...</div>
+        <div class="px-4 py-6 text-center text-muted-foreground text-[13px]">
+          Loading publishers...
+        </div>
       </Show>
 
       <Show when={publishers.error}>
-        <div class="catalog-error">Failed to load publishers</div>
+        <div class="px-4 py-6 text-center text-destructive text-[13px]">
+          Failed to load publishers
+        </div>
       </Show>
 
-      <div class="catalog-list">
+      <div class="flex-1 overflow-y-auto flex flex-col gap-2">
         <For each={filtered()}>
           {(publisher) => (
             <div
-              class="publisher-card"
+              class="flex gap-3 p-3 bg-muted border border-border rounded-md cursor-pointer transition-all hover:bg-accent hover:border-ring"
               onClick={() => handleSelectPublisher(publisher)}
             >
-              <div class="publisher-logo">
+              <div class="flex-shrink-0 w-10 h-10 rounded-md overflow-hidden bg-background">
                 <Show
                   when={publisher.logo_url}
                   fallback={
-                    <div class="publisher-logo-placeholder">
+                    <div class="w-full h-full flex items-center justify-center text-lg font-semibold text-muted-foreground">
                       {publisher.name.charAt(0).toUpperCase()}
                     </div>
                   }
@@ -135,27 +149,35 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
                   <img
                     src={publisher.logo_url!}
                     alt={publisher.name}
+                    class="w-full h-full object-cover"
                     onError={(e) => {
                       e.currentTarget.style.display = "none";
                     }}
                   />
                 </Show>
               </div>
-              <div class="publisher-info">
-                <div class="publisher-header">
-                  <h3 class="publisher-name">{publisher.name}</h3>
+              <div class="flex-1 min-w-0 flex flex-col gap-1">
+                <div class="flex items-center gap-1.5">
+                  <h3 class="m-0 text-[13px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
+                    {publisher.name}
+                  </h3>
                   <Show when={publisher.is_verified}>
-                    <span class="verified-badge" title="Verified publisher">
+                    <span
+                      class="text-green-500 text-xs"
+                      title="Verified publisher"
+                    >
                       ✓
                     </span>
                   </Show>
                 </div>
-                <p class="publisher-description">{publisher.description}</p>
-                <div class="publisher-meta">
-                  <span class="publisher-category">
+                <p class="m-0 text-xs text-muted-foreground leading-snug line-clamp-2">
+                  {publisher.description}
+                </p>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="px-1.5 py-0.5 bg-background rounded text-[10px] text-muted-foreground uppercase">
                     {publisher.publisher_type}
                   </span>
-                  <span class="publisher-price">
+                  <span class="text-[11px] text-green-500">
                     {getPricingDisplay(publisher)}
                   </span>
                 </div>
@@ -166,7 +188,7 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
       </div>
 
       <Show when={!publishers.loading && filtered().length === 0}>
-        <div class="catalog-empty">
+        <div class="px-4 py-6 text-center text-muted-foreground text-[13px]">
           <Show
             when={search() || selectedType()}
             fallback="No publishers available"

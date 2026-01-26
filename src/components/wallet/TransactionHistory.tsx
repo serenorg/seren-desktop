@@ -9,7 +9,6 @@ import {
   Show,
 } from "solid-js";
 import { fetchTransactions, type Transaction } from "@/services/wallet";
-import "./TransactionHistory.css";
 
 /**
  * Source categories for filtering.
@@ -141,12 +140,12 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
   };
 
   return (
-    <div class="transaction-history">
-      <header class="transaction-history-header">
-        <h3>Transaction History</h3>
+    <div class="flex flex-col h-full max-h-[500px]">
+      <header class="flex items-center justify-between px-5 py-4 border-b border-[rgba(148,163,184,0.15)]">
+        <h3 class="text-[16px] font-semibold text-white m-0">Transaction History</h3>
         <Show when={props.onClose}>
           <button
-            class="transaction-history-close"
+            class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-none rounded text-[20px] text-[#94a3b8] cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.1)] hover:text-white"
             onClick={props.onClose}
             aria-label="Close"
           >
@@ -155,39 +154,56 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
         </Show>
       </header>
 
-      <div class="transaction-filters">
+      <div class="flex gap-2 px-5 py-3 border-b border-[rgba(148,163,184,0.15)]">
         <button
-          class={`filter-btn ${filter() === "all" ? "active" : ""}`}
+          class={`px-3 py-1.5 rounded-full text-[12px] font-medium cursor-pointer transition-all border ${
+            filter() === "all"
+              ? "bg-[#6366f1] border-[#6366f1] text-white"
+              : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-[#94a3b8] hover:bg-[rgba(30,41,59,0.5)] hover:text-white"
+          }`}
           onClick={() => setFilter("all")}
         >
           All
         </button>
         <button
-          class={`filter-btn ${filter() === "deposit" ? "active" : ""}`}
+          class={`px-3 py-1.5 rounded-full text-[12px] font-medium cursor-pointer transition-all border ${
+            filter() === "deposit"
+              ? "bg-[#6366f1] border-[#6366f1] text-white"
+              : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-[#94a3b8] hover:bg-[rgba(30,41,59,0.5)] hover:text-white"
+          }`}
           onClick={() => setFilter("deposit")}
         >
           Deposits
         </button>
         <button
-          class={`filter-btn ${filter() === "charge" ? "active" : ""}`}
+          class={`px-3 py-1.5 rounded-full text-[12px] font-medium cursor-pointer transition-all border ${
+            filter() === "charge"
+              ? "bg-[#6366f1] border-[#6366f1] text-white"
+              : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-[#94a3b8] hover:bg-[rgba(30,41,59,0.5)] hover:text-white"
+          }`}
           onClick={() => setFilter("charge")}
         >
           Charges
         </button>
       </div>
 
-      <div class="transaction-list">
+      <div class="flex-1 overflow-y-auto py-2">
         <Show when={data.loading}>
-          <div class="transaction-loading">
-            <div class="transaction-spinner" />
+          <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-[#64748b] text-[14px]">
+            <div class="w-6 h-6 border-2 border-[rgba(148,163,184,0.15)] border-t-[#6366f1] rounded-full animate-spin" />
             <span>Loading transactions...</span>
           </div>
         </Show>
 
         <Show when={data.error}>
-          <div class="transaction-error">
+          <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-[#64748b] text-[14px]">
             <span>Failed to load transactions</span>
-            <button onClick={() => refetch()}>Retry</button>
+            <button
+              onClick={() => refetch()}
+              class="px-3 py-1.5 bg-[#6366f1] border-none rounded text-[13px] text-white cursor-pointer"
+            >
+              Retry
+            </button>
           </div>
         </Show>
 
@@ -195,7 +211,7 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
           <Show
             when={filteredTransactions().length > 0}
             fallback={
-              <div class="transaction-empty">
+              <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-[#64748b] text-[14px]">
                 <span>No transactions found</span>
               </div>
             }
@@ -205,7 +221,10 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
             </For>
 
             <Show when={hasMore()}>
-              <button class="load-more-btn" onClick={handleLoadMore}>
+              <button
+                class="block w-[calc(100%-40px)] mx-5 my-3 py-2.5 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-md text-[13px] font-medium text-[#94a3b8] cursor-pointer transition-all hover:bg-[rgba(30,41,59,0.5)] hover:text-white"
+                onClick={handleLoadMore}
+              >
                 Load More
               </button>
             </Show>
@@ -223,31 +242,39 @@ const TransactionItem: Component<{ transaction: Transaction }> = (props) => {
   const category = () => getTransactionCategory(props.transaction.source);
   const isPositive = () => isPositiveTransaction(props.transaction.source);
 
+  const getIconClasses = () => {
+    const cat = category();
+    if (cat === "deposit" || cat === "refund") {
+      return "bg-[rgba(40,167,69,0.1)] text-[#28a745]";
+    }
+    return "bg-[rgba(108,117,125,0.1)] text-[#94a3b8]";
+  };
+
   return (
-    <div class={`transaction-item transaction-item--${category()}`}>
-      <div class="transaction-icon">
+    <div class="flex items-center gap-3 px-5 py-3 border-b border-[rgba(148,163,184,0.15)] transition-colors hover:bg-[rgba(148,163,184,0.05)] last:border-b-0">
+      <div class={`flex items-center justify-center w-9 h-9 rounded-full text-[16px] shrink-0 ${getIconClasses()}`}>
         <span>{getTransactionIcon(props.transaction.source)}</span>
       </div>
-      <div class="transaction-details">
-        <span class="transaction-type">
+      <div class="flex-1 min-w-0 flex flex-col gap-0.5">
+        <span class="text-[14px] font-medium text-white">
           {getTransactionLabel(props.transaction.source)}
         </span>
-        <span class="transaction-description">
+        <span class="text-[12px] text-[#94a3b8] overflow-hidden text-ellipsis whitespace-nowrap">
           {props.transaction.description || props.transaction.source}
         </span>
-        <span class="transaction-date">
+        <span class="text-[11px] text-[#64748b]">
           {formatDate(props.transaction.created_at)} at{" "}
           {formatTime(props.transaction.created_at)}
         </span>
       </div>
-      <div class="transaction-amount-wrapper">
+      <div class="flex flex-col items-end gap-0.5 shrink-0">
         <span
-          class={`transaction-amount ${isPositive() ? "positive" : "negative"}`}
+          class={`text-[14px] font-semibold tabular-nums ${isPositive() ? "text-[#28a745]" : "text-[#94a3b8]"}`}
         >
           {isPositive() ? "+" : "-"}
           {props.transaction.amount_usd}
         </span>
-        <span class="transaction-balance">
+        <span class="text-[11px] text-[#64748b] tabular-nums">
           Balance: {props.transaction.remaining_usd}
         </span>
       </div>

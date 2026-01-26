@@ -16,7 +16,6 @@ import {
 } from "@/stores/settings.store";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
-import "./SettingsPanel.css";
 
 type SettingsSection =
   | "chat"
@@ -112,27 +111,31 @@ export const SettingsPanel: Component = () => {
   ];
 
   return (
-    <div class="settings-panel">
-      <aside class="settings-sidebar">
-        <h2 class="settings-title">Settings</h2>
-        <nav class="settings-nav">
+    <div class="flex h-full bg-surface text-foreground">
+      <aside class="w-[220px] min-w-[180px] flex flex-col bg-popover border-r border-[rgba(148,163,184,0.25)]">
+        <h2 class="px-4 pt-5 pb-3 m-0 text-[1.1rem] font-semibold text-foreground">Settings</h2>
+        <nav class="flex-1 flex flex-col px-2 py-1 gap-0.5">
           <For each={sections}>
             {(section) => (
               <button
                 type="button"
-                class={`settings-nav-item ${activeSection() === section.id ? "active" : ""}`}
+                class={`flex items-center gap-2.5 px-3 py-2.5 bg-transparent border-none rounded-md cursor-pointer text-[0.9rem] text-left transition-all duration-150 ${
+                  activeSection() === section.id
+                    ? "bg-accent text-white"
+                    : "text-muted hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground"
+                }`}
                 onClick={() => setActiveSection(section.id)}
               >
-                <span class="settings-nav-icon">{section.icon}</span>
+                <span class="text-[1.1rem]">{section.icon}</span>
                 {section.label}
               </button>
             )}
           </For>
         </nav>
-        <div class="settings-sidebar-footer">
+        <div class="p-3 border-t border-[rgba(148,163,184,0.15)]">
           <button
             type="button"
-            class="settings-reset-btn"
+            class="w-full py-2 px-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted text-[0.85rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:border-[rgba(239,68,68,0.5)] hover:text-[#ef4444]"
             onClick={() => setShowResetConfirm(true)}
           >
             Reset All Settings
@@ -140,18 +143,18 @@ export const SettingsPanel: Component = () => {
         </div>
       </aside>
 
-      <main class="settings-content">
+      <main class="flex-1 px-8 py-6 overflow-y-auto">
         <Show when={activeSection() === "chat"}>
           <section class="settings-section">
-            <h3>Chat Settings</h3>
-            <p class="settings-description">
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Chat Settings</h3>
+            <p class="m-0 mb-6 text-muted leading-normal">
               Configure AI chat behavior and conversation history.
             </p>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Default Model</span>
-                <span class="label-hint">AI model for chat conversations</span>
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Default Model</span>
+                <span class="text-[0.8rem] text-muted">AI model for chat conversations</span>
               </label>
               <SearchableModelSelect
                 value={settingsState.app.chatDefaultModel}
@@ -160,10 +163,10 @@ export const SettingsPanel: Component = () => {
               />
             </div>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">History Limit</span>
-                <span class="label-hint">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">History Limit</span>
+                <span class="text-[0.8rem] text-muted">
                   Maximum messages to keep in conversation context
                 </span>
               </label>
@@ -179,11 +182,12 @@ export const SettingsPanel: Component = () => {
                     e.currentTarget.value,
                   )
                 }
+                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="settings-group checkbox">
-              <label class="settings-checkbox">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={settingsState.app.chatEnterToSend}
@@ -193,10 +197,11 @@ export const SettingsPanel: Component = () => {
                       e.currentTarget.checked,
                     )
                   }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
-                <span class="checkbox-label">
-                  <span class="label-text">Enter to Send</span>
-                  <span class="label-hint">
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">Enter to Send</span>
+                  <span class="text-[0.8rem] text-muted">
                     Press Enter to send messages (Shift+Enter for new line)
                   </span>
                 </span>
@@ -211,15 +216,15 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "editor"}>
           <section class="settings-section">
-            <h3>Editor Settings</h3>
-            <p class="settings-description">
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Editor Settings</h3>
+            <p class="m-0 mb-6 text-muted leading-normal">
               Customize your code editing experience.
             </p>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Font Size</span>
-                <span class="label-hint">Size of text in the editor (px)</span>
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Font Size</span>
+                <span class="text-[0.8rem] text-muted">Size of text in the editor (px)</span>
               </label>
               <input
                 type="number"
@@ -229,13 +234,14 @@ export const SettingsPanel: Component = () => {
                 onInput={(e) =>
                   handleNumberChange("editorFontSize", e.currentTarget.value)
                 }
+                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Tab Size</span>
-                <span class="label-hint">Number of spaces per tab</span>
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Tab Size</span>
+                <span class="text-[0.8rem] text-muted">Number of spaces per tab</span>
               </label>
               <input
                 type="number"
@@ -245,11 +251,12 @@ export const SettingsPanel: Component = () => {
                 onInput={(e) =>
                   handleNumberChange("editorTabSize", e.currentTarget.value)
                 }
+                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="settings-group checkbox">
-              <label class="settings-checkbox">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={settingsState.app.editorWordWrap}
@@ -259,20 +266,21 @@ export const SettingsPanel: Component = () => {
                       e.currentTarget.checked,
                     )
                   }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
-                <span class="checkbox-label">
-                  <span class="label-text">Word Wrap</span>
-                  <span class="label-hint">
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">Word Wrap</span>
+                  <span class="text-[0.8rem] text-muted">
                     Wrap long lines instead of scrolling
                   </span>
                 </span>
               </label>
             </div>
 
-            <h4>Code Completion</h4>
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">Code Completion</h4>
 
-            <div class="settings-group checkbox">
-              <label class="settings-checkbox">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={settingsState.app.completionEnabled}
@@ -282,20 +290,21 @@ export const SettingsPanel: Component = () => {
                       e.currentTarget.checked,
                     )
                   }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
-                <span class="checkbox-label">
-                  <span class="label-text">Enable AI Completions</span>
-                  <span class="label-hint">
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">Enable AI Completions</span>
+                  <span class="text-[0.8rem] text-muted">
                     Show AI-powered code suggestions while typing
                   </span>
                 </span>
               </label>
             </div>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Completion Delay</span>
-                <span class="label-hint">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Completion Delay</span>
+                <span class="text-[0.8rem] text-muted">
                   Milliseconds to wait before showing suggestions
                 </span>
               </label>
@@ -308,13 +317,14 @@ export const SettingsPanel: Component = () => {
                 onInput={(e) =>
                   handleNumberChange("completionDelay", e.currentTarget.value)
                 }
+                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Completion Model</span>
-                <span class="label-hint">AI model for code completions</span>
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Completion Model</span>
+                <span class="text-[0.8rem] text-muted">AI model for code completions</span>
               </label>
               <SearchableModelSelect
                 value={settingsState.app.completionModelId}
@@ -325,10 +335,10 @@ export const SettingsPanel: Component = () => {
               />
             </div>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Max Suggestion Lines</span>
-                <span class="label-hint">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Max Suggestion Lines</span>
+                <span class="text-[0.8rem] text-muted">
                   Maximum lines in code completion suggestions
                 </span>
               </label>
@@ -343,6 +353,7 @@ export const SettingsPanel: Component = () => {
                     e.currentTarget.value,
                   )
                 }
+                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
           </section>
@@ -350,33 +361,34 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "wallet"}>
           <section class="settings-section">
-            <h3>Wallet Settings</h3>
-            <p class="settings-description">
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Wallet Settings</h3>
+            <p class="m-0 mb-6 text-muted leading-normal">
               Configure your SerenBucks balance display and auto top-up.
             </p>
 
-            <div class="settings-group checkbox">
-              <label class="settings-checkbox">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={settingsState.app.showBalance}
                   onChange={(e) =>
                     handleBooleanChange("showBalance", e.currentTarget.checked)
                   }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
-                <span class="checkbox-label">
-                  <span class="label-text">Show Balance in Status Bar</span>
-                  <span class="label-hint">
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">Show Balance in Status Bar</span>
+                  <span class="text-[0.8rem] text-muted">
                     Display your SerenBucks balance at the bottom of the app
                   </span>
                 </span>
               </label>
             </div>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Low Balance Warning</span>
-                <span class="label-hint">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Low Balance Warning</span>
+                <span class="text-[0.8rem] text-muted">
                   Show warning when balance falls below this amount ($)
                 </span>
               </label>
@@ -391,35 +403,44 @@ export const SettingsPanel: Component = () => {
                     e.currentTarget.value,
                   )
                 }
+                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <h4>Payment Method</h4>
-            <p class="settings-hint">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">Payment Method</h4>
+            <p class="m-0 mb-4 text-[0.85rem] text-muted leading-relaxed">
               Choose your preferred payment method for MCP server tools.
             </p>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Preferred Method</span>
-                <span class="label-hint">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Preferred Method</span>
+                <span class="text-[0.8rem] text-muted">
                   Default payment method for MCP tool usage
                 </span>
               </label>
-              <div class="payment-method-selector">
+              <div class="flex gap-3">
                 <button
                   type="button"
-                  class={`payment-method-option ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "active" : ""}`}
+                  class={`flex flex-col items-center gap-2 px-6 py-4 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 min-w-[120px] ${
+                    settingsState.app.preferredPaymentMethod === "serenbucks"
+                      ? "border-accent bg-[rgba(99,102,241,0.1)]"
+                      : "border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                  }`}
                   onClick={() =>
                     handleStringChange("preferredPaymentMethod", "serenbucks")
                   }
                 >
-                  <span class="payment-method-icon">💰</span>
-                  <span class="payment-method-label">SerenBucks</span>
+                  <span class="text-2xl">💰</span>
+                  <span class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "text-foreground" : "text-muted"}`}>SerenBucks</span>
                 </button>
                 <button
                   type="button"
-                  class={`payment-method-option ${settingsState.app.preferredPaymentMethod === "crypto" ? "active" : ""}`}
+                  class={`flex flex-col items-center gap-2 px-6 py-4 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed ${
+                    settingsState.app.preferredPaymentMethod === "crypto"
+                      ? "border-accent bg-[rgba(99,102,241,0.1)]"
+                      : "border-[rgba(148,163,184,0.2)] hover:not-disabled:border-[rgba(148,163,184,0.4)]"
+                  }`}
                   onClick={() =>
                     handleStringChange("preferredPaymentMethod", "crypto")
                   }
@@ -430,14 +451,14 @@ export const SettingsPanel: Component = () => {
                       : ""
                   }
                 >
-                  <span class="payment-method-icon">🔐</span>
-                  <span class="payment-method-label">Crypto Wallet</span>
+                  <span class="text-2xl">🔐</span>
+                  <span class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "crypto" ? "text-foreground" : "text-muted"}`}>Crypto Wallet</span>
                 </button>
               </div>
             </div>
 
-            <div class="settings-group checkbox">
-              <label class="settings-checkbox">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={settingsState.app.enablePaymentFallback}
@@ -447,20 +468,21 @@ export const SettingsPanel: Component = () => {
                       e.currentTarget.checked,
                     )
                   }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
-                <span class="checkbox-label">
-                  <span class="label-text">Enable Fallback Payment</span>
-                  <span class="label-hint">
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">Enable Fallback Payment</span>
+                  <span class="text-[0.8rem] text-muted">
                     Use alternate method if preferred has insufficient funds
                   </span>
                 </span>
               </label>
             </div>
 
-            <h4>Auto Top-Up</h4>
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">Auto Top-Up</h4>
 
-            <div class="settings-group checkbox">
-              <label class="settings-checkbox">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={settingsState.app.autoTopUpEnabled}
@@ -470,10 +492,11 @@ export const SettingsPanel: Component = () => {
                       e.currentTarget.checked,
                     )
                   }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
-                <span class="checkbox-label">
-                  <span class="label-text">Enable Auto Top-Up</span>
-                  <span class="label-hint">
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">Enable Auto Top-Up</span>
+                  <span class="text-[0.8rem] text-muted">
                     Automatically add funds when balance is low
                   </span>
                 </span>
@@ -481,10 +504,10 @@ export const SettingsPanel: Component = () => {
             </div>
 
             <Show when={settingsState.app.autoTopUpEnabled}>
-              <div class="settings-group">
-                <label class="settings-label">
-                  <span class="label-text">Top-Up Threshold</span>
-                  <span class="label-hint">
+              <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                <label class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-[0.95rem] font-medium text-foreground">Top-Up Threshold</span>
+                  <span class="text-[0.8rem] text-muted">
                     Trigger top-up when balance falls below ($)
                   </span>
                 </label>
@@ -499,13 +522,14 @@ export const SettingsPanel: Component = () => {
                       e.currentTarget.value,
                     )
                   }
+                  class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
                 />
               </div>
 
-              <div class="settings-group">
-                <label class="settings-label">
-                  <span class="label-text">Top-Up Amount</span>
-                  <span class="label-hint">
+              <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                <label class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-[0.95rem] font-medium text-foreground">Top-Up Amount</span>
+                  <span class="text-[0.8rem] text-muted">
                     Amount to add when auto top-up triggers ($)
                   </span>
                 </label>
@@ -517,20 +541,21 @@ export const SettingsPanel: Component = () => {
                   onInput={(e) =>
                     handleNumberChange("autoTopUpAmount", e.currentTarget.value)
                   }
+                  class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
                 />
               </div>
             </Show>
 
-            <h4>Crypto Wallet (USDC Payments)</h4>
-            <p class="settings-hint">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">Crypto Wallet (USDC Payments)</h4>
+            <p class="m-0 mb-4 text-[0.85rem] text-muted leading-relaxed">
               Configure your crypto wallet for x402 USDC payments to MCP
               servers.
             </p>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Auto-Approve Limit</span>
-                <span class="label-hint">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Auto-Approve Limit</span>
+                <span class="text-[0.8rem] text-muted">
                   Auto-approve payments up to this amount (USD)
                 </span>
               </label>
@@ -547,79 +572,81 @@ export const SettingsPanel: Component = () => {
                     e.currentTarget.value,
                   )
                 }
+                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
             <Show
               when={cryptoWalletStore.state().isConfigured}
               fallback={
-                <div class="settings-group">
-                  <label class="settings-label">
-                    <span class="label-text">Private Key</span>
-                    <span class="label-hint">
+                <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                  <label class="flex flex-col gap-0.5 flex-1">
+                    <span class="text-[0.95rem] font-medium text-foreground">Private Key</span>
+                    <span class="text-[0.8rem] text-muted">
                       Enter your wallet private key (64 hex characters)
                     </span>
                   </label>
-                  <div class="crypto-key-input-group">
-                    <input
-                      type="password"
-                      placeholder="0x... or 64 hex characters"
-                      value={privateKeyInput()}
-                      onInput={(e) => setPrivateKeyInput(e.currentTarget.value)}
-                      class={
+                  <div class="flex flex-col gap-2 w-full max-w-md">
+                    <div class="flex gap-2">
+                      <input
+                        type="password"
+                        placeholder="0x... or 64 hex characters"
+                        value={privateKeyInput()}
+                        onInput={(e) => setPrivateKeyInput(e.currentTarget.value)}
+                        class={`flex-1 px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent ${
+                          privateKeyInput() && !isValidPrivateKeyFormat(privateKeyInput())
+                            ? "border-[#ef4444]"
+                            : "border-[rgba(148,163,184,0.3)]"
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        class="px-5 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 whitespace-nowrap hover:not-disabled:bg-[#4f46e5] disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={
+                          !isValidPrivateKeyFormat(privateKeyInput()) ||
+                          cryptoWalletStore.state().isLoading
+                        }
+                        onClick={handleSavePrivateKey}
+                      >
+                        {cryptoWalletStore.state().isLoading
+                          ? "Saving..."
+                          : "Save"}
+                      </button>
+                    </div>
+                    <Show
+                      when={
                         privateKeyInput() &&
                         !isValidPrivateKeyFormat(privateKeyInput())
-                          ? "invalid"
-                          : ""
                       }
-                    />
-                    <button
-                      type="button"
-                      class="primary"
-                      disabled={
-                        !isValidPrivateKeyFormat(privateKeyInput()) ||
-                        cryptoWalletStore.state().isLoading
-                      }
-                      onClick={handleSavePrivateKey}
                     >
-                      {cryptoWalletStore.state().isLoading
-                        ? "Saving..."
-                        : "Save"}
-                    </button>
+                      <span class="text-[0.8rem] text-[#ef4444]">
+                        Invalid key format. Must be 64 hex characters.
+                      </span>
+                    </Show>
+                    <Show when={cryptoWalletStore.state().error}>
+                      <span class="text-[0.8rem] text-[#ef4444]">
+                        {cryptoWalletStore.state().error}
+                      </span>
+                    </Show>
                   </div>
-                  <Show
-                    when={
-                      privateKeyInput() &&
-                      !isValidPrivateKeyFormat(privateKeyInput())
-                    }
-                  >
-                    <span class="settings-error">
-                      Invalid key format. Must be 64 hex characters.
-                    </span>
-                  </Show>
-                  <Show when={cryptoWalletStore.state().error}>
-                    <span class="settings-error">
-                      {cryptoWalletStore.state().error}
-                    </span>
-                  </Show>
                 </div>
               }
             >
-              <div class="crypto-wallet-configured">
-                <div class="settings-group">
-                  <label class="settings-label">
-                    <span class="label-text">Wallet Address</span>
-                    <span class="label-hint">
+              <div class="mt-2">
+                <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                  <label class="flex flex-col gap-0.5 flex-1">
+                    <span class="text-[0.95rem] font-medium text-foreground">Wallet Address</span>
+                    <span class="text-[0.8rem] text-muted">
                       Your configured wallet for USDC payments
                     </span>
                   </label>
-                  <div class="crypto-address-display">
-                    <code class="wallet-address">
+                  <div class="flex items-center gap-3 flex-wrap">
+                    <code class="flex-1 px-3 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[0.85rem] text-foreground font-mono break-all">
                       {cryptoWalletStore.state().address}
                     </code>
                     <button
                       type="button"
-                      class="danger-outline"
+                      class="px-4 py-2.5 bg-transparent border border-[rgba(239,68,68,0.5)] rounded-md text-[#ef4444] text-[0.9rem] cursor-pointer transition-all duration-150 whitespace-nowrap hover:bg-[rgba(239,68,68,0.1)] hover:border-[#ef4444]"
                       onClick={() => setShowClearConfirm(true)}
                     >
                       Remove Wallet
@@ -627,21 +654,21 @@ export const SettingsPanel: Component = () => {
                   </div>
                 </div>
 
-                <div class="settings-group">
-                  <label class="settings-label">
-                    <span class="label-text">USDC Balance (Base)</span>
-                    <span class="label-hint">
+                <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                  <label class="flex flex-col gap-0.5 flex-1">
+                    <span class="text-[0.95rem] font-medium text-foreground">USDC Balance (Base)</span>
+                    <span class="text-[0.8rem] text-muted">
                       Your current USDC balance on Base mainnet
                     </span>
                   </label>
-                  <div class="crypto-balance-display">
+                  <div class="flex items-center gap-3">
                     <Show
                       when={!cryptoWalletStore.state().balanceLoading}
                       fallback={
-                        <span class="balance-loading">Loading balance...</span>
+                        <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[0.9rem] text-muted min-w-[140px]">Loading balance...</span>
                       }
                     >
-                      <span class="balance-value">
+                      <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[1.1rem] font-semibold text-foreground font-mono min-w-[140px]">
                         {cryptoWalletStore.state().usdcBalance !== null
                           ? `${cryptoWalletStore.state().usdcBalance} USDC`
                           : "—"}
@@ -649,7 +676,7 @@ export const SettingsPanel: Component = () => {
                     </Show>
                     <button
                       type="button"
-                      class="refresh-balance-btn"
+                      class="w-9 h-9 flex items-center justify-center bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[1.2rem] text-muted cursor-pointer transition-all duration-150 hover:not-disabled:bg-[rgba(148,163,184,0.1)] hover:not-disabled:border-[rgba(148,163,184,0.4)] hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => cryptoWalletStore.fetchBalance()}
                       disabled={cryptoWalletStore.state().balanceLoading}
                       title="Refresh balance"
@@ -665,34 +692,38 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "appearance"}>
           <section class="settings-section">
-            <h3>Appearance</h3>
-            <p class="settings-description">
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Appearance</h3>
+            <p class="m-0 mb-6 text-muted leading-normal">
               Customize how Seren Desktop looks.
             </p>
 
-            <div class="settings-group">
-              <label class="settings-label">
-                <span class="label-text">Theme</span>
-                <span class="label-hint">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">Theme</span>
+                <span class="text-[0.8rem] text-muted">
                   Choose your preferred color scheme
                 </span>
               </label>
-              <div class="theme-selector">
+              <div class="flex gap-3">
                 <For each={["dark", "light", "system"] as const}>
                   {(theme) => (
                     <button
                       type="button"
-                      class={`theme-option ${settingsState.app.theme === theme ? "active" : ""}`}
+                      class={`flex flex-col items-center gap-2 px-6 py-4 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 ${
+                        settingsState.app.theme === theme
+                          ? "border-accent bg-[rgba(99,102,241,0.1)]"
+                          : "border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                      }`}
                       onClick={() => handleThemeChange(theme)}
                     >
-                      <span class="theme-icon">
+                      <span class="text-2xl">
                         {theme === "dark"
                           ? "🌙"
                           : theme === "light"
                             ? "☀️"
                             : "💻"}
                       </span>
-                      <span class="theme-label">
+                      <span class={`text-[0.85rem] ${settingsState.app.theme === theme ? "text-foreground" : "text-muted"}`}>
                         {theme.charAt(0).toUpperCase() + theme.slice(1)}
                       </span>
                     </button>
@@ -705,13 +736,13 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "general"}>
           <section class="settings-section">
-            <h3>General Settings</h3>
-            <p class="settings-description">
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">General Settings</h3>
+            <p class="m-0 mb-6 text-muted leading-normal">
               Configure application behavior and privacy options.
             </p>
 
-            <div class="settings-group checkbox">
-              <label class="settings-checkbox">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={settingsState.app.telemetryEnabled}
@@ -721,10 +752,11 @@ export const SettingsPanel: Component = () => {
                       e.currentTarget.checked,
                     )
                   }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
-                <span class="checkbox-label">
-                  <span class="label-text">Enable Telemetry</span>
-                  <span class="label-hint">
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">Enable Telemetry</span>
+                  <span class="text-[0.8rem] text-muted">
                     Help improve Seren by sharing anonymous usage data
                   </span>
                 </span>
@@ -735,8 +767,8 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "mcp"}>
           <section class="settings-section">
-            <h3>MCP Servers</h3>
-            <p class="settings-description">
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">MCP Servers</h3>
+            <p class="m-0 mb-6 text-muted leading-normal">
               Manage Model Context Protocol server connections for enhanced AI
               capabilities.
             </p>
@@ -744,30 +776,32 @@ export const SettingsPanel: Component = () => {
             <Show
               when={mcpSettings().servers.length > 0}
               fallback={
-                <div class="settings-empty">
-                  <span class="empty-icon">🔌</span>
-                  <p>No MCP servers configured</p>
-                  <p class="empty-hint">
+                <div class="text-center py-10 px-6 text-muted">
+                  <span class="text-[2.5rem] block mb-3 opacity-60">🔌</span>
+                  <p class="m-0">No MCP servers configured</p>
+                  <p class="m-0 mt-2 text-[0.85rem] text-muted">
                     MCP servers extend AI capabilities with tools like file
                     access, web browsing, and more.
                   </p>
                 </div>
               }
             >
-              <div class="mcp-server-list">
+              <div class="flex flex-col gap-2">
                 <For each={mcpSettings().servers}>
                   {(server) => (
                     <div
-                      class={`mcp-server-item ${server.enabled ? "" : "disabled"}`}
+                      class={`flex items-center justify-between px-4 py-3 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg ${
+                        !server.enabled ? "opacity-60" : ""
+                      }`}
                     >
-                      <div class="mcp-server-info">
-                        <div class="mcp-server-header">
-                          <span class="mcp-server-name">{server.name}</span>
+                      <div class="flex flex-col gap-1">
+                        <div class="flex items-center gap-2">
+                          <span class="font-medium text-foreground">{server.name}</span>
                           <Show when={server.autoConnect}>
-                            <span class="mcp-badge">Auto-connect</span>
+                            <span class="px-1.5 py-0.5 bg-[rgba(99,102,241,0.2)] rounded text-[0.7rem] text-accent">Auto-connect</span>
                           </Show>
                         </div>
-                        <span class="mcp-server-transport">
+                        <span class="text-[0.8rem] text-muted font-mono">
                           {isLocalServer(server)
                             ? `Command: ${server.command} ${server.args.join(" ")}`
                             : isBuiltinServer(server)
@@ -775,10 +809,14 @@ export const SettingsPanel: Component = () => {
                               : "Unknown type"}
                         </span>
                       </div>
-                      <div class="mcp-server-actions">
+                      <div class="flex items-center gap-2">
                         <button
                           type="button"
-                          class={`mcp-toggle ${server.enabled ? "enabled" : ""}`}
+                          class={`px-3 py-1 border-none rounded text-[0.8rem] cursor-pointer transition-all duration-150 hover:opacity-80 ${
+                            server.enabled
+                              ? "bg-[rgba(34,197,94,0.2)] text-[#22c55e]"
+                              : "bg-[rgba(148,163,184,0.2)] text-muted"
+                          }`}
                           onClick={() => handleToggleMcpServer(server.name)}
                           title={server.enabled ? "Disable" : "Enable"}
                         >
@@ -786,7 +824,7 @@ export const SettingsPanel: Component = () => {
                         </button>
                         <button
                           type="button"
-                          class="mcp-remove"
+                          class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[1.2rem] text-muted cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:text-[#ef4444]"
                           onClick={() => handleRemoveMcpServer(server.name)}
                           title="Remove server"
                         >
@@ -804,24 +842,24 @@ export const SettingsPanel: Component = () => {
 
       <Show when={showResetConfirm()}>
         <div
-          class="settings-modal-overlay"
+          class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000]"
           onClick={() => setShowResetConfirm(false)}
         >
-          <div class="settings-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Reset All Settings?</h3>
-            <p>
+          <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-6 max-w-[400px] w-[90%]" onClick={(e) => e.stopPropagation()}>
+            <h3 class="m-0 mb-3 text-[1.1rem]">Reset All Settings?</h3>
+            <p class="m-0 mb-5 text-muted leading-normal">
               This will restore all settings to their default values. This
               cannot be undone.
             </p>
-            <div class="settings-modal-actions">
+            <div class="flex justify-end gap-2">
               <button
                 type="button"
-                class="secondary"
+                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
                 onClick={() => setShowResetConfirm(false)}
               >
                 Cancel
               </button>
-              <button type="button" class="danger" onClick={handleResetAll}>
+              <button type="button" class="px-4 py-2 bg-[#ef4444] border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[#dc2626]" onClick={handleResetAll}>
                 Reset All
               </button>
             </div>
@@ -831,26 +869,26 @@ export const SettingsPanel: Component = () => {
 
       <Show when={showClearConfirm()}>
         <div
-          class="settings-modal-overlay"
+          class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000]"
           onClick={() => setShowClearConfirm(false)}
         >
-          <div class="settings-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Remove Crypto Wallet?</h3>
-            <p>
+          <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-6 max-w-[400px] w-[90%]" onClick={(e) => e.stopPropagation()}>
+            <h3 class="m-0 mb-3 text-[1.1rem]">Remove Crypto Wallet?</h3>
+            <p class="m-0 mb-5 text-muted leading-normal">
               This will delete your private key from this device. You will need
               to re-enter it to make USDC payments.
             </p>
-            <div class="settings-modal-actions">
+            <div class="flex justify-end gap-2">
               <button
                 type="button"
-                class="secondary"
+                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
                 onClick={() => setShowClearConfirm(false)}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                class="danger"
+                class="px-4 py-2 bg-[#ef4444] border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[#dc2626]"
                 onClick={handleClearCryptoWallet}
               >
                 Remove Wallet

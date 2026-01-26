@@ -9,7 +9,6 @@ import {
   shouldShowLowBalanceWarning,
   walletState,
 } from "@/stores/wallet.store";
-import "./LowBalanceWarning.css";
 
 interface LowBalanceWarningProps {
   variant?: "inline" | "modal";
@@ -51,20 +50,27 @@ export const LowBalanceWarning: Component<LowBalanceWarningProps> = (props) => {
     }
   };
 
+  const containerClasses = () => {
+    const base = "flex flex-col";
+    return variant() === "inline"
+      ? `${base} gap-3 py-3 px-4 bg-warning/10 border border-warning/30 rounded-lg`
+      : `${base} gap-4`;
+  };
+
   return (
     <Show when={shouldShow()}>
       <div
-        class={`low-balance-warning low-balance-warning--${variant()}`}
+        class={containerClasses()}
         role="alert"
         aria-live="polite"
       >
-        <div class="low-balance-content">
-          <span class="low-balance-icon" aria-hidden="true">
+        <div class="flex items-start gap-3">
+          <span class="text-xl text-warning shrink-0" aria-hidden="true">
             &#9888;
           </span>
-          <div class="low-balance-text">
-            <span class="low-balance-title">Low Balance</span>
-            <span class="low-balance-message">
+          <div class="flex flex-col gap-1 min-w-0">
+            <span class="text-sm font-semibold text-foreground">Low Balance</span>
+            <span class="text-[13px] text-muted-foreground">
               Your SerenBucks balance (${walletState.balance?.toFixed(2)}) is
               below ${threshold().toFixed(2)}.
             </span>
@@ -72,19 +78,19 @@ export const LowBalanceWarning: Component<LowBalanceWarningProps> = (props) => {
         </div>
 
         <Show when={topUpError()}>
-          <div class="low-balance-error">{topUpError()}</div>
+          <div class="text-xs text-destructive p-2 bg-destructive/10 rounded">{topUpError()}</div>
         </Show>
 
-        <div class="low-balance-actions">
+        <div class="flex justify-end gap-2">
           <button
-            class="btn-secondary"
+            class="py-1.5 px-3 text-[13px] font-medium rounded-md cursor-pointer transition-all duration-150 bg-transparent text-muted-foreground border border-border hover:bg-secondary hover:text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
             onClick={handleDismiss}
             disabled={isTopUpLoading()}
           >
             Dismiss
           </button>
           <button
-            class="btn-primary"
+            class="py-1.5 px-3 text-[13px] font-medium rounded-md cursor-pointer transition-all duration-150 bg-primary text-primary-foreground border-none hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed"
             onClick={handleTopUp}
             disabled={isTopUpLoading()}
           >
@@ -134,15 +140,15 @@ export const LowBalanceModal: Component = () => {
 
   return (
     <Show when={isVisible()}>
-      <div class="low-balance-modal-backdrop" onClick={handleClose}>
+      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] animate-[fadeIn_0.2s_ease-out]" onClick={handleClose}>
         <div
-          class="low-balance-modal"
+          class="bg-card border border-border rounded-xl p-6 max-w-[400px] w-[90%] shadow-xl animate-[slideUp_0.2s_ease-out]"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
           aria-labelledby="low-balance-modal-title"
         >
-          <h2 id="low-balance-modal-title" class="low-balance-modal-title">
+          <h2 id="low-balance-modal-title" class="text-lg font-semibold text-foreground m-0 mb-4">
             Low Balance Warning
           </h2>
           <LowBalanceWarning variant="modal" onTopUp={handleClose} />
@@ -166,7 +172,7 @@ export const LowBalanceIndicator: Component = () => {
 
   return (
     <Show when={showBalance() && isLow()}>
-      <span class="low-balance-indicator" title="Low balance - click to top up">
+      <span class="inline-flex items-center justify-center w-5 h-5 text-sm text-warning cursor-pointer rounded transition-colors duration-150 hover:bg-secondary" title="Low balance - click to top up">
         &#9888;
       </span>
     </Show>

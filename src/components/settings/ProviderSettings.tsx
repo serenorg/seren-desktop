@@ -28,7 +28,6 @@ import {
   startOAuthFlow,
 } from "@/services/oauth";
 import { providerStore } from "@/stores/provider.store";
-import "./ProviderSettings.css";
 
 export const ProviderSettings: Component = () => {
   const [selectedProvider, setSelectedProvider] =
@@ -155,33 +154,33 @@ export const ProviderSettings: Component = () => {
       </p>
 
       {/* Configured Providers List */}
-      <div class="provider-list">
+      <div class="flex flex-col gap-2 mb-6">
         <For each={providerStore.configuredProviders}>
           {(providerId) => {
             const config = PROVIDER_CONFIGS[providerId];
             const authType = providerStore.getAuthType(providerId);
             return (
-              <div class="provider-item">
-                <div class="provider-info">
-                  <div class="provider-header">
-                    <span class="provider-name">{config.name}</span>
+              <div class="flex items-center justify-between px-4 py-3 bg-[rgba(30,41,59,0.5)] border border-[rgba(148,163,184,0.15)] rounded-lg transition-[border-color] duration-150 hover:border-[rgba(148,163,184,0.25)]">
+                <div class="flex flex-col gap-1 min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium text-foreground">{config.name}</span>
                     <Show when={providerId === "seren"}>
-                      <span class="provider-badge default">Default</span>
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(99,102,241,0.2)] text-[#818cf8]">Default</span>
                     </Show>
                     <Show when={providerId === providerStore.activeProvider}>
-                      <span class="provider-badge active">Active</span>
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(34,197,94,0.2)] text-[#4ade80]">Active</span>
                     </Show>
                     <Show when={authType === "oauth"}>
-                      <span class="provider-badge oauth">Signed In</span>
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(59,130,246,0.2)] text-[#60a5fa]">Signed In</span>
                     </Show>
                   </div>
-                  <span class="provider-description">{config.description}</span>
+                  <span class="text-xs text-muted overflow-hidden text-ellipsis whitespace-nowrap">{config.description}</span>
                 </div>
-                <div class="provider-actions">
+                <div class="flex items-center gap-2 ml-4">
                   <Show when={providerId !== providerStore.activeProvider}>
                     <button
                       type="button"
-                      class="provider-activate"
+                      class="px-3 py-1.5 bg-transparent border border-accent text-accent rounded text-[13px] cursor-pointer transition-all duration-150 hover:bg-accent hover:text-white"
                       onClick={() => handleActivateProvider(providerId)}
                     >
                       Use
@@ -190,7 +189,7 @@ export const ProviderSettings: Component = () => {
                   <Show when={providerId !== "seren"}>
                     <button
                       type="button"
-                      class="provider-remove"
+                      class="w-7 h-7 flex items-center justify-center bg-transparent border border-[rgba(148,163,184,0.25)] text-muted rounded text-base cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:border-[rgba(239,68,68,0.5)] hover:text-[#ef4444]"
                       onClick={() => handleRemoveProvider(providerId)}
                       title="Remove provider"
                     >
@@ -210,11 +209,11 @@ export const ProviderSettings: Component = () => {
 
         {/* OAuth Error Display */}
         <Show when={oauthError()}>
-          <div class="oauth-error">{oauthError()}</div>
+          <div class="mt-3 px-3.5 py-2.5 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-md text-[#ef4444] text-[13px]">{oauthError()}</div>
         </Show>
 
         {/* Quick OAuth Sign-in Buttons */}
-        <div class="oauth-buttons">
+        <div class="flex flex-col gap-2.5 mt-3">
           <For each={unconfiguredProviders().filter((p) => supportsOAuth(p))}>
             {(providerId) => {
               const config = PROVIDER_CONFIGS[providerId];
@@ -222,7 +221,13 @@ export const ProviderSettings: Component = () => {
               return (
                 <button
                   type="button"
-                  class={`oauth-signin-btn oauth-${providerId}`}
+                  class={`flex items-center justify-center gap-2.5 px-5 py-3 border rounded-lg text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:-translate-y-px active:not-disabled:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    providerId === "openai"
+                      ? "bg-[#10a37f] border-[#10a37f] text-white hover:not-disabled:bg-[#0d8a6a] hover:not-disabled:border-[#0d8a6a]"
+                      : providerId === "gemini"
+                        ? "bg-gradient-to-br from-[#4285f4] via-[#34a853] to-[#fbbc05] border-transparent text-white hover:not-disabled:from-[#3b78e7] hover:not-disabled:via-[#2d9649] hover:not-disabled:to-[#e5ab04]"
+                        : "bg-[rgba(30,41,59,0.5)] border-[rgba(148,163,184,0.25)] text-foreground"
+                  }`}
                   onClick={() => handleOAuthSignIn(providerId)}
                   disabled={isInProgress() || !config.oauth?.clientId}
                 >
@@ -238,11 +243,11 @@ export const ProviderSettings: Component = () => {
           </For>
         </div>
 
-        <div class="auth-divider">
-          <span>or use API key</span>
+        <div class="flex items-center my-5 gap-4 before:content-[''] before:flex-1 before:h-px before:bg-[rgba(148,163,184,0.25)] after:content-[''] after:flex-1 after:h-px after:bg-[rgba(148,163,184,0.25)]">
+          <span class="text-muted text-xs uppercase tracking-[0.5px]">or use API key</span>
         </div>
 
-        <div class="add-provider-form">
+        <div class="mt-4">
           <div class="settings-group">
             <label class="settings-label">
               <span class="label-text">Provider</span>
@@ -287,15 +292,16 @@ export const ProviderSettings: Component = () => {
                           href={config().docsUrl}
                           target="_blank"
                           rel="noopener noreferrer"
+                          class="text-accent no-underline hover:underline"
                         >
                           Get one here
                         </a>
                       </span>
                     </label>
-                    <div class="api-key-input-wrapper">
+                    <div class="flex gap-2">
                       <input
                         type={showKey() ? "text" : "password"}
-                        class="api-key-input"
+                        class="flex-1 px-3 py-2 bg-surface border border-[rgba(148,163,184,0.25)] rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent placeholder:text-muted placeholder:font-sans"
                         value={apiKeyInput()}
                         onInput={(e) => {
                           setApiKeyInput(e.currentTarget.value);
@@ -307,7 +313,7 @@ export const ProviderSettings: Component = () => {
                       />
                       <button
                         type="button"
-                        class="toggle-visibility"
+                        class="px-3 py-2 bg-[rgba(30,41,59,0.5)] border border-[rgba(148,163,184,0.25)] rounded text-muted text-[13px] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-[rgba(148,163,184,0.15)]"
                         onClick={() => setShowKey(!showKey())}
                         title={showKey() ? "Hide API key" : "Show API key"}
                       >
@@ -317,14 +323,14 @@ export const ProviderSettings: Component = () => {
                   </div>
 
                   <Show when={providerStore.validationError}>
-                    <div class="validation-error">
+                    <div class="mt-2 px-3 py-2 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded text-[#ef4444] text-[13px]">
                       {providerStore.validationError}
                     </div>
                   </Show>
 
                   <button
                     type="button"
-                    class="primary add-provider-btn"
+                    class="mt-4 px-5 py-2.5 bg-accent border-none rounded-md text-white text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-[#4f46e5] disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleAddApiKey}
                     disabled={
                       !apiKeyInput().trim() || providerStore.isValidating
@@ -342,8 +348,8 @@ export const ProviderSettings: Component = () => {
       </Show>
 
       <Show when={unconfiguredProviders().length === 0}>
-        <div class="all-providers-configured">
-          <span class="check-icon">&#10003;</span>
+        <div class="flex items-center gap-2 px-4 py-3 bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.3)] rounded-lg text-[#4ade80] text-sm mt-4">
+          <span class="text-base">&#10003;</span>
           <span>All available providers have been configured.</span>
         </div>
       </Show>

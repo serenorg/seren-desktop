@@ -15,7 +15,6 @@ import {
   setSelectedPath,
   toggleExpanded,
 } from "@/stores/fileTree";
-import "./FileTree.css";
 
 interface FileTreeProps {
   onFileSelect?: (path: string) => void;
@@ -165,19 +164,19 @@ export const FileTree: Component<FileTreeProps> = (props) => {
 
   return (
     <div
-      class="file-tree"
+      class="h-full overflow-y-auto overflow-x-hidden text-[15px] select-none"
       role="tree"
       aria-label="File explorer"
       data-testid="file-tree"
     >
       <Show when={folderName()}>
-        <div class="file-tree-header">
-          <span class="file-tree-folder-name">{folderName()}</span>
+        <div class="py-2 px-3 font-semibold text-foreground uppercase text-base tracking-wider border-b border-border">
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap block">{folderName()}</span>
         </div>
       </Show>
       <Show
         when={fileTreeState.nodes.length > 0}
-        fallback={<div class="file-tree-empty">No folder open</div>}
+        fallback={<div class="p-4 text-muted-foreground text-center italic">No folder open</div>}
       >
         <For each={fileTreeState.nodes}>
           {(node) => (
@@ -287,14 +286,13 @@ const FileTreeNode: Component<FileTreeNodeProps> = (props) => {
   });
 
   return (
-    <div class="file-tree-node">
+    <div class="w-full">
       <div
-        class="file-tree-item"
-        classList={{
-          selected: isSelected(),
-          directory: props.node.isDirectory,
-          renaming: isRenaming(),
-        }}
+        class={`flex items-center gap-1.5 py-1 px-2 cursor-pointer rounded mx-1 my-px transition-colors duration-100 ${
+          isSelected()
+            ? "bg-accent"
+            : "hover:bg-muted focus:bg-muted"
+        } ${isRenaming() ? "bg-accent" : ""} ${props.node.isDirectory ? "font-medium" : ""}`}
         style={{ "padding-left": `${props.depth * 16 + 8}px` }}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
@@ -307,15 +305,15 @@ const FileTreeNode: Component<FileTreeNodeProps> = (props) => {
         data-file-path={props.node.path}
         data-file-type={props.node.isDirectory ? "directory" : "file"}
       >
-        <span class="file-tree-icon">{icon()}</span>
+        <span class="shrink-0 w-4 text-center text-sm">{icon()}</span>
         <Show
           when={isRenaming()}
-          fallback={<span class="file-tree-name">{props.node.name}</span>}
+          fallback={<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{props.node.name}</span>}
         >
           <input
             ref={renameInputRef}
             type="text"
-            class="file-tree-rename-input"
+            class="flex-1 bg-[#1c2128] border border-[#58a6ff] rounded text-foreground text-[13px] py-0.5 px-1.5 outline-none min-w-0 focus:border-[#58a6ff] focus:shadow-[0_0_0_2px_rgba(88,166,255,0.3)]"
             value={props.renameState?.name || ""}
             placeholder="Enter new name"
             aria-label="Rename file"
@@ -326,12 +324,12 @@ const FileTreeNode: Component<FileTreeNodeProps> = (props) => {
           />
         </Show>
         <Show when={props.node.isLoading}>
-          <span class="file-tree-loading">...</span>
+          <span class="text-muted-foreground text-xs">...</span>
         </Show>
       </div>
 
       <Show when={props.node.isDirectory && expanded() && props.node.children}>
-        <div class="file-tree-children" role="group">
+        <div role="group">
           <For each={props.node.children}>
             {(child) => (
               <FileTreeNode

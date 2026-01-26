@@ -2,7 +2,6 @@
 // ABOUTME: Provides navigation between Chat, Editor, Catalog, Settings, and Account.
 
 import { type Component, createMemo, For } from "solid-js";
-import "./Sidebar.css";
 
 export type Panel =
   | "chat"
@@ -43,18 +42,22 @@ export const Sidebar: Component<SidebarProps> = (props) => {
   );
 
   return (
-    <nav class="sidebar">
-      <ul class="sidebar-nav">
+    <nav class="w-[200px] bg-popover border-r border-border flex flex-col">
+      <ul class="list-none m-0 p-2">
         <For each={visibleItems()}>
           {(item) => (
             <li>
               <button
-                class={`sidebar-item ${props.activePanel === item.id ? "active" : ""}`}
+                class={`flex items-center gap-2 w-full py-2.5 px-3 text-[13px] bg-transparent border-none rounded cursor-pointer text-left transition-all duration-150 ${
+                  props.activePanel === item.id
+                    ? "text-primary-foreground bg-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                }`}
                 onClick={() => props.onPanelChange(item.id)}
                 title={item.label}
               >
-                <span class="sidebar-icon">{item.icon}</span>
-                <span class="sidebar-label">{item.label}</span>
+                <span class="text-base">{item.icon}</span>
+                <span class="flex-1">{item.label}</span>
               </button>
             </li>
           )}

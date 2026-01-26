@@ -12,7 +12,6 @@ import {
   setRootPath,
 } from "@/stores/fileTree";
 import { FileTree } from "./FileTree";
-import "./FileExplorerPanel.css";
 
 interface FileExplorerPanelProps {
   onFileSelect?: (path: string) => void;
@@ -132,12 +131,14 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
   }
 
   return (
-    <div class="file-explorer-panel">
-      <div class="file-explorer-header">
-        <h3 class="file-explorer-title">Explorer</h3>
+    <div class="flex flex-col h-full bg-card">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+        <h3 class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground m-0">
+          Explorer
+        </h3>
         <button
           type="button"
-          class="file-explorer-open-btn"
+          class="flex items-center justify-center w-6 h-6 p-0 bg-transparent border-none rounded cursor-pointer transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={handleOpenFolder}
           title="Open Folder"
           disabled={isLoading()}
@@ -147,17 +148,21 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
       </div>
 
       <Show when={error()}>
-        <div class="file-explorer-error">
+        <div class="flex items-center justify-between gap-2 px-4 py-2 bg-destructive/10 text-destructive text-xs">
           <span>{error()}</span>
-          <button type="button" onClick={() => setError(null)}>
+          <button
+            type="button"
+            class="px-1.5 py-0.5 bg-transparent border-none text-destructive cursor-pointer text-xs"
+            onClick={() => setError(null)}
+          >
             ✕
           </button>
         </div>
       </Show>
 
       <Show when={isLoading()}>
-        <div class="file-explorer-loading">
-          <span class="file-explorer-spinner" />
+        <div class="flex items-center justify-center gap-2 px-4 py-8 text-muted-foreground text-[13px]">
+          <span class="w-4 h-4 border-2 border-border border-t-primary rounded-full animate-spin" />
           <span>Loading...</span>
         </div>
       </Show>
@@ -166,11 +171,11 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
         <Show
           when={fileTreeState.rootPath}
           fallback={
-            <div class="file-explorer-empty">
-              <p>No folder open</p>
+            <div class="flex flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+              <p class="m-0 text-muted-foreground text-[13px]">No folder open</p>
               <button
                 type="button"
-                class="file-explorer-open-folder-btn"
+                class="px-4 py-2 bg-primary border-none rounded text-primary-foreground text-[13px] font-medium cursor-pointer transition-opacity hover:opacity-90"
                 onClick={handleOpenFolder}
               >
                 Open Folder
@@ -178,17 +183,17 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
             </div>
           }
         >
-          <div class="file-explorer-workspace">
-            <div class="file-explorer-workspace-header">
+          <div class="flex flex-col flex-1 min-h-0">
+            <div class="flex items-center justify-between px-4 py-2 bg-muted border-b border-border">
               <span
-                class="file-explorer-workspace-name"
+                class="text-[13px] font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap"
                 title={fileTreeState.rootPath || ""}
               >
                 {getRootFolderName()}
               </span>
               <button
                 type="button"
-                class="file-explorer-close-btn"
+                class="flex items-center justify-center w-5 h-5 p-0 bg-transparent border-none rounded text-xs text-muted-foreground cursor-pointer transition-all hover:bg-muted hover:text-foreground"
                 onClick={() => {
                   setRootPath("");
                   setNodes([]);

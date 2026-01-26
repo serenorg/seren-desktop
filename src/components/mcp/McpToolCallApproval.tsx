@@ -14,7 +14,6 @@ import { mcpClient } from "@/lib/mcp/client";
 import { getRiskLabel, getToolRiskLevel } from "@/lib/mcp/risk";
 import type { McpToolResult } from "@/lib/mcp/types";
 import type { ToolCallRequest } from "@/stores/mcp-chat.store";
-import "./McpToolCallApproval.css";
 
 export interface McpToolCallApprovalProps {
   request: ToolCallRequest;
@@ -197,29 +196,37 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
 
   const argEntries = () => Object.entries(props.request.call.arguments);
 
+  const getRiskBadgeClasses = () => {
+    const level = riskLevel();
+    const base = "mt-1 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full w-fit before:content-[''] before:w-1.5 before:h-1.5 before:rounded-full";
+    if (level === "low") return `${base} bg-[rgba(34,197,94,0.15)] text-[#15803d] before:bg-[#22c55e]`;
+    if (level === "medium") return `${base} bg-[rgba(251,191,36,0.2)] text-[#b45309] before:bg-[#f59e0b]`;
+    return `${base} bg-[rgba(248,113,113,0.2)] text-[#b91c1c] before:bg-[#ef4444]`;
+  };
+
   return (
-    <div class="mcp-tool-call-approval">
-      <div class="approval-header">
-        <span class="icon">🔧</span>
-        <div class="header-content">
-          <span class="title">Tool Call Request</span>
-          <span class="tool-name">{props.request.call.name}</span>
-          <div class={`risk-badge risk-${riskLevel()}`}>
+    <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-lg px-4 py-3 my-2">
+      <div class="flex items-center gap-2.5 mb-3">
+        <span class="text-xl">🔧</span>
+        <div class="flex-1 flex flex-col gap-0.5">
+          <span class="text-[11px] uppercase tracking-[0.5px] text-muted">Tool Call Request</span>
+          <span class="text-sm font-semibold font-mono">{props.request.call.name}</span>
+          <div class={getRiskBadgeClasses()}>
             {getRiskLabel(riskLevel())}
           </div>
         </div>
-        <span class="server-badge">{props.request.serverName}</span>
+        <span class="px-2.5 py-1 bg-[#dbeafe] text-accent rounded-md text-[11px] font-medium">{props.request.serverName}</span>
       </div>
 
       <Show when={argEntries().length > 0}>
-        <div class="arguments">
-          <span class="section-label">Arguments:</span>
-          <div class="arg-list">
+        <div class="mb-3">
+          <span class="block text-[11px] uppercase tracking-[0.5px] text-muted mb-1.5">Arguments:</span>
+          <div class="bg-card border border-[rgba(148,163,184,0.25)] rounded-md px-3 py-2">
             <For each={argEntries()}>
               {([key, value]) => (
-                <div class="arg-item">
-                  <span class="arg-key">{key}:</span>
-                  <span class="arg-value">{formatArgValue(value)}</span>
+                <div class="flex gap-2 py-1 text-[13px] font-mono border-b border-[rgba(148,163,184,0.25)] last:border-b-0">
+                  <span class="text-accent font-medium">{key}:</span>
+                  <span class="text-foreground break-all">{formatArgValue(value)}</span>
                 </div>
               )}
             </For>
@@ -228,8 +235,8 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
       </Show>
 
       <Show when={requiresTypeConfirmation()}>
-        <div class="confirmation-block">
-          <label>
+        <div class="my-3 flex flex-col gap-1.5">
+          <label class="text-[13px]">
             Type <strong>{props.request.call.name}</strong> to confirm high-risk
             execution
           </label>
@@ -237,22 +244,23 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
             value={confirmationInput()}
             onInput={(e) => setConfirmationInput(e.currentTarget.value)}
             placeholder={props.request.call.name}
+            class="p-2 border border-[rgba(148,163,184,0.25)] rounded-md font-mono bg-card text-foreground"
           />
         </div>
       </Show>
 
-      <div class="attempt-meta">
+      <div class="text-xs text-muted mt-2">
         Attempt {Math.min(Math.max(attemptCount(), 1), maxAttempts())} /{" "}
         {maxAttempts()}
       </div>
 
       <Show when={isPendingRetry()}>
-        <div class="pending-retry">Retrying automatically...</div>
+        <div class="mt-1 text-xs text-accent">Retrying automatically...</div>
       </Show>
 
-      <div class="approval-actions">
+      <div class="flex items-center gap-2 mt-3">
         <button
-          class="btn-approve"
+          class="flex-1 px-4 py-2 bg-[#22c55e] text-white border-none rounded-md text-[13px] font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-[#16a34a] disabled:opacity-60 disabled:cursor-not-allowed"
           onClick={handleApprove}
           disabled={
             isExecuting() ||
@@ -264,27 +272,34 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
           {isExecuting() ? "Executing..." : "Approve & Execute"}
         </button>
         <Show when={isExecuting()}>
-          <button class="btn-cancel" onClick={handleCancel}>
+          <button
+            class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md bg-popover text-muted text-xs font-medium cursor-pointer hover:bg-[#fee2e2] hover:border-[#f87171] hover:text-[#b91c1c]"
+            onClick={handleCancel}
+          >
             Cancel
           </button>
         </Show>
-        <button class="btn-deny" onClick={handleDeny} disabled={isExecuting()}>
+        <button
+          class="px-4 py-2 bg-popover text-foreground border border-[rgba(148,163,184,0.25)] rounded-md text-[13px] font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-[rgba(239,68,68,0.1)] hover:not-disabled:border-[#dc2626] hover:not-disabled:text-[#dc2626] disabled:opacity-60 disabled:cursor-not-allowed"
+          onClick={handleDeny}
+          disabled={isExecuting()}
+        >
           Deny
         </button>
       </div>
 
       <Show when={error()}>
-        <div class="execution-error">
-          <span class="error-icon">❌</span>
-          <span class="error-message">{error()}</span>
+        <div class="flex items-start gap-2 px-3 py-2.5 bg-[rgba(239,68,68,0.1)] rounded-md mt-3">
+          <span class="shrink-0">❌</span>
+          <span class="text-[13px] text-[#dc2626]">{error()}</span>
         </div>
-        <div class="retry-actions">
+        <div class="mt-2 flex items-center gap-3">
           <Show when={wasCancelled()}>
-            <span class="cancelled-note">Call cancelled by user.</span>
+            <span class="text-xs text-muted">Call cancelled by user.</span>
           </Show>
           <Show when={!wasCancelled() && attemptCount() < maxAttempts()}>
             <button
-              class="btn-retry"
+              class="px-3 py-1.5 text-xs rounded-md border border-accent bg-transparent text-accent cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={handleManualRetry}
               disabled={isExecuting()}
             >
@@ -296,12 +311,13 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
 
       <Show when={result()}>
         <div
-          class="execution-result"
-          classList={{ "is-error": result()?.isError }}
+          class={`flex items-start gap-2 px-3 py-2.5 rounded-md mt-3 ${
+            result()?.isError ? "bg-[#fef9c3]" : "bg-[#dcfce7]"
+          }`}
         >
-          <span class="result-icon">{result()?.isError ? "⚠️" : "✅"}</span>
-          <div class="result-content">
-            <pre>{formatResult(result()!)}</pre>
+          <span class="shrink-0">{result()?.isError ? "⚠️" : "✅"}</span>
+          <div class="flex-1 overflow-auto">
+            <pre class="m-0 text-xs font-mono whitespace-pre-wrap break-words">{formatResult(result()!)}</pre>
           </div>
         </div>
       </Show>

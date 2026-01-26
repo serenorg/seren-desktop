@@ -18,7 +18,6 @@ import {
 } from "@/lib/providers";
 import { chatStore } from "@/stores/chat.store";
 import { providerStore } from "@/stores/provider.store";
-import "./ModelSelector.css";
 
 export const ModelSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
@@ -97,9 +96,9 @@ export const ModelSelector: Component = () => {
   });
 
   return (
-    <div class="model-selector" ref={containerRef}>
+    <div class="relative" ref={containerRef}>
       <button
-        class="model-selector-trigger"
+        class="flex items-center gap-2 px-3 py-1.5 bg-popover border border-muted rounded-md text-sm text-foreground cursor-pointer transition-colors hover:border-[rgba(148,163,184,0.4)]"
         onClick={() => {
           const opening = !isOpen();
           setIsOpen(opening);
@@ -110,22 +109,23 @@ export const ModelSelector: Component = () => {
           }
         }}
       >
-        <span class="provider-badge-small">
+        <span class="inline-flex items-center justify-center w-[18px] h-[18px] bg-accent text-white rounded text-[11px] font-semibold">
           {getProviderIcon(currentProvider())}
         </span>
-        <span class="model-name">{currentModel()?.name || "Select model"}</span>
-        <span class="chevron">{isOpen() ? "▲" : "▼"}</span>
+        <span class="text-foreground">{currentModel()?.name || "Select model"}</span>
+        <span class="text-[10px] text-muted-foreground">{isOpen() ? "▲" : "▼"}</span>
       </button>
 
       <Show when={isOpen()}>
-        <div class="model-selector-dropdown">
+        <div class="absolute bottom-[calc(100%+8px)] left-0 min-w-[320px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-[1000] overflow-hidden">
           {/* Search input */}
-          <div class="model-search">
+          <div class="p-2 bg-[#1e1e1e] border-b border-[#3c3c3c]">
             <input
               ref={searchInputRef}
               type="text"
               placeholder="Search models"
               value={searchQuery()}
+              class="w-full px-3 py-2 bg-[#2d2d2d] border border-[#3c3c3c] rounded-md text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-accent"
               onInput={(e) => setSearchQuery(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
@@ -136,22 +136,22 @@ export const ModelSelector: Component = () => {
           </div>
 
           {/* Provider tabs */}
-          <div class="provider-tabs">
+          <div class="flex gap-0.5 p-2 bg-[#252525] border-b border-[#3c3c3c] flex-wrap">
             <For each={providerStore.configuredProviders}>
               {(providerId) => (
                 <button
                   type="button"
-                  class={`provider-tab ${providerId === currentProvider() ? "active" : ""}`}
+                  class={`flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-xs text-muted-foreground cursor-pointer transition-all no-underline hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground ${providerId === currentProvider() ? "bg-[rgba(99,102,241,0.15)] border-[rgba(99,102,241,0.4)] text-accent" : ""}`}
                   onClick={() => {
                     selectProvider(providerId);
                     setSearchQuery("");
                   }}
                   title={PROVIDER_CONFIGS[providerId].name}
                 >
-                  <span class="provider-tab-icon">
+                  <span class={`w-4 h-4 inline-flex items-center justify-center bg-[#3c3c3c] rounded-sm text-[10px] font-semibold ${providerId === currentProvider() ? "bg-accent text-white" : ""}`}>
                     {getProviderIcon(providerId)}
                   </span>
-                  <span class="provider-tab-name">
+                  <span class="max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">
                     {PROVIDER_CONFIGS[providerId].name}
                   </span>
                 </button>
@@ -160,7 +160,7 @@ export const ModelSelector: Component = () => {
             <Show when={providerStore.getUnconfiguredProviders().length > 0}>
               <a
                 href="#"
-                class="provider-tab add-provider"
+                class="flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-sm font-medium text-muted-foreground cursor-pointer transition-all no-underline hover:bg-[rgba(99,102,241,0.15)] hover:text-accent"
                 onClick={(e) => {
                   e.preventDefault();
                   setIsOpen(false);
@@ -173,11 +173,11 @@ export const ModelSelector: Component = () => {
           </div>
 
           {/* Models for selected provider */}
-          <div class="model-list">
+          <div class="max-h-[300px] overflow-y-auto py-1 bg-[#1e1e1e]">
             <Show
               when={filteredModels().length > 0}
               fallback={
-                <div class="model-list-empty">
+                <div class="p-4 text-center text-muted-foreground text-[13px]">
                   {searchQuery()
                     ? `No models matching "${searchQuery()}"`
                     : `No models available for ${PROVIDER_CONFIGS[currentProvider()].name}`}
@@ -188,22 +188,22 @@ export const ModelSelector: Component = () => {
                 {(model) => (
                   <button
                     type="button"
-                    class={`model-option ${model.id === providerStore.activeModel ? "selected" : ""}`}
+                    class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-[rgba(148,163,184,0.1)] ${model.id === providerStore.activeModel ? "bg-[rgba(99,102,241,0.12)]" : ""}`}
                     onClick={() => selectModel(model.id)}
                   >
-                    <div class="model-info">
-                      <span class="model-name">{model.name}</span>
+                    <div class="flex flex-col gap-0.5 min-w-0 flex-1">
+                      <span class="text-foreground font-medium">{model.name}</span>
                       <Show when={model.description}>
-                        <span class="model-description">
+                        <span class="text-[11px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
                           {model.description}
                         </span>
                       </Show>
                     </div>
-                    <div class="model-meta">
+                    <div class="flex items-center gap-2">
                       <Show when={model.id === providerStore.activeModel}>
-                        <span class="model-checkmark">&#10003;</span>
+                        <span class="text-success text-sm font-semibold">&#10003;</span>
                       </Show>
-                      <span class="model-context">
+                      <span class="text-[11px] text-[#94a3b8] px-1.5 py-0.5 bg-[#2d2d2d] rounded whitespace-nowrap">
                         {formatContextWindow(model.contextWindow)}
                       </span>
                     </div>

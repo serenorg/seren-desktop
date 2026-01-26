@@ -12,7 +12,6 @@ import {
   removeMcpServer,
   toggleMcpServer,
 } from "@/stores/settings.store";
-import "./McpServersPanel.css";
 
 export const McpServersPanel: Component = () => {
   const [showAddForm, setShowAddForm] = createSignal(false);
@@ -134,79 +133,86 @@ export const McpServersPanel: Component = () => {
   }
 
   return (
-    <div class="mcp-servers-panel">
-      <div class="panel-header">
-        <h3>MCP Servers</h3>
-        <button class="btn-add" onClick={() => setShowAddForm(!showAddForm())}>
+    <div class="p-4 flex flex-col gap-4">
+      <div class="flex justify-between items-center">
+        <h3 class="m-0 text-lg font-semibold">MCP Servers</h3>
+        <button
+          class="px-4 py-2 bg-accent text-white border-none rounded-md cursor-pointer text-sm hover:bg-[#2563eb]"
+          onClick={() => setShowAddForm(!showAddForm())}
+        >
           {showAddForm() ? "Cancel" : "Add Server"}
         </button>
       </div>
 
       <Show when={error()}>
-        <div class="error-message">{error()}</div>
+        <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-sm">{error()}</div>
       </Show>
 
       <Show when={showAddForm()}>
-        <div class="add-server-form">
-          <div class="form-field">
-            <label for="server-name">Server Name</label>
+        <div class="p-4 bg-popover rounded-lg flex flex-col gap-3">
+          <div class="flex flex-col gap-1">
+            <label for="server-name" class="text-[13px] font-medium text-muted">Server Name</label>
             <input
               id="server-name"
               type="text"
               placeholder="e.g., filesystem"
               value={newServerName()}
               onInput={(e) => setNewServerName(e.currentTarget.value)}
+              class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
             />
           </div>
 
-          <div class="form-field">
-            <label for="server-command">Command</label>
+          <div class="flex flex-col gap-1">
+            <label for="server-command" class="text-[13px] font-medium text-muted">Command</label>
             <input
               id="server-command"
               type="text"
               placeholder="e.g., npx"
               value={newServerCommand()}
               onInput={(e) => setNewServerCommand(e.currentTarget.value)}
+              class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
             />
           </div>
 
-          <div class="form-field">
-            <label for="server-args">Arguments (comma-separated)</label>
+          <div class="flex flex-col gap-1">
+            <label for="server-args" class="text-[13px] font-medium text-muted">Arguments (comma-separated)</label>
             <input
               id="server-args"
               type="text"
               placeholder="e.g., -y, @modelcontextprotocol/server-filesystem, /path"
               value={newServerArgs()}
               onInput={(e) => setNewServerArgs(e.currentTarget.value)}
+              class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
             />
           </div>
 
-          <div class="form-field checkbox">
+          <div class="flex flex-row items-center gap-2">
             <input
               id="server-autoconnect"
               type="checkbox"
               checked={newServerAutoConnect()}
               onChange={(e) => setNewServerAutoConnect(e.currentTarget.checked)}
+              class="w-4 h-4"
             />
-            <label for="server-autoconnect">Auto-connect on startup</label>
+            <label for="server-autoconnect" class="text-[13px] font-medium text-muted">Auto-connect on startup</label>
           </div>
 
-          <div class="form-actions">
-            <button class="btn-primary" onClick={handleAddServer}>
+          <div class="flex gap-2 mt-2">
+            <button class="px-4 py-2 bg-accent text-white border-none rounded-md cursor-pointer text-sm hover:bg-[#2563eb]" onClick={handleAddServer}>
               Add Server
             </button>
-            <button class="btn-secondary" onClick={resetForm}>
+            <button class="px-4 py-2 bg-popover text-foreground border border-[rgba(148,163,184,0.25)] rounded-md cursor-pointer text-sm hover:bg-[rgba(148,163,184,0.15)]" onClick={resetForm}>
               Cancel
             </button>
           </div>
         </div>
       </Show>
 
-      <div class="server-list">
+      <div class="flex flex-col gap-2">
         <Show
           when={mcpSettings().servers.length > 0}
           fallback={
-            <div class="empty-state">
+            <div class="py-8 text-center text-muted text-sm">
               No MCP servers configured. Click "Add Server" to get started.
             </div>
           }
@@ -220,21 +226,33 @@ export const McpServersPanel: Component = () => {
 
               return (
                 <div
-                  class="server-item"
-                  classList={{
-                    disabled: !server.enabled,
-                    connected: status() === "connected",
-                    error: status() === "error",
-                    builtin: isBuiltin(),
-                  }}
+                  class={`px-4 py-3 bg-popover border rounded-lg flex justify-between items-center gap-4 ${
+                    !server.enabled
+                      ? "opacity-60"
+                      : status() === "connected"
+                        ? "border-[#22c55e]"
+                        : status() === "error"
+                          ? "border-[#dc2626]"
+                          : "border-[rgba(148,163,184,0.25)]"
+                  } ${isBuiltin() ? "bg-[#f0f9ff] border-accent" : ""}`}
                 >
-                  <div class="server-info">
-                    <div class="server-name">
-                      <span class="name">{server.name}</span>
+                  <div class="flex-1 flex flex-col gap-1">
+                    <div class="flex items-center gap-2">
+                      <span class="font-semibold text-sm">{server.name}</span>
                       <Show when={isBuiltin()}>
-                        <span class="builtin-badge">Built-in</span>
+                        <span class="px-2 py-0.5 rounded-xl text-[10px] font-semibold uppercase bg-accent text-white">Built-in</span>
                       </Show>
-                      <span class={`status-badge ${status()}`}>
+                      <span
+                        class={`px-2 py-0.5 rounded-xl text-[11px] font-medium uppercase ${
+                          status() === "disconnected"
+                            ? "bg-popover text-muted"
+                            : status() === "connecting"
+                              ? "bg-[#fef9c3] text-[#ca8a04]"
+                              : status() === "connected"
+                                ? "bg-[#dcfce7] text-[#16a34a]"
+                                : "bg-[rgba(239,68,68,0.1)] text-[#dc2626]"
+                        }`}
+                      >
                         {isBuiltin() && status() === "connected"
                           ? "Connected (Gateway)"
                           : status()}
@@ -243,28 +261,28 @@ export const McpServersPanel: Component = () => {
                     <Show
                       when={isLocal()}
                       fallback={
-                        <div class="server-description">
+                        <div class="text-xs text-muted italic">
                           {isBuiltinServer(server) && server.description}
                         </div>
                       }
                     >
-                      <div class="server-command">
+                      <div class="text-xs text-muted font-mono">
                         {isLocalServer(server) &&
                           `${server.command} ${server.args.join(" ")}`}
                       </div>
                     </Show>
                     <Show when={server.autoConnect && isLocal()}>
-                      <span class="auto-connect-badge">Auto-connect</span>
+                      <span class="text-[11px] text-accent">Auto-connect</span>
                     </Show>
                   </div>
 
-                  <div class="server-actions">
+                  <div class="flex gap-2">
                     <Show when={isLocal()}>
                       <Show
                         when={status() === "connected"}
                         fallback={
                           <button
-                            class="btn-connect"
+                            class="px-3 py-1.5 rounded text-xs cursor-pointer bg-[#22c55e] text-white border-none hover:not-disabled:bg-[#16a34a] disabled:opacity-50 disabled:cursor-not-allowed"
                             onClick={() => handleConnect(server)}
                             disabled={!server.enabled || isConnecting()}
                           >
@@ -273,7 +291,7 @@ export const McpServersPanel: Component = () => {
                         }
                       >
                         <button
-                          class="btn-disconnect"
+                          class="px-3 py-1.5 rounded text-xs cursor-pointer bg-[#f59e0b] text-white border-none hover:bg-[#d97706]"
                           onClick={() => handleDisconnect(server.name)}
                         >
                           Disconnect
@@ -281,14 +299,14 @@ export const McpServersPanel: Component = () => {
                       </Show>
 
                       <button
-                        class="btn-toggle"
+                        class="px-3 py-1.5 rounded text-xs cursor-pointer bg-popover text-foreground border border-[rgba(148,163,184,0.25)] hover:bg-[rgba(148,163,184,0.15)]"
                         onClick={() => handleToggle(server.name)}
                       >
                         {server.enabled ? "Disable" : "Enable"}
                       </button>
 
                       <button
-                        class="btn-remove"
+                        class="px-3 py-1.5 rounded text-xs cursor-pointer bg-[#ef4444] text-white border-none hover:bg-[#dc2626]"
                         onClick={() => handleRemove(server.name)}
                       >
                         Remove

@@ -4,7 +4,6 @@
 import { type Component, createSignal, For, onMount, Show } from "solid-js";
 import { getDefaultRegion, REGIONS } from "@/lib/regions";
 import { projectStore } from "@/stores/project.store";
-import "./ProjectPicker.css";
 
 export const ProjectPicker: Component = () => {
   const [isCreating, setIsCreating] = createSignal(false);
@@ -55,11 +54,13 @@ export const ProjectPicker: Component = () => {
   };
 
   return (
-    <div class="project-picker">
-      <div class="project-picker-header">
-        <h2>Projects</h2>
+    <div class="flex flex-col h-full p-3 bg-card text-foreground">
+      <div class="flex justify-between items-center mb-3 pb-2 border-b border-border">
+        <h2 class="m-0 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Projects
+        </h2>
         <button
-          class="project-picker-new-btn"
+          class="px-2 py-1 bg-primary text-primary-foreground border-none rounded text-xs cursor-pointer transition-colors hover:not-disabled:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={() => setIsCreating(true)}
           disabled={isCreating()}
         >
@@ -68,11 +69,13 @@ export const ProjectPicker: Component = () => {
       </div>
 
       <Show when={projectStore.error}>
-        <div class="project-picker-error">{projectStore.error}</div>
+        <div class="p-2 mb-3 bg-destructive/20 text-destructive rounded text-xs">
+          {projectStore.error}
+        </div>
       </Show>
 
       <Show when={isCreating()}>
-        <div class="project-create-form">
+        <div class="flex flex-col gap-2 p-3 mb-3 bg-muted rounded-md">
           <input
             type="text"
             placeholder="Project name"
@@ -81,11 +84,13 @@ export const ProjectPicker: Component = () => {
             onKeyDown={handleKeyDown}
             disabled={isSubmitting()}
             autofocus
+            class="px-2.5 py-2 bg-background border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring placeholder:text-muted-foreground"
           />
           <select
             value={selectedRegion()}
             onChange={(e) => setSelectedRegion(e.currentTarget.value)}
             disabled={isSubmitting()}
+            class="px-2.5 py-2 bg-background border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring"
           >
             <For each={REGIONS}>
               {(region) => (
@@ -95,16 +100,16 @@ export const ProjectPicker: Component = () => {
               )}
             </For>
           </select>
-          <div class="project-create-actions">
+          <div class="flex gap-2 mt-1">
             <button
-              class="project-create-btn"
+              class="flex-1 py-2 bg-primary text-primary-foreground border-none rounded text-[13px] cursor-pointer transition-colors hover:not-disabled:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleCreate}
               disabled={isSubmitting() || !newName().trim()}
             >
               {isSubmitting() ? "Creating..." : "Create"}
             </button>
             <button
-              class="project-cancel-btn"
+              class="px-3 py-2 bg-transparent text-foreground border border-border rounded text-[13px] cursor-pointer transition-colors hover:not-disabled:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={() => {
                 setIsCreating(false);
                 setNewName("");
@@ -118,22 +123,32 @@ export const ProjectPicker: Component = () => {
       </Show>
 
       <Show when={projectStore.loading && projectStore.projects.length === 0}>
-        <div class="project-picker-loading">Loading projects...</div>
+        <div class="p-4 text-center text-muted-foreground text-[13px]">
+          Loading projects...
+        </div>
       </Show>
 
-      <div class="project-list">
+      <div class="flex-1 overflow-y-auto flex flex-col gap-0.5">
         <For each={projectStore.projects}>
           {(project) => (
             <div
-              class={`project-item ${project.id === projectStore.activeProject?.id ? "active" : ""}`}
+              class={`flex justify-between items-center px-2.5 py-2 rounded cursor-pointer transition-colors group ${
+                project.id === projectStore.activeProject?.id
+                  ? "bg-primary/20"
+                  : "hover:bg-muted"
+              }`}
               onClick={() => projectStore.setActive(project.id)}
             >
-              <div class="project-item-info">
-                <span class="project-name">{project.name}</span>
-                <span class="project-region">{project.region}</span>
+              <div class="flex flex-col gap-0.5 overflow-hidden">
+                <span class="text-[13px] font-medium whitespace-nowrap overflow-hidden text-ellipsis">
+                  {project.name}
+                </span>
+                <span class="text-[11px] text-muted-foreground">
+                  {project.region}
+                </span>
               </div>
               <button
-                class="project-delete-btn"
+                class="px-1.5 py-0.5 bg-transparent text-muted-foreground border-none rounded text-base leading-none cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/20 hover:text-destructive"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDelete(project.id, project.name);
@@ -148,7 +163,7 @@ export const ProjectPicker: Component = () => {
       </div>
 
       <Show when={!projectStore.loading && projectStore.projects.length === 0}>
-        <div class="project-picker-empty">
+        <div class="p-4 text-center text-muted-foreground text-[13px]">
           No projects yet. Create one to get started.
         </div>
       </Show>

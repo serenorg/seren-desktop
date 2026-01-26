@@ -4,7 +4,6 @@
 import { type Component, For, Show } from "solid-js";
 import { logout } from "@/services/auth";
 import { settingsStore } from "@/stores/settings.store";
-import "./SettingsPanel.css";
 
 interface SettingsPanelProps {
   onLogout?: () => void;
@@ -36,20 +35,29 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   };
 
   return (
-    <div class="settings-panel">
-      <div class="settings-header">
-        <h2>Settings</h2>
-        <button class="reset-all-btn" onClick={handleResetAll}>
+    <div class="flex flex-col h-full p-3 bg-card text-foreground overflow-y-auto">
+      <div class="flex justify-between items-center mb-4 pb-2 border-b border-border">
+        <h2 class="m-0 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Settings
+        </h2>
+        <button
+          class="px-2 py-1 bg-transparent text-muted-foreground border border-border rounded text-[11px] cursor-pointer transition-all hover:bg-destructive/20 hover:text-destructive hover:border-destructive"
+          onClick={handleResetAll}
+        >
           Reset All
         </button>
       </div>
 
       {/* Editor Settings */}
-      <section class="settings-section">
-        <h3>Editor</h3>
+      <section class="mb-5 pb-4 border-b border-border last:border-b-0">
+        <h3 class="m-0 mb-3 text-[13px] font-semibold text-foreground">
+          Editor
+        </h3>
 
-        <div class="setting-item">
-          <label for="font-size">Font Size</label>
+        <div class="flex justify-between items-center mb-3 last:mb-0">
+          <label for="font-size" class="text-[13px] text-foreground">
+            Font Size
+          </label>
           <input
             id="font-size"
             type="number"
@@ -62,11 +70,14 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 parseInt(e.currentTarget.value, 10) || 14,
               )
             }
+            class="w-[100px] px-2 py-1.5 bg-muted border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring"
           />
         </div>
 
-        <div class="setting-item">
-          <label for="tab-size">Tab Size</label>
+        <div class="flex justify-between items-center mb-3 last:mb-0">
+          <label for="tab-size" class="text-[13px] text-foreground">
+            Tab Size
+          </label>
           <select
             id="tab-size"
             value={settingsStore.get("editorTabSize")}
@@ -76,6 +87,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 parseInt(e.currentTarget.value, 10),
               )
             }
+            class="w-[100px] px-2 py-1.5 bg-muted border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring"
           >
             <option value="2">2 spaces</option>
             <option value="4">4 spaces</option>
@@ -83,14 +95,15 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
           </select>
         </div>
 
-        <div class="setting-item checkbox">
-          <label>
+        <div class="flex justify-start items-center mb-3 last:mb-0">
+          <label class="flex items-center gap-2 text-[13px] text-foreground cursor-pointer">
             <input
               type="checkbox"
               checked={settingsStore.get("editorWordWrap")}
               onChange={(e) =>
                 settingsStore.set("editorWordWrap", e.currentTarget.checked)
               }
+              class="w-4 h-4 m-0 cursor-pointer"
             />
             Word Wrap
           </label>
@@ -98,25 +111,30 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       </section>
 
       {/* Completion Settings */}
-      <section class="settings-section">
-        <h3>AI Completions</h3>
+      <section class="mb-5 pb-4 border-b border-border last:border-b-0">
+        <h3 class="m-0 mb-3 text-[13px] font-semibold text-foreground">
+          AI Completions
+        </h3>
 
-        <div class="setting-item checkbox">
-          <label>
+        <div class="flex justify-start items-center mb-3 last:mb-0">
+          <label class="flex items-center gap-2 text-[13px] text-foreground cursor-pointer">
             <input
               type="checkbox"
               checked={settingsStore.get("completionEnabled")}
               onChange={(e) =>
                 settingsStore.set("completionEnabled", e.currentTarget.checked)
               }
+              class="w-4 h-4 m-0 cursor-pointer"
             />
             Enable Inline Completions
           </label>
         </div>
 
         <Show when={settingsStore.get("completionEnabled")}>
-          <div class="setting-item">
-            <label for="completion-delay">Delay (ms)</label>
+          <div class="flex justify-between items-center mb-3 last:mb-0">
+            <label for="completion-delay" class="text-[13px] text-foreground">
+              Delay (ms)
+            </label>
             <input
               id="completion-delay"
               type="number"
@@ -130,30 +148,36 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   parseInt(e.currentTarget.value, 10) || 300,
                 )
               }
+              class="w-[100px] px-2 py-1.5 bg-muted border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring"
             />
           </div>
         </Show>
       </section>
 
       {/* Wallet Settings */}
-      <section class="settings-section">
-        <h3>Wallet</h3>
+      <section class="mb-5 pb-4 border-b border-border last:border-b-0">
+        <h3 class="m-0 mb-3 text-[13px] font-semibold text-foreground">
+          Wallet
+        </h3>
 
-        <div class="setting-item checkbox">
-          <label>
+        <div class="flex justify-start items-center mb-3 last:mb-0">
+          <label class="flex items-center gap-2 text-[13px] text-foreground cursor-pointer">
             <input
               type="checkbox"
               checked={settingsStore.get("showBalance")}
               onChange={(e) =>
                 settingsStore.set("showBalance", e.currentTarget.checked)
               }
+              class="w-4 h-4 m-0 cursor-pointer"
             />
             Show Balance in Status Bar
           </label>
         </div>
 
-        <div class="setting-item">
-          <label for="low-balance">Low Balance Warning ($)</label>
+        <div class="flex justify-between items-center mb-3 last:mb-0">
+          <label for="low-balance" class="text-[13px] text-foreground">
+            Low Balance Warning ($)
+          </label>
           <input
             id="low-balance"
             type="number"
@@ -166,30 +190,36 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 parseFloat(e.currentTarget.value) || 1,
               )
             }
+            class="w-[100px] px-2 py-1.5 bg-muted border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring"
           />
         </div>
       </section>
 
       {/* Auto Top-Up Settings */}
-      <section class="settings-section">
-        <h3>Auto Top-Up</h3>
+      <section class="mb-5 pb-4 border-b border-border last:border-b-0">
+        <h3 class="m-0 mb-3 text-[13px] font-semibold text-foreground">
+          Auto Top-Up
+        </h3>
 
-        <div class="setting-item checkbox">
-          <label>
+        <div class="flex justify-start items-center mb-3 last:mb-0">
+          <label class="flex items-center gap-2 text-[13px] text-foreground cursor-pointer">
             <input
               type="checkbox"
               checked={settingsStore.get("autoTopUpEnabled")}
               onChange={(e) =>
                 settingsStore.set("autoTopUpEnabled", e.currentTarget.checked)
               }
+              class="w-4 h-4 m-0 cursor-pointer"
             />
             Enable Automatic Top-Up
           </label>
         </div>
 
         <Show when={settingsStore.get("autoTopUpEnabled")}>
-          <div class="setting-item">
-            <label for="auto-threshold">When balance falls below ($)</label>
+          <div class="flex justify-between items-center mb-3 last:mb-0">
+            <label for="auto-threshold" class="text-[13px] text-foreground">
+              When balance falls below ($)
+            </label>
             <input
               id="auto-threshold"
               type="number"
@@ -202,11 +232,14 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   parseFloat(e.currentTarget.value) || 5,
                 )
               }
+              class="w-[100px] px-2 py-1.5 bg-muted border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring"
             />
           </div>
 
-          <div class="setting-item">
-            <label for="auto-amount">Top-up Amount</label>
+          <div class="flex justify-between items-center mb-3 last:mb-0">
+            <label for="auto-amount" class="text-[13px] text-foreground">
+              Top-up Amount
+            </label>
             <select
               id="auto-amount"
               value={settingsStore.get("autoTopUpAmount")}
@@ -216,6 +249,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   parseFloat(e.currentTarget.value),
                 )
               }
+              class="w-[100px] px-2 py-1.5 bg-muted border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring"
             >
               <For each={TOP_UP_AMOUNTS}>
                 {(amount) => (
@@ -225,7 +259,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             </select>
           </div>
 
-          <p class="setting-hint">
+          <p class="mt-2 mb-0 p-2 bg-blue-500/10 rounded text-[11px] text-blue-400 leading-snug">
             When your balance drops below the threshold, you'll be redirected to
             Stripe to complete the top-up.
           </p>
@@ -233,11 +267,15 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       </section>
 
       {/* Theme Settings */}
-      <section class="settings-section">
-        <h3>Appearance</h3>
+      <section class="mb-5 pb-4 border-b border-border last:border-b-0">
+        <h3 class="m-0 mb-3 text-[13px] font-semibold text-foreground">
+          Appearance
+        </h3>
 
-        <div class="setting-item">
-          <label for="theme">Theme</label>
+        <div class="flex justify-between items-center mb-3 last:mb-0">
+          <label for="theme" class="text-[13px] text-foreground">
+            Theme
+          </label>
           <select
             id="theme"
             value={settingsStore.get("theme")}
@@ -247,6 +285,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 e.currentTarget.value as "dark" | "light" | "system",
               )
             }
+            class="w-[100px] px-2 py-1.5 bg-muted border border-border rounded text-foreground text-[13px] focus:outline-none focus:border-ring"
           >
             <option value="dark">Dark</option>
             <option value="light">Light</option>
@@ -256,10 +295,15 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       </section>
 
       {/* Account Section */}
-      <section class="settings-section">
-        <h3>Account</h3>
+      <section class="mb-5 pb-4 border-b border-border last:border-b-0">
+        <h3 class="m-0 mb-3 text-[13px] font-semibold text-foreground">
+          Account
+        </h3>
 
-        <button class="logout-btn" onClick={handleLogout}>
+        <button
+          class="w-full py-2.5 bg-transparent text-destructive border border-destructive rounded text-[13px] cursor-pointer transition-all hover:bg-destructive/20"
+          onClick={handleLogout}
+        >
           Sign Out
         </button>
       </section>

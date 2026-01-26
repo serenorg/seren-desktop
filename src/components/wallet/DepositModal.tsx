@@ -14,7 +14,6 @@ import {
   walletState,
   walletStore,
 } from "@/stores/wallet.store";
-import "./DepositModal.css";
 
 interface DepositModalProps {
   onClose: () => void;
@@ -143,17 +142,20 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
   };
 
   return (
-    <div class="deposit-modal-backdrop" onClick={handleBackdropClick}>
+    <div
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] animate-[fadeIn_0.2s_ease-out]"
+      onClick={handleBackdropClick}
+    >
       <div
-        class="deposit-modal"
+        class="bg-[#1e293b] border border-[rgba(148,163,184,0.15)] rounded-xl w-[90%] max-w-[420px] shadow-[0_8px_32px_rgba(0,0,0,0.4)] animate-[slideUp_0.2s_ease-out]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="deposit-modal-title"
       >
-        <header class="deposit-modal-header">
-          <h2 id="deposit-modal-title">Add SerenBucks</h2>
+        <header class="flex items-center justify-between px-6 py-5 border-b border-[rgba(148,163,184,0.15)]">
+          <h2 id="deposit-modal-title" class="text-[18px] font-semibold text-white m-0">Add SerenBucks</h2>
           <button
-            class="deposit-modal-close"
+            class="flex items-center justify-center w-8 h-8 p-0 bg-transparent border-none rounded-md text-[24px] text-[#94a3b8] cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.1)] hover:text-white"
             onClick={props.onClose}
             aria-label="Close"
           >
@@ -161,29 +163,37 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
           </button>
         </header>
 
-        <div class="deposit-modal-body">
-          <div class="deposit-current-balance">
-            <span class="deposit-balance-label">Current Balance</span>
-            <span class="deposit-balance-value">
+        <div class="p-6 flex flex-col gap-5">
+          <div class="flex flex-col items-center gap-1 p-4 bg-[rgba(15,23,42,0.5)] rounded-lg">
+            <span class="text-[12px] text-[#64748b] uppercase tracking-wider">Current Balance</span>
+            <span class="text-[28px] font-bold text-white tabular-nums">
               {walletStore.formattedBalance}
             </span>
           </div>
 
           <Show when={!cryptoDepositInfo()}>
-            <div class="deposit-method-selector">
-              <label class="deposit-method-label">Payment Method</label>
-              <div class="deposit-method-options">
+            <div class="flex flex-col gap-2">
+              <label class="text-[14px] font-medium text-white">Payment Method</label>
+              <div class="grid grid-cols-2 gap-3">
                 <button
                   type="button"
-                  class={`deposit-method-btn ${paymentMethod() === "stripe" ? "selected" : ""}`}
+                  class={`flex flex-col items-center gap-1 px-3 py-4 rounded-[10px] cursor-pointer transition-all border-2 ${
+                    paymentMethod() === "stripe"
+                      ? "border-[#6366f1] bg-[rgba(99,102,241,0.1)]"
+                      : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                  }`}
                   onClick={() => setPaymentMethod("stripe")}
                 >
-                  <span class="method-icon">💳</span>
-                  <span class="method-name">Card (Stripe)</span>
+                  <span class="text-[24px]">💳</span>
+                  <span class="text-[13px] font-medium text-white">Card (Stripe)</span>
                 </button>
                 <button
                   type="button"
-                  class={`deposit-method-btn ${paymentMethod() === "crypto" ? "selected" : ""}`}
+                  class={`flex flex-col items-center gap-1 px-3 py-4 rounded-[10px] cursor-pointer transition-all border-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    paymentMethod() === "crypto"
+                      ? "border-[#6366f1] bg-[rgba(99,102,241,0.1)]"
+                      : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                  }`}
                   onClick={() => setPaymentMethod("crypto")}
                   disabled={!cryptoWalletStore.state().isConfigured}
                   title={
@@ -192,19 +202,23 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                       : ""
                   }
                 >
-                  <span class="method-icon">🔐</span>
-                  <span class="method-name">USDC (Crypto)</span>
+                  <span class="text-[24px]">🔐</span>
+                  <span class="text-[13px] font-medium text-white">USDC (Crypto)</span>
                 </button>
               </div>
             </div>
 
-            <div class="deposit-amounts">
-              <label class="deposit-amounts-label">Select Amount</label>
-              <div class="deposit-preset-amounts">
+            <div class="flex flex-col gap-3">
+              <label class="text-[14px] font-medium text-white">Select Amount</label>
+              <div class="grid grid-cols-5 gap-2">
                 <For each={PRESET_AMOUNTS}>
                   {(amount) => (
                     <button
-                      class={`deposit-amount-btn ${!isCustom() && selectedAmount() === amount ? "selected" : ""}`}
+                      class={`py-3 px-2 rounded-lg text-[14px] font-medium cursor-pointer transition-all border ${
+                        !isCustom() && selectedAmount() === amount
+                          ? "bg-[#6366f1] border-[#6366f1] text-white"
+                          : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-white hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                      }`}
                       onClick={() => handlePresetClick(amount)}
                     >
                       ${amount}
@@ -212,7 +226,11 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   )}
                 </For>
                 <button
-                  class={`deposit-amount-btn ${isCustom() ? "selected" : ""}`}
+                  class={`py-3 px-2 rounded-lg text-[14px] font-medium cursor-pointer transition-all border ${
+                    isCustom()
+                      ? "bg-[#6366f1] border-[#6366f1] text-white"
+                      : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-white hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                  }`}
                   onClick={handleCustomClick}
                 >
                   Custom
@@ -220,8 +238,8 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
               </div>
 
               <Show when={isCustom()}>
-                <div class="deposit-custom-input">
-                  <span class="deposit-currency">$</span>
+                <div class="flex items-center gap-2 mt-2">
+                  <span class="text-[18px] font-medium text-[#94a3b8]">$</span>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -230,16 +248,17 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                     onInput={(e) => handleCustomInput(e.currentTarget.value)}
                     aria-label="Custom amount in dollars"
                     autofocus
+                    class="flex-1 px-4 py-3 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-lg text-[18px] text-white outline-none transition-colors focus:border-[#6366f1] placeholder:text-[#64748b]"
                   />
                 </div>
-                <p class="deposit-custom-hint">Minimum $5, maximum $500</p>
+                <p class="text-[12px] text-[#64748b] mt-1 m-0">Minimum $5, maximum $500</p>
               </Show>
             </div>
 
             <Show when={effectiveAmount() > 0}>
-              <div class="deposit-summary">
+              <div class="flex justify-between items-center px-4 py-3 bg-[rgba(15,23,42,0.5)] rounded-lg text-[14px] text-[#94a3b8]">
                 <span>New balance after deposit:</span>
-                <span class="deposit-new-balance">
+                <span class="font-semibold text-[#22c55e]">
                   ${((walletState.balance ?? 0) + effectiveAmount()).toFixed(2)}
                 </span>
               </div>
@@ -248,30 +267,30 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
 
           <Show when={cryptoDepositInfo()}>
             {(info) => (
-              <div class="crypto-deposit-info">
-                <div class="crypto-deposit-header">
-                  <span class="crypto-icon">🔐</span>
-                  <h3>Send USDC to Complete Deposit</h3>
+              <div class="flex flex-col gap-4">
+                <div class="flex items-center gap-3 pb-3 border-b border-[rgba(148,163,184,0.15)]">
+                  <span class="text-[28px]">🔐</span>
+                  <h3 class="m-0 text-[16px] font-semibold text-white">Send USDC to Complete Deposit</h3>
                 </div>
 
-                <div class="crypto-deposit-details">
-                  <div class="crypto-detail-row">
-                    <span class="crypto-label">Amount</span>
-                    <span class="crypto-value">{info().amount} USDC</span>
+                <div class="flex flex-col gap-3">
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">Amount</span>
+                    <span class="text-[15px] font-medium text-white">{info().amount} USDC</span>
                   </div>
-                  <div class="crypto-detail-row">
-                    <span class="crypto-label">Network</span>
-                    <span class="crypto-value">{info().network}</span>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">Network</span>
+                    <span class="text-[15px] font-medium text-white">{info().network}</span>
                   </div>
-                  <div class="crypto-detail-row">
-                    <span class="crypto-label">Deposit Address</span>
-                    <div class="crypto-address-row">
-                      <code class="crypto-address">
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">Deposit Address</span>
+                    <div class="flex items-center gap-2">
+                      <code class="flex-1 px-3 py-2.5 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-md text-[12px] font-mono text-white break-all">
                         {info().depositAddress}
                       </code>
                       <button
                         type="button"
-                        class="copy-btn"
+                        class="px-3 py-2 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-md text-[16px] cursor-pointer transition-all hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
                         onClick={handleCopyAddress}
                         title="Copy address"
                       >
@@ -281,20 +300,20 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   </div>
                 </div>
 
-                <div class="crypto-deposit-warning">
-                  <p>
+                <div class="p-3 bg-[rgba(255,193,7,0.1)] border border-[rgba(255,193,7,0.3)] rounded-lg">
+                  <p class="m-0 text-[13px] text-white">
                     Send exactly <strong>{info().amount} USDC</strong> to the
                     address above.
                   </p>
-                  <p class="crypto-warning-text">
+                  <p class="mt-2 text-[12px] text-[#94a3b8] m-0">
                     Only send USDC on <strong>{info().network}</strong>. Sending
                     other tokens or using the wrong network will result in
                     permanent loss.
                   </p>
                 </div>
 
-                <div class="crypto-deposit-status">
-                  <span class="status-dot" />
+                <div class="flex items-center gap-2 p-3 bg-[rgba(15,23,42,0.5)] rounded-lg text-[13px] text-[#94a3b8]">
+                  <span class="w-2 h-2 bg-[#6366f1] rounded-full animate-pulse" />
                   <span>Waiting for payment...</span>
                 </div>
               </div>
@@ -302,24 +321,28 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
           </Show>
 
           <Show when={error()}>
-            <div class="deposit-error" role="alert">
+            <div class="px-4 py-3 bg-[rgba(220,53,69,0.1)] border border-[#dc3545] rounded-lg text-[13px] text-[#dc3545]" role="alert">
               {error()}
             </div>
           </Show>
         </div>
 
-        <footer class="deposit-modal-footer">
+        <footer class="flex justify-end gap-3 px-6 py-4 border-t border-[rgba(148,163,184,0.15)]">
           <Show
             when={!cryptoDepositInfo()}
             fallback={
-              <button type="button" class="btn-primary" onClick={props.onClose}>
+              <button
+                type="button"
+                class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-[#6366f1] text-white border-none hover:bg-[#4f46e5]"
+                onClick={props.onClose}
+              >
                 Done
               </button>
             }
           >
             <button
               type="button"
-              class="btn-secondary"
+              class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-transparent text-[#94a3b8] border border-[rgba(148,163,184,0.15)] hover:bg-[rgba(148,163,184,0.1)] hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={props.onClose}
               disabled={isLoading()}
             >
@@ -327,7 +350,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
             </button>
             <button
               type="button"
-              class="btn-primary"
+              class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-[#6366f1] text-white border-none hover:bg-[#4f46e5] disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={handleDeposit}
               disabled={isLoading() || !isValidAmount()}
             >

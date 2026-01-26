@@ -1,6 +1,5 @@
 import type { Component } from "solid-js";
 import { createSignal, onCleanup, onMount } from "solid-js";
-import "./StreamingMessage.css";
 
 interface StreamingMessageProps {
   stream: AsyncGenerator<string>;
@@ -45,10 +44,10 @@ export const StreamingMessage: Component<StreamingMessageProps> = (props) => {
   });
 
   return (
-    <article class="chat-message assistant streaming">
-      <div class="message-content">
+    <article class="px-5 py-4 border-b border-[#21262d] bg-transparent">
+      <div class="text-sm leading-relaxed text-[#e6edf3] break-words">
         {content()}
-        {isStreaming() && <span class="streaming-cursor" />}
+        {isStreaming() && <span class="inline-block w-0.5 h-[1em] bg-[#58a6ff] ml-0.5 align-text-bottom animate-[blink_1s_step-end_infinite]" />}
       </div>
     </article>
   );

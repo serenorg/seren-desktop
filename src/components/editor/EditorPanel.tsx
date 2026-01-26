@@ -27,7 +27,6 @@ import { ImageViewer } from "./ImageViewer";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonacoEditor } from "./MonacoEditor";
 import { PdfViewer } from "./PdfViewer";
-import "./EditorPanel.css";
 
 export const EditorPanel: Component = () => {
   const [editorContent, setEditorContent] = createSignal("");
@@ -145,13 +144,13 @@ export const EditorPanel: Component = () => {
   }
 
   return (
-    <div class="editor-panel" onKeyDown={handleKeyDown}>
-      <aside class="editor-sidebar">
-        <div class="editor-sidebar-header">
-          <span class="editor-sidebar-title">Explorer</span>
+    <div class="flex h-full bg-card text-foreground" onKeyDown={handleKeyDown}>
+      <aside class="w-60 min-w-[180px] max-w-[400px] flex flex-col bg-popover border-r border-[rgba(148,163,184,0.25)]">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-[rgba(148,163,184,0.15)]">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Explorer</span>
           <button
             type="button"
-            class="editor-open-folder"
+            class="bg-transparent border-none px-2 py-1 cursor-pointer text-sm rounded transition-colors hover:bg-[rgba(148,163,184,0.15)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleOpenFolder}
             disabled={isLoading()}
             title="Open Folder"
@@ -159,7 +158,7 @@ export const EditorPanel: Component = () => {
             {isLoading() ? "..." : "📂"}
           </button>
         </div>
-        <div class="editor-file-tree">
+        <div class="flex-1 overflow-y-auto py-2">
           <FileTree
             onFileSelect={handleFileSelect}
             onDirectoryToggle={handleDirectoryToggle}
@@ -167,8 +166,8 @@ export const EditorPanel: Component = () => {
         </div>
       </aside>
 
-      <section class="editor-main">
-        <div class="editor-tabs">
+      <section class="flex-1 flex flex-col min-w-0">
+        <div class="shrink-0 border-b border-[rgba(148,163,184,0.15)]">
           <FileTabs
             isMarkdown={isMarkdownFile()}
             showPreview={showPreview()}
@@ -176,19 +175,18 @@ export const EditorPanel: Component = () => {
           />
         </div>
         <div
-          class="editor-content"
-          classList={{ "split-view": showPreview() && isMarkdownFile() }}
+          class={`flex-1 min-h-0 relative flex ${showPreview() && isMarkdownFile() ? "flex-row" : ""}`}
         >
           <Show
             when={activeFilePath()}
             fallback={
-              <div class="editor-empty">
-                <div class="editor-empty-content">
-                  <span class="editor-empty-icon">📝</span>
-                  <h2>No file open</h2>
-                  <p>
+              <div class="h-full flex items-center justify-center p-6">
+                <div class="text-center max-w-[320px]">
+                  <span class="text-5xl block mb-4 opacity-60">📝</span>
+                  <h2 class="m-0 mb-2 text-xl font-medium text-foreground">No file open</h2>
+                  <p class="m-0 mb-5 text-muted-foreground leading-normal">
                     Open a folder to browse files, or use{" "}
-                    <kbd>
+                    <kbd class="bg-[rgba(148,163,184,0.2)] px-1.5 py-0.5 rounded font-inherit text-[0.9em]">
                       {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+O
                     </kbd>{" "}
                     to open a file.
@@ -196,7 +194,7 @@ export const EditorPanel: Component = () => {
                   <Show when={!fileTreeState.rootPath}>
                     <button
                       type="button"
-                      class="editor-empty-button"
+                      class="bg-accent text-white border-none px-6 py-2.5 rounded-md text-[0.95rem] cursor-pointer transition-colors hover:bg-[#4f46e5]"
                       onClick={handleOpenFolder}
                     >
                       Open Folder
@@ -213,7 +211,7 @@ export const EditorPanel: Component = () => {
                   when={isPdfFile()}
                   fallback={
                     <>
-                      <div class="editor-pane">
+                      <div class="flex-1 min-w-0 h-full">
                         <MonacoEditor
                           filePath={activeFilePath() ?? undefined}
                           value={editorContent()}

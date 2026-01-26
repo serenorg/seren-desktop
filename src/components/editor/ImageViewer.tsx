@@ -8,7 +8,6 @@ import {
   createSignal,
   onCleanup,
 } from "solid-js";
-import "./ImageViewer.css";
 
 interface ImageViewerProps {
   filePath: string;
@@ -106,29 +105,29 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
   };
 
   return (
-    <div class="image-viewer">
-      <div class="image-viewer-toolbar">
-        <div class="image-viewer-info">
-          <span class="image-viewer-filename">{fileName()}</span>
+    <div class="flex flex-col h-full bg-card">
+      <div class="flex items-center justify-between px-4 py-2 bg-popover border-b border-[rgba(148,163,184,0.15)] shrink-0">
+        <div class="flex items-center gap-4">
+          <span class="font-medium text-foreground">{fileName()}</span>
           {dimensions() && (
-            <span class="image-viewer-dimensions">
+            <span class="text-xs text-muted-foreground">
               {dimensions()?.width} × {dimensions()?.height}
             </span>
           )}
         </div>
-        <div class="image-viewer-controls">
+        <div class="flex items-center gap-2">
           <button
             type="button"
-            class="image-viewer-btn"
+            class="bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)]"
             onClick={handleZoomOut}
             title="Zoom Out"
           >
             −
           </button>
-          <span class="image-viewer-zoom">{zoom()}%</span>
+          <span class="min-w-[50px] text-center text-[13px] text-muted-foreground">{zoom()}%</span>
           <button
             type="button"
-            class="image-viewer-btn"
+            class="bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)]"
             onClick={handleZoomIn}
             title="Zoom In"
           >
@@ -136,7 +135,7 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="image-viewer-btn"
+            class="bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)]"
             onClick={handleZoomReset}
             title="Reset Zoom"
           >
@@ -146,18 +145,17 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
       </div>
 
       <div
-        class="image-viewer-container"
+        class={`flex-1 overflow-hidden flex items-center justify-center relative cursor-grab ${isDragging() ? "cursor-grabbing" : ""} before:content-[''] before:absolute before:inset-0 before:bg-[linear-gradient(45deg,#2a2a2a_25%,transparent_25%),linear-gradient(-45deg,#2a2a2a_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#2a2a2a_75%),linear-gradient(-45deg,transparent_75%,#2a2a2a_75%)] before:bg-[length:20px_20px] before:bg-[position:0_0,0_10px,10px_-10px,-10px_0px] before:opacity-50 before:z-0`}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
-        classList={{ dragging: isDragging() }}
       >
         {error() ? (
-          <div class="image-viewer-error">{error()}</div>
+          <div class="text-destructive text-sm">{error()}</div>
         ) : imageUrl() ? (
           <img
             src={imageUrl()!}
             alt={fileName()}
-            class="image-viewer-image"
+            class={`max-w-none max-h-none origin-center select-none relative z-[1] ${isDragging() ? "" : "transition-transform duration-100 ease-out"}`}
             style={{
               transform: `translate(${position().x}px, ${position().y}px) scale(${zoom() / 100})`,
             }}
@@ -166,7 +164,7 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
             draggable={false}
           />
         ) : (
-          <div class="image-viewer-loading">Loading...</div>
+          <div class="text-muted-foreground text-sm">Loading...</div>
         )}
       </div>
     </div>
