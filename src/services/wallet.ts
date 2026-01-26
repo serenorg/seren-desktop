@@ -30,16 +30,22 @@ export interface CryptoDepositInfo {
  * @throws Error if not authenticated or network error
  */
 export async function fetchBalance() {
+  console.log("[Wallet] Fetching balance...");
   const { data, error } = await getWalletBalance({ throwOnError: false });
 
+  console.log("[Wallet] Response:", { hasData: !!data, hasError: !!error });
+
   if (error) {
+    console.error("[Wallet] Error fetching balance:", error);
     throw new Error("Failed to fetch balance");
   }
 
   if (!data?.data) {
+    console.error("[Wallet] No balance data in response:", data);
     throw new Error("No balance data returned");
   }
 
+  console.log("[Wallet] Balance fetched successfully:", data.data);
   return data.data;
 }
 
