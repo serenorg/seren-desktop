@@ -2,6 +2,7 @@
 // ABOUTME: Captures unhandled errors, scrubs PII, rate limits, and batches reports.
 
 import { API_BASE } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
 import { scrubSensitive } from "@/lib/scrub-sensitive";
 import { RateLimiter, getErrorKey } from "@/lib/rate-limiter";
 import { getToken } from "@/lib/tauri-bridge";
@@ -127,7 +128,7 @@ class TelemetryService {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      await fetch(`${API_BASE}/diagnostics/errors`, {
+      await appFetch(`${API_BASE}/diagnostics/errors`, {
         method: "POST",
         headers,
         body: JSON.stringify({ errors: batch }),

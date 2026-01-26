@@ -2,6 +2,7 @@
 // ABOUTME: Handles listing, creating, updating, and deleting projects.
 
 import { apiBase } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/lib/tauri-bridge";
 
 /**
@@ -60,7 +61,7 @@ export const projects = {
    */
   async list(): Promise<Project[]> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${apiBase}/projects`, {
+    const response = await appFetch(`${apiBase}/projects`, {
       method: "GET",
       headers,
     });
@@ -79,7 +80,7 @@ export const projects = {
    */
   async create(params: CreateProjectParams): Promise<Project> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${apiBase}/projects`, {
+    const response = await appFetch(`${apiBase}/projects`, {
       method: "POST",
       headers,
       body: JSON.stringify(params),
@@ -98,7 +99,7 @@ export const projects = {
    */
   async get(id: string): Promise<Project> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${apiBase}/projects/${id}`, {
+    const response = await appFetch(`${apiBase}/projects/${id}`, {
       method: "GET",
       headers,
     });
@@ -116,7 +117,7 @@ export const projects = {
    */
   async update(id: string, params: UpdateProjectParams): Promise<Project> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${apiBase}/projects/${id}`, {
+    const response = await appFetch(`${apiBase}/projects/${id}`, {
       method: "PATCH",
       headers,
       body: JSON.stringify(params),
@@ -135,7 +136,7 @@ export const projects = {
    */
   async delete(id: string): Promise<void> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${apiBase}/projects/${id}`, {
+    const response = await appFetch(`${apiBase}/projects/${id}`, {
       method: "DELETE",
       headers,
     });

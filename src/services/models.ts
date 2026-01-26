@@ -2,6 +2,7 @@
 // ABOUTME: Uses the seren-models publisher through the Seren Gateway API.
 
 import { apiBase } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
 
 export interface Model {
@@ -44,7 +45,7 @@ export const modelsService = {
         method: "GET",
       };
 
-      const response = await fetch(AGENT_API_ENDPOINT, {
+      const response = await appFetch(AGENT_API_ENDPOINT, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

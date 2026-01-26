@@ -5,9 +5,13 @@ const TOKEN_STORAGE_KEY = "seren_token";
 
 /**
  * Check if running in Tauri runtime (vs browser).
+ * Tauri 2.x uses __TAURI_INTERNALS__ for IPC communication.
  */
 export function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI__" in window;
+  return (
+    typeof window !== "undefined" &&
+    ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+  );
 }
 
 /**

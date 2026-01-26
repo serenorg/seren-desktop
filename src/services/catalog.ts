@@ -2,6 +2,7 @@
 // ABOUTME: Handles listing publishers, getting details, and search suggestions.
 
 import { apiBase } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/lib/tauri-bridge";
 
 /**
@@ -67,7 +68,7 @@ export const catalog = {
    */
   async list(): Promise<Publisher[]> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${apiBase}/agent/publishers`, {
+    const response = await appFetch(`${apiBase}/agent/publishers`, {
       method: "GET",
       headers,
     });
@@ -86,7 +87,7 @@ export const catalog = {
    */
   async get(slug: string): Promise<Publisher> {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${apiBase}/agent/publishers/${encodeURIComponent(slug)}`, {
+    const response = await appFetch(`${apiBase}/agent/publishers/${encodeURIComponent(slug)}`, {
       method: "GET",
       headers,
     });
@@ -110,7 +111,7 @@ export const catalog = {
 
     const headers = await getAuthHeaders();
     const params = new URLSearchParams({ search: query });
-    const response = await fetch(`${apiBase}/agent/publishers?${params}`, {
+    const response = await appFetch(`${apiBase}/agent/publishers?${params}`, {
       method: "GET",
       headers,
     });
@@ -135,7 +136,7 @@ export const catalog = {
 
     const headers = await getAuthHeaders();
     const params = new URLSearchParams({ q: query });
-    const response = await fetch(`${apiBase}/agent/publishers/suggest?${params}`, {
+    const response = await appFetch(`${apiBase}/agent/publishers/suggest?${params}`, {
       method: "GET",
       headers,
     });
@@ -155,7 +156,7 @@ export const catalog = {
   async listByCategory(category: string): Promise<Publisher[]> {
     const headers = await getAuthHeaders();
     const params = new URLSearchParams({ category });
-    const response = await fetch(`${apiBase}/agent/publishers?${params}`, {
+    const response = await appFetch(`${apiBase}/agent/publishers?${params}`, {
       method: "GET",
       headers,
     });

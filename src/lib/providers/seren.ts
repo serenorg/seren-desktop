@@ -2,6 +2,7 @@
 // ABOUTME: Routes requests through Seren's /agent/api and /agent/stream endpoints.
 
 import { apiBase } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
 import type { ChatRequest, ProviderAdapter, ProviderModel } from "./types";
 
@@ -125,7 +126,7 @@ export const serenProvider: ProviderAdapter = {
       },
     };
 
-    const response = await fetch(AGENT_API_ENDPOINT, {
+    const response = await appFetch(AGENT_API_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -157,7 +158,7 @@ export const serenProvider: ProviderAdapter = {
       },
     };
 
-    const response = await fetch(AGENT_STREAM_ENDPOINT, {
+    const response = await appFetch(AGENT_STREAM_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -228,7 +229,7 @@ export const serenProvider: ProviderAdapter = {
         },
       };
 
-      const response = await fetch(AGENT_API_ENDPOINT, {
+      const response = await appFetch(AGENT_API_ENDPOINT, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

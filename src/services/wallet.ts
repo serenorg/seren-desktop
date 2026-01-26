@@ -2,6 +2,7 @@
 // ABOUTME: Communicates with the Seren Gateway API for balance operations.
 
 import { API_BASE } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/lib/tauri-bridge";
 
 /**
@@ -40,7 +41,7 @@ export async function fetchBalance(): Promise<WalletBalance> {
     throw new Error("Not authenticated");
   }
 
-  const response = await fetch(`${API_BASE}/agent/wallet/balance`, {
+  const response = await appFetch(`${API_BASE}/agent/wallet/balance`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -74,7 +75,7 @@ export async function initiateTopUp(amount: number): Promise<TopUpCheckout> {
     throw new Error("Not authenticated");
   }
 
-  const response = await fetch(`${API_BASE}/agent/wallet/deposit`, {
+  const response = await appFetch(`${API_BASE}/agent/wallet/deposit`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

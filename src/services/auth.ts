@@ -2,6 +2,7 @@
 // ABOUTME: Communicates with Seren Gateway API using /auth/login endpoint.
 
 import { API_BASE } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
 import { storeToken, getToken, clearToken } from "@/lib/tauri-bridge";
 
 export interface LoginResponse {
@@ -32,7 +33,7 @@ export async function login(
   email: string,
   password: string
 ): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE}/auth/login`, {
+  const response = await appFetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
