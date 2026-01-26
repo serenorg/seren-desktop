@@ -2,8 +2,7 @@
 // ABOUTME: App is fully usable without login; auth unlocks AI features.
 
 import { createSignal, createEffect, Match, onCleanup, onMount, Show, Switch } from "solid-js";
-import { Header } from "@/components/common/Header";
-import { Sidebar, Panel } from "@/components/common/Sidebar";
+import { Header, type Panel } from "@/components/common/Header";
 import { StatusBar } from "@/components/common/StatusBar";
 import { SignIn } from "@/components/auth/SignIn";
 import { ChatPanel } from "@/components/chat/ChatPanel";
@@ -125,36 +124,30 @@ function App() {
     >
       <div class="app">
         <Header
+          activePanel={activePanel()}
+          onPanelChange={setActivePanel}
           onLogout={handleLogout}
-          onSignIn={handleSignInClick}
           isAuthenticated={authStore.isAuthenticated}
         />
-        <div class="app-body">
-          <Sidebar
-            activePanel={activePanel()}
-            onPanelChange={setActivePanel}
-            isAuthenticated={authStore.isAuthenticated}
-          />
-          <main class="app-main">
-            <Switch fallback={<div class="panel-placeholder">Select a panel</div>}>
-              <Match when={activePanel() === "chat"}>
-                <ChatPanel onSignInClick={handleSignInClick} />
-              </Match>
-              <Match when={activePanel() === "editor"}>
-                <EditorPanel />
-              </Match>
-              <Match when={activePanel() === "catalog"}>
-                <CatalogPanel onSignInClick={handleSignInClick} />
-              </Match>
-              <Match when={activePanel() === "settings"}>
-                <SettingsPanel />
-              </Match>
-              <Match when={activePanel() === "account"}>
-                <SignIn onSuccess={handleLoginSuccess} />
-              </Match>
-            </Switch>
-          </main>
-        </div>
+        <main class="app-main">
+          <Switch fallback={<div class="panel-placeholder">Select a panel</div>}>
+            <Match when={activePanel() === "chat"}>
+              <ChatPanel onSignInClick={handleSignInClick} />
+            </Match>
+            <Match when={activePanel() === "editor"}>
+              <EditorPanel />
+            </Match>
+            <Match when={activePanel() === "catalog"}>
+              <CatalogPanel onSignInClick={handleSignInClick} />
+            </Match>
+            <Match when={activePanel() === "settings"}>
+              <SettingsPanel />
+            </Match>
+            <Match when={activePanel() === "account"}>
+              <SignIn onSuccess={handleLoginSuccess} />
+            </Match>
+          </Switch>
+        </main>
         <StatusBar />
         <LowBalanceModal />
       </div>

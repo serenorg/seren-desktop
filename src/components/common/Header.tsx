@@ -1,11 +1,29 @@
-// ABOUTME: Application header with title, balance, and user actions.
-// ABOUTME: Displays app name, wallet balance, and sign-in/logout controls based on auth state.
+// ABOUTME: Application header with horizontal navigation, balance, and user actions.
+// ABOUTME: Provides navigation between Chat, Editor, Catalog, Settings with Cursor-like styling.
 
-import { Component, Show } from "solid-js";
+import { Component, For, Show } from "solid-js";
 import { BalanceDisplay } from "./BalanceDisplay";
 import "./Header.css";
 
+export type Panel = "chat" | "editor" | "catalog" | "settings" | "account";
+
+interface NavItem {
+  id: Panel;
+  label: string;
+  icon: string;
+  showWhenAuthenticated?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { id: "chat", label: "Chat", icon: "💬" },
+  { id: "editor", label: "Editor", icon: "📝" },
+  { id: "catalog", label: "Catalog", icon: "📚" },
+  { id: "settings", label: "Settings", icon: "⚙️" },
+];
+
 interface HeaderProps {
+  activePanel?: Panel;
+  onPanelChange?: (panel: Panel) => void;
   onLogout?: () => void;
   onSignIn?: () => void;
   isAuthenticated?: boolean;
@@ -14,21 +32,38 @@ interface HeaderProps {
 export const Header: Component<HeaderProps> = (props) => {
   return (
     <header class="header">
-      <h1 class="header-title">Seren Desktop</h1>
+      <div class="header-left">
+        <h1 class="header-title">Seren</h1>
+        <nav class="header-nav">
+          <For each={NAV_ITEMS}>
+            {(item) => (
+              <button
+                type="button"
+                class="header-nav-item"
+                classList={{ active: props.activePanel === item.id }}
+                onClick={() => props.onPanelChange?.(item.id)}
+              >
+                <span class="nav-icon">{item.icon}</span>
+                <span class="nav-label">{item.label}</span>
+              </button>
+            )}
+          </For>
+        </nav>
+      </div>
       <div class="header-actions">
         <Show
           when={props.isAuthenticated}
           fallback={
-            props.onSignIn && (
-              <button
-                type="button"
-                class="header-signin"
-                data-testid="header-signin-button"
-                onClick={props.onSignIn}
-              >
-                Sign In
-              </button>
-            )
+            <button
+              type="button"
+              class="header-nav-item signin"
+              classList={{ active: props.activePanel === "account" }}
+              data-testid="header-signin-button"
+              onClick={() => props.onPanelChange?.("account")}
+            >
+              <span class="nav-icon">👤</span>
+              <span class="nav-label">Sign In</span>
+            </button>
           }
         >
           <BalanceDisplay />
