@@ -12,10 +12,17 @@ import {
 } from "@/stores/settings.store";
 import "./SettingsPanel.css";
 
-type SettingsSection = "editor" | "wallet" | "appearance" | "mcp";
+type SettingsSection = "chat" | "editor" | "wallet" | "appearance" | "general" | "mcp";
+
+// Available AI models for chat and completion
+const AI_MODELS = [
+  { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
+  { id: "claude-opus-4-20250514", name: "Claude Opus 4" },
+  { id: "claude-haiku-3-20240307", name: "Claude Haiku 3" },
+] as const;
 
 export const SettingsPanel: Component = () => {
-  const [activeSection, setActiveSection] = createSignal<SettingsSection>("editor");
+  const [activeSection, setActiveSection] = createSignal<SettingsSection>("chat");
   const [showResetConfirm, setShowResetConfirm] = createSignal(false);
 
   const handleNumberChange = (key: keyof Settings, value: string) => {
@@ -35,6 +42,10 @@ export const SettingsPanel: Component = () => {
     }
   };
 
+  const handleStringChange = (key: keyof Settings, value: string) => {
+    settingsStore.set(key, value as Settings[typeof key]);
+  };
+
   const handleResetAll = () => {
     settingsStore.reset();
     setShowResetConfirm(false);
@@ -52,9 +63,11 @@ export const SettingsPanel: Component = () => {
   };
 
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
+    { id: "chat", label: "Chat", icon: "💬" },
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },
     { id: "appearance", label: "Appearance", icon: "🎨" },
+    { id: "general", label: "General", icon: "⚙️" },
     { id: "mcp", label: "MCP Servers", icon: "🔌" },
   ];
 
@@ -88,6 +101,47 @@ export const SettingsPanel: Component = () => {
       </aside>
 
       <main class="settings-content">
+        <Show when={activeSection() === "chat"}>
+          <section class="settings-section">
+            <h3>Chat Settings</h3>
+            <p class="settings-description">
+              Configure AI chat behavior and conversation history.
+            </p>
+
+            <div class="settings-group">
+              <label class="settings-label">
+                <span class="label-text">Default Model</span>
+                <span class="label-hint">AI model for chat conversations</span>
+              </label>
+              <select
+                value={settingsState.app.chatDefaultModel}
+                onChange={(e) => handleStringChange("chatDefaultModel", e.currentTarget.value)}
+              >
+                <For each={AI_MODELS}>
+                  {(model) => (
+                    <option value={model.id}>{model.name}</option>
+                  )}
+                </For>
+              </select>
+            </div>
+
+            <div class="settings-group">
+              <label class="settings-label">
+                <span class="label-text">History Limit</span>
+                <span class="label-hint">Maximum messages to keep in conversation context</span>
+              </label>
+              <input
+                type="number"
+                min="10"
+                max="200"
+                step="10"
+                value={settingsState.app.chatMaxHistoryMessages}
+                onInput={(e) => handleNumberChange("chatMaxHistoryMessages", e.currentTarget.value)}
+              />
+            </div>
+          </section>
+        </Show>
+
         <Show when={activeSection() === "editor"}>
           <section class="settings-section">
             <h3>Editor Settings</h3>
@@ -165,6 +219,37 @@ export const SettingsPanel: Component = () => {
                 step="100"
                 value={settingsState.app.completionDelay}
                 onInput={(e) => handleNumberChange("completionDelay", e.currentTarget.value)}
+              />
+            </div>
+
+            <div class="settings-group">
+              <label class="settings-label">
+                <span class="label-text">Completion Model</span>
+                <span class="label-hint">AI model for code completions</span>
+              </label>
+              <select
+                value={settingsState.app.completionModelId}
+                onChange={(e) => handleStringChange("completionModelId", e.currentTarget.value)}
+              >
+                <For each={AI_MODELS}>
+                  {(model) => (
+                    <option value={model.id}>{model.name}</option>
+                  )}
+                </For>
+              </select>
+            </div>
+
+            <div class="settings-group">
+              <label class="settings-label">
+                <span class="label-text">Max Suggestion Lines</span>
+                <span class="label-hint">Maximum lines in code completion suggestions</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={settingsState.app.completionMaxSuggestionLines}
+                onInput={(e) => handleNumberChange("completionMaxSuggestionLines", e.currentTarget.value)}
               />
             </div>
           </section>
@@ -283,6 +368,29 @@ export const SettingsPanel: Component = () => {
                   )}
                 </For>
               </div>
+            </div>
+          </section>
+        </Show>
+
+        <Show when={activeSection() === "general"}>
+          <section class="settings-section">
+            <h3>General Settings</h3>
+            <p class="settings-description">
+              Configure application behavior and privacy options.
+            </p>
+
+            <div class="settings-group checkbox">
+              <label class="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.telemetryEnabled}
+                  onChange={(e) => handleBooleanChange("telemetryEnabled", e.currentTarget.checked)}
+                />
+                <span class="checkbox-label">
+                  <span class="label-text">Enable Telemetry</span>
+                  <span class="label-hint">Help improve Seren by sharing anonymous usage data</span>
+                </span>
+              </label>
             </div>
           </section>
         </Show>

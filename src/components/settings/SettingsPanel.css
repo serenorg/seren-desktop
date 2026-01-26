@@ -162,6 +162,32 @@
   border-color: var(--accent, #6366f1);
 }
 
+.settings-group select {
+  min-width: 180px;
+  padding: 8px 12px;
+  background: var(--input-bg, rgba(30, 30, 30, 0.8));
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.3));
+  border-radius: 6px;
+  color: var(--text-primary, #f8fafc);
+  font-size: 0.9rem;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+.settings-group select:focus {
+  outline: none;
+  border-color: var(--accent, #6366f1);
+}
+
+.settings-group select option {
+  background: var(--surface, #1e1e1e);
+  color: var(--text-primary, #f8fafc);
+}
+
 /* Checkbox styling */
 .settings-checkbox {
   display: flex;
