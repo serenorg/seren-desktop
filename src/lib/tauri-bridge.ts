@@ -490,3 +490,163 @@ export async function getCryptoUsdcBalance(): Promise<UsdcBalanceResponse> {
   }
   return result.data!;
 }
+
+// ============================================================================
+// Chat Conversation Management
+// ============================================================================
+
+/**
+ * A chat conversation that groups messages together.
+ */
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: number;
+  selected_model: string | null;
+  selected_provider: string | null;
+  is_archived: boolean;
+}
+
+/**
+ * A chat message stored in a conversation.
+ */
+export interface StoredMessage {
+  id: string;
+  conversation_id: string | null;
+  role: string;
+  content: string;
+  model: string | null;
+  timestamp: number;
+}
+
+/**
+ * Create a new conversation.
+ */
+export async function createConversation(
+  id: string,
+  title: string,
+  selectedModel?: string,
+  selectedProvider?: string
+): Promise<Conversation> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  return await invoke<Conversation>("create_conversation", {
+    id,
+    title,
+    selectedModel,
+    selectedProvider,
+  });
+}
+
+/**
+ * Get all non-archived conversations.
+ */
+export async function getConversations(): Promise<Conversation[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  return await invoke<Conversation[]>("get_conversations");
+}
+
+/**
+ * Get a single conversation by ID.
+ */
+export async function getConversation(id: string): Promise<Conversation | null> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  return await invoke<Conversation | null>("get_conversation", { id });
+}
+
+/**
+ * Update a conversation's properties.
+ */
+export async function updateConversation(
+  id: string,
+  title?: string,
+  selectedModel?: string,
+  selectedProvider?: string
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("update_conversation", { id, title, selectedModel, selectedProvider });
+}
+
+/**
+ * Archive a conversation (hides from tabs but preserves data).
+ */
+export async function archiveConversation(id: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("archive_conversation", { id });
+}
+
+/**
+ * Permanently delete a conversation and its messages.
+ */
+export async function deleteConversation(id: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("delete_conversation", { id });
+}
+
+/**
+ * Save a message to a conversation.
+ */
+export async function saveMessage(
+  id: string,
+  conversationId: string,
+  role: string,
+  content: string,
+  model: string | null,
+  timestamp: number
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Message operations require Tauri runtime");
+  }
+  await invoke("save_message", { id, conversationId, role, content, model, timestamp });
+}
+
+/**
+ * Get messages for a conversation.
+ */
+export async function getMessages(conversationId: string, limit: number): Promise<StoredMessage[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Message operations require Tauri runtime");
+  }
+  return await invoke<StoredMessage[]>("get_messages", { conversationId, limit });
+}
+
+/**
+ * Clear all messages in a conversation.
+ */
+export async function clearConversationHistory(conversationId: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Message operations require Tauri runtime");
+  }
+  await invoke("clear_conversation_history", { conversationId });
+}
+
+/**
+ * Clear all conversations and messages (full reset).
+ */
+export async function clearAllHistory(): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Message operations require Tauri runtime");
+  }
+  await invoke("clear_all_history");
+}
