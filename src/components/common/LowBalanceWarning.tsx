@@ -1,7 +1,7 @@
 // ABOUTME: Low balance warning component that appears when SerenBucks is low.
 // ABOUTME: Shows in status bar and as a modal when balance first drops.
 
-import { Component, Show, createSignal, createEffect, onCleanup } from "solid-js";
+import { Component, Show, createSignal, createEffect } from "solid-js";
 import {
   walletState,
   dismissLowBalanceWarning,
