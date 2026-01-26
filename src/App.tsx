@@ -159,14 +159,14 @@ function App() {
           {/* Three-column resizable layout (always visible) */}
           <ResizableLayout
             left={<FileExplorer />}
-            center={<EditorContent />}
-            right={<ChatContent onSignInClick={handleSignInClick} />}
+            center={<ChatContent onSignInClick={handleSignInClick} />}
+            right={<EditorContent />}
             leftWidth={240}
-            rightWidth={400}
+            rightWidth={500}
             leftMinWidth={180}
             leftMaxWidth={400}
-            rightMinWidth={300}
-            rightMaxWidth={700}
+            rightMinWidth={400}
+            rightMaxWidth={900}
           />
 
           {/* Overlay panels */}
