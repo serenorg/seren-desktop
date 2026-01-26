@@ -39,7 +39,9 @@
       "Bash(npx tsc:*)",
       "Bash(pnpm exec tsc:*)",
       "Bash(pgrep:*)",
-      "Bash(git rev-list:*)"
+      "Bash(git rev-list:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill -9)"
     ]
   }
 }

@@ -55,6 +55,8 @@ function App() {
 
   // Overlay panels (settings, catalog, database, account)
   const [overlayPanel, setOverlayPanel] = createSignal<Panel | null>(null);
+  // Toggle editor visibility
+  const [showEditor, setShowEditor] = createSignal(false);
 
   onMount(async () => {
     checkAuth();
@@ -125,18 +127,25 @@ function App() {
   };
 
   const handlePanelChange = (panel: Panel) => {
-    // Main panels (chat, editor) are always visible in the three-column layout
-    // Other panels (settings, catalog, database, account) are overlays
-    if (panel === "chat" || panel === "editor") {
+    if (panel === "chat") {
+      // Close overlays, keep editor state as is
+      setOverlayPanel(null);
+    } else if (panel === "editor") {
+      // Toggle editor visibility
+      setShowEditor(true);
       setOverlayPanel(null);
     } else {
+      // Settings, catalog, database, account are overlays
       setOverlayPanel(panel);
     }
   };
 
   // Get the "active" panel for header highlighting
-  // If an overlay is open, show that; otherwise default to "chat"
-  const activePanel = () => overlayPanel() ?? "chat";
+  // If an overlay is open, show that; if editor is visible, show "editor"; otherwise "chat"
+  const activePanel = () => {
+    if (overlayPanel()) return overlayPanel()!;
+    return showEditor() ? "editor" : "chat";
+  };
 
   return (
     <Show
@@ -160,7 +169,11 @@ function App() {
           <ResizableLayout
             left={<FileExplorer />}
             center={<ChatContent onSignInClick={handleSignInClick} />}
-            right={<EditorContent />}
+            right={
+              showEditor() ? (
+                <EditorContent onClose={() => setShowEditor(false)} />
+              ) : null
+            }
             leftWidth={240}
             rightWidth={500}
             leftMinWidth={180}

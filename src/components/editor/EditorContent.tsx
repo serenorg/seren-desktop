@@ -22,7 +22,11 @@ import { MarkdownPreview } from "./MarkdownPreview";
 import { MonacoEditor } from "./MonacoEditor";
 import { PdfViewer } from "./PdfViewer";
 
-export const EditorContent: Component = () => {
+interface EditorContentProps {
+  onClose?: () => void;
+}
+
+export const EditorContent: Component<EditorContentProps> = (props) => {
   const [editorContent, setEditorContent] = createSignal("");
   const [activeFilePath, setActiveFilePath] = createSignal<string | null>(null);
   const [showPreview, setShowPreview] = createSignal(false);
@@ -102,6 +106,19 @@ export const EditorContent: Component = () => {
 
   return (
     <div class="flex flex-col h-full bg-card text-foreground" onKeyDown={handleKeyDown}>
+      <Show when={props.onClose}>
+        <div class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[rgba(148,163,184,0.15)] bg-[#161b22]">
+          <span class="text-xs font-medium text-[#8b949e]">Editor</span>
+          <button
+            type="button"
+            class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-[#e6edf3]"
+            onClick={props.onClose}
+            title="Close Editor"
+          >
+            ×
+          </button>
+        </div>
+      </Show>
       <div class="shrink-0 border-b border-[rgba(148,163,184,0.15)]">
         <FileTabs
           isMarkdown={isMarkdownFile()}
