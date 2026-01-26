@@ -153,7 +153,10 @@ export const McpServersPanel: Component = () => {
       <Show when={showAddForm()}>
         <div class="p-4 bg-popover rounded-lg flex flex-col gap-3">
           <div class="flex flex-col gap-1">
-            <label for="server-name" class="text-[13px] font-medium text-muted">
+            <label
+              for="server-name"
+              class="text-[13px] font-medium text-muted-foreground"
+            >
               Server Name
             </label>
             <input
@@ -169,7 +172,7 @@ export const McpServersPanel: Component = () => {
           <div class="flex flex-col gap-1">
             <label
               for="server-command"
-              class="text-[13px] font-medium text-muted"
+              class="text-[13px] font-medium text-muted-foreground"
             >
               Command
             </label>
@@ -184,7 +187,10 @@ export const McpServersPanel: Component = () => {
           </div>
 
           <div class="flex flex-col gap-1">
-            <label for="server-args" class="text-[13px] font-medium text-muted">
+            <label
+              for="server-args"
+              class="text-[13px] font-medium text-muted-foreground"
+            >
               Arguments (comma-separated)
             </label>
             <input
@@ -207,7 +213,7 @@ export const McpServersPanel: Component = () => {
             />
             <label
               for="server-autoconnect"
-              class="text-[13px] font-medium text-muted"
+              class="text-[13px] font-medium text-muted-foreground"
             >
               Auto-connect on startup
             </label>
@@ -234,7 +240,7 @@ export const McpServersPanel: Component = () => {
         <Show
           when={mcpSettings().servers.length > 0}
           fallback={
-            <div class="py-8 text-center text-muted text-sm">
+            <div class="py-8 text-center text-muted-foreground text-sm">
               No MCP servers configured. Click "Add Server" to get started.
             </div>
           }
@@ -269,7 +275,7 @@ export const McpServersPanel: Component = () => {
                       <span
                         class={`px-2 py-0.5 rounded-xl text-[11px] font-medium uppercase ${
                           status() === "disconnected"
-                            ? "bg-popover text-muted"
+                            ? "bg-popover text-muted-foreground"
                             : status() === "connecting"
                               ? "bg-[#fef9c3] text-[#ca8a04]"
                               : status() === "connected"
@@ -285,12 +291,12 @@ export const McpServersPanel: Component = () => {
                     <Show
                       when={isLocal()}
                       fallback={
-                        <div class="text-xs text-muted italic">
+                        <div class="text-xs text-muted-foreground italic">
                           {isBuiltinServer(server) && server.description}
                         </div>
                       }
                     >
-                      <div class="text-xs text-muted font-mono">
+                      <div class="text-xs text-muted-foreground font-mono">
                         {isLocalServer(server) &&
                           `${server.command} ${server.args.join(" ")}`}
                       </div>

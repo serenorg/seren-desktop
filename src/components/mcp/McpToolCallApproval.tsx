@@ -212,7 +212,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
       <div class="flex items-center gap-2.5 mb-3">
         <span class="text-xl">🔧</span>
         <div class="flex-1 flex flex-col gap-0.5">
-          <span class="text-[11px] uppercase tracking-[0.5px] text-muted">
+          <span class="text-[11px] uppercase tracking-[0.5px] text-muted-foreground">
             Tool Call Request
           </span>
           <span class="text-sm font-semibold font-mono">
@@ -227,7 +227,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
 
       <Show when={argEntries().length > 0}>
         <div class="mb-3">
-          <span class="block text-[11px] uppercase tracking-[0.5px] text-muted mb-1.5">
+          <span class="block text-[11px] uppercase tracking-[0.5px] text-muted-foreground mb-1.5">
             Arguments:
           </span>
           <div class="bg-card border border-[rgba(148,163,184,0.25)] rounded-md px-3 py-2">
@@ -260,7 +260,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
         </div>
       </Show>
 
-      <div class="text-xs text-muted mt-2">
+      <div class="text-xs text-muted-foreground mt-2">
         Attempt {Math.min(Math.max(attemptCount(), 1), maxAttempts())} /{" "}
         {maxAttempts()}
       </div>
@@ -284,7 +284,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
         </button>
         <Show when={isExecuting()}>
           <button
-            class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md bg-popover text-muted text-xs font-medium cursor-pointer hover:bg-[#fee2e2] hover:border-[#f87171] hover:text-[#b91c1c]"
+            class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md bg-popover text-muted-foreground text-xs font-medium cursor-pointer hover:bg-[#fee2e2] hover:border-[#f87171] hover:text-[#b91c1c]"
             onClick={handleCancel}
           >
             Cancel
@@ -306,7 +306,9 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
         </div>
         <div class="mt-2 flex items-center gap-3">
           <Show when={wasCancelled()}>
-            <span class="text-xs text-muted">Call cancelled by user.</span>
+            <span class="text-xs text-muted-foreground">
+              Call cancelled by user.
+            </span>
           </Show>
           <Show when={!wasCancelled() && attemptCount() < maxAttempts()}>
             <button

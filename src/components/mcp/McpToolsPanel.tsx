@@ -136,7 +136,7 @@ export const McpToolsPanel: Component = () => {
         <Show
           when={tools().length > 0}
           fallback={
-            <div class="flex items-center justify-center h-full text-muted text-sm text-center p-6">
+            <div class="flex items-center justify-center h-full text-muted-foreground text-sm text-center p-6">
               No tools available. Connect to an MCP server first.
             </div>
           }
@@ -179,7 +179,7 @@ export const McpToolsPanel: Component = () => {
         <Show
           when={selectedTool()}
           fallback={
-            <div class="flex items-center justify-center h-full text-muted text-sm text-center p-6">
+            <div class="flex items-center justify-center h-full text-muted-foreground text-sm text-center p-6">
               Select a tool from the list to view details and execute it.
             </div>
           }
@@ -188,12 +188,12 @@ export const McpToolsPanel: Component = () => {
             <>
               <div class="flex items-center gap-3 mb-3">
                 <h2 class="m-0 text-xl font-semibold">{sel().tool.name}</h2>
-                <span class="px-2.5 py-1 bg-popover rounded-md text-xs text-muted">
+                <span class="px-2.5 py-1 bg-popover rounded-md text-xs text-muted-foreground">
                   {sel().serverName}
                 </span>
               </div>
 
-              <p class="text-muted mb-6 leading-normal">
+              <p class="text-muted-foreground mb-6 leading-normal">
                 {sel().tool.description}
               </p>
 
@@ -202,7 +202,7 @@ export const McpToolsPanel: Component = () => {
                 <Show
                   when={getArgProperties(sel().tool).length > 0}
                   fallback={
-                    <p class="text-muted text-[13px]">
+                    <p class="text-muted-foreground text-[13px]">
                       This tool takes no arguments.
                     </p>
                   }
@@ -217,7 +217,7 @@ export const McpToolsPanel: Component = () => {
                           )}
                         </label>
                         <Show when={arg.schema.description}>
-                          <span class="block text-xs text-muted mb-1.5">
+                          <span class="block text-xs text-muted-foreground mb-1.5">
                             {arg.schema.description as string}
                           </span>
                         </Show>
@@ -255,7 +255,7 @@ export const McpToolsPanel: Component = () => {
                   <div class="border-t border-[rgba(148,163,184,0.25)] pt-6">
                     <h4 class="m-0 mb-3 text-sm font-semibold">Result</h4>
                     <Show when={exec().isRunning}>
-                      <div class="text-muted text-[13px]">
+                      <div class="text-muted-foreground text-[13px]">
                         Executing tool...
                       </div>
                     </Show>

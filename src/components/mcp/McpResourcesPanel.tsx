@@ -116,7 +116,7 @@ export const McpResourcesPanel: Component = () => {
         <Show
           when={filteredResources().length > 0}
           fallback={
-            <div class="flex items-center justify-center h-full text-muted text-sm text-center p-6">
+            <div class="flex items-center justify-center h-full text-muted-foreground text-sm text-center p-6">
               {resources().length === 0
                 ? "No resources available. Connect to an MCP server first."
                 : "No resources match your search."}
@@ -173,7 +173,7 @@ export const McpResourcesPanel: Component = () => {
         <Show
           when={selectedResource()}
           fallback={
-            <div class="flex items-center justify-center h-full text-muted text-sm text-center p-6">
+            <div class="flex items-center justify-center h-full text-muted-foreground text-sm text-center p-6">
               Select a resource from the list to view its contents.
             </div>
           }
@@ -188,24 +188,24 @@ export const McpResourcesPanel: Component = () => {
                   <h2 class="m-0 text-xl font-semibold break-words">
                     {sel().resource.name}
                   </h2>
-                  <span class="block text-xs text-muted font-mono break-all mt-1">
+                  <span class="block text-xs text-muted-foreground font-mono break-all mt-1">
                     {sel().resource.uri}
                   </span>
                 </div>
-                <span class="px-2.5 py-1 bg-popover rounded-md text-xs text-muted shrink-0">
+                <span class="px-2.5 py-1 bg-popover rounded-md text-xs text-muted-foreground shrink-0">
                   {sel().serverName}
                 </span>
               </div>
 
               <Show when={sel().resource.description}>
-                <p class="text-muted mb-4 leading-normal">
+                <p class="text-muted-foreground mb-4 leading-normal">
                   {sel().resource.description}
                 </p>
               </Show>
 
               <Show when={sel().resource.mimeType}>
                 <div class="mb-4 text-[13px]">
-                  <span class="text-muted mr-2">Type:</span>
+                  <span class="text-muted-foreground mr-2">Type:</span>
                   <span class="font-mono bg-popover px-2 py-0.5 rounded">
                     {sel().resource.mimeType}
                   </span>
@@ -231,7 +231,7 @@ export const McpResourcesPanel: Component = () => {
                 </div>
 
                 <Show when={resourceContent()?.isLoading}>
-                  <div class="text-muted text-[13px] p-4">
+                  <div class="text-muted-foreground text-[13px] p-4">
                     Loading resource content...
                   </div>
                 </Show>

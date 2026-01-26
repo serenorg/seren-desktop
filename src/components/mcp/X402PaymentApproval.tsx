@@ -161,7 +161,7 @@ export const X402PaymentApproval: Component = () => {
               </div>
 
               <div class="mb-5">
-                <p class="m-0 mb-4 text-muted leading-normal text-[0.95rem]">
+                <p class="m-0 mb-4 text-muted-foreground leading-normal text-[0.95rem]">
                   The tool{" "}
                   <strong class="text-foreground">{p().toolName}</strong> on{" "}
                   <strong class="text-foreground">{p().serverName}</strong>{" "}
@@ -170,20 +170,26 @@ export const X402PaymentApproval: Component = () => {
 
                 <div class="bg-black/20 border border-[rgba(148,163,184,0.15)] rounded-xl p-4 mb-4">
                   <div class="flex justify-between items-center py-2 border-b border-[rgba(148,163,184,0.1)]">
-                    <span class="text-[0.9rem] text-muted">Amount</span>
+                    <span class="text-[0.9rem] text-muted-foreground">
+                      Amount
+                    </span>
                     <span class="text-[1.1rem] text-[#22c55e] font-semibold">
                       {p().amountFormatted}
                     </span>
                   </div>
                   <Show when={selectedMethod() === "crypto"}>
                     <div class="flex justify-between items-center py-2 border-b border-[rgba(148,163,184,0.1)]">
-                      <span class="text-[0.9rem] text-muted">Network</span>
+                      <span class="text-[0.9rem] text-muted-foreground">
+                        Network
+                      </span>
                       <span class="text-[0.9rem] text-foreground font-medium">
                         {p().chainName}
                       </span>
                     </div>
                     <div class="flex justify-between items-center py-2">
-                      <span class="text-[0.9rem] text-muted">Recipient</span>
+                      <span class="text-[0.9rem] text-muted-foreground">
+                        Recipient
+                      </span>
                       <span
                         class="text-[0.85rem] text-foreground font-medium font-mono"
                         title={p().recipient}
@@ -196,7 +202,7 @@ export const X402PaymentApproval: Component = () => {
 
                 <Show when={availableMethods().length > 1}>
                   <div class="my-4">
-                    <span class="block text-[0.9rem] text-muted mb-3">
+                    <span class="block text-[0.9rem] text-muted-foreground mb-3">
                       Pay with:
                     </span>
                     <div class="flex gap-3 max-sm:flex-col">
@@ -220,7 +226,7 @@ export const X402PaymentApproval: Component = () => {
                               <span class="text-[0.9rem] font-medium text-foreground">
                                 {method.label}
                               </span>
-                              <span class="text-[0.8rem] text-muted font-mono">
+                              <span class="text-[0.8rem] text-muted-foreground font-mono">
                                 {method.balance}
                               </span>
                             </div>
@@ -253,7 +259,7 @@ export const X402PaymentApproval: Component = () => {
               <div class="flex gap-3 justify-end">
                 <button
                   type="button"
-                  class="px-5 py-2.5 rounded-lg text-[0.95rem] font-medium cursor-pointer transition-all duration-150 bg-transparent border border-[rgba(148,163,184,0.3)] text-muted hover:not-disabled:bg-[rgba(148,163,184,0.1)] hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="px-5 py-2.5 rounded-lg text-[0.95rem] font-medium cursor-pointer transition-all duration-150 bg-transparent border border-[rgba(148,163,184,0.3)] text-muted-foreground hover:not-disabled:bg-[rgba(148,163,184,0.1)] hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleDecline}
                   disabled={isProcessing()}
                 >

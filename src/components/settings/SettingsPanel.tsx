@@ -124,7 +124,7 @@ export const SettingsPanel: Component = () => {
                 class={`flex items-center gap-2.5 px-3 py-2.5 bg-transparent border-none rounded-md cursor-pointer text-[0.9rem] text-left transition-all duration-150 ${
                   activeSection() === section.id
                     ? "bg-accent text-white"
-                    : "text-muted hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground"
+                    : "text-muted-foreground hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground"
                 }`}
                 onClick={() => setActiveSection(section.id)}
               >
@@ -137,7 +137,7 @@ export const SettingsPanel: Component = () => {
         <div class="p-3 border-t border-[rgba(148,163,184,0.15)]">
           <button
             type="button"
-            class="w-full py-2 px-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted text-[0.85rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:border-[rgba(239,68,68,0.5)] hover:text-[#ef4444]"
+            class="w-full py-2 px-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.85rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:border-[rgba(239,68,68,0.5)] hover:text-[#ef4444]"
             onClick={() => setShowResetConfirm(true)}
           >
             Reset All Settings
@@ -149,7 +149,7 @@ export const SettingsPanel: Component = () => {
         <Show when={activeSection() === "chat"}>
           <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Chat Settings</h3>
-            <p class="m-0 mb-6 text-muted leading-normal">
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Configure AI chat behavior and conversation history.
             </p>
 
@@ -158,7 +158,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Default Model
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   AI model for chat conversations
                 </span>
               </label>
@@ -174,7 +174,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   History Limit
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Maximum messages to keep in conversation context
                 </span>
               </label>
@@ -211,7 +211,7 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Enter to Send
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Press Enter to send messages (Shift+Enter for new line)
                   </span>
                 </span>
@@ -229,7 +229,7 @@ export const SettingsPanel: Component = () => {
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
               Editor Settings
             </h3>
-            <p class="m-0 mb-6 text-muted leading-normal">
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Customize your code editing experience.
             </p>
 
@@ -238,7 +238,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Font Size
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Size of text in the editor (px)
                 </span>
               </label>
@@ -259,7 +259,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Tab Size
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Number of spaces per tab
                 </span>
               </label>
@@ -292,14 +292,14 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Word Wrap
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Wrap long lines instead of scrolling
                   </span>
                 </span>
               </label>
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
               Code Completion
             </h4>
 
@@ -320,7 +320,7 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Enable AI Completions
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Show AI-powered code suggestions while typing
                   </span>
                 </span>
@@ -332,7 +332,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Completion Delay
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Milliseconds to wait before showing suggestions
                 </span>
               </label>
@@ -354,7 +354,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Completion Model
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   AI model for code completions
                 </span>
               </label>
@@ -372,7 +372,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Max Suggestion Lines
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Maximum lines in code completion suggestions
                 </span>
               </label>
@@ -398,7 +398,7 @@ export const SettingsPanel: Component = () => {
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
               Wallet Settings
             </h3>
-            <p class="m-0 mb-6 text-muted leading-normal">
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Configure your SerenBucks balance display and auto top-up.
             </p>
 
@@ -416,7 +416,7 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Show Balance in Status Bar
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Display your SerenBucks balance at the bottom of the app
                   </span>
                 </span>
@@ -428,7 +428,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Low Balance Warning
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Show warning when balance falls below this amount ($)
                 </span>
               </label>
@@ -447,10 +447,10 @@ export const SettingsPanel: Component = () => {
               />
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
               Payment Method
             </h4>
-            <p class="m-0 mb-4 text-[0.85rem] text-muted leading-relaxed">
+            <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
               Choose your preferred payment method for MCP server tools.
             </p>
 
@@ -459,7 +459,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Preferred Method
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Default payment method for MCP tool usage
                 </span>
               </label>
@@ -477,7 +477,7 @@ export const SettingsPanel: Component = () => {
                 >
                   <span class="text-2xl">💰</span>
                   <span
-                    class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "text-foreground" : "text-muted"}`}
+                    class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "text-foreground" : "text-muted-foreground"}`}
                   >
                     SerenBucks
                   </span>
@@ -501,7 +501,7 @@ export const SettingsPanel: Component = () => {
                 >
                   <span class="text-2xl">🔐</span>
                   <span
-                    class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "crypto" ? "text-foreground" : "text-muted"}`}
+                    class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "crypto" ? "text-foreground" : "text-muted-foreground"}`}
                   >
                     Crypto Wallet
                   </span>
@@ -526,14 +526,14 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Enable Fallback Payment
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Use alternate method if preferred has insufficient funds
                   </span>
                 </span>
               </label>
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
               Auto Top-Up
             </h4>
 
@@ -554,7 +554,7 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Enable Auto Top-Up
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Automatically add funds when balance is low
                   </span>
                 </span>
@@ -567,7 +567,7 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Top-Up Threshold
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Trigger top-up when balance falls below ($)
                   </span>
                 </label>
@@ -591,7 +591,7 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Top-Up Amount
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Amount to add when auto top-up triggers ($)
                   </span>
                 </label>
@@ -608,10 +608,10 @@ export const SettingsPanel: Component = () => {
               </div>
             </Show>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
               Crypto Wallet (USDC Payments)
             </h4>
-            <p class="m-0 mb-4 text-[0.85rem] text-muted leading-relaxed">
+            <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
               Configure your crypto wallet for x402 USDC payments to MCP
               servers.
             </p>
@@ -621,7 +621,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Auto-Approve Limit
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Auto-approve payments up to this amount (USD)
                 </span>
               </label>
@@ -650,7 +650,7 @@ export const SettingsPanel: Component = () => {
                     <span class="text-[0.95rem] font-medium text-foreground">
                       Private Key
                     </span>
-                    <span class="text-[0.8rem] text-muted">
+                    <span class="text-[0.8rem] text-muted-foreground">
                       Enter your wallet private key (64 hex characters)
                     </span>
                   </label>
@@ -709,7 +709,7 @@ export const SettingsPanel: Component = () => {
                     <span class="text-[0.95rem] font-medium text-foreground">
                       Wallet Address
                     </span>
-                    <span class="text-[0.8rem] text-muted">
+                    <span class="text-[0.8rem] text-muted-foreground">
                       Your configured wallet for USDC payments
                     </span>
                   </label>
@@ -732,7 +732,7 @@ export const SettingsPanel: Component = () => {
                     <span class="text-[0.95rem] font-medium text-foreground">
                       USDC Balance (Base)
                     </span>
-                    <span class="text-[0.8rem] text-muted">
+                    <span class="text-[0.8rem] text-muted-foreground">
                       Your current USDC balance on Base mainnet
                     </span>
                   </label>
@@ -740,7 +740,7 @@ export const SettingsPanel: Component = () => {
                     <Show
                       when={!cryptoWalletStore.state().balanceLoading}
                       fallback={
-                        <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[0.9rem] text-muted min-w-[140px]">
+                        <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[0.9rem] text-muted-foreground min-w-[140px]">
                           Loading balance...
                         </span>
                       }
@@ -753,7 +753,7 @@ export const SettingsPanel: Component = () => {
                     </Show>
                     <button
                       type="button"
-                      class="w-9 h-9 flex items-center justify-center bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[1.2rem] text-muted cursor-pointer transition-all duration-150 hover:not-disabled:bg-[rgba(148,163,184,0.1)] hover:not-disabled:border-[rgba(148,163,184,0.4)] hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                      class="w-9 h-9 flex items-center justify-center bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[1.2rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:not-disabled:bg-[rgba(148,163,184,0.1)] hover:not-disabled:border-[rgba(148,163,184,0.4)] hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => cryptoWalletStore.fetchBalance()}
                       disabled={cryptoWalletStore.state().balanceLoading}
                       title="Refresh balance"
@@ -770,7 +770,7 @@ export const SettingsPanel: Component = () => {
         <Show when={activeSection() === "appearance"}>
           <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Appearance</h3>
-            <p class="m-0 mb-6 text-muted leading-normal">
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Customize how Seren Desktop looks.
             </p>
 
@@ -779,7 +779,7 @@ export const SettingsPanel: Component = () => {
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Theme
                 </span>
-                <span class="text-[0.8rem] text-muted">
+                <span class="text-[0.8rem] text-muted-foreground">
                   Choose your preferred color scheme
                 </span>
               </label>
@@ -803,7 +803,7 @@ export const SettingsPanel: Component = () => {
                             : "💻"}
                       </span>
                       <span
-                        class={`text-[0.85rem] ${settingsState.app.theme === theme ? "text-foreground" : "text-muted"}`}
+                        class={`text-[0.85rem] ${settingsState.app.theme === theme ? "text-foreground" : "text-muted-foreground"}`}
                       >
                         {theme.charAt(0).toUpperCase() + theme.slice(1)}
                       </span>
@@ -820,7 +820,7 @@ export const SettingsPanel: Component = () => {
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
               General Settings
             </h3>
-            <p class="m-0 mb-6 text-muted leading-normal">
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Configure application behavior and privacy options.
             </p>
 
@@ -841,7 +841,7 @@ export const SettingsPanel: Component = () => {
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Enable Telemetry
                   </span>
-                  <span class="text-[0.8rem] text-muted">
+                  <span class="text-[0.8rem] text-muted-foreground">
                     Help improve Seren by sharing anonymous usage data
                   </span>
                 </span>
@@ -853,7 +853,7 @@ export const SettingsPanel: Component = () => {
         <Show when={activeSection() === "mcp"}>
           <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">MCP Servers</h3>
-            <p class="m-0 mb-6 text-muted leading-normal">
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Manage Model Context Protocol server connections for enhanced AI
               capabilities.
             </p>
@@ -861,10 +861,10 @@ export const SettingsPanel: Component = () => {
             <Show
               when={mcpSettings().servers.length > 0}
               fallback={
-                <div class="text-center py-10 px-6 text-muted">
+                <div class="text-center py-10 px-6 text-muted-foreground">
                   <span class="text-[2.5rem] block mb-3 opacity-60">🔌</span>
                   <p class="m-0">No MCP servers configured</p>
-                  <p class="m-0 mt-2 text-[0.85rem] text-muted">
+                  <p class="m-0 mt-2 text-[0.85rem] text-muted-foreground">
                     MCP servers extend AI capabilities with tools like file
                     access, web browsing, and more.
                   </p>
@@ -890,7 +890,7 @@ export const SettingsPanel: Component = () => {
                             </span>
                           </Show>
                         </div>
-                        <span class="text-[0.8rem] text-muted font-mono">
+                        <span class="text-[0.8rem] text-muted-foreground font-mono">
                           {isLocalServer(server)
                             ? `Command: ${server.command} ${server.args.join(" ")}`
                             : isBuiltinServer(server)
@@ -904,7 +904,7 @@ export const SettingsPanel: Component = () => {
                           class={`px-3 py-1 border-none rounded text-[0.8rem] cursor-pointer transition-all duration-150 hover:opacity-80 ${
                             server.enabled
                               ? "bg-[rgba(34,197,94,0.2)] text-[#22c55e]"
-                              : "bg-[rgba(148,163,184,0.2)] text-muted"
+                              : "bg-[rgba(148,163,184,0.2)] text-muted-foreground"
                           }`}
                           onClick={() => handleToggleMcpServer(server.name)}
                           title={server.enabled ? "Disable" : "Enable"}
@@ -913,7 +913,7 @@ export const SettingsPanel: Component = () => {
                         </button>
                         <button
                           type="button"
-                          class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[1.2rem] text-muted cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:text-[#ef4444]"
+                          class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[1.2rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:text-[#ef4444]"
                           onClick={() => handleRemoveMcpServer(server.name)}
                           title="Remove server"
                         >
@@ -939,14 +939,14 @@ export const SettingsPanel: Component = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 class="m-0 mb-3 text-[1.1rem]">Reset All Settings?</h3>
-            <p class="m-0 mb-5 text-muted leading-normal">
+            <p class="m-0 mb-5 text-muted-foreground leading-normal">
               This will restore all settings to their default values. This
               cannot be undone.
             </p>
             <div class="flex justify-end gap-2">
               <button
                 type="button"
-                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
+                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
                 onClick={() => setShowResetConfirm(false)}
               >
                 Cancel
@@ -973,14 +973,14 @@ export const SettingsPanel: Component = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 class="m-0 mb-3 text-[1.1rem]">Remove Crypto Wallet?</h3>
-            <p class="m-0 mb-5 text-muted leading-normal">
+            <p class="m-0 mb-5 text-muted-foreground leading-normal">
               This will delete your private key from this device. You will need
               to re-enter it to make USDC payments.
             </p>
             <div class="flex justify-end gap-2">
               <button
                 type="button"
-                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
+                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
                 onClick={() => setShowClearConfirm(false)}
               >
                 Cancel
