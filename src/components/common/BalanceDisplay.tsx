@@ -1,7 +1,7 @@
 // ABOUTME: Balance display component for header showing SerenBucks.
 // ABOUTME: Shows balance with color coding and click to open deposit modal.
 
-import { type Component, createSignal, Show } from "solid-js";
+import { type Component, createEffect, createSignal, Show } from "solid-js";
 import { DepositModal } from "@/components/wallet/DepositModal";
 import { settingsStore } from "@/stores/settings.store";
 import {
@@ -19,6 +19,11 @@ export const BalanceDisplay: Component = () => {
 
   const showBalance = () => settingsStore.get("showBalance");
   const lowThreshold = () => settingsStore.get("lowBalanceThreshold");
+
+  // Debug: log whenever isLoading changes
+  createEffect(() => {
+    console.log("[BalanceDisplay] isLoading:", walletState.isLoading, "balance_usd:", walletState.balance_usd);
+  });
 
   // Determine balance state for styling
   const balanceState = () => {
