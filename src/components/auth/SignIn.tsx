@@ -1,5 +1,5 @@
-// ABOUTME: Sign-in form component for user authentication.
-// ABOUTME: Handles email/password login with validation and error display.
+// ABOUTME: Sign-in component for user authentication.
+// ABOUTME: Uses OAuth 2.1 with PKCE - opens browser for secure authentication.
 
 import { Component, createSignal } from "solid-js";
 import { login } from "@/services/auth";
@@ -11,28 +11,15 @@ interface SignInProps {
 }
 
 export const SignIn: Component<SignInProps> = (props) => {
-  const [email, setEmail] = createSignal("");
-  const [password, setPassword] = createSignal("");
   const [error, setError] = createSignal("");
   const [isLoading, setIsLoading] = createSignal(false);
 
-  const handleSubmit = async (e: Event) => {
-    e.preventDefault();
+  const handleSignIn = async () => {
     setError("");
-
-    if (!email().trim()) {
-      setError("Email is required");
-      return;
-    }
-
-    if (!password()) {
-      setError("Password is required");
-      return;
-    }
-
     setIsLoading(true);
+
     try {
-      await login(email(), password());
+      await login();
       props.onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -48,47 +35,30 @@ export const SignIn: Component<SignInProps> = (props) => {
 
         {error() && <div class="signin-error">{error()}</div>}
 
-        <form class="signin-form" onSubmit={handleSubmit}>
-          <div class="signin-field">
-            <label for="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={email()}
-              onInput={(e) => setEmail(e.currentTarget.value)}
-              placeholder="you@example.com"
-              disabled={isLoading()}
-            />
-          </div>
+        <div class="signin-content">
+          {isLoading() ? (
+            <div class="signin-waiting">
+              <div class="signin-spinner" />
+              <p>Waiting for authentication...</p>
+              <p class="signin-hint">Complete sign-in in your browser</p>
+            </div>
+          ) : (
+            <>
+              <p class="signin-description">
+                Click the button below to sign in with your Seren account.
+                A browser window will open for secure authentication.
+              </p>
 
-          <div class="signin-field">
-            <label for="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              value={password()}
-              onInput={(e) => setPassword(e.currentTarget.value)}
-              placeholder="Your password"
-              autocomplete="off"
-              disabled={isLoading()}
-            />
-            <button
-              type="button"
-              class="signin-link"
-              onClick={() => openExternalLink("https://console.serendb.com/forgot-password")}
-            >
-              Forgot password?
-            </button>
-          </div>
-
-          <button
-            type="submit"
-            class="signin-submit"
-            disabled={isLoading()}
-          >
-            {isLoading() ? "Signing in..." : "Sign In"}
-          </button>
-        </form>
+              <button
+                type="button"
+                class="signin-submit"
+                onClick={handleSignIn}
+              >
+                Sign in with Seren
+              </button>
+            </>
+          )}
+        </div>
 
         <p class="signin-signup">
           Don't have an account?{" "}
