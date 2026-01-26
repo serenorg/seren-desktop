@@ -347,6 +347,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             chatStore.selectedModel,
             context,
             true,
+            chatStore.messages,
           ),
           toolsEnabled: true,
         }

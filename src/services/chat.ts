@@ -151,12 +151,14 @@ export type ToolStreamEvent =
  * @param model - Model ID to use
  * @param context - Optional code context
  * @param enableTools - Whether to enable tools (default true)
+ * @param history - Previous messages in the conversation
  */
 export async function* streamMessageWithTools(
   content: string,
   model: string,
   context?: ChatContext,
   enableTools = true,
+  history: Message[] = [],
 ): AsyncGenerator<ToolStreamEvent> {
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
@@ -183,7 +185,14 @@ export async function* streamMessageWithTools(
     });
   }
 
-  // Add user message
+  // Add conversation history (user and assistant messages only)
+  for (const msg of history) {
+    if (msg.role === "user" || msg.role === "assistant") {
+      messages.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  // Add current user message
   messages.push({ role: "user", content });
 
   // Get tools if enabled
@@ -193,6 +202,7 @@ export async function* streamMessageWithTools(
   let fullContent = "";
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    console.log("[streamMessageWithTools] Iteration:", iteration);
     // Send request with tools
     const response: ChatResponse = await sendWithTools(
       messages,
@@ -200,16 +210,21 @@ export async function* streamMessageWithTools(
       tools,
       tools ? "auto" : undefined,
     );
+    console.log("[streamMessageWithTools] Got response:", response);
 
     // Yield content if present
     if (response.content) {
+      console.log("[streamMessageWithTools] Yielding content:", response.content.substring(0, 100));
       fullContent += response.content;
       yield { type: "content", content: response.content };
+    } else {
+      console.log("[streamMessageWithTools] No content in response");
     }
 
     // Check if model wants to call tools
     if (!response.tool_calls || response.tool_calls.length === 0) {
       // No tool calls, we're done
+      console.log("[streamMessageWithTools] No tool_calls, completing with content length:", fullContent.length);
       yield { type: "complete", finalContent: fullContent };
       return;
     }
