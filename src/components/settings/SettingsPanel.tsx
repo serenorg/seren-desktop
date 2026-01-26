@@ -11,9 +11,10 @@ import {
   type Settings,
 } from "@/stores/settings.store";
 import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
+import { ProviderSettings } from "./ProviderSettings";
 import "./SettingsPanel.css";
 
-type SettingsSection = "chat" | "editor" | "wallet" | "appearance" | "general" | "mcp";
+type SettingsSection = "chat" | "providers" | "editor" | "wallet" | "appearance" | "general" | "mcp";
 
 // Available AI models for chat and completion
 const AI_MODELS = [
@@ -65,6 +66,7 @@ export const SettingsPanel: Component = () => {
 
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
     { id: "chat", label: "Chat", icon: "💬" },
+    { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },
     { id: "appearance", label: "Appearance", icon: "🎨" },
@@ -141,6 +143,10 @@ export const SettingsPanel: Component = () => {
               />
             </div>
           </section>
+        </Show>
+
+        <Show when={activeSection() === "providers"}>
+          <ProviderSettings />
         </Show>
 
         <Show when={activeSection() === "editor"}>

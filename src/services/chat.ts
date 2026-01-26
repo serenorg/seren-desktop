@@ -1,7 +1,12 @@
-// ABOUTME: Chat service supporting streaming completions, retries, and context injection.
+// ABOUTME: Chat service supporting streaming completions with multi-provider routing.
+// ABOUTME: Routes requests through provider abstraction for Seren, Anthropic, OpenAI, Gemini.
 
-import { apiBase } from "@/lib/config";
-import { getToken } from "@/services/auth";
+import {
+  sendProviderMessage,
+  streamProviderMessage,
+  buildChatRequest,
+} from "@/lib/providers";
+import { providerStore } from "@/stores/provider.store";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -31,122 +36,41 @@ export interface Message {
   };
 }
 
-interface ChatCompletionPayload {
-  model: string;
-  messages: Array<{ role: ChatRole; content: string }>;
-  stream?: boolean;
-}
-
-interface AgentApiPayload {
-  publisher: string;
-  path: string;
-  method: string;
-  body: ChatCompletionPayload;
-}
-
-const PUBLISHER_SLUG = "seren-models";
-const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
-const AGENT_STREAM_ENDPOINT = `${apiBase}/agent/stream`;
 export const CHAT_MAX_RETRIES = 3;
 const INITIAL_DELAY = 1000;
 
+/**
+ * Send a non-streaming message using the active provider.
+ */
 export async function sendMessage(
   content: string,
   model: string,
   context?: ChatContext
 ): Promise<string> {
-  const token = await requireToken();
-  const chatPayload = buildPayload(content, model, context, false);
-  const agentPayload: AgentApiPayload = {
-    publisher: PUBLISHER_SLUG,
-    path: "/chat/completions",
-    method: "POST",
-    body: chatPayload,
-  };
+  const request = buildChatRequest(content, model, context);
+  const providerId = providerStore.activeProvider;
 
-  const response = await fetch(AGENT_API_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(agentPayload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Chat completion failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return extractContent(data);
+  return sendProviderMessage(providerId, request);
 }
 
+/**
+ * Stream a message using the active provider.
+ */
 export async function* streamMessage(
   content: string,
   model: string,
   context?: ChatContext
 ): AsyncGenerator<string> {
-  const token = await requireToken();
-  const chatPayload = buildPayload(content, model, context, true);
-  const agentPayload: AgentApiPayload = {
-    publisher: PUBLISHER_SLUG,
-    path: "/chat/completions",
-    method: "POST",
-    body: chatPayload,
-  };
+  const request = buildChatRequest(content, model, context);
+  request.stream = true;
+  const providerId = providerStore.activeProvider;
 
-  const response = await fetch(AGENT_STREAM_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(agentPayload),
-  });
-
-  if (!response.ok || !response.body) {
-    throw new Error(`Streaming failed: ${response.status}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith(":")) continue;
-        if (!line.startsWith("data:")) continue;
-
-        const data = line.slice(5).trim();
-        if (!data) continue;
-        if (data === "[DONE]") {
-          return;
-        }
-
-        const delta = parseDelta(data);
-        if (delta) {
-          yield delta;
-        }
-      }
-    }
-  } catch (error) {
-    throw new Error(
-      `Streaming connection interrupted: ${(error as Error).message}`
-    );
-  } finally {
-    reader.releaseLock();
-  }
+  yield* streamProviderMessage(providerId, request);
 }
 
+/**
+ * Send a message with automatic retry on transient failures.
+ */
 export async function sendMessageWithRetry(
   content: string,
   model: string,
@@ -162,7 +86,8 @@ export async function sendMessageWithRetry(
       lastError = error as Error;
 
       const message = lastError.message || "";
-      if (message.includes("401") || message.includes("403")) {
+      // Don't retry auth errors
+      if (message.includes("401") || message.includes("403") || message.includes("API key")) {
         throw lastError;
       }
 
@@ -177,113 +102,16 @@ export async function sendMessageWithRetry(
   throw lastError ?? new Error("Chat request failed");
 }
 
-function buildPayload(
-  content: string,
-  model: string,
-  context: ChatContext | undefined,
-  stream: boolean
-): ChatCompletionPayload {
-  const messages: Array<{ role: ChatRole; content: string }> = [];
-
-  if (context && context.content.trim().length > 0) {
-    const locationParts = [] as string[];
-    if (context.file) {
-      locationParts.push(context.file);
-    }
-    if (context.range) {
-      locationParts.push(
-        `lines ${context.range.startLine}-${context.range.endLine}`
-      );
-    }
-    const location = locationParts.length
-      ? ` from ${locationParts.join(" ")}`
-      : "";
-
-    messages.push({
-      role: "system",
-      content: `The user selected the following context${location}. Use it when responding.\n\n<context>\n${context.content}\n</context>`,
-    });
-  }
-
-  messages.push({ role: "user", content });
-
-  return { model, messages, stream };
+/**
+ * Get the currently active provider ID.
+ */
+export function getActiveProvider(): string {
+  return providerStore.activeProvider;
 }
 
-function extractContent(data: unknown): string {
-  if (!data || typeof data !== "object") {
-    return "";
-  }
-
-  const payload = data as Record<string, unknown>;
-  const choices = payload.choices as Array<Record<string, unknown>> | undefined;
-  if (choices && choices.length > 0) {
-    const first = choices[0];
-    const message = first.message as Record<string, unknown> | undefined;
-    if (message && typeof message.content === "string") {
-      return message.content;
-    }
-
-    const delta = first.delta as Record<string, unknown> | undefined;
-    if (delta && typeof delta.content === "string") {
-      return delta.content;
-    }
-  }
-
-  if (typeof payload.content === "string") {
-    return payload.content;
-  }
-
-  return JSON.stringify(data);
-}
-
-function parseDelta(data: string): string | null {
-  try {
-    const parsed = JSON.parse(data);
-
-    if (parsed.delta && parsed.delta.content) {
-      return normalizeContent(parsed.delta.content);
-    }
-
-    if (parsed.choices && parsed.choices[0]?.delta?.content) {
-      return normalizeContent(parsed.choices[0].delta.content);
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeContent(chunk: unknown): string | null {
-  if (typeof chunk === "string") {
-    return chunk;
-  }
-
-  if (Array.isArray(chunk)) {
-    return chunk
-      .map((piece) => {
-        if (!piece) return "";
-        if (typeof piece === "string") return piece;
-        if (typeof piece === "object" && "text" in piece) {
-          return (piece as Record<string, unknown>).text ?? "";
-        }
-        return "";
-      })
-      .join("");
-  }
-
-  if (typeof chunk === "object" && chunk && "text" in chunk) {
-    return (chunk as Record<string, string>).text ?? null;
-  }
-
-  return null;
-}
-
-async function requireToken(): Promise<string> {
-  const token = await getToken();
-  if (!token) {
-    throw new Error("Not authenticated");
-  }
-  return token;
+/**
+ * Get the currently active model ID.
+ */
+export function getActiveModel(): string {
+  return providerStore.activeModel;
 }

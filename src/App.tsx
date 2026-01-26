@@ -25,6 +25,7 @@ import {
   resetWalletState,
 } from "@/stores/wallet.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
+import { providerStore } from "@/stores/provider.store";
 import { initAutoTopUp } from "@/services/autoTopUp";
 import { shortcuts } from "@/lib/shortcuts";
 import "./App.css";
@@ -45,6 +46,7 @@ function App() {
   onMount(() => {
     checkAuth();
     updaterStore.initUpdater();
+    providerStore.loadSettings();
 
     // Initialize keyboard shortcuts
     shortcuts.init();

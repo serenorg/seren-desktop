@@ -137,3 +137,65 @@ export async function deletePath(path: string): Promise<void> {
 export async function renamePath(oldPath: string, newPath: string): Promise<void> {
   await invoke("rename_path", { oldPath, newPath });
 }
+
+// ============================================================================
+// Provider API Key Management
+// ============================================================================
+
+/**
+ * Store an API key for a provider securely.
+ */
+export async function storeProviderKey(provider: string, apiKey: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("store_provider_key", { provider, apiKey });
+  } else {
+    // Browser fallback for testing
+    localStorage.setItem(`provider_key_${provider}`, apiKey);
+  }
+}
+
+/**
+ * Get the stored API key for a provider.
+ * Returns null if no key is stored.
+ */
+export async function getProviderKey(provider: string): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    return await invoke<string | null>("get_provider_key", { provider });
+  }
+  // Browser fallback for testing
+  return localStorage.getItem(`provider_key_${provider}`);
+}
+
+/**
+ * Clear the stored API key for a provider.
+ */
+export async function clearProviderKey(provider: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("clear_provider_key", { provider });
+  } else {
+    // Browser fallback for testing
+    localStorage.removeItem(`provider_key_${provider}`);
+  }
+}
+
+/**
+ * Get a list of providers that have API keys configured.
+ */
+export async function getConfiguredProviders(): Promise<string[]> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    return await invoke<string[]>("get_configured_providers");
+  }
+  // Browser fallback for testing - scan localStorage
+  const providers: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith("provider_key_")) {
+      providers.push(key.replace("provider_key_", ""));
+    }
+  }
+  return providers;
+}
