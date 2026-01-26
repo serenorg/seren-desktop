@@ -53,14 +53,17 @@ let topUpInProgress = false;
 async function refreshBalance(): Promise<void> {
   // Skip if already loading
   if (walletState.isLoading) {
+    console.log("[Wallet Store] Skipping refresh - already loading");
     return;
   }
 
+  console.log("[Wallet Store] Setting isLoading = true");
   setWalletState("isLoading", true);
   setWalletState("error", null);
 
   try {
     const data: WalletBalance = await fetchBalance();
+    console.log("[Wallet Store] Setting isLoading = false (success)");
     setWalletState({
       balance: data.balance_atomic / 1_000_000,
       balance_atomic: data.balance_atomic,
@@ -68,9 +71,11 @@ async function refreshBalance(): Promise<void> {
       lastUpdated: new Date().toISOString(),
       isLoading: false,
     });
+    console.log("[Wallet Store] State updated, isLoading:", walletState.isLoading);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to fetch balance";
+    console.error("[Wallet Store] Error refreshing balance:", message);
     // Stop auto-refresh on auth errors to prevent 401 spam
     if (
       message.includes("expired") ||
@@ -79,6 +84,7 @@ async function refreshBalance(): Promise<void> {
     ) {
       stopAutoRefresh();
     }
+    console.log("[Wallet Store] Setting isLoading = false (error)");
     setWalletState({
       isLoading: false,
       error: message,
