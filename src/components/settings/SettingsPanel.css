@@ -439,6 +439,110 @@
 }
 
 /* Responsive adjustments */
+/* Crypto wallet settings */
+.settings-hint {
+  margin: 0 0 16px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.4;
+}
+
+.crypto-key-input-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.crypto-key-input-group input[type="password"] {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--input-bg, rgba(30, 30, 30, 0.8));
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.3));
+  border-radius: 6px;
+  color: var(--text-primary, #f8fafc);
+  font-size: 0.9rem;
+  font-family: monospace;
+}
+
+.crypto-key-input-group input[type="password"]:focus {
+  outline: none;
+  border-color: var(--accent, #6366f1);
+}
+
+.crypto-key-input-group input[type="password"].invalid {
+  border-color: #ef4444;
+}
+
+.crypto-key-input-group button.primary {
+  padding: 10px 20px;
+  background: var(--accent, #6366f1);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.crypto-key-input-group button.primary:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.crypto-key-input-group button.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-error {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #ef4444;
+}
+
+.crypto-wallet-configured {
+  margin-top: 8px;
+}
+
+.crypto-address-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wallet-address {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--surface-elevated, rgba(30, 30, 30, 0.6));
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.2));
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--text-primary, #f8fafc);
+  font-family: monospace;
+  word-break: break-all;
+}
+
+button.danger-outline {
+  padding: 10px 16px;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 6px;
+  color: #ef4444;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+button.danger-outline:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+}
+
+/* Responsive adjustments */
 @media (max-width: 768px) {
   .settings-sidebar {
     width: 64px;
@@ -469,5 +573,14 @@
   .theme-option {
     flex: 1;
     min-width: 80px;
+  }
+
+  .crypto-key-input-group {
+    flex-direction: column;
+  }
+
+  .crypto-address-display {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
