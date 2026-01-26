@@ -1,7 +1,70 @@
-// ABOUTME: Tool definitions for local file operations.
+// ABOUTME: Tool definitions combining local file operations and MCP server tools.
 // ABOUTME: Follows OpenAI function calling format for use with chat completions.
 
-import type { ToolDefinition } from "@/lib/providers/types";
+import { mcpClient } from "@/lib/mcp/client";
+import type { McpTool } from "@/lib/mcp/types";
+import type { ToolDefinition, ToolParameterSchema } from "@/lib/providers/types";
+
+/**
+ * Prefix added to MCP tool names to identify them during execution.
+ * Format: mcp__{serverName}__{toolName}
+ */
+export const MCP_TOOL_PREFIX = "mcp__";
+
+/**
+ * Parse an MCP tool name to extract server name and original tool name.
+ * Returns null if the name is not an MCP tool.
+ */
+export function parseMcpToolName(
+  name: string,
+): { serverName: string; toolName: string } | null {
+  if (!name.startsWith(MCP_TOOL_PREFIX)) {
+    return null;
+  }
+  const rest = name.slice(MCP_TOOL_PREFIX.length);
+  const separatorIndex = rest.indexOf("__");
+  if (separatorIndex === -1) {
+    return null;
+  }
+  return {
+    serverName: rest.slice(0, separatorIndex),
+    toolName: rest.slice(separatorIndex + 2),
+  };
+}
+
+/**
+ * Convert an MCP tool to OpenAI function calling format.
+ */
+function convertMcpToolToDefinition(
+  serverName: string,
+  tool: McpTool,
+): ToolDefinition {
+  // Build parameter properties from MCP input schema
+  const properties: ToolParameterSchema["properties"] = {};
+  if (tool.inputSchema?.properties) {
+    for (const [key, schema] of Object.entries(tool.inputSchema.properties)) {
+      properties[key] = {
+        type: schema.type,
+        description: schema.description,
+        enum: schema.enum,
+      };
+    }
+  }
+
+  return {
+    type: "function",
+    function: {
+      // Prefix with server name to route during execution
+      name: `${MCP_TOOL_PREFIX}${serverName}__${tool.name}`,
+      description: tool.description || `MCP tool from ${serverName}`,
+      parameters: {
+        type: "object",
+        properties,
+        required: tool.inputSchema?.required,
+      },
+    },
+  };
+}
 
 /**
  * File operation tools available to the chat AI.
@@ -105,10 +168,18 @@ export const FILE_TOOLS: ToolDefinition[] = [
 ];
 
 /**
- * Get all available tools.
+ * Get all available tools, including file tools and MCP server tools.
  */
 export function getAllTools(): ToolDefinition[] {
-  return FILE_TOOLS;
+  const tools: ToolDefinition[] = [...FILE_TOOLS];
+
+  // Add tools from connected MCP servers
+  const mcpTools = mcpClient.getAllTools();
+  for (const { serverName, tool } of mcpTools) {
+    tools.push(convertMcpToolToDefinition(serverName, tool));
+  }
+
+  return tools;
 }
 
 /**
