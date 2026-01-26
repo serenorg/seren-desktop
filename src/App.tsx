@@ -9,6 +9,7 @@ import {
   onMount,
   Show,
   Switch,
+  untrack,
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
 import { CatalogPanel } from "@/components/catalog";
@@ -22,6 +23,7 @@ import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { FileExplorer } from "@/components/sidebar/FileExplorer";
+import { gatewayMcpClient } from "@/lib/tools/gateway-mcp";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
@@ -97,21 +99,41 @@ function App() {
   });
 
   // Initialize wallet and AI features when authenticated
-  createEffect(() => {
-    if (authStore.isAuthenticated) {
-      startAutoRefresh();
-      autocompleteStore.enable();
-      const cleanupAutoTopUp = initAutoTopUp();
+  createEffect((prev) => {
+    const isAuth = authStore.isAuthenticated;
 
-      onCleanup(() => {
-        stopAutoRefresh();
-        cleanupAutoTopUp();
+    // Only run if auth state actually changed
+    if (isAuth === prev) return isAuth;
+
+    if (isAuth) {
+      console.log("[App] User authenticated, starting services...");
+
+      // Use untrack to prevent reactive dependencies
+      untrack(() => {
+        startAutoRefresh();
+        autocompleteStore.enable();
+        initAutoTopUp();
+
+        // Fetch gateway MCP tools when user is authenticated
+        console.log("[App] Calling gatewayMcpClient.fetchAllTools()...");
+        gatewayMcpClient.fetchAllTools().then(() => {
+          console.log("[App] fetchAllTools() completed");
+        }).catch((error) => {
+          console.error("[App] fetchAllTools() failed:", error);
+        });
       });
     } else {
-      resetWalletState();
-      autocompleteStore.disable();
+      console.log("[App] User logged out, stopping services...");
+      untrack(() => {
+        stopAutoRefresh();
+        resetWalletState();
+        autocompleteStore.disable();
+        gatewayMcpClient.clearCache();
+      });
     }
-  });
+
+    return isAuth;
+  }, authStore.isAuthenticated);
 
   const handleLoginSuccess = () => {
     setAuthenticated({ id: "", email: "", name: "" });

@@ -76,26 +76,21 @@ function createGatewayMcpClient() {
     setLastError(null);
 
     try {
-      // First, get all MCP publishers
-      const { data: publishersData, error: publishersError } =
-        await listStorePublishers({
-          query: { search: "mcp" },
-          throwOnError: false,
-        });
+      // First, get all publishers
+      const { data: publishersData } = await listStorePublishers({
+        throwOnError: true,
+      });
 
-      if (publishersError || !publishersData?.data) {
-        throw new Error("Failed to fetch MCP publishers");
+      if (!publishersData?.data) {
+        throw new Error("No publishers data returned");
       }
 
-      // Filter to only MCP integration type publishers
-      const mcpPublishers = publishersData.data.filter(
-        (p) => p.integration_type === "mcp",
-      );
+      const mcpPublishers = publishersData.data;
 
       console.log(
         "[GatewayMCP] Found",
         mcpPublishers.length,
-        "MCP publishers:",
+        "publishers:",
         mcpPublishers.map((p) => p.slug),
       );
 
@@ -103,6 +98,7 @@ function createGatewayMcpClient() {
       const allTools: GatewayMcpTool[] = [];
       const fetchResults = await Promise.allSettled(
         mcpPublishers.map(async (publisher) => {
+          console.log(`[GatewayMCP] Fetching tools from ${publisher.slug}...`);
           const { data, error } = await listMcpTools({
             body: { publisher: publisher.slug },
             throwOnError: false,
@@ -118,6 +114,9 @@ function createGatewayMcpClient() {
 
           // Extract tools from response
           const tools = data.tools || [];
+          console.log(
+            `[GatewayMCP] Publisher ${publisher.slug}: ${tools.length} tools`,
+          );
           return tools.map((tool) => ({
             publisherSlug: publisher.slug,
             publisherName: publisher.name,
