@@ -7,6 +7,7 @@ import { FileTabs } from "./FileTabs";
 import { MonacoEditor } from "./MonacoEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { ImageViewer } from "./ImageViewer";
+import { PdfViewer } from "./PdfViewer";
 import { fileTreeState, setSelectedPath } from "@/stores/fileTree";
 import {
   tabsState,
@@ -42,6 +43,13 @@ export const EditorPanel: Component = () => {
     if (!path) return false;
     const ext = path.toLowerCase().split(".").pop();
     return ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(ext || "");
+  });
+
+  // Check if current file is a PDF
+  const isPdfFile = createMemo(() => {
+    const path = activeFilePath();
+    if (!path) return false;
+    return path.toLowerCase().endsWith(".pdf");
   });
 
   // Sync editor content with active tab
@@ -183,19 +191,26 @@ export const EditorPanel: Component = () => {
             <Show
               when={isImageFile()}
               fallback={
-                <>
-                  <div class="editor-pane">
-                    <MonacoEditor
-                      filePath={activeFilePath() ?? undefined}
-                      value={editorContent()}
-                      onChange={handleEditorChange}
-                      onDirtyChange={handleEditorDirtyChange}
-                    />
-                  </div>
-                  <Show when={showPreview() && isMarkdownFile()}>
-                    <MarkdownPreview content={editorContent()} />
-                  </Show>
-                </>
+                <Show
+                  when={isPdfFile()}
+                  fallback={
+                    <>
+                      <div class="editor-pane">
+                        <MonacoEditor
+                          filePath={activeFilePath() ?? undefined}
+                          value={editorContent()}
+                          onChange={handleEditorChange}
+                          onDirtyChange={handleEditorDirtyChange}
+                        />
+                      </div>
+                      <Show when={showPreview() && isMarkdownFile()}>
+                        <MarkdownPreview content={editorContent()} />
+                      </Show>
+                    </>
+                  }
+                >
+                  <PdfViewer filePath={activeFilePath()!} />
+                </Show>
               }
             >
               <ImageViewer filePath={activeFilePath()!} />
