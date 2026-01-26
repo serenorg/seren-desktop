@@ -229,6 +229,8 @@ export const serenProvider: ProviderAdapter = {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        // For JWT auth, SerenCore derives the wallet from the authenticated identity
+        "X-AGENT-WALLET": "prepaid",
       },
       body: JSON.stringify(agentPayload),
     });
@@ -339,6 +341,8 @@ export const serenProvider: ProviderAdapter = {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          // For JWT auth, SerenCore derives the wallet from the authenticated identity
+          "X-AGENT-WALLET": "prepaid",
         },
         body: JSON.stringify(agentPayload),
       });
@@ -398,6 +402,8 @@ export async function sendMessageWithTools(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
+      // For JWT auth, SerenCore derives the wallet from the authenticated identity
+      "X-AGENT-WALLET": "prepaid",
     },
     body: JSON.stringify(agentPayload),
   });
