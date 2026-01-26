@@ -224,7 +224,8 @@ export const walletStore = {
    * Format balance for display (uses API-formatted string).
    */
   get formattedBalance(): string {
-    return walletState.balance_usd ? `$${walletState.balance_usd}` : "--";
+    // API already returns balance_usd with $ prefix (e.g., "$3.67")
+    return walletState.balance_usd || "--";
   },
 };
 
