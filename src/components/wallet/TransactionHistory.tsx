@@ -21,15 +21,15 @@ interface TransactionHistoryProps {
 function getTransactionIcon(type: TransactionType): string {
   switch (type) {
     case "deposit":
-      return "&#x2B06;"; // Up arrow
+      return "⬆"; // Up arrow
     case "charge":
-      return "&#x2B07;"; // Down arrow
+      return "⬇"; // Down arrow
     case "refund":
-      return "&#x21A9;"; // Return arrow
+      return "↩"; // Return arrow
     case "auto_topup":
-      return "&#x26A1;"; // Lightning
+      return "⚡"; // Lightning
     default:
-      return "&#x2022;"; // Bullet
+      return "•"; // Bullet
   }
 }
 
@@ -192,7 +192,7 @@ const TransactionItem: Component<{ transaction: Transaction }> = (props) => {
   return (
     <div class={`transaction-item transaction-item--${props.transaction.type}`}>
       <div class="transaction-icon">
-        <span innerHTML={getTransactionIcon(props.transaction.type)} />
+        <span>{getTransactionIcon(props.transaction.type)}</span>
       </div>
       <div class="transaction-details">
         <span class="transaction-type">
