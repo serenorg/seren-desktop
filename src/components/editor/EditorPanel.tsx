@@ -6,6 +6,7 @@ import { FileTree } from "@/components/sidebar/FileTree";
 import { FileTabs } from "./FileTabs";
 import { MonacoEditor } from "./MonacoEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { ImageViewer } from "./ImageViewer";
 import { fileTreeState, setSelectedPath } from "@/stores/fileTree";
 import {
   tabsState,
@@ -33,6 +34,14 @@ export const EditorPanel: Component = () => {
     const path = activeFilePath();
     if (!path) return false;
     return path.toLowerCase().endsWith(".md") || path.toLowerCase().endsWith(".markdown");
+  });
+
+  // Check if current file is an image
+  const isImageFile = createMemo(() => {
+    const path = activeFilePath();
+    if (!path) return false;
+    const ext = path.toLowerCase().split(".").pop();
+    return ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(ext || "");
   });
 
   // Sync editor content with active tab
@@ -171,16 +180,25 @@ export const EditorPanel: Component = () => {
               </div>
             }
           >
-            <div class="editor-pane">
-              <MonacoEditor
-                filePath={activeFilePath() ?? undefined}
-                value={editorContent()}
-                onChange={handleEditorChange}
-                onDirtyChange={handleEditorDirtyChange}
-              />
-            </div>
-            <Show when={showPreview() && isMarkdownFile()}>
-              <MarkdownPreview content={editorContent()} />
+            <Show
+              when={isImageFile()}
+              fallback={
+                <>
+                  <div class="editor-pane">
+                    <MonacoEditor
+                      filePath={activeFilePath() ?? undefined}
+                      value={editorContent()}
+                      onChange={handleEditorChange}
+                      onDirtyChange={handleEditorDirtyChange}
+                    />
+                  </div>
+                  <Show when={showPreview() && isMarkdownFile()}>
+                    <MarkdownPreview content={editorContent()} />
+                  </Show>
+                </>
+              }
+            >
+              <ImageViewer filePath={activeFilePath()!} />
             </Show>
           </Show>
         </div>

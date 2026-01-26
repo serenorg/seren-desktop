@@ -45,7 +45,7 @@ interface ChatPanelComponent extends Component<ChatPanelProps> {
   focusInput?: () => void;
 }
 
-export const ChatPanel: Component<ChatPanelProps> = (props) => {
+export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [input, setInput] = createSignal("");
   const [streamingSession, setStreamingSession] = createSignal<StreamingSession | null>(null);
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
@@ -367,7 +367,7 @@ export const ChatPanel: Component<ChatPanelProps> = (props) => {
               <span>
                 Context from {ctx().file ?? "selection"}
                 {ctx().range &&
-                  ` (${ctx().range.startLine}-${ctx().range.endLine})`}
+                  ` (${ctx().range?.startLine}-${ctx().range?.endLine})`}
               </span>
               <button type="button" class="icon" onClick={() => editorStore.clearSelection()}>
                 ×
