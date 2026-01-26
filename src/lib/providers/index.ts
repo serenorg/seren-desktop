@@ -6,6 +6,9 @@ import { anthropicProvider } from "./anthropic";
 import { openaiProvider } from "./openai";
 import { geminiProvider } from "./gemini";
 import { providerStore } from "@/stores/provider.store";
+import { getOAuthCredentials } from "@/lib/tauri-bridge";
+import { refreshOAuthToken, needsRefresh } from "@/services/oauth";
+import type { OAuthCredentials } from "./types";
 import type {
   ChatRequest,
   ProviderId,
@@ -39,6 +42,53 @@ export function getProvider(id: ProviderId): ProviderAdapter {
 }
 
 /**
+ * Get authentication token for a provider.
+ * Returns OAuth access token if configured via OAuth, otherwise API key.
+ * Handles token refresh if needed.
+ */
+async function getAuthToken(providerId: ProviderId): Promise<{ token: string; isOAuth: boolean }> {
+  if (providerId === "seren") {
+    return { token: "", isOAuth: false };
+  }
+
+  const authType = providerStore.getAuthType(providerId);
+
+  if (authType === "oauth") {
+    // Get OAuth credentials
+    const credentialsJson = await getOAuthCredentials(providerId);
+    if (!credentialsJson) {
+      throw new Error(`OAuth credentials not found for ${providerId}. Please sign in again.`);
+    }
+
+    const credentials = JSON.parse(credentialsJson) as OAuthCredentials;
+
+    // Check if token needs refresh
+    if (needsRefresh(credentials) && credentials.refreshToken) {
+      try {
+        const refreshed = await refreshOAuthToken(providerId, credentials.refreshToken);
+        // Store refreshed credentials
+        const { storeOAuthCredentials } = await import("@/lib/tauri-bridge");
+        await storeOAuthCredentials(providerId, JSON.stringify(refreshed));
+        return { token: refreshed.accessToken, isOAuth: true };
+      } catch (error) {
+        // If refresh fails, try using existing token (it may still work)
+        console.warn("Token refresh failed, attempting with existing token:", error);
+      }
+    }
+
+    return { token: credentials.accessToken, isOAuth: true };
+  }
+
+  // Fall back to API key
+  const apiKey = await providerStore.getApiKey(providerId);
+  if (!apiKey) {
+    throw new Error(`No API key configured for ${providerId}. Please add your API key in Settings > AI Providers.`);
+  }
+
+  return { token: apiKey, isOAuth: false };
+}
+
+/**
  * Send a non-streaming message using the specified provider.
  */
 export async function sendProviderMessage(
@@ -50,16 +100,10 @@ export async function sendProviderMessage(
     throw new Error(`Unknown provider: ${providerId}`);
   }
 
-  // Get API key for non-Seren providers
-  const apiKey = providerId === "seren"
-    ? ""
-    : await providerStore.getApiKey(providerId) || "";
+  // Get authentication token (API key or OAuth token)
+  const { token, isOAuth } = await getAuthToken(providerId);
 
-  if (providerId !== "seren" && !apiKey) {
-    throw new Error(`No API key configured for ${providerId}. Please add your API key in Settings > AI Providers.`);
-  }
-
-  return provider.sendMessage(request, apiKey);
+  return provider.sendMessage(request, { token, isOAuth });
 }
 
 /**
@@ -74,16 +118,10 @@ export async function* streamProviderMessage(
     throw new Error(`Unknown provider: ${providerId}`);
   }
 
-  // Get API key for non-Seren providers
-  const apiKey = providerId === "seren"
-    ? ""
-    : await providerStore.getApiKey(providerId) || "";
+  // Get authentication token (API key or OAuth token)
+  const { token, isOAuth } = await getAuthToken(providerId);
 
-  if (providerId !== "seren" && !apiKey) {
-    throw new Error(`No API key configured for ${providerId}. Please add your API key in Settings > AI Providers.`);
-  }
-
-  yield* provider.streamMessage(request, apiKey);
+  yield* provider.streamMessage(request, { token, isOAuth });
 }
 
 /**
@@ -192,7 +230,7 @@ export function buildChatRequest(
  */
 export function getProviderDisplayName(providerId: ProviderId): string {
   const names: Record<ProviderId, string> = {
-    seren: "Seren Gateway",
+    seren: "Seren Models",
     anthropic: "Anthropic",
     openai: "OpenAI",
     gemini: "Google Gemini",

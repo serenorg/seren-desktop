@@ -1,7 +1,15 @@
 // ABOUTME: Anthropic Claude API provider adapter.
 // ABOUTME: Direct integration with api.anthropic.com for users with Anthropic subscriptions.
 
-import type { ChatRequest, ProviderAdapter, ProviderModel, ChatMessage } from "./types";
+import type { ChatRequest, ProviderAdapter, ProviderModel, ChatMessage, AuthOptions } from "./types";
+
+/**
+ * Get API key from auth parameter.
+ * Anthropic only supports API keys (no OAuth), so just extract the token.
+ */
+function getApiKey(auth: string | AuthOptions): string {
+  return typeof auth === "string" ? auth : auth.token;
+}
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -95,7 +103,8 @@ async function* parseAnthropicSSE(
 export const anthropicProvider: ProviderAdapter = {
   id: "anthropic",
 
-  async sendMessage(request: ChatRequest, apiKey: string): Promise<string> {
+  async sendMessage(request: ChatRequest, auth: string | AuthOptions): Promise<string> {
+    const apiKey = getApiKey(auth);
     const { system, messages } = convertToAnthropicFormat(request.messages);
 
     const body: Record<string, unknown> = {
@@ -136,8 +145,9 @@ export const anthropicProvider: ProviderAdapter = {
 
   async *streamMessage(
     request: ChatRequest,
-    apiKey: string
+    auth: string | AuthOptions
   ): AsyncGenerator<string, void, unknown> {
+    const apiKey = getApiKey(auth);
     const { system, messages } = convertToAnthropicFormat(request.messages);
 
     const body: Record<string, unknown> = {

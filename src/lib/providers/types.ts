@@ -7,17 +7,41 @@
 export type ProviderId = "seren" | "anthropic" | "openai" | "gemini";
 
 /**
+ * Authentication method for a provider.
+ */
+export type AuthMethod = "none" | "api_key" | "oauth" | "api_key_or_oauth";
+
+/**
+ * OAuth configuration for providers that support it.
+ */
+export interface OAuthConfig {
+  /** OAuth authorization endpoint */
+  authUrl: string;
+  /** OAuth token endpoint */
+  tokenUrl: string;
+  /** OAuth scopes required */
+  scopes: string[];
+  /** OAuth client ID (public, registered with provider) */
+  clientId: string;
+  /** Whether this provider uses PKCE (most modern providers do) */
+  usePkce: boolean;
+}
+
+/**
  * Configuration for a provider including display info and API details.
  */
 export interface ProviderConfig {
   id: ProviderId;
   name: string;
   description: string;
-  apiKeyRequired: boolean;
+  /** Authentication methods supported by this provider */
+  authMethod: AuthMethod;
   apiKeyPrefix?: string;
   apiKeyPlaceholder?: string;
   baseUrl: string;
   docsUrl: string;
+  /** OAuth configuration (if authMethod includes oauth) */
+  oauth?: OAuthConfig;
 }
 
 /**
@@ -31,12 +55,31 @@ export interface ProviderModel {
 }
 
 /**
- * Credentials stored for a provider.
+ * API key credentials stored for a provider.
  */
-export interface ProviderCredentials {
+export interface ApiKeyCredentials {
+  type: "api_key";
   apiKey: string;
   validatedAt: number;
 }
+
+/**
+ * OAuth credentials stored for a provider.
+ */
+export interface OAuthCredentials {
+  type: "oauth";
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  tokenType: string;
+  scope?: string;
+  validatedAt: number;
+}
+
+/**
+ * Credentials stored for a provider (API key or OAuth).
+ */
+export type ProviderCredentials = ApiKeyCredentials | OAuthCredentials;
 
 /**
  * Message format for chat requests.
@@ -57,6 +100,16 @@ export interface ChatRequest {
 }
 
 /**
+ * Authentication options for provider API calls.
+ */
+export interface AuthOptions {
+  /** The authentication token (API key or OAuth access token) */
+  token: string;
+  /** Whether the token is an OAuth access token (affects how auth is passed to API) */
+  isOAuth?: boolean;
+}
+
+/**
  * Interface that all provider adapters must implement.
  */
 export interface ProviderAdapter {
@@ -65,13 +118,17 @@ export interface ProviderAdapter {
 
   /**
    * Send a non-streaming message and get the complete response.
+   * @param request - The chat request
+   * @param auth - Authentication token string or AuthOptions object
    */
-  sendMessage(request: ChatRequest, apiKey: string): Promise<string>;
+  sendMessage(request: ChatRequest, auth: string | AuthOptions): Promise<string>;
 
   /**
    * Stream a message response, yielding chunks as they arrive.
+   * @param request - The chat request
+   * @param auth - Authentication token string or AuthOptions object
    */
-  streamMessage(request: ChatRequest, apiKey: string): AsyncGenerator<string, void, unknown>;
+  streamMessage(request: ChatRequest, auth: string | AuthOptions): AsyncGenerator<string, void, unknown>;
 
   /**
    * Validate an API key by making a minimal test request.
@@ -92,9 +149,9 @@ export interface ProviderAdapter {
 export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
   seren: {
     id: "seren",
-    name: "Seren Gateway",
+    name: "Seren Models",
     description: "Use your SerenBucks balance to access multiple AI models",
-    apiKeyRequired: false,
+    authMethod: "none",
     baseUrl: "https://api.serendb.com",
     docsUrl: "https://docs.serendb.com",
   },
@@ -102,7 +159,7 @@ export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
     id: "anthropic",
     name: "Anthropic",
     description: "Direct access to Claude models with your Anthropic API key",
-    apiKeyRequired: true,
+    authMethod: "api_key",
     apiKeyPrefix: "sk-ant-",
     apiKeyPlaceholder: "sk-ant-api03-...",
     baseUrl: "https://api.anthropic.com",
@@ -111,28 +168,50 @@ export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
   openai: {
     id: "openai",
     name: "OpenAI",
-    description: "Direct access to GPT models with your OpenAI API key",
-    apiKeyRequired: true,
+    description: "Access GPT models via sign-in or API key",
+    authMethod: "api_key_or_oauth",
     apiKeyPrefix: "sk-",
     apiKeyPlaceholder: "sk-proj-...",
     baseUrl: "https://api.openai.com",
     docsUrl: "https://platform.openai.com/docs",
+    oauth: {
+      authUrl: "https://auth.openai.com/authorize",
+      tokenUrl: "https://auth.openai.com/oauth/token",
+      scopes: ["openai.organization.read", "openai.chat.completions.create"],
+      clientId: "", // Set via environment or config
+      usePkce: true,
+    },
   },
   gemini: {
     id: "gemini",
     name: "Google Gemini",
-    description: "Direct access to Gemini models with your Google AI API key",
-    apiKeyRequired: true,
+    description: "Access Gemini models via Google sign-in or API key",
+    authMethod: "api_key_or_oauth",
     apiKeyPlaceholder: "AIza...",
     baseUrl: "https://generativelanguage.googleapis.com",
     docsUrl: "https://ai.google.dev/docs",
+    oauth: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      scopes: [
+        "https://www.googleapis.com/auth/generative-language.retriever",
+        "https://www.googleapis.com/auth/cloud-platform",
+      ],
+      clientId: "", // Set via environment or config
+      usePkce: true,
+    },
   },
 };
 
 /**
- * List of provider IDs that require API key configuration (excludes Seren).
+ * List of provider IDs that can be configured by users (excludes Seren).
  */
 export const CONFIGURABLE_PROVIDERS: ProviderId[] = ["anthropic", "openai", "gemini"];
+
+/**
+ * List of provider IDs that support OAuth.
+ */
+export const OAUTH_PROVIDERS: ProviderId[] = ["openai", "gemini"];
 
 /**
  * Get provider configuration by ID.
@@ -142,8 +221,17 @@ export function getProviderConfig(id: ProviderId): ProviderConfig {
 }
 
 /**
- * Check if a provider requires an API key.
+ * Check if a provider supports API key authentication.
  */
-export function requiresApiKey(id: ProviderId): boolean {
-  return PROVIDER_CONFIGS[id].apiKeyRequired;
+export function supportsApiKey(id: ProviderId): boolean {
+  const method = PROVIDER_CONFIGS[id].authMethod;
+  return method === "api_key" || method === "api_key_or_oauth";
+}
+
+/**
+ * Check if a provider supports OAuth authentication.
+ */
+export function supportsOAuth(id: ProviderId): boolean {
+  const method = PROVIDER_CONFIGS[id].authMethod;
+  return (method === "oauth" || method === "api_key_or_oauth") && !!PROVIDER_CONFIGS[id].oauth;
 }

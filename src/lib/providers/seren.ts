@@ -1,10 +1,10 @@
-// ABOUTME: Seren Gateway provider adapter for chat completions.
+// ABOUTME: Seren Models provider adapter for chat completions.
 // ABOUTME: Routes requests through Seren's /agent/api and /agent/stream endpoints.
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
-import type { ChatRequest, ProviderAdapter, ProviderModel } from "./types";
+import type { ChatRequest, ProviderAdapter, ProviderModel, AuthOptions } from "./types";
 
 const PUBLISHER_SLUG = "seren-models";
 const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
@@ -141,7 +141,7 @@ function normalizeContent(chunk: unknown): string | null {
 export const serenProvider: ProviderAdapter = {
   id: "seren",
 
-  async sendMessage(request: ChatRequest, _apiKey: string): Promise<string> {
+  async sendMessage(request: ChatRequest, _auth: string | AuthOptions): Promise<string> {
     const token = await requireToken();
     const model = normalizeModelId(request.model);
 
@@ -174,7 +174,7 @@ export const serenProvider: ProviderAdapter = {
     return extractContent(data);
   },
 
-  async *streamMessage(request: ChatRequest, _apiKey: string): AsyncGenerator<string, void, unknown> {
+  async *streamMessage(request: ChatRequest, _auth: string | AuthOptions): AsyncGenerator<string, void, unknown> {
     const token = await requireToken();
     const model = normalizeModelId(request.model);
 

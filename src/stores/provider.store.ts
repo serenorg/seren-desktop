@@ -8,6 +8,8 @@ import {
   getProviderKey,
   clearProviderKey,
   getConfiguredProviders,
+  clearOAuthCredentials,
+  getOAuthProviders,
 } from "@/lib/tauri-bridge";
 import type { ProviderId, ProviderModel } from "@/lib/providers/types";
 import { PROVIDER_CONFIGS, CONFIGURABLE_PROVIDERS } from "@/lib/providers/types";
@@ -36,6 +38,11 @@ interface ProviderSelectionSettings {
 }
 
 /**
+ * Authentication type for a configured provider.
+ */
+type AuthType = "api_key" | "oauth" | null;
+
+/**
  * Provider store state.
  */
 interface ProviderState {
@@ -45,6 +52,8 @@ interface ProviderState {
   activeModel: string;
   /** List of providers with configured API keys (always includes "seren") */
   configuredProviders: ProviderId[];
+  /** Providers configured via OAuth (subset of configuredProviders) */
+  oauthProviders: ProviderId[];
   /** Available models per provider */
   providerModels: Record<ProviderId, ProviderModel[]>;
   /** Whether key validation is in progress */
@@ -98,6 +107,7 @@ const DEFAULT_STATE: ProviderState = {
   activeProvider: "seren",
   activeModel: "anthropic/claude-sonnet-4",
   configuredProviders: ["seren"],
+  oauthProviders: [],
   providerModels: { ...DEFAULT_MODELS },
   isValidating: false,
   validationError: null,
@@ -172,10 +182,23 @@ async function saveProviderSelectionSettings(): Promise<void> {
  */
 async function loadConfiguredProviders(): Promise<void> {
   try {
-    const providers = await getConfiguredProviders();
-    // Always include seren, then add any providers with keys
-    const configured = ["seren", ...providers.filter(p => p !== "seren")] as ProviderId[];
-    setState("configuredProviders", configured);
+    // Load API key providers
+    const apiKeyProviders = await getConfiguredProviders();
+
+    // Load OAuth providers
+    const oauthProviderList = await getOAuthProviders();
+    setState("oauthProviders", oauthProviderList as ProviderId[]);
+
+    // Combine both lists, always include seren first
+    const allProviders = new Set<ProviderId>(["seren"]);
+    for (const p of apiKeyProviders) {
+      if (p !== "seren") allProviders.add(p as ProviderId);
+    }
+    for (const p of oauthProviderList) {
+      allProviders.add(p as ProviderId);
+    }
+
+    setState("configuredProviders", Array.from(allProviders));
   } catch {
     // Keep defaults if loading fails
   }
@@ -250,14 +273,63 @@ async function configureProvider(
 }
 
 /**
- * Remove a provider's API key configuration.
+ * Configure a provider via OAuth.
+ * Called after successful OAuth flow - credentials are already stored.
+ * @param providerId - The provider that was authenticated via OAuth
+ */
+async function configureOAuthProvider(providerId: ProviderId): Promise<void> {
+  if (providerId === "seren") {
+    return; // Seren doesn't use OAuth
+  }
+
+  // Add to OAuth providers list
+  if (!state.oauthProviders.includes(providerId)) {
+    setState("oauthProviders", [...state.oauthProviders, providerId]);
+  }
+
+  // Add to configured providers list
+  if (!state.configuredProviders.includes(providerId)) {
+    setState("configuredProviders", [...state.configuredProviders, providerId]);
+  }
+}
+
+/**
+ * Get the authentication type for a configured provider.
+ * @returns "oauth" if configured via OAuth, "api_key" if via API key, null if not configured
+ */
+function getAuthType(providerId: ProviderId): AuthType {
+  if (providerId === "seren") {
+    return null; // Seren uses session auth, not API key or OAuth
+  }
+
+  if (state.oauthProviders.includes(providerId)) {
+    return "oauth";
+  }
+
+  if (state.configuredProviders.includes(providerId)) {
+    return "api_key";
+  }
+
+  return null;
+}
+
+/**
+ * Remove a provider's configuration (API key or OAuth).
  */
 async function removeProvider(providerId: ProviderId): Promise<void> {
   if (providerId === "seren") {
     return; // Can't remove Seren
   }
 
+  // Clear API key if configured
   await clearProviderKey(providerId);
+
+  // Clear OAuth credentials if configured
+  if (state.oauthProviders.includes(providerId)) {
+    await clearOAuthCredentials(providerId);
+    setState("oauthProviders", state.oauthProviders.filter((p: ProviderId) => p !== providerId));
+  }
+
   setState("configuredProviders", state.configuredProviders.filter(p => p !== providerId));
 
   // If this was the active provider, switch to Seren
@@ -348,6 +420,7 @@ export const providerStore = {
   get activeProvider() { return state.activeProvider; },
   get activeModel() { return state.activeModel; },
   get configuredProviders() { return state.configuredProviders; },
+  get oauthProviders() { return state.oauthProviders; },
   get isValidating() { return state.isValidating; },
   get validationError() { return state.validationError; },
   get isLoading() { return state.isLoading; },
@@ -355,9 +428,11 @@ export const providerStore = {
   // Functions
   loadSettings: loadProviderSettings,
   configureProvider,
+  configureOAuthProvider,
   removeProvider,
   isProviderConfigured,
   getApiKey,
+  getAuthType,
   setActiveProvider,
   setActiveModel,
   setProviderModels,

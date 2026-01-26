@@ -241,6 +241,89 @@ export async function getConfiguredProviders(): Promise<string[]> {
 }
 
 // ============================================================================
+// OAuth Credentials Management
+// ============================================================================
+
+/**
+ * Store OAuth credentials for a provider securely.
+ * @param provider - Provider ID (e.g., "openai", "gemini")
+ * @param credentials - JSON string of OAuthCredentials
+ */
+export async function storeOAuthCredentials(provider: string, credentials: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("store_oauth_credentials", { provider, credentials });
+  } else {
+    // Browser fallback for testing
+    localStorage.setItem(`oauth_creds_${provider}`, credentials);
+  }
+}
+
+/**
+ * Get stored OAuth credentials for a provider.
+ * Returns null if no credentials are stored.
+ */
+export async function getOAuthCredentials(provider: string): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    return await invoke<string | null>("get_oauth_credentials", { provider });
+  }
+  // Browser fallback for testing
+  return localStorage.getItem(`oauth_creds_${provider}`);
+}
+
+/**
+ * Clear OAuth credentials for a provider.
+ */
+export async function clearOAuthCredentials(provider: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("clear_oauth_credentials", { provider });
+  } else {
+    // Browser fallback for testing
+    localStorage.removeItem(`oauth_creds_${provider}`);
+  }
+}
+
+/**
+ * Get a list of providers that have OAuth credentials configured.
+ */
+export async function getOAuthProviders(): Promise<string[]> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    return await invoke<string[]>("get_oauth_providers");
+  }
+  // Browser fallback for testing - scan localStorage
+  const providers: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith("oauth_creds_")) {
+      providers.push(key.replace("oauth_creds_", ""));
+    }
+  }
+  return providers;
+}
+
+/**
+ * Listen for OAuth callback events from deep links.
+ * @param callback - Function to call with the callback URL
+ * @returns Cleanup function to remove the listener
+ */
+export async function listenForOAuthCallback(
+  callback: (url: string) => void
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    // Browser fallback - no deep link support
+    return () => {};
+  }
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<string>("oauth-callback", (event) => {
+    callback(event.payload);
+  });
+  return unlisten;
+}
+
+// ============================================================================
 // Crypto Wallet Operations (x402)
 // ============================================================================
 
