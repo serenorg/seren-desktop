@@ -14,6 +14,12 @@ interface FileTreeProps {
 }
 
 export const FileTree: Component<FileTreeProps> = (props) => {
+  const folderName = createMemo(() => {
+    if (!fileTreeState.rootPath) return null;
+    const parts = fileTreeState.rootPath.split("/");
+    return parts[parts.length - 1] || parts[parts.length - 2];
+  });
+
   return (
     <div
       class="file-tree"
@@ -21,6 +27,11 @@ export const FileTree: Component<FileTreeProps> = (props) => {
       aria-label="File explorer"
       data-testid="file-tree"
     >
+      <Show when={folderName()}>
+        <div class="file-tree-header">
+          <span class="file-tree-folder-name">{folderName()}</span>
+        </div>
+      </Show>
       <Show
         when={fileTreeState.nodes.length > 0}
         fallback={<div class="file-tree-empty">No folder open</div>}

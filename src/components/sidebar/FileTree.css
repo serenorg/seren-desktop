@@ -2,8 +2,25 @@
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  font-size: 14px;
+  font-size: 15px;
   user-select: none;
+}
+
+.file-tree-header {
+  padding: 8px 12px;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color, #3c3c3c);
+}
+
+.file-tree-folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
 }
 
 .file-tree-empty {
