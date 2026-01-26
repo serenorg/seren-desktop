@@ -1,8 +1,10 @@
-// ABOUTME: Tool executor that calls Tauri commands for file operations.
+// ABOUTME: Tool executor that routes tool calls to file operations or MCP servers.
 // ABOUTME: Handles tool call parsing, execution, and result formatting.
 
 import { invoke } from "@tauri-apps/api/core";
+import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
+import { parseMcpToolName } from "./definitions";
 
 /**
  * File entry returned by list_directory.
@@ -15,12 +17,21 @@ interface FileEntry {
 
 /**
  * Execute a single tool call and return the result.
+ * Routes to MCP server if tool name is prefixed, otherwise uses local file tools.
  */
 export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
   const { name, arguments: argsJson } = toolCall.function;
 
   try {
     const args = JSON.parse(argsJson) as Record<string, unknown>;
+
+    // Check if this is an MCP tool call
+    const mcpInfo = parseMcpToolName(name);
+    if (mcpInfo) {
+      return await executeMcpTool(toolCall.id, mcpInfo.serverName, mcpInfo.toolName, args);
+    }
+
+    // Otherwise, handle local file tools
     let result: unknown;
 
     switch (name) {
@@ -81,6 +92,48 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
     return {
       tool_call_id: toolCall.id,
       content: `Error: ${message}`,
+      is_error: true,
+    };
+  }
+}
+
+/**
+ * Execute an MCP tool call via the MCP client.
+ */
+async function executeMcpTool(
+  toolCallId: string,
+  serverName: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  try {
+    const result = await mcpClient.callTool(serverName, {
+      name: toolName,
+      arguments: args,
+    });
+
+    // Convert MCP result content to string
+    let content = "";
+    for (const item of result.content) {
+      if (item.type === "text") {
+        content += item.text;
+      } else if (item.type === "image") {
+        content += `[Image: ${item.mimeType}]`;
+      } else if (item.type === "resource") {
+        content += item.resource.text || `[Resource: ${item.resource.uri}]`;
+      }
+    }
+
+    return {
+      tool_call_id: toolCallId,
+      content: content || "Tool executed successfully",
+      is_error: result.isError ?? false,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      tool_call_id: toolCallId,
+      content: `MCP tool error: ${message}`,
       is_error: true,
     };
   }
