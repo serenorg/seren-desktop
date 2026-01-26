@@ -135,6 +135,17 @@ code {
   button {
     @apply cursor-pointer;
   }
+
+  /* Form elements - ensure proper dark mode styling */
+  select,
+  input,
+  textarea {
+    @apply bg-muted text-foreground;
+  }
+
+  select option {
+    @apply bg-muted text-foreground;
+  }
 }
 
 /* Scrollbar styling */
