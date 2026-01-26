@@ -2,7 +2,7 @@
 // ABOUTME: Fetches models from Seren API and allows filtering by name/provider.
 
 import { createSignal, createEffect, For, Show, onCleanup, type Component } from "solid-js";
-import { modelService, type Model } from "@/services/models";
+import { modelsService, type Model } from "@/services/models";
 import "./SearchableModelSelect.css";
 
 interface SearchableModelSelectProps {
@@ -38,7 +38,7 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (pro
   async function loadModels() {
     setIsLoading(true);
     try {
-      const fetched = await modelService.getModels();
+      const fetched = await modelsService.getAvailable();
       if (fetched.length > 0) {
         setModels(fetched);
       }
