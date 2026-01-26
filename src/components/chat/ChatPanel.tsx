@@ -367,7 +367,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
               <span>
                 Context from {ctx().file ?? "selection"}
                 {ctx().range &&
-                  ` (${ctx().range.startLine}-${ctx().range.endLine})`}
+                  ` (${ctx().range?.startLine}-${ctx().range?.endLine})`}
               </span>
               <button type="button" class="icon" onClick={() => editorStore.clearSelection()}>
                 ×
