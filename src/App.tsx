@@ -7,6 +7,7 @@ import { Sidebar, Panel } from "@/components/common/Sidebar";
 import { StatusBar } from "@/components/common/StatusBar";
 import { SignIn } from "@/components/auth/SignIn";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { EditorPanel } from "@/components/editor/EditorPanel";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import {
@@ -101,7 +102,7 @@ function App() {
                 <ChatPanel onSignInClick={handleSignInClick} />
               </Match>
               <Match when={activePanel() === "editor"}>
-                <div class="panel-placeholder">Editor Panel (Coming Soon)</div>
+                <EditorPanel />
               </Match>
               <Match when={activePanel() === "catalog"}>
                 <div class="panel-placeholder">Catalog Panel (Coming Soon)</div>
