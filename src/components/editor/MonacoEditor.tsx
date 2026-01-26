@@ -38,6 +38,8 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
 
   const [isDirty, setIsDirty] = createSignal(false);
   const [originalValue, setOriginalValue] = createSignal(props.value || "");
+  // Track Monaco initialization to trigger re-render of value effect
+  const [isMonacoReady, setIsMonacoReady] = createSignal(false);
 
   // Track dirty state
   createEffect(() => {
@@ -71,6 +73,9 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
       readOnly: props.readOnly || false,
     });
 
+    // Signal that Monaco is ready - this triggers effects that depend on model
+    setIsMonacoReady(true);
+
     // Listen for content changes
     const disposable = model.onDidChangeContent(() => {
       const currentValue = model?.getValue() || "";
@@ -95,9 +100,11 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
   });
 
   // Update value from props (controlled mode)
+  // isMonacoReady() is accessed to re-run this effect when Monaco initializes
   createEffect(() => {
+    const ready = isMonacoReady();
     const newValue = props.value;
-    if (newValue !== undefined && model && model.getValue() !== newValue) {
+    if (ready && newValue !== undefined && model && model.getValue() !== newValue) {
       model.setValue(newValue);
       setOriginalValue(newValue);
       setIsDirty(false);

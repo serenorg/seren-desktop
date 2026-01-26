@@ -4,6 +4,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
+ * Check if running in Tauri runtime (vs browser).
+ */
+export function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI__" in window;
+}
+
+/**
  * Store authentication token securely using OS keychain.
  */
 export async function storeToken(token: string): Promise<void> {
