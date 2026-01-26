@@ -25,6 +25,15 @@
       "csp": "default-src 'self'; connect-src 'self' https://api.serendb.com; script-src 'self'; style-src 'self' 'unsafe-inline'"
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://releases.serendb.com/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": "SEREN_RELEASES_PUBLIC_KEY_PLACEHOLDER",
+      "dialog": false
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

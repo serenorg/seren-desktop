@@ -15,6 +15,7 @@ import {
   setAuthenticated,
 } from "@/stores/auth.store";
 import { telemetry } from "@/services/telemetry";
+import { updaterStore } from "@/stores/updater.store";
 import "./App.css";
 
 // Initialize telemetry early to capture startup errors
@@ -29,6 +30,7 @@ function App() {
 
   onMount(() => {
     checkAuth();
+    updaterStore.initUpdater();
   });
 
   const handleLoginSuccess = () => {

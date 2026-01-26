@@ -28,3 +28,7 @@
 .status-bar-right .mcp-status-indicator .status-label {
   color: rgba(255, 255, 255, 0.85);
 }
+
+.status-bar-right .update-indicator {
+  color: rgba(255, 255, 255, 0.9);
+}
