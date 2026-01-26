@@ -1,10 +1,9 @@
 // ABOUTME: Application status bar at the bottom.
-// ABOUTME: Displays status messages, wallet balance, MCP state, autocomplete status, and connection state.
+// ABOUTME: Displays status messages, MCP state, autocomplete status, and connection state.
 
 import { Component } from "solid-js";
 import { McpStatusIndicator } from "./McpStatusIndicator";
 import { UpdateIndicator } from "./UpdateIndicator";
-import { WalletStatus } from "./WalletStatus";
 import { AutocompleteStatus } from "./AutocompleteStatus";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import "./StatusBar.css";
@@ -24,7 +23,6 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
           onToggle={autocompleteStore.toggle}
         />
         <UpdateIndicator />
-        <WalletStatus />
         <McpStatusIndicator />
       </div>
     </footer>
