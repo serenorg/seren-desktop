@@ -135,8 +135,8 @@ function App() {
   };
 
   // Get the "active" panel for header highlighting
-  // If an overlay is open, show that; otherwise default to "editor"
-  const activePanel = () => overlayPanel() ?? "editor";
+  // If an overlay is open, show that; otherwise default to "chat"
+  const activePanel = () => overlayPanel() ?? "chat";
 
   return (
     <Show
