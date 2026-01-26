@@ -165,15 +165,13 @@ export async function prepareEmbeddedRuntime(arch: 'x64' | 'arm64', outputDir: s
 	return { nodeDir, gitDir };
 }
 
-// CLI entry point
-if (require.main === module) {
-	const arch = (process.argv[2] as 'x64' | 'arm64') || 'arm64';
-	const outputDir = process.argv[3] || path.join(process.cwd(), '.build', 'embedded-runtime', `darwin-${arch}`);
+// CLI entry point (ESM compatible)
+const arch = (process.argv[2] as 'x64' | 'arm64') || 'arm64';
+const outputDir = process.argv[3] || path.join(process.cwd(), '.build', 'embedded-runtime', `darwin-${arch}`);
 
-	prepareEmbeddedRuntime(arch, outputDir)
-		.then(() => process.exit(0))
-		.catch((err) => {
-			console.error('Failed to prepare embedded runtime:', err);
-			process.exit(1);
-		});
-}
+prepareEmbeddedRuntime(arch, outputDir)
+	.then(() => process.exit(0))
+	.catch((err) => {
+		console.error('Failed to prepare embedded runtime:', err);
+		process.exit(1);
+	});
