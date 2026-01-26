@@ -1,0 +1,132 @@
+/* ABOUTME: Styles for the searchable model select dropdown. */
+/* ABOUTME: Dark theme matching the settings panel design. */
+
+.searchable-model-select {
+  position: relative;
+  width: 100%;
+}
+
+.select-trigger {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.select-trigger:hover {
+  border-color: #484f58;
+}
+
+.select-trigger.open {
+  border-color: #58a6ff;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-arrow {
+  font-size: 10px;
+  color: #8b949e;
+  margin-left: 8px;
+}
+
+.select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #161b22;
+  border: 1px solid #58a6ff;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  z-index: 1000;
+  max-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.select-search {
+  padding: 8px;
+  border-bottom: 1px solid #21262d;
+}
+
+.select-search input {
+  width: 100%;
+  padding: 8px 12px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #e6edf3;
+  font-size: 13px;
+}
+
+.select-search input:focus {
+  outline: none;
+  border-color: #58a6ff;
+}
+
+.select-search input::placeholder {
+  color: #484f58;
+}
+
+.select-options {
+  overflow-y: auto;
+  max-height: 240px;
+}
+
+.select-option {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  color: #e6edf3;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease;
+}
+
+.select-option:hover {
+  background: #21262d;
+}
+
+.select-option.selected {
+  background: #1f6feb20;
+}
+
+.select-option.selected .option-name {
+  color: #58a6ff;
+}
+
+.option-name {
+  font-weight: 500;
+}
+
+.option-provider {
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.select-loading,
+.select-empty {
+  padding: 16px;
+  text-align: center;
+  color: #8b949e;
+  font-size: 13px;
+}

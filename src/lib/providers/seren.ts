@@ -10,6 +10,27 @@ const PUBLISHER_SLUG = "seren-models";
 const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
 const AGENT_STREAM_ENDPOINT = `${apiBase}/agent/stream`;
 
+/**
+ * Normalize old model IDs to current OpenRouter format.
+ * Handles migration from date-suffixed IDs to clean IDs.
+ */
+function normalizeModelId(modelId: string): string {
+  // Map of old IDs to new IDs
+  const migrations: Record<string, string> = {
+    // Anthropic - remove date suffixes
+    "anthropic/claude-sonnet-4-20250514": "anthropic/claude-sonnet-4",
+    "anthropic/claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+    "anthropic/claude-haiku-4-20250514": "anthropic/claude-haiku-4.5",
+    // Also handle without namespace prefix (from old settings)
+    "claude-sonnet-4-20250514": "anthropic/claude-sonnet-4",
+    "claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+    "claude-haiku-4-20250514": "anthropic/claude-haiku-4.5",
+    "claude-haiku-3-20240307": "anthropic/claude-3-haiku-20240307",
+  };
+
+  return migrations[modelId] || modelId;
+}
+
 interface AgentApiPayload {
   publisher: string;
   path: string;
@@ -25,10 +46,18 @@ interface AgentApiPayload {
  * Default models available through Seren Gateway.
  */
 const DEFAULT_MODELS: ProviderModel[] = [
-  { id: "anthropic/claude-sonnet-4-20250514", name: "Claude Sonnet 4", contextWindow: 200000 },
-  { id: "anthropic/claude-opus-4-20250514", name: "Claude Opus 4", contextWindow: 200000 },
+  // Anthropic
+  { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5", contextWindow: 200000 },
+  { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", contextWindow: 200000 },
+  { id: "anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5", contextWindow: 200000 },
+  // OpenAI
+  { id: "openai/gpt-5", name: "GPT-5", contextWindow: 128000 },
   { id: "openai/gpt-4o", name: "GPT-4o", contextWindow: 128000 },
   { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", contextWindow: 128000 },
+  // Google Gemini
+  { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 1000000 },
+  { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000 },
+  { id: "google/gemini-3-flash-preview", name: "Gemini 3 Flash", contextWindow: 1000000 },
 ];
 
 async function requireToken(): Promise<string> {
@@ -114,13 +143,14 @@ export const serenProvider: ProviderAdapter = {
 
   async sendMessage(request: ChatRequest, _apiKey: string): Promise<string> {
     const token = await requireToken();
+    const model = normalizeModelId(request.model);
 
     const agentPayload: AgentApiPayload = {
       publisher: PUBLISHER_SLUG,
       path: "/chat/completions",
       method: "POST",
       body: {
-        model: request.model,
+        model,
         messages: request.messages,
         stream: false,
       },
@@ -146,13 +176,14 @@ export const serenProvider: ProviderAdapter = {
 
   async *streamMessage(request: ChatRequest, _apiKey: string): AsyncGenerator<string, void, unknown> {
     const token = await requireToken();
+    const model = normalizeModelId(request.model);
 
     const agentPayload: AgentApiPayload = {
       publisher: PUBLISHER_SLUG,
       path: "/chat/completions",
       method: "POST",
       body: {
-        model: request.model,
+        model,
         messages: request.messages,
         stream: true,
       },
@@ -168,7 +199,13 @@ export const serenProvider: ProviderAdapter = {
     });
 
     if (!response.ok || !response.body) {
-      throw new Error(`Seren streaming failed: ${response.status}`);
+      const errorText = await response.text().catch(() => "");
+      console.error("[Seren Stream Error]", {
+        status: response.status,
+        body: errorText,
+        payload: agentPayload,
+      });
+      throw new Error(`Seren streaming failed: ${response.status} - ${errorText}`);
     }
 
     const reader = response.body.getReader();

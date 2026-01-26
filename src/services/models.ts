@@ -80,7 +80,7 @@ export const modelsService = {
 function getDefaultModels(): Model[] {
   return [
     {
-      id: "anthropic/claude-sonnet-4-20250514",
+      id: "anthropic/claude-sonnet-4",
       name: "Claude Sonnet 4",
       provider: "Anthropic",
       contextWindow: 200000,

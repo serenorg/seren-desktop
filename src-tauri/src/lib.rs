@@ -11,6 +11,7 @@ pub mod services {
     pub mod database;
 }
 
+mod embedded_runtime;
 mod files;
 mod mcp;
 mod sync;
@@ -116,6 +117,16 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .manage(mcp::McpState::new())
+        .setup(|app| {
+            // Configure embedded runtime early in startup
+            // This prepends bundled Node.js and Git to PATH
+            let paths = embedded_runtime::configure_embedded_runtime(&app.handle());
+            if paths.node_dir.is_some() || paths.git_dir.is_some() {
+                println!("[Seren] Embedded runtime configured: node={:?}, git={:?}",
+                    paths.node_dir.is_some(), paths.git_dir.is_some());
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             store_token,
@@ -154,6 +165,7 @@ pub fn run() {
             wallet::commands::get_crypto_wallet_address,
             wallet::commands::clear_crypto_wallet,
             wallet::commands::sign_x402_payment,
+            embedded_runtime::get_embedded_runtime_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

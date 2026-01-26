@@ -1,0 +1,3 @@
+# Placeholder for embedded runtime binaries
+# Run 'pnpm prepare:runtime' to download actual binaries
+# This placeholder ensures CI can build without the full runtime

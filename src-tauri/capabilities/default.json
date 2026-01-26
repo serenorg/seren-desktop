@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "dialog:default",
+    "updater:default",
     {
       "identifier": "opener:default",
       "allow": [

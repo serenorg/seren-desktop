@@ -65,10 +65,47 @@ export async function logout(): Promise<void> {
 
 /**
  * Check if user is logged in (has stored token).
+ * Only checks local storage, does not validate with server.
+ */
+export async function hasStoredToken(): Promise<boolean> {
+  const token = await getToken();
+  return token !== null;
+}
+
+/**
+ * Validate token with the server by calling /auth/me.
+ * Clears token if invalid/expired.
+ * @returns true if token is valid, false otherwise
  */
 export async function isLoggedIn(): Promise<boolean> {
   const token = await getToken();
-  return token !== null;
+  if (!token) {
+    return false;
+  }
+
+  try {
+    const response = await appFetch(`${API_BASE}/auth/me`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (response.ok) {
+      return true;
+    }
+
+    // Token is invalid or expired - clear it
+    if (response.status === 401) {
+      await clearToken();
+    }
+    return false;
+  } catch {
+    // Network error - assume token might still be valid
+    // This allows offline usage if token was valid
+    return true;
+  }
 }
 
 /**

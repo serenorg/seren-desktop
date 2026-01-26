@@ -13,16 +13,10 @@ import {
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
 import { ProviderSettings } from "./ProviderSettings";
+import { SearchableModelSelect } from "./SearchableModelSelect";
 import "./SettingsPanel.css";
 
 type SettingsSection = "chat" | "providers" | "editor" | "wallet" | "appearance" | "general" | "mcp";
-
-// Available AI models for chat and completion
-const AI_MODELS = [
-  { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
-  { id: "claude-opus-4-20250514", name: "Claude Opus 4" },
-  { id: "claude-haiku-3-20240307", name: "Claude Haiku 3" },
-] as const;
 
 export const SettingsPanel: Component = () => {
   const [activeSection, setActiveSection] = createSignal<SettingsSection>("chat");
@@ -141,16 +135,11 @@ export const SettingsPanel: Component = () => {
                 <span class="label-text">Default Model</span>
                 <span class="label-hint">AI model for chat conversations</span>
               </label>
-              <select
+              <SearchableModelSelect
                 value={settingsState.app.chatDefaultModel}
-                onChange={(e) => handleStringChange("chatDefaultModel", e.currentTarget.value)}
-              >
-                <For each={AI_MODELS}>
-                  {(model) => (
-                    <option value={model.id}>{model.name}</option>
-                  )}
-                </For>
-              </select>
+                onChange={(value) => handleStringChange("chatDefaultModel", value)}
+                placeholder="Select a model"
+              />
             </div>
 
             <div class="settings-group">
@@ -166,6 +155,20 @@ export const SettingsPanel: Component = () => {
                 value={settingsState.app.chatMaxHistoryMessages}
                 onInput={(e) => handleNumberChange("chatMaxHistoryMessages", e.currentTarget.value)}
               />
+            </div>
+
+            <div class="settings-group checkbox">
+              <label class="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.chatEnterToSend}
+                  onChange={(e) => handleBooleanChange("chatEnterToSend", e.currentTarget.checked)}
+                />
+                <span class="checkbox-label">
+                  <span class="label-text">Enter to Send</span>
+                  <span class="label-hint">Press Enter to send messages (Shift+Enter for new line)</span>
+                </span>
+              </label>
             </div>
           </section>
         </Show>
@@ -259,16 +262,11 @@ export const SettingsPanel: Component = () => {
                 <span class="label-text">Completion Model</span>
                 <span class="label-hint">AI model for code completions</span>
               </label>
-              <select
+              <SearchableModelSelect
                 value={settingsState.app.completionModelId}
-                onChange={(e) => handleStringChange("completionModelId", e.currentTarget.value)}
-              >
-                <For each={AI_MODELS}>
-                  {(model) => (
-                    <option value={model.id}>{model.name}</option>
-                  )}
-                </For>
-              </select>
+                onChange={(value) => handleStringChange("completionModelId", value)}
+                placeholder="Select a model"
+              />
             </div>
 
             <div class="settings-group">
@@ -406,7 +404,7 @@ export const SettingsPanel: Component = () => {
                 </label>
                 <input
                   type="number"
-                  min="5"
+                  min="10"
                   step="5"
                   value={settingsState.app.autoTopUpAmount}
                   onInput={(e) => handleNumberChange("autoTopUpAmount", e.currentTarget.value)}
