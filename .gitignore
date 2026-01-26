@@ -5,6 +5,7 @@ node_modules/
 dist/
 target/
 src-tauri/target/
+.build/
 
 # Environment files (NEVER commit these)
 .env

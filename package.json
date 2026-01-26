@@ -17,7 +17,14 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "prepare:runtime": "tsx build/darwin/prepare-embedded-runtime.ts",
+    "prepare:runtime:darwin-x64": "tsx build/darwin/prepare-embedded-runtime.ts x64",
+    "prepare:runtime:darwin-arm64": "tsx build/darwin/prepare-embedded-runtime.ts arm64",
+    "prepare:runtime:win32-x64": "tsx build/win32/prepare-embedded-runtime.ts x64",
+    "prepare:runtime:win32-arm64": "tsx build/win32/prepare-embedded-runtime.ts arm64",
+    "prepare:runtime:linux-x64": "tsx build/linux/prepare-embedded-runtime.ts x64",
+    "prepare:runtime:linux-arm64": "tsx build/linux/prepare-embedded-runtime.ts arm64"
   },
   "license": "MIT",
   "dependencies": {
@@ -39,6 +46,7 @@
     "@playwright/test": "^1.58.0",
     "@tauri-apps/cli": "^2",
     "@types/node": "^25.0.10",
+    "tsx": "^4.19.0",
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
     "eslint": "^9.39.2",
