@@ -127,7 +127,7 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
         </header>
 
         <div class="flex items-center gap-4 p-4 px-6 border-b border-[rgba(148,163,184,0.1)] flex-wrap">
-          <div class="flex-1 min-w-[200px]">
+          <div class="min-w-[200px] max-w-[350px]">
             <input
               type="text"
               placeholder="Search publishers..."
