@@ -1,5 +1,5 @@
-// ABOUTME: Main application component with layout and optional auth.
-// ABOUTME: App is fully usable without login; auth unlocks AI features.
+// ABOUTME: Main application component with three-column resizable layout.
+// ABOUTME: FileTree | Editor | Chat with draggable separators.
 
 import {
   createEffect,
@@ -12,14 +12,16 @@ import {
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
 import { CatalogPanel } from "@/components/catalog";
-import { ChatPanel } from "@/components/chat/ChatPanel";
+import { ChatContent } from "@/components/chat/ChatContent";
 import { Header, type Panel } from "@/components/common/Header";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
+import { ResizableLayout } from "@/components/common/ResizableLayout";
 import { StatusBar } from "@/components/common/StatusBar";
-import { EditorPanel } from "@/components/editor/EditorPanel";
+import { EditorContent } from "@/components/editor/EditorContent";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
+import { FileExplorer } from "@/components/sidebar/FileExplorer";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
@@ -40,6 +42,7 @@ import {
   startAutoRefresh,
   stopAutoRefresh,
 } from "@/stores/wallet.store";
+import "@/components/common/ResizableLayout.css";
 import "./styles.css";
 
 // Initialize telemetry early to capture startup errors
@@ -50,10 +53,8 @@ function App() {
     return <Phase3Playground />;
   }
 
-  const [activePanel, setActivePanel] = createSignal<Panel>("editor");
-
-  // Reference to focus chat input
-  let chatPanelRef: { focusInput?: () => void } | undefined;
+  // Overlay panels (settings, catalog, database, account)
+  const [overlayPanel, setOverlayPanel] = createSignal<Panel | null>(null);
 
   onMount(async () => {
     checkAuth();
@@ -66,31 +67,26 @@ function App() {
     await providerStore.loadSettings();
 
     // Sync chatStore with the active model from provider store
-    // (providerStore already loaded the persisted activeModel)
     chatStore.setModel(providerStore.activeModel);
 
     // Initialize keyboard shortcuts
     shortcuts.init();
     shortcuts.register("focusChat", () => {
-      setActivePanel("chat");
-      // Focus the chat input after panel switch
-      setTimeout(() => chatPanelRef?.focusInput?.(), 0);
+      // Chat is always visible, just focus it
+      setOverlayPanel(null);
     });
-    shortcuts.register("openSettings", () => setActivePanel("settings"));
+    shortcuts.register("openSettings", () => setOverlayPanel("settings"));
     shortcuts.register("toggleSidebar", () => {
-      // Toggle between current panel and a minimized state (future enhancement)
-      // For now, cycle through main panels
-      const panels: Panel[] = ["chat", "editor"];
-      const currentIndex = panels.indexOf(activePanel());
-      const nextIndex = (currentIndex + 1) % panels.length;
-      setActivePanel(panels[nextIndex]);
+      // Toggle catalog panel
+      setOverlayPanel((p) => (p === "catalog" ? null : "catalog"));
     });
-    shortcuts.register("focusEditor", () => setActivePanel("editor"));
+    shortcuts.register("focusEditor", () => {
+      // Editor is always visible, just close overlays
+      setOverlayPanel(null);
+    });
     shortcuts.register("closePanel", () => {
-      // Escape closes settings/account panels, returns to editor
-      if (activePanel() === "settings" || activePanel() === "account") {
-        setActivePanel("editor");
-      }
+      // Escape closes overlay panels
+      setOverlayPanel(null);
     });
   });
 
@@ -101,13 +97,8 @@ function App() {
   // Initialize wallet and AI features when authenticated
   createEffect(() => {
     if (authStore.isAuthenticated) {
-      // Start wallet balance refresh
       startAutoRefresh();
-
-      // Enable AI autocomplete
       autocompleteStore.enable();
-
-      // Initialize auto top-up monitoring
       const cleanupAutoTopUp = initAutoTopUp();
 
       onCleanup(() => {
@@ -115,7 +106,6 @@ function App() {
         cleanupAutoTopUp();
       });
     } else {
-      // Reset wallet state and disable autocomplete on logout
       resetWalletState();
       autocompleteStore.disable();
     }
@@ -123,8 +113,7 @@ function App() {
 
   const handleLoginSuccess = () => {
     setAuthenticated({ id: "", email: "", name: "" });
-    // Switch to chat panel after successful login
-    setActivePanel("chat");
+    setOverlayPanel(null);
   };
 
   const handleLogout = async () => {
@@ -132,8 +121,22 @@ function App() {
   };
 
   const handleSignInClick = () => {
-    setActivePanel("account");
+    setOverlayPanel("account");
   };
+
+  const handlePanelChange = (panel: Panel) => {
+    // Main panels (chat, editor) are always visible in the three-column layout
+    // Other panels (settings, catalog, database, account) are overlays
+    if (panel === "chat" || panel === "editor") {
+      setOverlayPanel(null);
+    } else {
+      setOverlayPanel(panel);
+    }
+  };
+
+  // Get the "active" panel for header highlighting
+  // If an overlay is open, show that; otherwise default to "editor"
+  const activePanel = () => overlayPanel() ?? "editor";
 
   return (
     <Show
@@ -148,37 +151,43 @@ function App() {
       <div class="flex flex-col h-full">
         <Header
           activePanel={activePanel()}
-          onPanelChange={setActivePanel}
+          onPanelChange={handlePanelChange}
           onLogout={handleLogout}
           isAuthenticated={authStore.isAuthenticated}
         />
-        <main class="flex-1 overflow-hidden bg-transparent">
-          <Switch
-            fallback={
-              <div class="flex items-center justify-center h-full text-muted-foreground text-base">
-                Select a panel
-              </div>
-            }
-          >
-            <Match when={activePanel() === "chat"}>
-              <ChatPanel onSignInClick={handleSignInClick} />
-            </Match>
-            <Match when={activePanel() === "editor"}>
-              <EditorPanel />
-            </Match>
-            <Match when={activePanel() === "catalog"}>
-              <CatalogPanel onSignInClick={handleSignInClick} />
-            </Match>
-            <Match when={activePanel() === "database"}>
-              <DatabasePanel />
-            </Match>
-            <Match when={activePanel() === "settings"}>
-              <SettingsPanel />
-            </Match>
-            <Match when={activePanel() === "account"}>
-              <SignIn onSuccess={handleLoginSuccess} />
-            </Match>
-          </Switch>
+        <main class="flex-1 overflow-hidden bg-transparent relative">
+          {/* Three-column resizable layout (always visible) */}
+          <ResizableLayout
+            left={<FileExplorer />}
+            center={<EditorContent />}
+            right={<ChatContent onSignInClick={handleSignInClick} />}
+            leftWidth={240}
+            rightWidth={400}
+            leftMinWidth={180}
+            leftMaxWidth={400}
+            rightMinWidth={300}
+            rightMaxWidth={700}
+          />
+
+          {/* Overlay panels */}
+          <Show when={overlayPanel()}>
+            <div class="absolute inset-0 bg-[#0d1117] z-10">
+              <Switch>
+                <Match when={overlayPanel() === "catalog"}>
+                  <CatalogPanel onSignInClick={handleSignInClick} />
+                </Match>
+                <Match when={overlayPanel() === "database"}>
+                  <DatabasePanel />
+                </Match>
+                <Match when={overlayPanel() === "settings"}>
+                  <SettingsPanel />
+                </Match>
+                <Match when={overlayPanel() === "account"}>
+                  <SignIn onSuccess={handleLoginSuccess} />
+                </Match>
+              </Switch>
+            </div>
+          </Show>
         </main>
         <StatusBar />
         <LowBalanceModal />
