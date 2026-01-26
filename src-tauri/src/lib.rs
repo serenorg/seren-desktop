@@ -14,6 +14,7 @@ pub mod services {
 mod files;
 mod mcp;
 mod sync;
+mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
 const TOKEN_KEY: &str = "token";
@@ -149,6 +150,10 @@ pub fn run() {
             mcp::mcp_read_resource,
             mcp::mcp_is_connected,
             mcp::mcp_list_connected,
+            wallet::commands::store_crypto_private_key,
+            wallet::commands::get_crypto_wallet_address,
+            wallet::commands::clear_crypto_wallet,
+            wallet::commands::sign_x402_payment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
