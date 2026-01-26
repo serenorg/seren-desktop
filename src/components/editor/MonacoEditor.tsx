@@ -35,6 +35,7 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
   let containerRef: HTMLDivElement | undefined;
   let editor: Monaco.editor.IStandaloneCodeEditor | undefined;
   let model: Monaco.editor.ITextModel | undefined;
+  let ownsModel = false; // Track if we created the model vs reused existing
 
   const [isDirty, setIsDirty] = createSignal(false);
   const [originalValue, setOriginalValue] = createSignal(props.value || "");
@@ -57,12 +58,22 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
       props.language ||
       (props.filePath ? getLanguageFromPath(props.filePath) : "plaintext");
 
-    // Create model
-    model = monaco.editor.createModel(
-      props.value || "",
-      language,
-      props.filePath ? monaco.Uri.file(props.filePath) : undefined
-    );
+    // Create or reuse model - check if one already exists with this URI
+    const uri = props.filePath ? monaco.Uri.file(props.filePath) : undefined;
+    const existingModel = uri ? monaco.editor.getModel(uri) : null;
+
+    if (existingModel) {
+      // Reuse existing model, update its content if different
+      model = existingModel;
+      ownsModel = false;
+      if (props.value !== undefined && model.getValue() !== props.value) {
+        model.setValue(props.value);
+      }
+    } else {
+      // Create new model
+      model = monaco.editor.createModel(props.value || "", language, uri);
+      ownsModel = true;
+    }
 
     // Create editor
     editor = monaco.editor.create(containerRef, {
@@ -95,7 +106,10 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
       disposable.dispose();
       resizeObserver.disconnect();
       editor?.dispose();
-      model?.dispose();
+      // Only dispose model if we created it (not if reused from another editor)
+      if (ownsModel) {
+        model?.dispose();
+      }
     });
   });
 
