@@ -183,3 +183,78 @@
   color: var(--text-muted, #666666);
   flex-shrink: 0;
 }
+
+/* Header action buttons */
+.database-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.database-action-btn {
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--text-muted, #888888);
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.database-action-btn:hover {
+  background: var(--hover-bg, #2a2a2a);
+  color: var(--text-color, #cccccc);
+}
+
+/* Tree item action buttons */
+.tree-action-btn {
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+  flex-shrink: 0;
+}
+
+.tree-item:hover .tree-action-btn {
+  opacity: 1;
+}
+
+.tree-action-btn:hover {
+  background: var(--hover-bg, #3a3a3a);
+}
+
+.tree-action-btn.delete-btn:hover {
+  background: var(--error-bg, #5a1d1d);
+}
+
+.tree-action-btn.copy-btn:hover {
+  background: var(--success-bg, #1d3a1d);
+}
+
+/* Copy status notification */
+.database-copy-status {
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  background: var(--success-bg, #1d3a1d);
+  color: var(--success-color, #89d185);
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: center;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
