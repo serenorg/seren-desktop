@@ -12,6 +12,7 @@ import { catalog, type Publisher } from "@/services/catalog";
 import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
 import { authStore, checkAuth } from "@/stores/auth.store";
+import { settingsStore } from "@/stores/settings.store";
 import { StreamingMessage } from "./StreamingMessage";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
@@ -397,16 +398,32 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
           placeholder="Ask Seren anything…"
           onInput={(event) => setInput(event.currentTarget.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              sendMessage();
+            if (event.key === "Enter") {
+              const enterToSend = settingsStore.get("chatEnterToSend");
+              if (enterToSend) {
+                // Enter sends, Shift+Enter for newline
+                if (!event.shiftKey) {
+                  event.preventDefault();
+                  sendMessage();
+                }
+              } else {
+                // Ctrl/Cmd+Enter sends
+                if (event.metaKey || event.ctrlKey) {
+                  event.preventDefault();
+                  sendMessage();
+                }
+              }
             }
           }}
           disabled={chatStore.isLoading}
         />
         <div class="input-footer">
           <span class="helper-text">
-            {chatStore.isLoading ? "Streaming…" : "Ctrl+Enter to send"}
+            {chatStore.isLoading
+              ? "Streaming…"
+              : settingsStore.get("chatEnterToSend")
+                ? "Enter to send, Shift+Enter for new line"
+                : "Ctrl+Enter to send"}
           </span>
           <button type="submit" disabled={chatStore.isLoading}>
             Send

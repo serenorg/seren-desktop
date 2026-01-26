@@ -61,6 +61,10 @@ async function refreshBalance(): Promise<void> {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to fetch balance";
+    // Stop auto-refresh on auth errors to prevent 401 spam
+    if (message.includes("expired") || message.includes("401") || message.includes("Authentication")) {
+      stopAutoRefresh();
+    }
     setWalletState({
       isLoading: false,
       error: message,

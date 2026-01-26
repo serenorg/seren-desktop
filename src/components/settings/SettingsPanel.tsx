@@ -142,6 +142,20 @@ export const SettingsPanel: Component = () => {
                 onInput={(e) => handleNumberChange("chatMaxHistoryMessages", e.currentTarget.value)}
               />
             </div>
+
+            <div class="settings-group checkbox">
+              <label class="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.chatEnterToSend}
+                  onChange={(e) => handleBooleanChange("chatEnterToSend", e.currentTarget.checked)}
+                />
+                <span class="checkbox-label">
+                  <span class="label-text">Enter to Send</span>
+                  <span class="label-hint">Press Enter to send messages (Shift+Enter for new line)</span>
+                </span>
+              </label>
+            </div>
           </section>
         </Show>
 

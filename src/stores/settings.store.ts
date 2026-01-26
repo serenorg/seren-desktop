@@ -29,6 +29,7 @@ export interface Settings {
   // Chat settings
   chatDefaultModel: string;
   chatMaxHistoryMessages: number;
+  chatEnterToSend: boolean;
 
   // Editor settings
   editorFontSize: number;
@@ -65,6 +66,7 @@ const DEFAULT_SETTINGS: Settings = {
   // Chat
   chatDefaultModel: "claude-sonnet-4-20250514",
   chatMaxHistoryMessages: 50,
+  chatEnterToSend: true,
   // Editor
   editorFontSize: 14,
   editorTabSize: 2,
