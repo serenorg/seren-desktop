@@ -45,7 +45,7 @@ interface AgentApiPayload {
   publisher: string;
   path: string;
   method: string;
-  body: {
+  body?: {
     model: string;
     messages: ChatRequest["messages"] | ChatMessageWithTools[];
     stream: boolean;
@@ -325,15 +325,11 @@ export const serenProvider: ProviderAdapter = {
       const token = await getToken();
       if (!token) return DEFAULT_MODELS;
 
+      // GET requests don't need a body - omit it entirely
       const agentPayload: AgentApiPayload = {
         publisher: PUBLISHER_SLUG,
         path: "/models",
         method: "GET",
-        body: {
-          model: "",
-          messages: [],
-          stream: false,
-        },
       };
 
       const response = await appFetch(AGENT_API_ENDPOINT, {
