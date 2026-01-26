@@ -23,7 +23,6 @@ import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { FileExplorer } from "@/components/sidebar/FileExplorer";
-import { gatewayMcpClient } from "@/lib/tools/gateway-mcp";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
@@ -98,6 +97,9 @@ function App() {
     shortcuts.destroy();
   });
 
+  // Store cleanup function for auto top-up
+  let cleanupAutoTopUp: (() => void) | null = null;
+
   // Initialize wallet and AI features when authenticated
   createEffect((prev) => {
     const isAuth = authStore.isAuthenticated;
@@ -112,23 +114,20 @@ function App() {
       untrack(() => {
         startAutoRefresh();
         autocompleteStore.enable();
-        initAutoTopUp();
-
-        // Fetch gateway MCP tools when user is authenticated
-        console.log("[App] Calling gatewayMcpClient.fetchAllTools()...");
-        gatewayMcpClient.fetchAllTools().then(() => {
-          console.log("[App] fetchAllTools() completed");
-        }).catch((error) => {
-          console.error("[App] fetchAllTools() failed:", error);
-        });
+        // Store cleanup to prevent effect accumulation
+        cleanupAutoTopUp = initAutoTopUp();
       });
     } else {
       console.log("[App] User logged out, stopping services...");
       untrack(() => {
+        // Clean up auto top-up effect
+        if (cleanupAutoTopUp) {
+          cleanupAutoTopUp();
+          cleanupAutoTopUp = null;
+        }
         stopAutoRefresh();
         resetWalletState();
         autocompleteStore.disable();
-        gatewayMcpClient.clearCache();
       });
     }
 

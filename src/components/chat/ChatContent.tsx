@@ -178,6 +178,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   onMount(async () => {
+    console.log("[ChatContent] Mounting, chatStore.isLoading:", chatStore.isLoading);
     document.addEventListener("keydown", handleKeyDown);
 
     // Register copy button handler (event delegation)
@@ -188,6 +189,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     } catch (error) {
       chatStore.setError((error as Error).message);
     }
+  });
+
+  // Debug: log when loading state changes
+  createEffect(() => {
+    console.log("[ChatContent] chatStore.isLoading changed to:", chatStore.isLoading);
   });
 
   // Auto-scroll to bottom when messages change or streaming starts
@@ -603,7 +609,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               onDismiss={dismissSuggestions}
             />
             <textarea
-              ref={inputRef}
+              ref={(el) => {
+                inputRef = el;
+                console.log("[ChatContent] Textarea ref set, disabled:", el.disabled, "isLoading:", chatStore.isLoading);
+              }}
               value={input()}
               placeholder="Ask Seren anything…"
               class="w-full min-h-[60px] max-h-[150px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-2 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60"
