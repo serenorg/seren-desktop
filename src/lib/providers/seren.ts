@@ -86,7 +86,10 @@ function extractContent(data: unknown): string {
   }
 
   const payload = data as Record<string, unknown>;
-  const choices = payload.choices as Array<Record<string, unknown>> | undefined;
+  // Unwrap body if response is wrapped (e.g., { status: 200, body: { choices: [...] } })
+  const body = payload.body as Record<string, unknown> | undefined;
+  const responseData = body || payload;
+  const choices = responseData.choices as Array<Record<string, unknown>> | undefined;
   if (choices && choices.length > 0) {
     const first = choices[0];
     const message = first.message as Record<string, unknown> | undefined;
@@ -117,7 +120,10 @@ function extractChatResponse(data: unknown): ChatResponse {
   }
 
   const payload = data as Record<string, unknown>;
-  const choices = payload.choices as Array<Record<string, unknown>> | undefined;
+  // Unwrap body if response is wrapped (e.g., { status: 200, body: { choices: [...] } })
+  const body = payload.body as Record<string, unknown> | undefined;
+  const responseData = body || payload;
+  const choices = responseData.choices as Array<Record<string, unknown>> | undefined;
 
   if (!choices || choices.length === 0) {
     return { content: null, finish_reason: "stop" };
