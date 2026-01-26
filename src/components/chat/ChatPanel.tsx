@@ -65,7 +65,50 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     }
   };
 
+  // Keyboard shortcuts for tab management
+  const handleKeyDown = (event: KeyboardEvent) => {
+    const isMod = event.metaKey || event.ctrlKey;
+
+    // Ctrl/Cmd+T: New tab
+    if (isMod && event.key === "t") {
+      event.preventDefault();
+      chatStore.createConversation();
+      return;
+    }
+
+    // Ctrl/Cmd+W: Close current tab
+    if (isMod && event.key === "w") {
+      event.preventDefault();
+      const activeId = chatStore.activeConversationId;
+      if (activeId) {
+        chatStore.archiveConversation(activeId);
+      }
+      return;
+    }
+
+    // Ctrl+Tab / Ctrl+Shift+Tab: Switch tabs
+    if (event.ctrlKey && event.key === "Tab") {
+      event.preventDefault();
+      const conversations = chatStore.conversations.filter((c) => !c.isArchived);
+      if (conversations.length < 2) return;
+
+      const currentIndex = conversations.findIndex(
+        (c) => c.id === chatStore.activeConversationId
+      );
+      if (currentIndex === -1) return;
+
+      const nextIndex = event.shiftKey
+        ? (currentIndex - 1 + conversations.length) % conversations.length
+        : (currentIndex + 1) % conversations.length;
+
+      chatStore.setActiveConversation(conversations[nextIndex].id);
+    }
+  };
+
   onMount(async () => {
+    // Register keyboard shortcuts
+    document.addEventListener("keydown", handleKeyDown);
+
     try {
       await chatStore.loadHistory();
     } catch (error) {
@@ -83,6 +126,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   });
 
   onCleanup(() => {
+    document.removeEventListener("keydown", handleKeyDown);
     if (suggestionDebounceTimer) {
       clearTimeout(suggestionDebounceTimer);
     }
