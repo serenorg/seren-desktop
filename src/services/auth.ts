@@ -1,7 +1,8 @@
 // ABOUTME: Authentication service for login, logout, and token management.
-// ABOUTME: Communicates with Seren Gateway API using /auth/login endpoint.
+// ABOUTME: Uses manual fetch for login/refresh (not in OpenAPI spec) and SDK for user info.
 
-import { API_BASE } from "@/lib/config";
+import { getCurrentUser } from "@/api";
+import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import {
   storeToken,
@@ -34,13 +35,14 @@ export interface AuthError {
 /**
  * Login with email and password.
  * Stores token securely on success.
+ * Note: Login endpoint is not in OpenAPI spec, using manual fetch.
  * @throws Error on authentication failure
  */
 export async function login(
   email: string,
   password: string
 ): Promise<LoginResponse> {
-  const response = await appFetch(`${API_BASE}/auth/login`, {
+  const response = await appFetch(`${apiBase}/auth/login`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -74,6 +76,7 @@ export async function logout(): Promise<void> {
 
 /**
  * Refresh the access token using the stored refresh token.
+ * Note: Refresh endpoint is not in OpenAPI spec, using manual fetch.
  * @returns true if refresh succeeded, false if refresh token is missing or invalid
  */
 export async function refreshAccessToken(): Promise<boolean> {
@@ -84,7 +87,7 @@ export async function refreshAccessToken(): Promise<boolean> {
 
   try {
     // Use appFetch for CORS bypass in Tauri (it skips auto-refresh for /auth/refresh)
-    const response = await appFetch(`${API_BASE}/auth/refresh`, {
+    const response = await appFetch(`${apiBase}/auth/refresh`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -125,6 +128,7 @@ export async function hasStoredToken(): Promise<boolean> {
 
 /**
  * Validate token with the server by calling /auth/me.
+ * Uses generated SDK for type-safe API calls.
  * Clears token if invalid/expired.
  * @returns true if token is valid, false otherwise
  */
@@ -135,20 +139,14 @@ export async function isLoggedIn(): Promise<boolean> {
   }
 
   try {
-    const response = await appFetch(`${API_BASE}/auth/me`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const { data, error } = await getCurrentUser({ throwOnError: false });
 
-    if (response.ok) {
+    if (data?.data) {
       return true;
     }
 
     // Token is invalid or expired - clear it
-    if (response.status === 401) {
+    if (error) {
       await clearToken();
     }
     return false;

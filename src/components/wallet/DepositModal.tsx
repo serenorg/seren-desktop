@@ -2,8 +2,17 @@
 // ABOUTME: Shows preset amounts and supports multiple payment methods.
 
 import { Component, createSignal, For, Show } from "solid-js";
-import { walletState, walletStore, refreshBalance } from "@/stores/wallet.store";
-import { initiateTopUp, openCheckout, initiateCryptoDeposit, type CryptoDepositInfo } from "@/services/wallet";
+import {
+  walletState,
+  walletStore,
+  refreshBalance,
+} from "@/stores/wallet.store";
+import {
+  initiateTopUp,
+  openCheckout,
+  initiateCryptoDeposit,
+  type CryptoDepositInfo,
+} from "@/services/wallet";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import "./DepositModal.css";
 
@@ -24,8 +33,10 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
   const [isCustom, setIsCustom] = createSignal(false);
   const [isLoading, setIsLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = createSignal<PaymentMethod>("stripe");
-  const [cryptoDepositInfo, setCryptoDepositInfo] = createSignal<CryptoDepositInfo | null>(null);
+  const [paymentMethod, setPaymentMethod] =
+    createSignal<PaymentMethod>("stripe");
+  const [cryptoDepositInfo, setCryptoDepositInfo] =
+    createSignal<CryptoDepositInfo | null>(null);
   const [copied, setCopied] = createSignal(false);
 
   const effectiveAmount = () => {
@@ -88,7 +99,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
     try {
       if (paymentMethod() === "stripe") {
         const checkout = await initiateTopUp(amount);
-        await openCheckout(checkout.checkoutUrl);
+        await openCheckout(checkout.checkout_url);
 
         // Start polling for balance update
         const pollInterval = setInterval(() => {
@@ -117,7 +128,8 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
         }, 1800000);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to initiate deposit";
+      const message =
+        err instanceof Error ? err.message : "Failed to initiate deposit";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -152,7 +164,9 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
         <div class="deposit-modal-body">
           <div class="deposit-current-balance">
             <span class="deposit-balance-label">Current Balance</span>
-            <span class="deposit-balance-value">{walletStore.formattedBalance}</span>
+            <span class="deposit-balance-value">
+              {walletStore.formattedBalance}
+            </span>
           </div>
 
           <Show when={!cryptoDepositInfo()}>
@@ -172,7 +186,11 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   class={`deposit-method-btn ${paymentMethod() === "crypto" ? "selected" : ""}`}
                   onClick={() => setPaymentMethod("crypto")}
                   disabled={!cryptoWalletStore.state().isConfigured}
-                  title={!cryptoWalletStore.state().isConfigured ? "Configure crypto wallet in Settings first" : ""}
+                  title={
+                    !cryptoWalletStore.state().isConfigured
+                      ? "Configure crypto wallet in Settings first"
+                      : ""
+                  }
                 >
                   <span class="method-icon">🔐</span>
                   <span class="method-name">USDC (Crypto)</span>
@@ -248,7 +266,9 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   <div class="crypto-detail-row">
                     <span class="crypto-label">Deposit Address</span>
                     <div class="crypto-address-row">
-                      <code class="crypto-address">{info().depositAddress}</code>
+                      <code class="crypto-address">
+                        {info().depositAddress}
+                      </code>
                       <button
                         type="button"
                         class="copy-btn"
@@ -262,8 +282,15 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                 </div>
 
                 <div class="crypto-deposit-warning">
-                  <p>Send exactly <strong>{info().amount} USDC</strong> to the address above.</p>
-                  <p class="crypto-warning-text">Only send USDC on <strong>{info().network}</strong>. Sending other tokens or using the wrong network will result in permanent loss.</p>
+                  <p>
+                    Send exactly <strong>{info().amount} USDC</strong> to the
+                    address above.
+                  </p>
+                  <p class="crypto-warning-text">
+                    Only send USDC on <strong>{info().network}</strong>. Sending
+                    other tokens or using the wrong network will result in
+                    permanent loss.
+                  </p>
                 </div>
 
                 <div class="crypto-deposit-status">
@@ -290,7 +317,12 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
               </button>
             }
           >
-            <button type="button" class="btn-secondary" onClick={props.onClose} disabled={isLoading()}>
+            <button
+              type="button"
+              class="btn-secondary"
+              onClick={props.onClose}
+              disabled={isLoading()}
+            >
               Cancel
             </button>
             <button
@@ -299,7 +331,11 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
               onClick={handleDeposit}
               disabled={isLoading() || !isValidAmount()}
             >
-              {isLoading() ? "Processing..." : paymentMethod() === "crypto" ? `Pay with USDC` : `Add $${effectiveAmount().toFixed(2)}`}
+              {isLoading()
+                ? "Processing..."
+                : paymentMethod() === "crypto"
+                  ? `Pay with USDC`
+                  : `Add $${effectiveAmount().toFixed(2)}`}
             </button>
           </Show>
         </footer>

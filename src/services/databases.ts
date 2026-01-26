@@ -1,102 +1,46 @@
 // ABOUTME: Database service for fetching SerenDB database data from Seren API.
-// ABOUTME: Handles listing projects, branches, and databases for the Database panel.
+// ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
-import { apiBase } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
-import { getToken } from "@/lib/tauri-bridge";
+import {
+  listOrganizations as apiListOrganizations,
+  listProjects as apiListProjects,
+  createProject as apiCreateProject,
+  deleteProject as apiDeleteProject,
+  getProject as apiGetProject,
+  listBranches as apiListBranches,
+  getBranch as apiGetBranch,
+  getConnectionString as apiGetConnectionString,
+  listDatabases as apiListDatabases,
+  getDatabase as apiGetDatabase,
+  type Organization,
+  type Project,
+  type Branch,
+  type DatabaseWithOwner,
+} from "@/api";
 
-/**
- * SerenDB Project structure.
- */
-export interface Project {
-  id: string;
-  name: string;
-  slug: string;
-  description?: string;
-  created_at: string;
-  updated_at: string;
-}
+// Use DatabaseWithOwner as the Database type (list endpoint returns this)
+export type Database = DatabaseWithOwner;
 
-/**
- * SerenDB Branch structure.
- */
-export interface Branch {
-  id: string;
-  name: string;
-  project_id: string;
-  is_default: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-/**
- * SerenDB Database structure.
- */
-export interface Database {
-  id: string;
-  name: string;
-  branch_id: string;
-  project_id: string;
-  schema?: string;
-  tables_count?: number;
-  created_at: string;
-  updated_at: string;
-}
-
-/**
- * SerenDB Organization structure.
- */
-export interface Organization {
-  id: string;
-  name: string;
-  slug?: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-/**
- * Get authorization headers for API requests.
- */
-async function getAuthHeaders(): Promise<HeadersInit> {
-  const token = await getToken();
-  if (!token) {
-    throw new Error("Not authenticated");
-  }
-  return {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-}
+// Re-export types for backwards compatibility
+export type { Organization, Project, Branch };
 
 /**
  * Database service for Seren API operations.
+ * Uses generated SDK with full type safety.
  */
 export const databases = {
   /**
    * List all organizations for the authenticated user.
    */
   async listOrganizations(): Promise<Organization[]> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/organizations`;
-    console.log("[Databases] Fetching organizations from:", url);
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
-    });
-
-    console.log("[Databases] Organizations response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+    console.log("[Databases] Fetching organizations");
+    const { data, error } = await apiListOrganizations({ throwOnError: false });
+    if (error) {
       console.error("[Databases] Error fetching organizations:", error);
-      throw new Error(error.message || "Failed to list organizations");
+      throw new Error("Failed to list organizations");
     }
-
-    const data = await response.json();
-    const orgs: Organization[] = Array.isArray(data) ? data : (data.data || data.organizations || []);
+    const orgs = data?.data || [];
     console.log("[Databases] Found", orgs.length, "organizations");
-
     return orgs;
   },
 
@@ -104,76 +48,50 @@ export const databases = {
    * List all projects for the authenticated user.
    */
   async listProjects(): Promise<Project[]> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects`;
-    console.log("[Databases] Fetching projects from:", url);
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
-    });
-
-    console.log("[Databases] Projects response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+    console.log("[Databases] Fetching projects");
+    const { data, error } = await apiListProjects({ throwOnError: false });
+    if (error) {
       console.error("[Databases] Error fetching projects:", error);
-      throw new Error(error.message || "Failed to list projects");
+      throw new Error("Failed to list projects");
     }
-
-    const data = await response.json();
-    // Handle { data: [...] } or direct array responses
-    const projects: Project[] = Array.isArray(data) ? data : (data.data || data.projects || []);
+    const projects = data?.data || [];
     console.log("[Databases] Found", projects.length, "projects");
-
     return projects;
   },
 
   /**
    * Create a new project.
+   * Note: organization_id is derived from the authenticated user's JWT token.
    */
-  async createProject(name: string, organizationId: string): Promise<Project> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects`;
+  async createProject(
+    name: string,
+    _organizationId?: string
+  ): Promise<Project> {
     console.log("[Databases] Creating project:", name);
-
-    const response = await appFetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ name, organization_id: organizationId }),
+    const { data, error } = await apiCreateProject({
+      body: { name, region: "aws-us-east-2" },
+      throwOnError: false,
     });
-
-    console.log("[Databases] Create project response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+    if (error || !data?.data) {
       console.error("[Databases] Error creating project:", error);
-      throw new Error(error.message || "Failed to create project");
+      throw new Error("Failed to create project");
     }
-
-    const data = await response.json();
-    return data.data || data;
+    // Fetch full project details (create returns ProjectCreated, not full Project)
+    return this.getProject(data.data.id);
   },
 
   /**
    * Delete a project by ID.
    */
   async deleteProject(projectId: string): Promise<void> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}`;
     console.log("[Databases] Deleting project:", projectId);
-
-    const response = await appFetch(url, {
-      method: "DELETE",
-      headers,
+    const { error } = await apiDeleteProject({
+      path: { project_id: projectId },
+      throwOnError: false,
     });
-
-    console.log("[Databases] Delete project response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+    if (error) {
       console.error("[Databases] Error deleting project:", error);
-      throw new Error(error.message || "Failed to delete project");
+      throw new Error("Failed to delete project");
     }
   },
 
@@ -181,80 +99,57 @@ export const databases = {
    * List all branches for a project.
    */
   async listBranches(projectId: string): Promise<Branch[]> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches`;
-    console.log("[Databases] Fetching branches from:", url);
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
+    console.log("[Databases] Fetching branches for project:", projectId);
+    const { data, error } = await apiListBranches({
+      path: { project_id: projectId },
+      throwOnError: false,
     });
-
-    console.log("[Databases] Branches response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+    if (error) {
       console.error("[Databases] Error fetching branches:", error);
-      throw new Error(error.message || "Failed to list branches");
+      throw new Error("Failed to list branches");
     }
-
-    const data = await response.json();
-    const branches: Branch[] = Array.isArray(data) ? data : (data.data || data.branches || []);
-    console.log("[Databases] Found", branches.length, "branches for project", projectId);
-
+    const branches = data?.data || [];
+    console.log("[Databases] Found", branches.length, "branches");
     return branches;
   },
 
   /**
    * Get connection string for a branch.
    */
-  async getConnectionString(projectId: string, branchId: string): Promise<string> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/connection-string`;
-    console.log("[Databases] Fetching connection string from:", url);
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
+  async getConnectionString(
+    projectId: string,
+    branchId: string
+  ): Promise<string> {
+    console.log("[Databases] Fetching connection string");
+    const { data, error } = await apiGetConnectionString({
+      path: { project_id: projectId, branch_id: branchId },
+      throwOnError: false,
     });
-
-    console.log("[Databases] Connection string response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+    if (error || !data?.data) {
       console.error("[Databases] Error fetching connection string:", error);
-      throw new Error(error.message || "Failed to get connection string");
+      throw new Error("Failed to get connection string");
     }
-
-    const data = await response.json();
-    return data.connection_string || data.data?.connection_string || data;
+    return data.data.connection_string;
   },
 
   /**
    * List all databases for a branch.
    */
-  async listDatabases(projectId: string, branchId: string): Promise<Database[]> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/databases`;
-    console.log("[Databases] Fetching databases from:", url);
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
+  async listDatabases(
+    projectId: string,
+    branchId: string
+  ): Promise<Database[]> {
+    console.log("[Databases] Fetching databases for branch:", branchId);
+    const { data, error } = await apiListDatabases({
+      path: { project_id: projectId, branch_id: branchId },
+      throwOnError: false,
     });
-
-    console.log("[Databases] Databases response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+    if (error) {
       console.error("[Databases] Error fetching databases:", error);
-      throw new Error(error.message || "Failed to list databases");
+      throw new Error("Failed to list databases");
     }
-
-    const data = await response.json();
-    const dbs: Database[] = Array.isArray(data) ? data : (data.data || data.databases || []);
-    console.log("[Databases] Found", dbs.length, "databases for branch", branchId);
-
+    const dbs = data?.data || [];
+    console.log("[Databases] Found", dbs.length, "databases");
     return dbs;
   },
 
@@ -262,62 +157,49 @@ export const databases = {
    * Get a single project by ID.
    */
   async getProject(projectId: string): Promise<Project> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}`;
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
+    const { data, error } = await apiGetProject({
+      path: { project_id: projectId },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to get project");
+    if (error || !data?.data) {
+      throw new Error("Failed to get project");
     }
-
-    const data = await response.json();
-    return data.data || data;
+    return data.data;
   },
 
   /**
    * Get a single branch by ID.
    */
   async getBranch(projectId: string, branchId: string): Promise<Branch> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}`;
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
+    const { data, error } = await apiGetBranch({
+      path: { project_id: projectId, branch_id: branchId },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to get branch");
+    if (error || !data?.data) {
+      throw new Error("Failed to get branch");
     }
-
-    const data = await response.json();
-    return data.data || data;
+    return data.data;
   },
 
   /**
    * Get a single database by ID.
    */
-  async getDatabase(projectId: string, branchId: string, databaseId: string): Promise<Database> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/databases/${encodeURIComponent(databaseId)}`;
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
+  async getDatabase(
+    projectId: string,
+    branchId: string,
+    databaseId: string
+  ): Promise<Database> {
+    const { data, error } = await apiGetDatabase({
+      path: {
+        project_id: projectId,
+        branch_id: branchId,
+        database_id: databaseId,
+      },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to get database");
+    if (error || !data?.data) {
+      throw new Error("Failed to get database");
     }
-
-    const data = await response.json();
-    return data.data || data;
+    return data.data;
   },
 };

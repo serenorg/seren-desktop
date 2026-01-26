@@ -2,18 +2,25 @@
 // ABOUTME: Provides reactive balance updates with automatic refresh.
 
 import { createStore } from "solid-js/store";
-import { fetchBalance, WalletBalance } from "@/services/wallet";
+import { fetchBalance, type WalletBalance } from "@/services/wallet";
 
 /**
  * Wallet state interface.
+ * Uses balance_usd from API for display, balance_atomic for calculations.
  */
 interface WalletState {
+  /** Balance in USD (computed from atomic for component compatibility) */
   balance: number | null;
-  currency: string;
+  /** Balance in atomic units (for precise calculations) */
+  balance_atomic: number | null;
+  /** Balance formatted as USD string (for display) */
+  balance_usd: string | null;
+  /** Last refresh timestamp */
   lastUpdated: string | null;
   isLoading: boolean;
   error: string | null;
-  lastDismissedBalance: number | null;
+  /** For dismissing low balance warning */
+  lastDismissedBalanceAtomic: number | null;
 }
 
 /**
@@ -21,11 +28,12 @@ interface WalletState {
  */
 const initialState: WalletState = {
   balance: null,
-  currency: "USD",
+  balance_atomic: null,
+  balance_usd: null,
   lastUpdated: null,
   isLoading: false,
   error: null,
-  lastDismissedBalance: null,
+  lastDismissedBalanceAtomic: null,
 };
 
 const [walletState, setWalletState] = createStore<WalletState>(initialState);
@@ -54,15 +62,21 @@ async function refreshBalance(): Promise<void> {
   try {
     const data: WalletBalance = await fetchBalance();
     setWalletState({
-      balance: data.balance,
-      currency: data.currency || "USD",
-      lastUpdated: data.lastUpdated || new Date().toISOString(),
+      balance: data.balance_atomic / 1_000_000,
+      balance_atomic: data.balance_atomic,
+      balance_usd: data.balance_usd,
+      lastUpdated: new Date().toISOString(),
       isLoading: false,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to fetch balance";
+    const message =
+      err instanceof Error ? err.message : "Failed to fetch balance";
     // Stop auto-refresh on auth errors to prevent 401 spam
-    if (message.includes("expired") || message.includes("401") || message.includes("Authentication")) {
+    if (
+      message.includes("expired") ||
+      message.includes("401") ||
+      message.includes("Authentication")
+    ) {
       stopAutoRefresh();
     }
     setWalletState({
@@ -104,33 +118,36 @@ function stopAutoRefresh(): void {
  * Stores the current balance so warning doesn't reappear until balance drops further.
  */
 function dismissLowBalanceWarning(): void {
-  setWalletState("lastDismissedBalance", walletState.balance);
+  setWalletState("lastDismissedBalanceAtomic", walletState.balance_atomic);
 }
 
 /**
  * Check if low balance warning should show.
- * @param threshold The low balance threshold from settings
+ * @param threshold The low balance threshold in USD
  */
 function shouldShowLowBalanceWarning(threshold: number): boolean {
-  const { balance, lastDismissedBalance } = walletState;
+  const { balance_atomic, lastDismissedBalanceAtomic } = walletState;
 
   // Don't show if balance unknown
-  if (balance === null) {
+  if (balance_atomic === null) {
     return false;
   }
 
+  // Convert threshold to atomic (1 USD = 1,000,000 atomic)
+  const thresholdAtomic = threshold * 1_000_000;
+
   // Don't show if above threshold
-  if (balance >= threshold) {
+  if (balance_atomic >= thresholdAtomic) {
     return false;
   }
 
   // Show if never dismissed
-  if (lastDismissedBalance === null) {
+  if (lastDismissedBalanceAtomic === null) {
     return true;
   }
 
   // Show if balance dropped further since dismissal
-  return balance < lastDismissedBalance;
+  return balance_atomic < lastDismissedBalanceAtomic;
 }
 
 /**
@@ -161,17 +178,19 @@ function resetWalletState(): void {
  */
 export const walletStore = {
   /**
-   * Get current balance.
+   * Get current balance in USD (atomic / 1_000_000).
    */
   get balance(): number | null {
-    return walletState.balance;
+    return walletState.balance_atomic !== null
+      ? walletState.balance_atomic / 1_000_000
+      : null;
   },
 
   /**
-   * Get currency code.
+   * Get balance as formatted USD string from API.
    */
-  get currency(): string {
-    return walletState.currency;
+  get balanceUsd(): string | null {
+    return walletState.balance_usd;
   },
 
   /**
@@ -196,13 +215,10 @@ export const walletStore = {
   },
 
   /**
-   * Format balance for display.
+   * Format balance for display (uses API-formatted string).
    */
   get formattedBalance(): string {
-    if (walletState.balance === null) {
-      return "--";
-    }
-    return `$${walletState.balance.toFixed(2)}`;
+    return walletState.balance_usd ? `$${walletState.balance_usd}` : "--";
   },
 };
 

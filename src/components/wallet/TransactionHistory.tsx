@@ -2,53 +2,77 @@
 // ABOUTME: Displays paginated list with filtering options.
 
 import { Component, createSignal, createResource, For, Show } from "solid-js";
-import {
-  fetchTransactions,
-  Transaction,
-  TransactionType,
-} from "@/services/wallet";
+import { fetchTransactions, type Transaction } from "@/services/wallet";
 import "./TransactionHistory.css";
 
-type FilterType = "all" | TransactionType;
+/**
+ * Source categories for filtering.
+ */
+type FilterType = "all" | "deposit" | "charge";
 
 interface TransactionHistoryProps {
   onClose?: () => void;
 }
 
 /**
- * Get icon for transaction type.
+ * Infer transaction category from source string.
  */
-function getTransactionIcon(type: TransactionType): string {
-  switch (type) {
+function getTransactionCategory(
+  source: string
+): "deposit" | "charge" | "refund" {
+  const s = source.toLowerCase();
+  if (
+    s.includes("deposit") ||
+    s.includes("stripe") ||
+    s.includes("purchase") ||
+    s.includes("topup")
+  ) {
+    return "deposit";
+  }
+  if (s.includes("refund")) {
+    return "refund";
+  }
+  return "charge";
+}
+
+/**
+ * Get icon for transaction source.
+ */
+function getTransactionIcon(source: string): string {
+  const category = getTransactionCategory(source);
+  switch (category) {
     case "deposit":
-      return "⬆"; // Up arrow
-    case "charge":
-      return "⬇"; // Down arrow
+      return "⬆";
     case "refund":
-      return "↩"; // Return arrow
-    case "auto_topup":
-      return "⚡"; // Lightning
+      return "↩";
+    case "charge":
     default:
-      return "•"; // Bullet
+      return "⬇";
   }
 }
 
 /**
- * Get display label for transaction type.
+ * Get display label for transaction source.
  */
-function getTransactionLabel(type: TransactionType): string {
-  switch (type) {
+function getTransactionLabel(source: string): string {
+  const category = getTransactionCategory(source);
+  switch (category) {
     case "deposit":
       return "Deposit";
-    case "charge":
-      return "Charge";
     case "refund":
       return "Refund";
-    case "auto_topup":
-      return "Auto Top-Up";
+    case "charge":
     default:
-      return type;
+      return "Charge";
   }
+}
+
+/**
+ * Check if transaction is positive (adds to balance).
+ */
+function isPositiveTransaction(source: string): boolean {
+  const category = getTransactionCategory(source);
+  return category === "deposit" || category === "refund";
 }
 
 /**
@@ -77,14 +101,16 @@ function formatTime(dateString: string): string {
 /**
  * Transaction history component.
  */
-export const TransactionHistory: Component<TransactionHistoryProps> = (props) => {
+export const TransactionHistory: Component<TransactionHistoryProps> = (
+  props
+) => {
   const [filter, setFilter] = createSignal<FilterType>("all");
-  const [cursor, setCursor] = createSignal<string | undefined>(undefined);
+  const [offset, setOffset] = createSignal(0);
 
   const [data, { refetch }] = createResource(
-    () => ({ filter: filter(), cursor: cursor() }),
-    async () => {
-      return fetchTransactions(20, cursor());
+    () => ({ filter: filter(), offset: offset() }),
+    async ({ offset: currentOffset }) => {
+      return fetchTransactions(20, currentOffset);
     }
   );
 
@@ -92,13 +118,21 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (props) =>
     const transactions = data()?.transactions ?? [];
     const currentFilter = filter();
     if (currentFilter === "all") return transactions;
-    return transactions.filter((t) => t.type === currentFilter);
+    return transactions.filter(
+      (t) => getTransactionCategory(t.source) === currentFilter
+    );
+  };
+
+  const hasMore = () => {
+    const response = data();
+    if (!response) return false;
+    return response.offset + response.transactions.length < response.total;
   };
 
   const handleLoadMore = () => {
-    const nextCursor = data()?.nextCursor;
-    if (nextCursor) {
-      setCursor(nextCursor);
+    const response = data();
+    if (response && hasMore()) {
+      setOffset(response.offset + response.transactions.length);
     }
   };
 
@@ -163,12 +197,10 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (props) =>
             }
           >
             <For each={filteredTransactions()}>
-              {(transaction) => (
-                <TransactionItem transaction={transaction} />
-              )}
+              {(transaction) => <TransactionItem transaction={transaction} />}
             </For>
 
-            <Show when={data()?.hasMore}>
+            <Show when={hasMore()}>
               <button class="load-more-btn" onClick={handleLoadMore}>
                 Load More
               </button>
@@ -184,37 +216,36 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (props) =>
  * Individual transaction item.
  */
 const TransactionItem: Component<{ transaction: Transaction }> = (props) => {
-  const isPositive = () =>
-    props.transaction.type === "deposit" ||
-    props.transaction.type === "refund" ||
-    props.transaction.type === "auto_topup";
+  const category = () => getTransactionCategory(props.transaction.source);
+  const isPositive = () => isPositiveTransaction(props.transaction.source);
 
   return (
-    <div class={`transaction-item transaction-item--${props.transaction.type}`}>
+    <div class={`transaction-item transaction-item--${category()}`}>
       <div class="transaction-icon">
-        <span>{getTransactionIcon(props.transaction.type)}</span>
+        <span>{getTransactionIcon(props.transaction.source)}</span>
       </div>
       <div class="transaction-details">
         <span class="transaction-type">
-          {getTransactionLabel(props.transaction.type)}
+          {getTransactionLabel(props.transaction.source)}
         </span>
         <span class="transaction-description">
-          {props.transaction.description}
+          {props.transaction.description || props.transaction.source}
         </span>
         <span class="transaction-date">
-          {formatDate(props.transaction.createdAt)} at{" "}
-          {formatTime(props.transaction.createdAt)}
+          {formatDate(props.transaction.created_at)} at{" "}
+          {formatTime(props.transaction.created_at)}
         </span>
       </div>
       <div class="transaction-amount-wrapper">
-        <span class={`transaction-amount ${isPositive() ? "positive" : "negative"}`}>
-          {isPositive() ? "+" : "-"}${Math.abs(props.transaction.amount).toFixed(2)}
+        <span
+          class={`transaction-amount ${isPositive() ? "positive" : "negative"}`}
+        >
+          {isPositive() ? "+" : "-"}
+          {props.transaction.amount_usd}
         </span>
-        <Show when={props.transaction.balance !== undefined}>
-          <span class="transaction-balance">
-            Balance: ${props.transaction.balance?.toFixed(2)}
-          </span>
-        </Show>
+        <span class="transaction-balance">
+          Balance: {props.transaction.remaining_usd}
+        </span>
       </div>
     </div>
   );

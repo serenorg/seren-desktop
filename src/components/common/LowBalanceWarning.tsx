@@ -40,10 +40,11 @@ export const LowBalanceWarning: Component<LowBalanceWarningProps> = (props) => {
     try {
       const topUpAmount = settingsStore.get("autoTopUpAmount");
       const checkout = await initiateTopUp(topUpAmount);
-      await openCheckout(checkout.checkoutUrl);
+      await openCheckout(checkout.checkout_url);
       props.onTopUp?.();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to initiate top-up";
+      const message =
+        err instanceof Error ? err.message : "Failed to initiate top-up";
       setTopUpError(message);
     } finally {
       setIsTopUpLoading(false);
@@ -64,8 +65,8 @@ export const LowBalanceWarning: Component<LowBalanceWarningProps> = (props) => {
           <div class="low-balance-text">
             <span class="low-balance-title">Low Balance</span>
             <span class="low-balance-message">
-              Your SerenBucks balance (${walletState.balance?.toFixed(2)}) is below $
-              {threshold().toFixed(2)}.
+              Your SerenBucks balance (${walletState.balance?.toFixed(2)}) is
+              below ${threshold().toFixed(2)}.
             </span>
           </div>
         </div>
@@ -100,7 +101,9 @@ export const LowBalanceWarning: Component<LowBalanceWarningProps> = (props) => {
  */
 export const LowBalanceModal: Component = () => {
   const [isVisible, setIsVisible] = createSignal(false);
-  const [lastNotifiedBalance, setLastNotifiedBalance] = createSignal<number | null>(null);
+  const [lastNotifiedBalance, setLastNotifiedBalance] = createSignal<
+    number | null
+  >(null);
 
   const threshold = () => settingsStore.get("lowBalanceThreshold");
 

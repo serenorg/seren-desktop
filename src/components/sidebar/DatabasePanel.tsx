@@ -7,7 +7,11 @@ import { CreateProjectModal } from "./CreateProjectModal";
 import "./DatabasePanel.css";
 
 interface DatabasePanelProps {
-  onSelectDatabase?: (databaseId: string, projectId: string, branchId: string) => void;
+  onSelectDatabase?: (
+    databaseId: string,
+    projectId: string,
+    branchId: string
+  ) => void;
 }
 
 interface ExpandedState {
@@ -21,8 +25,12 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
     branches: new Set(),
   });
 
-  const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
-  const [selectedBranchId, setSelectedBranchId] = createSignal<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(
+    null
+  );
+  const [selectedBranchId, setSelectedBranchId] = createSignal<string | null>(
+    null
+  );
   const [showCreateModal, setShowCreateModal] = createSignal(false);
   const [copyStatus, setCopyStatus] = createSignal<string | null>(null);
 
@@ -98,13 +106,24 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
 
   const handleSelectDatabase = (db: Database) => {
     if (props.onSelectDatabase) {
-      props.onSelectDatabase(db.id, db.project_id, db.branch_id);
+      // Use context from signals since DatabaseWithOwner doesn't have project_id
+      const projectId = selectedProjectId();
+      const branchId = selectedBranchId() || db.branch_id;
+      if (projectId) {
+        props.onSelectDatabase(db.id, projectId, branchId);
+      }
     }
   };
 
-  const handleDeleteProject = async (e: MouseEvent, projectId: string, projectName: string) => {
+  const handleDeleteProject = async (
+    e: MouseEvent,
+    projectId: string,
+    projectName: string
+  ) => {
     e.stopPropagation();
-    const confirmed = window.confirm(`Delete project "${projectName}"? This cannot be undone.`);
+    const confirmed = window.confirm(
+      `Delete project "${projectName}"? This cannot be undone.`
+    );
     if (!confirmed) return;
 
     try {
@@ -116,10 +135,17 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
     }
   };
 
-  const handleCopyConnectionString = async (e: MouseEvent, projectId: string, branchId: string) => {
+  const handleCopyConnectionString = async (
+    e: MouseEvent,
+    projectId: string,
+    branchId: string
+  ) => {
     e.stopPropagation();
     try {
-      const connectionString = await databases.getConnectionString(projectId, branchId);
+      const connectionString = await databases.getConnectionString(
+        projectId,
+        branchId
+      );
       await navigator.clipboard.writeText(connectionString);
       setCopyStatus("Copied!");
       setTimeout(() => setCopyStatus(null), 2000);
@@ -129,8 +155,10 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
     }
   };
 
-  const isProjectExpanded = (projectId: string) => expanded().projects.has(projectId);
-  const isBranchExpanded = (branchId: string) => expanded().branches.has(branchId);
+  const isProjectExpanded = (projectId: string) =>
+    expanded().projects.has(projectId);
+  const isBranchExpanded = (branchId: string) =>
+    expanded().branches.has(branchId);
 
   return (
     <div class="database-panel">
@@ -183,7 +211,9 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                 <button
                   type="button"
                   class="tree-action-btn delete-btn"
-                  onClick={(e) => handleDeleteProject(e, project.id, project.name)}
+                  onClick={(e) =>
+                    handleDeleteProject(e, project.id, project.name)
+                  }
                   title="Delete project"
                 >
                   🗑️
@@ -195,11 +225,19 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
 
               <Show when={isProjectExpanded(project.id)}>
                 <div class="tree-children">
-                  <Show when={branches.loading && selectedProjectId() === project.id}>
+                  <Show
+                    when={
+                      branches.loading && selectedProjectId() === project.id
+                    }
+                  >
                     <div class="tree-loading">Loading branches...</div>
                   </Show>
 
-                  <Show when={!branches.loading && selectedProjectId() === project.id}>
+                  <Show
+                    when={
+                      !branches.loading && selectedProjectId() === project.id
+                    }
+                  >
                     <For each={branches()}>
                       {(branch) => (
                         <div class="tree-node branch-node">
@@ -219,7 +257,13 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                             <button
                               type="button"
                               class="tree-action-btn copy-btn"
-                              onClick={(e) => handleCopyConnectionString(e, project.id, branch.id)}
+                              onClick={(e) =>
+                                handleCopyConnectionString(
+                                  e,
+                                  project.id,
+                                  branch.id
+                                )
+                              }
                               title="Copy connection string"
                             >
                               📋
@@ -231,13 +275,27 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
 
                           <Show when={isBranchExpanded(branch.id)}>
                             <div class="tree-children">
-                              <Show when={databaseList.loading && selectedBranchId() === branch.id}>
-                                <div class="tree-loading">Loading databases...</div>
+                              <Show
+                                when={
+                                  databaseList.loading &&
+                                  selectedBranchId() === branch.id
+                                }
+                              >
+                                <div class="tree-loading">
+                                  Loading databases...
+                                </div>
                               </Show>
 
-                              <Show when={!databaseList.loading && selectedBranchId() === branch.id}>
+                              <Show
+                                when={
+                                  !databaseList.loading &&
+                                  selectedBranchId() === branch.id
+                                }
+                              >
                                 <Show
-                                  when={databaseList() && databaseList()!.length > 0}
+                                  when={
+                                    databaseList() && databaseList()!.length > 0
+                                  }
                                   fallback={
                                     <div class="tree-empty">No databases</div>
                                   }
@@ -249,12 +307,9 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                                         onClick={() => handleSelectDatabase(db)}
                                       >
                                         <span class="tree-icon">🗄️</span>
-                                        <span class="tree-label">{db.name}</span>
-                                        <Show when={db.tables_count !== undefined}>
-                                          <span class="table-count">
-                                            {db.tables_count} tables
-                                          </span>
-                                        </Show>
+                                        <span class="tree-label">
+                                          {db.name}
+                                        </span>
                                       </div>
                                     )}
                                   </For>

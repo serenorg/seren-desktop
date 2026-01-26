@@ -140,7 +140,7 @@ async function triggerAutoTopUp(): Promise<void> {
     logEvent("checkout_opened", balance, threshold, amount);
 
     // Open in browser
-    await openCheckout(checkout.checkoutUrl);
+    await openCheckout(checkout.checkout_url);
 
     // Note: Completion is handled when user returns and balance is refreshed
     // We'll keep the lock for a reasonable time, then release it

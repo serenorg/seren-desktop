@@ -1,228 +1,107 @@
 // ABOUTME: Wallet service for fetching and managing SerenBucks balance.
-// ABOUTME: Communicates with the Seren Gateway API for balance operations.
+// ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
-import { API_BASE } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
-import { getToken } from "@/lib/tauri-bridge";
+import { getWalletBalance, createDeposit, getTransactions } from "@/api";
 
-/**
- * Wallet balance response from the API.
- */
-export interface WalletBalance {
-  balance: number;
-  currency: string;
-  lastUpdated: string;
-}
-
-/**
- * Top-up checkout response (Stripe).
- */
-export interface TopUpCheckout {
-  checkoutUrl: string;
-  sessionId: string;
-}
+// Re-export generated types directly
+export type {
+  WalletBalanceResponse as WalletBalance,
+  DepositResponse as TopUpCheckout,
+  WalletTransactionResponse as Transaction,
+  WalletTransactionHistoryResponse as TransactionsResponse,
+} from "@/api";
 
 /**
  * Crypto deposit response.
+ * Note: Not yet in OpenAPI spec.
  */
 export interface CryptoDepositInfo {
   depositAddress: string;
   network: string;
   chainId: number;
-  amount: string; // USDC amount in 6 decimal format
+  amount: string;
   amountUsd: number;
   expiresAt: string;
   reference: string;
 }
 
 /**
- * Wallet API error.
- */
-export interface WalletError {
-  message: string;
-  code?: string;
-}
-
-/**
  * Fetch the current wallet balance from the API.
  * @throws Error if not authenticated or network error
  */
-export async function fetchBalance(): Promise<WalletBalance> {
-  const token = await getToken();
+export async function fetchBalance() {
+  const { data, error } = await getWalletBalance({ throwOnError: false });
 
-  if (!token) {
-    throw new Error("Not authenticated");
+  if (error) {
+    throw new Error("Failed to fetch balance");
   }
 
-  const response = await appFetch(`${API_BASE}/agent/wallet/balance`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  if (response.status === 401) {
-    throw new Error("Authentication expired. Please log in again.");
+  if (!data?.data) {
+    throw new Error("No balance data returned");
   }
 
-  if (!response.ok) {
-    const error: WalletError = await response.json().catch(() => ({
-      message: "Failed to fetch balance",
-    }));
-    throw new Error(error.message);
-  }
-
-  return response.json();
+  return data.data;
 }
 
 /**
  * Initiate a top-up checkout session.
- * @param amount Amount in USD to top up
+ * @param amount Amount in USD to top up (will be converted to cents)
  * @throws Error if not authenticated or network error
  */
-export async function initiateTopUp(amount: number): Promise<TopUpCheckout> {
-  const token = await getToken();
-
-  if (!token) {
-    throw new Error("Not authenticated");
-  }
-
-  const response = await appFetch(`${API_BASE}/agent/wallet/deposit`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ amount }),
+export async function initiateTopUp(amount: number) {
+  const { data, error } = await createDeposit({
+    body: { amount_cents: Math.round(amount * 100) },
+    throwOnError: false,
   });
 
-  if (response.status === 401) {
-    throw new Error("Authentication expired. Please log in again.");
+  if (error) {
+    throw new Error("Failed to initiate top-up");
   }
 
-  if (!response.ok) {
-    const error: WalletError = await response.json().catch(() => ({
-      message: "Failed to initiate top-up",
-    }));
-    throw new Error(error.message);
+  if (!data?.data) {
+    throw new Error("No checkout data returned");
   }
 
-  return response.json();
+  return data.data;
 }
 
 /**
  * Open the Stripe checkout URL in the default browser.
  */
 export async function openCheckout(checkoutUrl: string): Promise<void> {
-  // Use Tauri's opener plugin to open URL in default browser
   const { openUrl } = await import("@tauri-apps/plugin-opener");
   await openUrl(checkoutUrl);
 }
 
 /**
- * Initiate a crypto deposit to get deposit address and payment details.
- * @param amount Amount in USD to deposit
- * @throws Error if not authenticated or network error
+ * Initiate a crypto deposit.
+ * Note: Not yet in OpenAPI spec - placeholder implementation.
  */
-export async function initiateCryptoDeposit(amount: number): Promise<CryptoDepositInfo> {
-  const token = await getToken();
-
-  if (!token) {
-    throw new Error("Not authenticated");
-  }
-
-  const response = await appFetch(`${API_BASE}/agent/wallet/deposit/crypto`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ amount }),
-  });
-
-  if (response.status === 401) {
-    throw new Error("Authentication expired. Please log in again.");
-  }
-
-  if (!response.ok) {
-    const error: WalletError = await response.json().catch(() => ({
-      message: "Failed to initiate crypto deposit",
-    }));
-    throw new Error(error.message);
-  }
-
-  return response.json();
-}
-
-/**
- * Transaction types.
- */
-export type TransactionType = "deposit" | "charge" | "refund" | "auto_topup";
-
-/**
- * Transaction record from the API.
- */
-export interface Transaction {
-  id: string;
-  type: TransactionType;
-  amount: number;
-  description: string;
-  createdAt: string;
-  balance?: number;
-}
-
-/**
- * Transactions response from the API.
- */
-export interface TransactionsResponse {
-  transactions: Transaction[];
-  hasMore: boolean;
-  nextCursor?: string;
+export async function initiateCryptoDeposit(
+  _amount: number
+): Promise<CryptoDepositInfo> {
+  throw new Error("Crypto deposits not yet supported");
 }
 
 /**
  * Fetch transaction history from the API.
  * @param limit Number of transactions to fetch
- * @param cursor Pagination cursor
+ * @param offset Pagination offset
  * @throws Error if not authenticated or network error
  */
-export async function fetchTransactions(
-  limit = 20,
-  cursor?: string
-): Promise<TransactionsResponse> {
-  const token = await getToken();
+export async function fetchTransactions(limit = 20, offset = 0) {
+  const { data, error } = await getTransactions({
+    query: { limit, offset },
+    throwOnError: false,
+  });
 
-  if (!token) {
-    throw new Error("Not authenticated");
+  if (error) {
+    throw new Error("Failed to fetch transactions");
   }
 
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (cursor) {
-    params.set("cursor", cursor);
+  if (!data?.data) {
+    throw new Error("No transaction data returned");
   }
 
-  const response = await fetch(
-    `${API_BASE}/agent/wallet/transactions?${params}`,
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
-
-  if (response.status === 401) {
-    throw new Error("Authentication expired. Please log in again.");
-  }
-
-  if (!response.ok) {
-    const error: WalletError = await response.json().catch(() => ({
-      message: "Failed to fetch transactions",
-    }));
-    throw new Error(error.message);
-  }
-
-  return response.json();
+  return data.data;
 }

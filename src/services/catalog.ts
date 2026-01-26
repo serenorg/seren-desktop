@@ -1,9 +1,13 @@
 // ABOUTME: Publisher catalog service for fetching publisher data from Seren API.
-// ABOUTME: Handles listing publishers, getting details, and search suggestions.
+// ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
+import {
+  listStorePublishers,
+  getStorePublisher,
+  suggestPublishers,
+  type PublisherResponse,
+} from "@/api";
 import { apiBase } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
-import { getToken } from "@/lib/tauri-bridge";
 
 /**
  * Publisher type (database, api, mcp, compute).
@@ -41,46 +45,15 @@ export interface Publisher {
   is_active: boolean;
 }
 
-/**
- * Raw API publisher structure (as returned by Seren API).
- */
-interface RawPublisher {
-  id: string;
-  slug: string;
-  name: string;
-  resource_name?: string | null;
-  resource_description?: string | null;
-  description?: string;
-  logo_url?: string | null;
-  publisher_type?: string;
-  publisher_category?: string;
-  category?: string;
-  billing_model?: string | null;
-  // Pricing can come as top-level fields or in pricing array
-  price_per_call?: string | number | null;
-  base_price_per_1000_rows?: string | number | null;
-  price_per_execution?: string | number | null;
-  pricing?: Array<{
-    price_per_call?: string | number;
-    base_price_per_1000_rows?: string | number;
-    price_per_execution?: string | number;
-  }>;
-  // Stats
-  total_transactions?: number;
-  unique_agents_served?: number;
-  total_queries?: number;
-  // Metadata
-  categories?: string[];
-  capabilities?: string[];
-  use_cases?: string[];
-  is_verified?: boolean;
-  is_active?: boolean;
-}
+// Use the generated PublisherResponse type as the raw API structure
+type RawPublisher = PublisherResponse;
 
 /**
  * Parse a numeric value that could be string or number.
  */
-function parseNumericPrice(value: string | number | null | undefined): number | null {
+function parseNumericPrice(
+  value: string | number | null | undefined
+): number | null {
   if (value === null || value === undefined) return null;
   const num = typeof value === "string" ? parseFloat(value) : value;
   return isNaN(num) ? null : num;
@@ -96,41 +69,35 @@ function transformPublisher(raw: RawPublisher): Publisher {
     logoUrl = `${apiBase}${logoUrl}`;
   }
 
-  // Determine publisher type
+  // Determine publisher type from publisher_category
   let publisherType: PublisherType = "api";
-  if (raw.publisher_type === "database") {
+  if (raw.publisher_category === "database") {
     publisherType = "database";
-  } else if (raw.publisher_type === "mcp") {
+  } else if (raw.integration_type === "mcp") {
     publisherType = "mcp";
-  } else if (raw.publisher_type === "compute") {
+  } else if (raw.publisher_category === "compute") {
     publisherType = "compute";
-  } else if (raw.publisher_category === "database" || raw.category === "database") {
-    publisherType = "database";
   }
 
   // Determine billing model
   let billingModel: BillingModel | null = null;
-  if (raw.billing_model === "x402_per_request" || raw.billing_model === "prepaid_credits") {
+  if (
+    raw.billing_model === "x402_per_request" ||
+    raw.billing_model === "prepaid_credits"
+  ) {
     billingModel = raw.billing_model;
   }
 
-  // Extract pricing - check top-level fields first, then pricing array
-  let pricePerCall = parseNumericPrice(raw.price_per_call);
-  let basePricePer1000Rows = parseNumericPrice(raw.base_price_per_1000_rows);
-  let pricePerExecution = parseNumericPrice(raw.price_per_execution);
+  // Extract pricing from pricing array
+  let pricePerCall: number | null = null;
+  let basePricePer1000Rows: number | null = null;
+  let pricePerExecution: number | null = null;
 
-  // Fallback to pricing array if available
   if (Array.isArray(raw.pricing) && raw.pricing.length > 0) {
     const pricing = raw.pricing[0];
-    if (pricePerCall === null) {
-      pricePerCall = parseNumericPrice(pricing.price_per_call);
-    }
-    if (basePricePer1000Rows === null) {
-      basePricePer1000Rows = parseNumericPrice(pricing.base_price_per_1000_rows);
-    }
-    if (pricePerExecution === null) {
-      pricePerExecution = parseNumericPrice(pricing.price_per_execution);
-    }
+    pricePerCall = parseNumericPrice(pricing.price_per_call);
+    basePricePer1000Rows = parseNumericPrice(pricing.base_price_per_1000_rows);
+    pricePerExecution = parseNumericPrice(pricing.price_per_execution);
   }
 
   // Handle categories - use categories, capabilities, or use_cases
@@ -159,25 +126,11 @@ function transformPublisher(raw: RawPublisher): Publisher {
     price_per_call: pricePerCall,
     base_price_per_1000_rows: basePricePer1000Rows,
     price_per_execution: pricePerExecution,
-    total_transactions: raw.total_transactions || raw.total_queries || 0,
+    total_transactions: raw.total_queries || 0,
     unique_agents_served: raw.unique_agents_served || 0,
     categories,
     is_verified: raw.is_verified ?? false,
     is_active: raw.is_active ?? true,
-  };
-}
-
-/**
- * Get authorization headers for API requests.
- */
-async function getAuthHeaders(): Promise<HeadersInit> {
-  const token = await getToken();
-  if (!token) {
-    throw new Error("Not authenticated");
-  }
-  return {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
   };
 }
 
@@ -198,7 +151,10 @@ export function formatPrice(price: number | null): string | null {
 export function getPricingDisplay(publisher: Publisher): string {
   // Handle prepaid_credits billing model
   if (publisher.billing_model === "prepaid_credits") {
-    if (publisher.price_per_execution !== null && publisher.price_per_execution > 0) {
+    if (
+      publisher.price_per_execution !== null &&
+      publisher.price_per_execution > 0
+    ) {
       const formatted = formatPrice(publisher.price_per_execution);
       return `${formatted}/execution`;
     }
@@ -238,57 +194,36 @@ export function formatNumber(num: number): string {
 
 /**
  * Publisher catalog service for Seren API operations.
+ * Uses generated SDK with full type safety.
  */
 export const catalog = {
   /**
    * List all active publishers.
    */
   async list(): Promise<Publisher[]> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/agent/publishers`;
-    console.log("[Catalog] Fetching publishers from:", url);
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
-    });
-
-    console.log("[Catalog] Response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
+    console.log("[Catalog] Fetching publishers");
+    const { data, error } = await listStorePublishers({ throwOnError: false });
+    if (error) {
       console.error("[Catalog] Error fetching publishers:", error);
-      throw new Error(error.message || "Failed to list publishers");
+      throw new Error("Failed to list publishers");
     }
-
-    const data = await response.json();
-
-    // Handle { data: [...] }, { publishers: [...] }, and direct array responses
-    const rawPublishers: RawPublisher[] = Array.isArray(data) ? data : (data.data || data.publishers || []);
+    const rawPublishers = data?.data || [];
     console.log("[Catalog] Found", rawPublishers.length, "publishers");
-
-    // Transform to normalized structure
-    const publishers = rawPublishers.map(transformPublisher);
-    return publishers;
+    return rawPublishers.map(transformPublisher);
   },
 
   /**
    * Get a single publisher by slug.
    */
   async get(slug: string): Promise<Publisher> {
-    const headers = await getAuthHeaders();
-    const response = await appFetch(`${apiBase}/agent/publishers/${encodeURIComponent(slug)}`, {
-      method: "GET",
-      headers,
+    const { data, error } = await getStorePublisher({
+      path: { slug },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to get publisher");
+    if (error || !data?.data) {
+      throw new Error("Failed to get publisher");
     }
-
-    const raw: RawPublisher = await response.json();
-    return transformPublisher(raw);
+    return transformPublisher(data.data);
   },
 
   /**
@@ -299,21 +234,14 @@ export const catalog = {
     if (!query.trim()) {
       return this.list();
     }
-
-    const headers = await getAuthHeaders();
-    const params = new URLSearchParams({ search: query });
-    const response = await appFetch(`${apiBase}/agent/publishers?${params}`, {
-      method: "GET",
-      headers,
+    const { data, error } = await listStorePublishers({
+      query: { search: query },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to search publishers");
+    if (error) {
+      throw new Error("Failed to search publishers");
     }
-
-    const data = await response.json();
-    const rawPublishers: RawPublisher[] = Array.isArray(data) ? data : (data.data || data.publishers || []);
+    const rawPublishers = data?.data || [];
     return rawPublishers.map(transformPublisher);
   },
 
@@ -325,42 +253,53 @@ export const catalog = {
     if (!query.trim()) {
       return [];
     }
-
-    const headers = await getAuthHeaders();
-    const params = new URLSearchParams({ q: query });
-    const response = await appFetch(`${apiBase}/agent/publishers/suggest?${params}`, {
-      method: "GET",
-      headers,
+    const { data } = await suggestPublishers({
+      query: { query },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      // Suggestions are optional, return empty on error
+    // Suggestions are optional, return empty on error
+    if (!data?.data?.publishers) {
       return [];
     }
-
-    const data = await response.json();
-    const rawPublishers: RawPublisher[] = Array.isArray(data) ? data : (data.data || data.suggestions || []);
-    return rawPublishers.map(transformPublisher);
+    // suggestPublishers returns PublisherSuggestion[], which has a subset of fields
+    // We need to fetch full publisher details or return partial data
+    // For now, map what we can from the suggestion
+    return data.data.publishers.map((suggestion) => ({
+      id: "",
+      slug: suggestion.slug,
+      name: suggestion.name,
+      resource_name: null,
+      resource_description: null,
+      description: suggestion.description || "",
+      logo_url: null, // PublisherSuggestion doesn't include logo_url
+      publisher_type: "api" as PublisherType,
+      billing_model: null,
+      price_per_call: null,
+      base_price_per_1000_rows: suggestion.pricing?.base_price_per_1000_rows
+        ? parseNumericPrice(suggestion.pricing.base_price_per_1000_rows)
+        : null,
+      price_per_execution: null,
+      total_transactions: 0,
+      unique_agents_served: 0,
+      categories: suggestion.capabilities || [],
+      is_verified: false,
+      is_active: true,
+    }));
   },
 
   /**
    * Get publishers by category.
+   * Note: API doesn't support category filter directly, so we search instead.
    */
   async listByCategory(category: string): Promise<Publisher[]> {
-    const headers = await getAuthHeaders();
-    const params = new URLSearchParams({ category });
-    const response = await appFetch(`${apiBase}/agent/publishers?${params}`, {
-      method: "GET",
-      headers,
+    const { data, error } = await listStorePublishers({
+      query: { search: category },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to list publishers by category");
+    if (error) {
+      throw new Error("Failed to list publishers by category");
     }
-
-    const data = await response.json();
-    const rawPublishers: RawPublisher[] = Array.isArray(data) ? data : (data.data || data.publishers || []);
+    const rawPublishers = data?.data || [];
     return rawPublishers.map(transformPublisher);
   },
 };
