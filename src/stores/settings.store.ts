@@ -13,6 +13,10 @@ const APP_SETTINGS_KEY = "app";
  * Application settings.
  */
 export interface Settings {
+  // Chat settings
+  chatDefaultModel: string;
+  chatMaxHistoryMessages: number;
+
   // Editor settings
   editorFontSize: number;
   editorTabSize: number;
@@ -21,6 +25,8 @@ export interface Settings {
   // Completion settings
   completionEnabled: boolean;
   completionDelay: number;
+  completionMaxSuggestionLines: number;
+  completionModelId: string;
   completionDisabledLanguages: string[];
 
   // Wallet settings
@@ -34,24 +40,39 @@ export interface Settings {
 
   // Theme settings
   theme: "dark" | "light" | "system";
+
+  // General settings
+  telemetryEnabled: boolean;
 }
 
 /**
  * Default settings values.
  */
 const DEFAULT_SETTINGS: Settings = {
+  // Chat
+  chatDefaultModel: "claude-sonnet-4-20250514",
+  chatMaxHistoryMessages: 50,
+  // Editor
   editorFontSize: 14,
   editorTabSize: 2,
   editorWordWrap: true,
+  // Completion
   completionEnabled: true,
   completionDelay: 300,
+  completionMaxSuggestionLines: 6,
+  completionModelId: "claude-sonnet-4-20250514",
   completionDisabledLanguages: ["markdown", "plaintext"],
+  // Wallet
   showBalance: true,
   lowBalanceThreshold: 1.0,
+  // Auto top-up
   autoTopUpEnabled: false,
   autoTopUpThreshold: 5.0,
   autoTopUpAmount: 25.0,
+  // Theme
   theme: "dark",
+  // General
+  telemetryEnabled: true,
 };
 
 const defaultMcpSettings: McpSettings = {

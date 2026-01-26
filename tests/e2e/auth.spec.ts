@@ -32,8 +32,8 @@ test.describe("Authentication", () => {
       await dialog.dismiss();
     });
 
-    await page.goto("/?test=signin");
-    await page.waitForSelector("[data-testid='signin-playground']", { timeout: 15000 });
+    await page.goto("/?panel=account");
+    await page.waitForSelector("form.signin-form", { timeout: 15000 });
 
     await page.getByLabel("Email").fill(fakeUser.user.email);
     await page.getByLabel("Password").fill("dummy-password");

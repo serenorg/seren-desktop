@@ -1,5 +1,5 @@
 import { createStore } from "solid-js/store";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { telemetry } from "@/services/telemetry";
 
@@ -26,7 +26,6 @@ const [state, setState] = createStore<UpdaterState>({
 });
 
 let initialized = false;
-let pendingUpdate: Update | null = null;
 
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && Boolean((window as Record<string, unknown>).__TAURI_IPC__);
@@ -44,6 +43,9 @@ async function initUpdater(): Promise<void> {
   await checkForUpdates();
 }
 
+// Store the update object for later installation
+let pendingUpdate: Awaited<ReturnType<typeof check>> | null = null;
+
 async function checkForUpdates(manual = false): Promise<void> {
   if (!isTauriRuntime()) {
     setState({ status: "unsupported" });
@@ -53,12 +55,13 @@ async function checkForUpdates(manual = false): Promise<void> {
   setState({ status: "checking", error: null });
 
   try {
-    const result = await check();
-    if (result) {
-      pendingUpdate = result;
+    const update = await check();
+
+    if (update) {
+      pendingUpdate = update;
       setState({
         status: "available",
-        availableVersion: result.version,
+        availableVersion: update.version,
         lastChecked: Date.now(),
         error: null,
       });

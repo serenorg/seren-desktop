@@ -1,0 +1,179 @@
+/* ABOUTME: Styles for the file explorer panel. */
+
+.file-explorer-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-secondary, #1e1e1e);
+}
+
+.file-explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-primary, #3c3c3c);
+}
+
+.file-explorer-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted, #707070);
+  margin: 0;
+}
+
+.file-explorer-open-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.file-explorer-open-btn:hover {
+  background: var(--bg-hover, #2d2d2d);
+}
+
+.file-explorer-open-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.file-explorer-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--error-bg, rgba(244, 67, 54, 0.1));
+  color: var(--error, #f44336);
+  font-size: 12px;
+}
+
+.file-explorer-error button {
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: var(--error, #f44336);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.file-explorer-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--text-muted, #707070);
+  font-size: 13px;
+}
+
+.file-explorer-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-primary, #3c3c3c);
+  border-top-color: var(--accent-primary, #4fc3f7);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.file-explorer-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 48px 16px;
+  text-align: center;
+}
+
+.file-explorer-empty p {
+  margin: 0;
+  color: var(--text-muted, #707070);
+  font-size: 13px;
+}
+
+.file-explorer-open-folder-btn {
+  padding: 8px 16px;
+  background: var(--accent-primary, #4fc3f7);
+  border: none;
+  border-radius: 4px;
+  color: var(--bg-primary, #1e1e1e);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.file-explorer-open-folder-btn:hover {
+  opacity: 0.9;
+}
+
+.file-explorer-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.file-explorer-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--bg-tertiary, #252526);
+  border-bottom: 1px solid var(--border-primary, #3c3c3c);
+}
+
+.file-explorer-workspace-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary, #e0e0e0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-explorer-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted, #707070);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.file-explorer-close-btn:hover {
+  background: var(--bg-hover, #2d2d2d);
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .file-explorer-spinner {
+    animation: none;
+  }
+}

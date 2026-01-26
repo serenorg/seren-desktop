@@ -409,6 +409,40 @@ Good names:
 - NEVER use `git add -A` unless you've just done a `git status`
 - YOU MUST remove ALL references to Claude from commit messages before pushing
 
+### Git Worktrees (REQUIRED for Features and Bugs)
+
+All features and bug fixes MUST be developed in git worktrees, not directly on main. This keeps main stable and allows parallel development.
+
+```bash
+# Create a worktree for a new feature
+git worktree add ../.worktrees/feature-name -b feature/feature-name
+
+# Create a worktree for a bug fix
+git worktree add ../.worktrees/fix-bug-name -b fix/bug-name
+
+# List active worktrees
+git worktree list
+
+# Remove a worktree after merging
+git worktree remove ../.worktrees/feature-name
+```
+
+**Workflow:**
+
+1. Create a worktree with a descriptive branch name
+2. Work in the worktree directory (e.g., `../.worktrees/feature-name`)
+3. Commit and push to the feature branch
+4. Create a PR from the feature branch to main
+5. After merge, remove the worktree
+
+**Naming Conventions:**
+
+- Features: `feature/descriptive-name` or just `descriptive-name`
+- Bug fixes: `fix/issue-description`
+- Refactoring: `refactor/what-changed`
+
+**Important:** The worktrees directory is at `../.worktrees/` (parent of the repo) to keep it separate from the main codebase.
+
 ## Testing
 
 - ALL TEST FAILURES ARE YOUR RESPONSIBILITY
