@@ -129,7 +129,7 @@ pub fn build_authorization_message(
 
 /// Generate a random 32-byte nonce
 pub fn generate_random_nonce() -> FixedBytes<32> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut bytes = [0u8; 32];
     rng.fill(&mut bytes);
     FixedBytes::from(bytes)
