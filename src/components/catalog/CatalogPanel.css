@@ -49,6 +49,7 @@
 /* Embed SignIn component styles */
 .catalog-signin-prompt .signin {
   padding: 0;
+  height: auto;
 }
 
 .catalog-signin-prompt .signin-card {

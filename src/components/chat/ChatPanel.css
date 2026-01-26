@@ -216,6 +216,7 @@
 /* Embed SignIn component styles */
 .chat-signin-prompt .signin {
   padding: 0;
+  height: auto;
 }
 
 .chat-signin-prompt .signin-card {

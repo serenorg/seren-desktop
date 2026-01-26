@@ -1,9 +1,8 @@
 // ABOUTME: Authentication service for login, logout, and token management.
 // ABOUTME: Communicates with Seren Gateway API using /auth/login endpoint.
 
-import { fetch } from "@tauri-apps/plugin-http";
 import { API_BASE } from "@/lib/config";
-import { storeToken, getToken, clearToken, isTauriRuntime } from "@/lib/tauri-bridge";
+import { storeToken, getToken, clearToken } from "@/lib/tauri-bridge";
 
 export interface LoginResponse {
   data: {
@@ -33,10 +32,7 @@ export async function login(
   email: string,
   password: string
 ): Promise<LoginResponse> {
-  // Use Tauri HTTP plugin for reliable requests, fallback to native fetch for dev
-  const fetchFn = isTauriRuntime() ? fetch : globalThis.fetch;
-
-  const response = await fetchFn(`${API_BASE}/auth/login`, {
+  const response = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -1,15 +1,19 @@
-import type { open as OpenFn } from "@tauri-apps/plugin-opener";
+// ABOUTME: External link handler for opening URLs in the default browser.
+// ABOUTME: Uses Tauri opener plugin when available, falls back to window.open.
+
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 
-let opener: typeof OpenFn | null = null;
+type OpenUrlFn = (url: string | URL, openWith?: string) => Promise<void>;
 
-async function getOpener(): Promise<typeof OpenFn | null> {
+let openUrlFn: OpenUrlFn | null = null;
+
+async function getOpenUrl(): Promise<OpenUrlFn | null> {
   if (!isTauriRuntime()) return null;
-  if (opener) return opener;
+  if (openUrlFn) return openUrlFn;
   try {
     const mod = await import("@tauri-apps/plugin-opener");
-    opener = mod.open;
-    return opener;
+    openUrlFn = mod.openUrl;
+    return openUrlFn;
   } catch {
     return null;
   }
@@ -17,10 +21,10 @@ async function getOpener(): Promise<typeof OpenFn | null> {
 
 export async function openExternalLink(url: string): Promise<void> {
   if (isTauriRuntime()) {
-    const openFn = await getOpener();
+    const openFn = await getOpenUrl();
     if (openFn) {
       try {
-        await openFn(url, { activate: true });
+        await openFn(url);
         return;
       } catch (error) {
         console.error("Failed to open external link via Tauri", error);
