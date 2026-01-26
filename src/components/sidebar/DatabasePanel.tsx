@@ -1,5 +1,5 @@
 // ABOUTME: Database panel for browsing SerenDB projects, branches, and databases.
-// ABOUTME: Provides a tree view with create, delete, and connection string features.
+// ABOUTME: Provides a tree view of the user's database resources.
 
 import { Component, For, createSignal, createResource, Show } from "solid-js";
 import { databases, type Database } from "@/services/databases";
@@ -111,8 +111,8 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
       await databases.deleteProject(projectId);
       refetchProjects();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to delete project";
-      alert(message);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to delete project: ${message}`);
     }
   };
 
@@ -124,8 +124,8 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
       setCopyStatus("Copied!");
       setTimeout(() => setCopyStatus(null), 2000);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to get connection string";
-      alert(message);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to copy connection string: ${message}`);
     }
   };
 

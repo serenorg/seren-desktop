@@ -73,6 +73,34 @@ async function getAuthHeaders(): Promise<HeadersInit> {
  */
 export const databases = {
   /**
+   * List all organizations for the authenticated user.
+   */
+  async listOrganizations(): Promise<Organization[]> {
+    const headers = await getAuthHeaders();
+    const url = `${apiBase}/organizations`;
+    console.log("[Databases] Fetching organizations from:", url);
+
+    const response = await appFetch(url, {
+      method: "GET",
+      headers,
+    });
+
+    console.log("[Databases] Organizations response status:", response.status);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      console.error("[Databases] Error fetching organizations:", error);
+      throw new Error(error.message || "Failed to list organizations");
+    }
+
+    const data = await response.json();
+    const orgs: Organization[] = Array.isArray(data) ? data : (data.data || data.organizations || []);
+    console.log("[Databases] Found", orgs.length, "organizations");
+
+    return orgs;
+  },
+
+  /**
    * List all projects for the authenticated user.
    */
   async listProjects(): Promise<Project[]> {
@@ -102,6 +130,54 @@ export const databases = {
   },
 
   /**
+   * Create a new project.
+   */
+  async createProject(name: string, organizationId: string): Promise<Project> {
+    const headers = await getAuthHeaders();
+    const url = `${apiBase}/projects`;
+    console.log("[Databases] Creating project:", name);
+
+    const response = await appFetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name, organization_id: organizationId }),
+    });
+
+    console.log("[Databases] Create project response status:", response.status);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      console.error("[Databases] Error creating project:", error);
+      throw new Error(error.message || "Failed to create project");
+    }
+
+    const data = await response.json();
+    return data.data || data;
+  },
+
+  /**
+   * Delete a project by ID.
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    const headers = await getAuthHeaders();
+    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}`;
+    console.log("[Databases] Deleting project:", projectId);
+
+    const response = await appFetch(url, {
+      method: "DELETE",
+      headers,
+    });
+
+    console.log("[Databases] Delete project response status:", response.status);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      console.error("[Databases] Error deleting project:", error);
+      throw new Error(error.message || "Failed to delete project");
+    }
+  },
+
+  /**
    * List all branches for a project.
    */
   async listBranches(projectId: string): Promise<Branch[]> {
@@ -127,6 +203,31 @@ export const databases = {
     console.log("[Databases] Found", branches.length, "branches for project", projectId);
 
     return branches;
+  },
+
+  /**
+   * Get connection string for a branch.
+   */
+  async getConnectionString(projectId: string, branchId: string): Promise<string> {
+    const headers = await getAuthHeaders();
+    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/connection-string`;
+    console.log("[Databases] Fetching connection string from:", url);
+
+    const response = await appFetch(url, {
+      method: "GET",
+      headers,
+    });
+
+    console.log("[Databases] Connection string response status:", response.status);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      console.error("[Databases] Error fetching connection string:", error);
+      throw new Error(error.message || "Failed to get connection string");
+    }
+
+    const data = await response.json();
+    return data.connection_string || data.data?.connection_string || data;
   },
 
   /**
@@ -200,11 +301,11 @@ export const databases = {
   },
 
   /**
-   * Get a single database by ID or name.
+   * Get a single database by ID.
    */
-  async getDatabase(projectId: string, branchId: string, databaseIdOrName: string): Promise<Database> {
+  async getDatabase(projectId: string, branchId: string, databaseId: string): Promise<Database> {
     const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/databases/${encodeURIComponent(databaseIdOrName)}`;
+    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/databases/${encodeURIComponent(databaseId)}`;
 
     const response = await appFetch(url, {
       method: "GET",
@@ -218,106 +319,5 @@ export const databases = {
 
     const data = await response.json();
     return data.data || data;
-  },
-
-  /**
-   * List all organizations for the authenticated user.
-   */
-  async listOrganizations(): Promise<Organization[]> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/organizations`;
-    console.log("[Databases] Fetching organizations from:", url);
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
-    });
-
-    console.log("[Databases] Organizations response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      console.error("[Databases] Error fetching organizations:", error);
-      throw new Error(error.message || "Failed to list organizations");
-    }
-
-    const data = await response.json();
-    const orgs: Organization[] = Array.isArray(data) ? data : (data.data || data.organizations || []);
-    console.log("[Databases] Found", orgs.length, "organizations");
-
-    return orgs;
-  },
-
-  /**
-   * Create a new project.
-   */
-  async createProject(name: string, organizationId: string): Promise<Project> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects`;
-    console.log("[Databases] Creating project:", name);
-
-    const response = await appFetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ name, organization_id: organizationId }),
-    });
-
-    console.log("[Databases] Create project response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      console.error("[Databases] Error creating project:", error);
-      throw new Error(error.message || "Failed to create project");
-    }
-
-    const data = await response.json();
-    return data.data || data;
-  },
-
-  /**
-   * Delete a project.
-   */
-  async deleteProject(projectId: string): Promise<void> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}`;
-    console.log("[Databases] Deleting project:", projectId);
-
-    const response = await appFetch(url, {
-      method: "DELETE",
-      headers,
-    });
-
-    console.log("[Databases] Delete project response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      console.error("[Databases] Error deleting project:", error);
-      throw new Error(error.message || "Failed to delete project");
-    }
-  },
-
-  /**
-   * Get connection string for a branch.
-   */
-  async getConnectionString(projectId: string, branchId: string): Promise<string> {
-    const headers = await getAuthHeaders();
-    const url = `${apiBase}/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/connection-string`;
-    console.log("[Databases] Getting connection string for branch:", branchId);
-
-    const response = await appFetch(url, {
-      method: "GET",
-      headers,
-    });
-
-    console.log("[Databases] Connection string response status:", response.status);
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      console.error("[Databases] Error getting connection string:", error);
-      throw new Error(error.message || "Failed to get connection string");
-    }
-
-    const data = await response.json();
-    return data.connection_string || data.data?.connection_string || "";
   },
 };

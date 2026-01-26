@@ -2,6 +2,7 @@
 // ABOUTME: Provides typed functions for secure token storage and Rust communication.
 
 const TOKEN_STORAGE_KEY = "seren_token";
+const REFRESH_TOKEN_STORAGE_KEY = "seren_refresh_token";
 
 /**
  * Check if running in Tauri runtime (vs browser).
@@ -62,6 +63,46 @@ export async function clearToken(): Promise<void> {
   } else {
     // Browser fallback for testing
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+}
+
+/**
+ * Store refresh token securely using OS keychain.
+ * Falls back to localStorage in browser environments (for testing).
+ */
+export async function storeRefreshToken(token: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("store_refresh_token", { token });
+  } else {
+    // Browser fallback for testing
+    localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, token);
+  }
+}
+
+/**
+ * Retrieve stored refresh token.
+ * Returns null if no token is stored.
+ */
+export async function getRefreshToken(): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    return await invoke<string | null>("get_refresh_token");
+  }
+  // Browser fallback for testing
+  return localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+}
+
+/**
+ * Clear stored refresh token (logout).
+ */
+export async function clearRefreshToken(): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("clear_refresh_token");
+  } else {
+    // Browser fallback for testing
+    localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
   }
 }
 
