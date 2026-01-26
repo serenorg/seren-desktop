@@ -83,8 +83,8 @@ export async function refreshAccessToken(): Promise<boolean> {
   }
 
   try {
-    // Use native fetch to avoid auto-refresh loop
-    const response = await fetch(`${API_BASE}/auth/refresh`, {
+    // Use appFetch for CORS bypass in Tauri (it skips auto-refresh for /auth/refresh)
+    const response = await appFetch(`${API_BASE}/auth/refresh`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
