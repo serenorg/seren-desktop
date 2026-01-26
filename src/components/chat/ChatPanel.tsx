@@ -482,11 +482,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
           />
           <div class="input-footer">
             <span class="input-hint">
-              {chatStore.isLoading
-                ? "Generating…"
-                : settingsStore.get("chatEnterToSend")
-                  ? "Enter to send"
-                  : "Ctrl+Enter to send"}
+              {settingsStore.get("chatEnterToSend")
+                ? "Enter to send"
+                : "Ctrl+Enter to send"}
             </span>
             <button type="submit" disabled={chatStore.isLoading}>
               Send
