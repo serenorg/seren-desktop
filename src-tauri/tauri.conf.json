@@ -22,7 +22,11 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://api.serendb.com; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' https://api.serendb.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https:",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     }
   },
   "plugins": {
