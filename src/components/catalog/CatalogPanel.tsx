@@ -118,14 +118,12 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
     >
       <div class="flex flex-col h-full bg-transparent">
         <header class="p-6 pb-4 border-b border-[rgba(148,163,184,0.1)]">
-          <div class="max-w-[1200px] mx-auto">
-            <h1 class="text-2xl font-semibold text-white m-0">
-              Publisher Catalog
-            </h1>
-            <p class="text-[14px] text-[#94a3b8] mt-1 m-0">
-              Discover APIs, databases, and AI services to power your workflows.
-            </p>
-          </div>
+          <h1 class="text-2xl font-semibold text-white m-0">
+            Publisher Catalog
+          </h1>
+          <p class="text-[14px] text-[#94a3b8] mt-1 m-0">
+            Discover APIs, databases, and AI services to power your workflows.
+          </p>
         </header>
 
         <div class="flex items-center gap-4 p-4 px-6 border-b border-[rgba(148,163,184,0.1)] flex-wrap">
