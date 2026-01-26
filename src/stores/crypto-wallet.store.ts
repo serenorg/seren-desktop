@@ -6,6 +6,7 @@ import {
   storeCryptoPrivateKey,
   getCryptoWalletAddress,
   clearCryptoWallet,
+  getCryptoUsdcBalance,
 } from "@/lib/tauri-bridge";
 
 interface CryptoWalletState {
@@ -13,6 +14,9 @@ interface CryptoWalletState {
   isConfigured: boolean;
   isLoading: boolean;
   error: string | null;
+  usdcBalance: string | null;
+  usdcBalanceRaw: string | null;
+  balanceLoading: boolean;
 }
 
 function createCryptoWalletStore() {
@@ -21,19 +25,51 @@ function createCryptoWalletStore() {
     isConfigured: false,
     isLoading: false,
     error: null,
+    usdcBalance: null,
+    usdcBalanceRaw: null,
+    balanceLoading: false,
   });
+
+  // Fetch USDC balance from Base mainnet
+  const fetchBalance = async () => {
+    const currentState = state();
+    if (!currentState.isConfigured) return;
+
+    setState((prev) => ({ ...prev, balanceLoading: true }));
+    try {
+      const balanceInfo = await getCryptoUsdcBalance();
+      setState((prev) => ({
+        ...prev,
+        usdcBalance: balanceInfo.balance,
+        usdcBalanceRaw: balanceInfo.balanceRaw,
+        balanceLoading: false,
+      }));
+    } catch (err) {
+      // Don't overwrite the main error, just log balance fetch failure
+      console.error("Failed to fetch USDC balance:", err);
+      setState((prev) => ({
+        ...prev,
+        balanceLoading: false,
+      }));
+    }
+  };
 
   // Load wallet address on initialization
   const loadWallet = async () => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
       const address = await getCryptoWalletAddress();
-      setState({
+      setState((prev) => ({
+        ...prev,
         address,
         isConfigured: address !== null,
         isLoading: false,
         error: null,
-      });
+      }));
+      // Fetch balance if wallet is configured
+      if (address !== null) {
+        fetchBalance();
+      }
     } catch (err) {
       setState((prev) => ({
         ...prev,
@@ -48,12 +84,15 @@ function createCryptoWalletStore() {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
       const address = await storeCryptoPrivateKey(privateKey);
-      setState({
+      setState((prev) => ({
+        ...prev,
         address,
         isConfigured: true,
         isLoading: false,
         error: null,
-      });
+      }));
+      // Fetch balance after storing key
+      fetchBalance();
       return address;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Failed to store key";
@@ -76,6 +115,9 @@ function createCryptoWalletStore() {
         isConfigured: false,
         isLoading: false,
         error: null,
+        usdcBalance: null,
+        usdcBalanceRaw: null,
+        balanceLoading: false,
       });
     } catch (err) {
       setState((prev) => ({
@@ -94,6 +136,7 @@ function createCryptoWalletStore() {
     loadWallet,
     storeKey,
     clearWallet,
+    fetchBalance,
   };
 }
 

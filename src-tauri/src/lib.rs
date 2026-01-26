@@ -165,6 +165,7 @@ pub fn run() {
             wallet::commands::get_crypto_wallet_address,
             wallet::commands::clear_crypto_wallet,
             wallet::commands::sign_x402_payment,
+            wallet::commands::get_crypto_usdc_balance,
             embedded_runtime::get_embedded_runtime_info,
         ])
         .run(tauri::generate_context!())

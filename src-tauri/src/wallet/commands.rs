@@ -1,5 +1,5 @@
 // ABOUTME: Tauri IPC command handlers for crypto wallet operations.
-// ABOUTME: Provides secure storage and x402 payment signing via Tauri commands.
+// ABOUTME: Provides secure storage, x402 payment signing, and balance fetching via Tauri commands.
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
@@ -12,6 +12,10 @@ use super::{
 const WALLET_STORE: &str = "crypto-wallet.json";
 const PRIVATE_KEY_KEY: &str = "private_key";
 const WALLET_ADDRESS_KEY: &str = "wallet_address";
+
+// Base mainnet RPC URL and USDC contract
+const BASE_RPC_URL: &str = "https://mainnet.base.org";
+const USDC_CONTRACT_BASE: &str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
 /// Result type for wallet commands (serializable for IPC)
 #[derive(Debug, Serialize, Deserialize)]
@@ -207,5 +211,119 @@ pub async fn sign_x402_payment<R: Runtime>(
         header_name: payload.header_name().to_string(),
         header_value,
         x402_version: payload.x402_version(),
+    })
+}
+
+/// USDC balance response
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsdcBalanceResponse {
+    /// Balance in USDC (human-readable, 6 decimals)
+    pub balance: String,
+    /// Balance in smallest unit (raw)
+    pub balance_raw: String,
+    /// Network name
+    pub network: String,
+}
+
+/// JSON-RPC request for eth_call
+#[derive(Debug, Serialize)]
+struct JsonRpcRequest {
+    jsonrpc: &'static str,
+    method: &'static str,
+    params: Vec<serde_json::Value>,
+    id: u32,
+}
+
+/// JSON-RPC response
+#[derive(Debug, Deserialize)]
+struct JsonRpcResponse {
+    result: Option<String>,
+    error: Option<JsonRpcError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JsonRpcError {
+    message: String,
+}
+
+/// Get the USDC balance for the configured wallet on Base mainnet.
+///
+/// Makes an eth_call to the USDC contract's balanceOf function.
+#[tauri::command]
+pub async fn get_crypto_usdc_balance<R: Runtime>(
+    app: AppHandle<R>,
+) -> WalletCommandResult<UsdcBalanceResponse> {
+    // Get the wallet address
+    let store = match app.store(WALLET_STORE) {
+        Ok(s) => s,
+        Err(_) => return WalletCommandResult::err("Wallet not configured"),
+    };
+
+    let address = match store.get(WALLET_ADDRESS_KEY) {
+        Some(v) => match v.as_str() {
+            Some(a) => a.to_string(),
+            None => return WalletCommandResult::err("Wallet not configured"),
+        },
+        None => return WalletCommandResult::err("Wallet not configured"),
+    };
+
+    // Build the eth_call data for balanceOf(address)
+    // Function selector: 0x70a08231 (first 4 bytes of keccak256("balanceOf(address)"))
+    // Pad address to 32 bytes
+    let address_clean = address.trim_start_matches("0x").to_lowercase();
+    let call_data = format!("0x70a08231000000000000000000000000{}", address_clean);
+
+    // Build JSON-RPC request
+    let request = JsonRpcRequest {
+        jsonrpc: "2.0",
+        method: "eth_call",
+        params: vec![
+            serde_json::json!({
+                "to": USDC_CONTRACT_BASE,
+                "data": call_data,
+            }),
+            serde_json::json!("latest"),
+        ],
+        id: 1,
+    };
+
+    // Make the RPC call
+    let client = reqwest::Client::new();
+    let response = match client
+        .post(BASE_RPC_URL)
+        .json(&request)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return WalletCommandResult::err(format!("RPC request failed: {}", e)),
+    };
+
+    let rpc_response: JsonRpcResponse = match response.json().await {
+        Ok(r) => r,
+        Err(e) => return WalletCommandResult::err(format!("Failed to parse RPC response: {}", e)),
+    };
+
+    if let Some(error) = rpc_response.error {
+        return WalletCommandResult::err(format!("RPC error: {}", error.message));
+    }
+
+    let result = match rpc_response.result {
+        Some(r) => r,
+        None => return WalletCommandResult::err("No result in RPC response"),
+    };
+
+    // Parse the hex result (32-byte uint256)
+    let balance_hex = result.trim_start_matches("0x");
+    let balance_raw = u128::from_str_radix(balance_hex, 16).unwrap_or(0);
+
+    // USDC has 6 decimals
+    let balance_decimal = balance_raw as f64 / 1_000_000.0;
+
+    WalletCommandResult::ok(UsdcBalanceResponse {
+        balance: format!("{:.2}", balance_decimal),
+        balance_raw: balance_raw.to_string(),
+        network: "Base".to_string(),
     })
 }

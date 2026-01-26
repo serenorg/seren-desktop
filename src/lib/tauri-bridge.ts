@@ -339,3 +339,30 @@ export async function signX402Payment(requirementsJson: string): Promise<SignX40
   }
   return result.data!;
 }
+
+/**
+ * Response from USDC balance query.
+ */
+export interface UsdcBalanceResponse {
+  balance: string;
+  balanceRaw: string;
+  network: string;
+}
+
+/**
+ * Get the USDC balance for the stored crypto wallet on Base mainnet.
+ *
+ * @returns The USDC balance with human-readable amount and raw value
+ * @throws Error if wallet is not configured or query fails
+ */
+export async function getCryptoUsdcBalance(): Promise<UsdcBalanceResponse> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("USDC balance query requires Tauri runtime");
+  }
+  const result = await invoke<WalletCommandResult<UsdcBalanceResponse>>("get_crypto_usdc_balance");
+  if (!result.success) {
+    throw new Error(result.error || "Failed to get USDC balance");
+  }
+  return result.data!;
+}
