@@ -89,6 +89,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // Input history navigation (terminal-style up/down arrow)
   const [historyIndex, setHistoryIndex] = createSignal(-1);
   const [savedInput, setSavedInput] = createSignal("");
+  // Message queue for sending messages while streaming
+  const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -318,10 +320,25 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     const trimmed = input().trim();
     if (!trimmed) return;
 
+    // If currently streaming, queue the message instead
+    if (chatStore.isLoading) {
+      setMessageQueue((queue) => [...queue, trimmed]);
+      setInput("");
+      setHistoryIndex(-1);
+      setSavedInput("");
+      console.log("[ChatContent] Message queued:", trimmed);
+      return;
+    }
+
+    // Send message immediately
+    await sendMessageImmediate(trimmed);
+  };
+
+  const sendMessageImmediate = async (messageContent: string) => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: trimmed,
+      content: messageContent,
       timestamp: Date.now(),
       model: chatStore.selectedModel,
       status: "complete",
@@ -338,11 +355,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       ? {
           id: assistantId,
           userMessageId: userMessage.id,
-          prompt: trimmed,
+          prompt: messageContent,
           model: chatStore.selectedModel,
           context,
           stream: streamMessageWithTools(
-            trimmed,
+            messageContent,
             chatStore.selectedModel,
             context,
             true,
@@ -353,10 +370,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       : {
           id: assistantId,
           userMessageId: userMessage.id,
-          prompt: trimmed,
+          prompt: messageContent,
           model: chatStore.selectedModel,
           context,
-          stream: streamMessage(trimmed, chatStore.selectedModel, context),
+          stream: streamMessage(messageContent, chatStore.selectedModel, context),
           toolsEnabled: false,
         };
 
@@ -386,6 +403,18 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     await chatStore.persistMessage(assistantMessage);
     setStreamingSession(null);
     chatStore.setLoading(false);
+
+    // Process message queue if there are queued messages
+    const queue = messageQueue();
+    if (queue.length > 0) {
+      const [nextMessage, ...remainingQueue] = queue;
+      setMessageQueue(remainingQueue);
+      console.log("[ChatContent] Processing queued message:", nextMessage);
+      // Small delay to ensure UI updates
+      setTimeout(() => {
+        sendMessageImmediate(nextMessage);
+      }, 100);
+    }
   };
 
   const handleStreamingError = async (
@@ -622,14 +651,28 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               onSelect={handlePublisherSelect}
               onDismiss={dismissSuggestions}
             />
+            <Show when={messageQueue().length > 0}>
+              <div class="flex items-center gap-2 px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e]">
+                <span>
+                  {messageQueue().length} message{messageQueue().length > 1 ? "s" : ""} queued
+                </span>
+                <button
+                  type="button"
+                  class="ml-auto bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[#30363d] hover:text-[#e6edf3]"
+                  onClick={() => setMessageQueue([])}
+                >
+                  Clear Queue
+                </button>
+              </div>
+            </Show>
             <textarea
               ref={(el) => {
                 inputRef = el;
                 console.log("[ChatContent] Textarea ref set, disabled:", el.disabled, "isLoading:", chatStore.isLoading);
               }}
               value={input()}
-              placeholder="Ask Seren anything…"
-              class="w-full min-h-[60px] max-h-[150px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-2 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60"
+              placeholder={chatStore.isLoading ? "Type to queue message..." : "Ask Seren anything…"}
+              class="w-full min-h-[60px] max-h-[150px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-2 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58]"
               onInput={(event) => {
                 setInput(event.currentTarget.value);
                 if (historyIndex() !== -1) {
@@ -693,23 +736,22 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   }
                 }
               }}
-              disabled={chatStore.isLoading}
             />
             <div class="flex justify-between items-center">
               <div class="flex items-center gap-2">
                 <ModelSelector />
                 <span class="text-[10px] text-[#484f58]">
                   {settingsStore.get("chatEnterToSend")
-                    ? "Enter to send"
-                    : "Ctrl+Enter"}
+                    ? chatStore.isLoading ? "Enter to queue" : "Enter to send"
+                    : chatStore.isLoading ? "Ctrl+Enter to queue" : "Ctrl+Enter"}
                 </span>
               </div>
               <button
                 type="submit"
                 class="bg-[#238636] text-white border-none px-3 py-1 rounded text-xs font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58]"
-                disabled={chatStore.isLoading}
+                disabled={!input().trim()}
               >
-                Send
+                {chatStore.isLoading ? "Queue" : "Send"}
               </button>
             </div>
           </form>
