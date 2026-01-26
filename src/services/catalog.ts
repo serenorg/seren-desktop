@@ -68,18 +68,29 @@ export const catalog = {
    */
   async list(): Promise<Publisher[]> {
     const headers = await getAuthHeaders();
-    const response = await appFetch(`${apiBase}/agent/publishers`, {
+    const url = `${apiBase}/agent/publishers`;
+    console.log("[Catalog] Fetching publishers from:", url);
+
+    const response = await appFetch(url, {
       method: "GET",
       headers,
     });
 
+    console.log("[Catalog] Response status:", response.status);
+
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
+      console.error("[Catalog] Error fetching publishers:", error);
       throw new Error(error.message || "Failed to list publishers");
     }
 
-    const data: PublisherListResponse = await response.json();
-    return data.publishers || [];
+    const data = await response.json();
+    console.log("[Catalog] Response data:", data);
+
+    // Handle { data: [...] }, { publishers: [...] }, and direct array responses
+    const publishers = Array.isArray(data) ? data : (data.data || data.publishers || []);
+    console.log("[Catalog] Found", publishers.length, "publishers");
+    return publishers;
   },
 
   /**
@@ -121,8 +132,8 @@ export const catalog = {
       throw new Error(error.message || "Failed to search publishers");
     }
 
-    const data: PublisherListResponse = await response.json();
-    return data.publishers || [];
+    const data = await response.json();
+    return data.data || data.publishers || [];
   },
 
   /**
@@ -146,8 +157,8 @@ export const catalog = {
       return [];
     }
 
-    const data: SuggestResponse = await response.json();
-    return data.suggestions || [];
+    const data = await response.json();
+    return data.data || data.suggestions || [];
   },
 
   /**
@@ -166,7 +177,7 @@ export const catalog = {
       throw new Error(error.message || "Failed to list publishers by category");
     }
 
-    const data: PublisherListResponse = await response.json();
-    return data.publishers || [];
+    const data = await response.json();
+    return data.data || data.publishers || [];
   },
 };
