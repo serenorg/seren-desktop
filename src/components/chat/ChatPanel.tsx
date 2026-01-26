@@ -16,6 +16,7 @@ import { settingsStore } from "@/stores/settings.store";
 import { StreamingMessage } from "./StreamingMessage";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { ChatTabBar } from "./ChatTabBar";
 import { SignIn } from "@/components/auth/SignIn";
 import { FileTree } from "@/components/sidebar/FileTree";
 import { fileTreeState, setNodes } from "@/stores/fileTree";
@@ -377,9 +378,10 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             </div>
           }
         >
+        <ChatTabBar />
         <header class="chat-header">
           <div class="chat-header-left">
-            {/* Model selector moved to input area */}
+            {/* Model selector in input area, tab bar above */}
           </div>
           <div class="chat-actions">
             <button type="button" class="clear-btn" onClick={clearHistory}>
