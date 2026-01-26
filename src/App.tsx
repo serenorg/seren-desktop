@@ -9,6 +9,7 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { EditorPanel } from "@/components/editor/EditorPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { CatalogPanel } from "@/components/catalog";
+import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { Phase3Playground } from "@/playground/Phase3Playground";
@@ -142,6 +143,9 @@ function App() {
             </Match>
             <Match when={activePanel() === "catalog"}>
               <CatalogPanel onSignInClick={handleSignInClick} />
+            </Match>
+            <Match when={activePanel() === "database"}>
+              <DatabasePanel />
             </Match>
             <Match when={activePanel() === "settings"}>
               <SettingsPanel />

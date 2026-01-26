@@ -4,7 +4,7 @@
 import { Component, For, createMemo } from "solid-js";
 import "./Sidebar.css";
 
-export type Panel = "chat" | "editor" | "catalog" | "settings" | "account";
+export type Panel = "chat" | "editor" | "catalog" | "database" | "settings" | "account";
 
 interface SidebarProps {
   activePanel: Panel;
@@ -23,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "editor", label: "Editor", icon: "📝" },
   { id: "catalog", label: "Catalog", icon: "📚" },
+  { id: "database", label: "Database", icon: "🗄️" },
   { id: "settings", label: "Settings", icon: "⚙️" },
   { id: "account", label: "Sign In", icon: "👤", showWhenAuthenticated: false },
 ];
