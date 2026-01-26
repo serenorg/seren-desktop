@@ -60,6 +60,7 @@ export default [
       "node_modules/**",
       "dist/**",
       "src-tauri/target/**",
+      "src/api/generated/**/*.gen.ts",
       "*.d.ts",
     ],
   },
