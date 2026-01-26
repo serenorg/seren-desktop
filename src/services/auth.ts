@@ -190,5 +190,5 @@ export async function getApiKey(): Promise<string> {
   }
 
   const data = await response.json();
-  return data.data.api_key;
+  return data.api_key;
 }
