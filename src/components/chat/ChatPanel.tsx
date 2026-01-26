@@ -1,6 +1,6 @@
 /* eslint-disable solid/no-innerhtml */
 import type { Component } from "solid-js";
-import { For, Show, createMemo, createSignal, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import {
   type ChatContext,
   type Message,
@@ -8,16 +8,24 @@ import {
   sendMessageWithRetry,
   CHAT_MAX_RETRIES,
 } from "@/services/chat";
+import { catalog, type Publisher } from "@/services/catalog";
 import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
 import { authStore } from "@/stores/auth.store";
 import { StreamingMessage } from "./StreamingMessage";
 import { ModelSelector } from "./ModelSelector";
+import { PublisherSuggestions } from "./PublisherSuggestions";
 import { formatRelativeTime } from "@/lib/format-time";
 import { renderMarkdown } from "@/lib/render-markdown";
 import { escapeHtml } from "@/lib/escape-html";
 import "./ChatPanel.css";
 import "highlight.js/styles/github.css";
+
+// Keywords that trigger publisher suggestions
+const SUGGESTION_KEYWORDS = [
+  "scrape", "crawl", "fetch", "search", "query", "database",
+  "api", "web", "data", "analyze", "extract", "research",
+];
 
 interface StreamingSession {
   id: string;
@@ -32,9 +40,18 @@ interface ChatPanelProps {
   onSignInClick?: () => void;
 }
 
+interface ChatPanelComponent extends Component<ChatPanelProps> {
+  focusInput?: () => void;
+}
+
 export const ChatPanel: Component<ChatPanelProps> = (props) => {
   const [input, setInput] = createSignal("");
   const [streamingSession, setStreamingSession] = createSignal<StreamingSession | null>(null);
+  const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
+  const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
+  let inputRef: HTMLTextAreaElement | undefined;
+  let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   onMount(async () => {
     try {
@@ -43,6 +60,86 @@ export const ChatPanel: Component<ChatPanelProps> = (props) => {
       chatStore.setError((error as Error).message);
     }
   });
+
+  onCleanup(() => {
+    if (suggestionDebounceTimer) {
+      clearTimeout(suggestionDebounceTimer);
+    }
+  });
+
+  // Check if input contains suggestion-triggering keywords
+  const shouldShowSuggestions = (text: string): boolean => {
+    const lowerText = text.toLowerCase();
+    return SUGGESTION_KEYWORDS.some((keyword) => lowerText.includes(keyword));
+  };
+
+  // Debounced fetch for publisher suggestions
+  const fetchSuggestions = async (query: string) => {
+    if (!authStore.isAuthenticated || suggestionsDismissed()) return;
+
+    if (!shouldShowSuggestions(query)) {
+      setSuggestions([]);
+      return;
+    }
+
+    setSuggestionsLoading(true);
+    try {
+      const results = await catalog.suggest(query);
+      setSuggestions(results.slice(0, 3)); // Show max 3 suggestions
+    } catch {
+      setSuggestions([]);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  // Watch input changes for suggestions
+  createEffect(() => {
+    const text = input();
+    if (suggestionDebounceTimer) {
+      clearTimeout(suggestionDebounceTimer);
+    }
+
+    if (text.length < 10) {
+      setSuggestions([]);
+      return;
+    }
+
+    suggestionDebounceTimer = setTimeout(() => {
+      fetchSuggestions(text);
+    }, 500); // 500ms debounce
+  });
+
+  const handlePublisherSelect = (publisher: Publisher) => {
+    // Add publisher mention to input
+    const currentInput = input();
+    const mention = `@${publisher.slug} `;
+    setInput(currentInput + (currentInput.endsWith(" ") ? "" : " ") + mention);
+    setSuggestions([]);
+    inputRef?.focus();
+  };
+
+  const dismissSuggestions = () => {
+    setSuggestions([]);
+    setSuggestionsDismissed(true);
+  };
+
+  // Reset dismissed state when input is cleared
+  createEffect(() => {
+    if (input().length === 0) {
+      setSuggestionsDismissed(false);
+    }
+  });
+
+  /**
+   * Focus the chat input. Called by keyboard shortcut.
+   */
+  const focusInput = () => {
+    inputRef?.focus();
+  };
+
+  // Expose focusInput for parent components
+  (ChatPanel as ChatPanelComponent).focusInput = focusInput;
 
   const contextPreview = createMemo(() => {
     if (!editorStore.selectedText) return null;
@@ -289,7 +386,14 @@ export const ChatPanel: Component<ChatPanelProps> = (props) => {
           sendMessage();
         }}
       >
+        <PublisherSuggestions
+          suggestions={suggestions()}
+          isLoading={suggestionsLoading()}
+          onSelect={handlePublisherSelect}
+          onDismiss={dismissSuggestions}
+        />
         <textarea
+          ref={inputRef}
           value={input()}
           placeholder="Ask Seren anything…"
           onInput={(event) => setInput(event.currentTarget.value)}
