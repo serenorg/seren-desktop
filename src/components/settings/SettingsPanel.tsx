@@ -10,6 +10,7 @@ import {
   toggleMcpServer,
   type Settings,
 } from "@/stores/settings.store";
+import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
@@ -20,6 +21,8 @@ type SettingsSection = "chat" | "providers" | "editor" | "wallet" | "appearance"
 export const SettingsPanel: Component = () => {
   const [activeSection, setActiveSection] = createSignal<SettingsSection>("chat");
   const [showResetConfirm, setShowResetConfirm] = createSignal(false);
+  const [privateKeyInput, setPrivateKeyInput] = createSignal("");
+  const [showClearConfirm, setShowClearConfirm] = createSignal(false);
 
   const handleNumberChange = (key: keyof Settings, value: string) => {
     const num = Number.parseFloat(value);
@@ -56,6 +59,28 @@ export const SettingsPanel: Component = () => {
 
   const handleToggleMcpServer = async (name: string) => {
     await toggleMcpServer(name);
+  };
+
+  const handleSavePrivateKey = async () => {
+    const key = privateKeyInput().trim();
+    if (!key) return;
+
+    try {
+      await cryptoWalletStore.storeKey(key);
+      setPrivateKeyInput("");
+    } catch {
+      // Error is handled by the store
+    }
+  };
+
+  const handleClearCryptoWallet = async () => {
+    await cryptoWalletStore.clearWallet();
+    setShowClearConfirm(false);
+  };
+
+  const isValidPrivateKeyFormat = (key: string): boolean => {
+    const cleaned = key.startsWith("0x") ? key.slice(2) : key;
+    return /^[0-9a-fA-F]{64}$/.test(cleaned);
   };
 
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
@@ -295,6 +320,52 @@ export const SettingsPanel: Component = () => {
               />
             </div>
 
+            <h4>Payment Method</h4>
+            <p class="settings-hint">
+              Choose your preferred payment method for MCP server tools.
+            </p>
+
+            <div class="settings-group">
+              <label class="settings-label">
+                <span class="label-text">Preferred Method</span>
+                <span class="label-hint">Default payment method for MCP tool usage</span>
+              </label>
+              <div class="payment-method-selector">
+                <button
+                  type="button"
+                  class={`payment-method-option ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "active" : ""}`}
+                  onClick={() => handleStringChange("preferredPaymentMethod", "serenbucks")}
+                >
+                  <span class="payment-method-icon">💰</span>
+                  <span class="payment-method-label">SerenBucks</span>
+                </button>
+                <button
+                  type="button"
+                  class={`payment-method-option ${settingsState.app.preferredPaymentMethod === "crypto" ? "active" : ""}`}
+                  onClick={() => handleStringChange("preferredPaymentMethod", "crypto")}
+                  disabled={!cryptoWalletStore.state().isConfigured}
+                  title={!cryptoWalletStore.state().isConfigured ? "Configure crypto wallet first" : ""}
+                >
+                  <span class="payment-method-icon">🔐</span>
+                  <span class="payment-method-label">Crypto Wallet</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-group checkbox">
+              <label class="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.enablePaymentFallback}
+                  onChange={(e) => handleBooleanChange("enablePaymentFallback", e.currentTarget.checked)}
+                />
+                <span class="checkbox-label">
+                  <span class="label-text">Enable Fallback Payment</span>
+                  <span class="label-hint">Use alternate method if preferred has insufficient funds</span>
+                </span>
+              </label>
+            </div>
+
             <h4>Auto Top-Up</h4>
 
             <div class="settings-group checkbox">
@@ -338,6 +409,81 @@ export const SettingsPanel: Component = () => {
                   value={settingsState.app.autoTopUpAmount}
                   onInput={(e) => handleNumberChange("autoTopUpAmount", e.currentTarget.value)}
                 />
+              </div>
+            </Show>
+
+            <h4>Crypto Wallet (USDC Payments)</h4>
+            <p class="settings-hint">
+              Configure your crypto wallet for x402 USDC payments to MCP servers.
+            </p>
+
+            <div class="settings-group">
+              <label class="settings-label">
+                <span class="label-text">Auto-Approve Limit</span>
+                <span class="label-hint">Auto-approve payments up to this amount (USD)</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="10"
+                step="0.01"
+                aria-label="Auto-approve limit in USD"
+                value={settingsState.app.cryptoAutoApproveLimit}
+                onInput={(e) => handleNumberChange("cryptoAutoApproveLimit", e.currentTarget.value)}
+              />
+            </div>
+
+            <Show
+              when={cryptoWalletStore.state().isConfigured}
+              fallback={
+                <div class="settings-group">
+                  <label class="settings-label">
+                    <span class="label-text">Private Key</span>
+                    <span class="label-hint">Enter your wallet private key (64 hex characters)</span>
+                  </label>
+                  <div class="crypto-key-input-group">
+                    <input
+                      type="password"
+                      placeholder="0x... or 64 hex characters"
+                      value={privateKeyInput()}
+                      onInput={(e) => setPrivateKeyInput(e.currentTarget.value)}
+                      class={privateKeyInput() && !isValidPrivateKeyFormat(privateKeyInput()) ? "invalid" : ""}
+                    />
+                    <button
+                      type="button"
+                      class="primary"
+                      disabled={!isValidPrivateKeyFormat(privateKeyInput()) || cryptoWalletStore.state().isLoading}
+                      onClick={handleSavePrivateKey}
+                    >
+                      {cryptoWalletStore.state().isLoading ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                  <Show when={privateKeyInput() && !isValidPrivateKeyFormat(privateKeyInput())}>
+                    <span class="settings-error">Invalid key format. Must be 64 hex characters.</span>
+                  </Show>
+                  <Show when={cryptoWalletStore.state().error}>
+                    <span class="settings-error">{cryptoWalletStore.state().error}</span>
+                  </Show>
+                </div>
+              }
+            >
+              <div class="crypto-wallet-configured">
+                <div class="settings-group">
+                  <label class="settings-label">
+                    <span class="label-text">Wallet Address</span>
+                    <span class="label-hint">Your configured wallet for USDC payments</span>
+                  </label>
+                  <div class="crypto-address-display">
+                    <code class="wallet-address">{cryptoWalletStore.state().address}</code>
+                    <button
+                      type="button"
+                      class="danger-outline"
+                      onClick={() => setShowClearConfirm(true)}
+                    >
+                      Remove Wallet
+                    </button>
+                  </div>
+                </div>
               </div>
             </Show>
           </section>
@@ -477,6 +623,23 @@ export const SettingsPanel: Component = () => {
               </button>
               <button type="button" class="danger" onClick={handleResetAll}>
                 Reset All
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={showClearConfirm()}>
+        <div class="settings-modal-overlay" onClick={() => setShowClearConfirm(false)}>
+          <div class="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Remove Crypto Wallet?</h3>
+            <p>This will delete your private key from this device. You will need to re-enter it to make USDC payments.</p>
+            <div class="settings-modal-actions">
+              <button type="button" class="secondary" onClick={() => setShowClearConfirm(false)}>
+                Cancel
+              </button>
+              <button type="button" class="danger" onClick={handleClearCryptoWallet}>
+                Remove Wallet
               </button>
             </div>
           </div>

@@ -1,0 +1,248 @@
+/* ABOUTME: Styles for the x402 payment approval modal. */
+/* ABOUTME: Dark theme modal with payment details and action buttons. */
+
+.x402-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  backdrop-filter: blur(4px);
+}
+
+.x402-modal {
+  background: var(--surface-elevated, #1e1e2e);
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.25));
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.x402-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.x402-icon {
+  font-size: 1.5rem;
+}
+
+.x402-modal-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-primary, #f8fafc);
+}
+
+.x402-modal-body {
+  margin-bottom: 20px;
+}
+
+.x402-description {
+  margin: 0 0 16px;
+  color: var(--text-secondary, #94a3b8);
+  line-height: 1.5;
+  font-size: 0.95rem;
+}
+
+.x402-description strong {
+  color: var(--text-primary, #f8fafc);
+}
+
+.x402-details {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.15));
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.x402-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.x402-detail-row:not(:last-child) {
+  border-bottom: 1px solid var(--border-muted, rgba(148, 163, 184, 0.1));
+}
+
+.x402-label {
+  font-size: 0.9rem;
+  color: var(--text-muted, #64748b);
+}
+
+.x402-value {
+  font-size: 0.9rem;
+  color: var(--text-primary, #f8fafc);
+  font-weight: 500;
+}
+
+.x402-amount {
+  font-size: 1.1rem;
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.x402-address {
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
+.x402-warning {
+  margin: 0;
+  padding: 12px;
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: #eab308;
+  line-height: 1.4;
+}
+
+.x402-modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.x402-btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.x402-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.x402-btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.3));
+  color: var(--text-secondary, #94a3b8);
+}
+
+.x402-btn-secondary:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-primary, #f8fafc);
+}
+
+.x402-btn-primary {
+  background: #22c55e;
+  border: none;
+  color: white;
+}
+
+.x402-btn-primary:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+/* Payment method selection */
+.x402-method-selection {
+  margin: 16px 0;
+}
+
+.x402-method-label {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-secondary, #94a3b8);
+  margin-bottom: 12px;
+}
+
+.x402-method-options {
+  display: flex;
+  gap: 12px;
+}
+
+.x402-method-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 2px solid var(--border-muted, rgba(148, 163, 184, 0.2));
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.x402-method-option:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.x402-method-option.selected {
+  border-color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.x402-method-option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.x402-method-icon {
+  font-size: 1.3rem;
+}
+
+.x402-method-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.x402-method-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary, #f8fafc);
+}
+
+.x402-method-balance {
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+  font-family: monospace;
+}
+
+.x402-method-unavailable {
+  font-size: 0.75rem;
+  color: #ef4444;
+  position: absolute;
+  bottom: 4px;
+  right: 8px;
+}
+
+.x402-method-option {
+  position: relative;
+}
+
+/* Info message (for SerenBucks) */
+.x402-info {
+  margin: 0;
+  padding: 12px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--accent, #6366f1);
+  line-height: 1.4;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .x402-method-options {
+    flex-direction: column;
+  }
+}
