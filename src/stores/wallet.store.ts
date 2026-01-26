@@ -97,11 +97,15 @@ async function refreshBalance(): Promise<void> {
  */
 function startAutoRefresh(): void {
   if (refreshTimer) {
+    console.log("[Wallet Store] Auto-refresh already running");
     return;
   }
 
-  // Fetch immediately
-  refreshBalance();
+  console.log("[Wallet Store] Starting auto-refresh");
+  // Fetch immediately (but only if not already loading)
+  if (!walletState.isLoading) {
+    refreshBalance();
+  }
 
   // Then refresh periodically
   refreshTimer = setInterval(() => {
