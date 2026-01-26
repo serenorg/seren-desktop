@@ -1,0 +1,102 @@
+/* ABOUTME: Styles for tool execution display in streaming messages. */
+/* ABOUTME: Shows tool calls with status indicators and collapsible results. */
+
+.tool-executions {
+  margin-bottom: 12px;
+  padding: 8px;
+  background: rgba(88, 166, 255, 0.05);
+  border: 1px solid rgba(88, 166, 255, 0.2);
+  border-radius: 6px;
+}
+
+.tool-execution {
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.tool-execution:last-child {
+  margin-bottom: 0;
+}
+
+.tool-execution.pending {
+  opacity: 0.8;
+}
+
+.tool-execution.error {
+  border-left: 3px solid #f85149;
+}
+
+.tool-execution.complete {
+  border-left: 3px solid #3fb950;
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.tool-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+}
+
+.tool-name {
+  font-weight: 500;
+  color: #58a6ff;
+}
+
+.tool-args {
+  color: #8b949e;
+  font-family: monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
+.tool-result {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.tool-result summary {
+  cursor: pointer;
+  color: #8b949e;
+  user-select: none;
+}
+
+.tool-result summary:hover {
+  color: #c9d1d9;
+}
+
+.tool-result pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  font-size: 11px;
+  overflow-x: auto;
+  max-height: 200px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Pending animation */
+.tool-execution.pending .tool-icon {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
