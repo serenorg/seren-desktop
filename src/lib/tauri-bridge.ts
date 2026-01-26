@@ -239,3 +239,103 @@ export async function getConfiguredProviders(): Promise<string[]> {
   }
   return providers;
 }
+
+// ============================================================================
+// Crypto Wallet Operations (x402)
+// ============================================================================
+
+const CRYPTO_WALLET_ADDRESS_KEY = "seren_crypto_wallet_address";
+
+/**
+ * Result type from wallet commands.
+ */
+interface WalletCommandResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+/**
+ * Response from sign_x402_payment command.
+ */
+export interface SignX402Response {
+  headerName: string;
+  headerValue: string;
+  x402Version: number;
+}
+
+/**
+ * Store a crypto private key for x402 payments.
+ * Returns the derived Ethereum address.
+ *
+ * @param privateKey - Hex-encoded private key (64 chars, with or without 0x prefix)
+ * @returns The Ethereum address derived from the private key
+ * @throws Error if the key is invalid or storage fails
+ */
+export async function storeCryptoPrivateKey(privateKey: string): Promise<string> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    const result = await invoke<WalletCommandResult<string>>("store_crypto_private_key", { privateKey });
+    if (!result.success) {
+      throw new Error(result.error || "Failed to store private key");
+    }
+    return result.data!;
+  }
+  // Browser fallback - just store a placeholder (can't derive address without alloy)
+  localStorage.setItem(CRYPTO_WALLET_ADDRESS_KEY, "browser-fallback");
+  return "browser-fallback";
+}
+
+/**
+ * Get the stored crypto wallet address, if any.
+ * Returns null if no wallet is configured.
+ */
+export async function getCryptoWalletAddress(): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    const result = await invoke<WalletCommandResult<string | null>>("get_crypto_wallet_address");
+    if (!result.success) {
+      throw new Error(result.error || "Failed to get wallet address");
+    }
+    return result.data ?? null;
+  }
+  // Browser fallback
+  return localStorage.getItem(CRYPTO_WALLET_ADDRESS_KEY);
+}
+
+/**
+ * Clear the stored crypto wallet (remove private key and address).
+ */
+export async function clearCryptoWallet(): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    const result = await invoke<WalletCommandResult<null>>("clear_crypto_wallet");
+    if (!result.success) {
+      throw new Error(result.error || "Failed to clear wallet");
+    }
+  } else {
+    // Browser fallback
+    localStorage.removeItem(CRYPTO_WALLET_ADDRESS_KEY);
+  }
+}
+
+/**
+ * Sign an x402 payment request using the stored private key.
+ *
+ * @param requirementsJson - The 402 response body as a JSON string
+ * @returns The header name and base64-encoded signed payload
+ * @throws Error if wallet is not configured or signing fails
+ */
+export async function signX402Payment(requirementsJson: string): Promise<SignX402Response> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("x402 signing requires Tauri runtime");
+  }
+  const result = await invoke<WalletCommandResult<SignX402Response>>("sign_x402_payment", {
+    request: { requirementsJson }
+  });
+  if (!result.success) {
+    throw new Error(result.error || "Failed to sign x402 payment");
+  }
+  return result.data!;
+}
