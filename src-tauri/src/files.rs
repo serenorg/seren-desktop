@@ -110,3 +110,12 @@ pub fn delete_path(path: String) -> Result<(), String> {
 pub fn rename_path(old_path: String, new_path: String) -> Result<(), String> {
     fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename: {}", e))
 }
+
+/// Reveal a file or directory in the system file manager (Finder on macOS).
+#[tauri::command]
+pub fn reveal_in_file_manager(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(std::path::Path::new(&path))
+        .map_err(|e| format!("Failed to reveal in file manager: {}", e))
+}

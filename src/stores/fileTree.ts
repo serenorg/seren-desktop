@@ -1,5 +1,6 @@
 import { createStore } from "solid-js/store";
 import { createSignal } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface FileNode {
   name: string;
@@ -8,6 +9,12 @@ export interface FileNode {
   children?: FileNode[];
   isExpanded?: boolean;
   isLoading?: boolean;
+}
+
+interface FileEntry {
+  name: string;
+  path: string;
+  is_directory: boolean;
 }
 
 interface FileTreeState {
@@ -101,6 +108,41 @@ export function setSelectedPath(path: string | null): void {
  */
 export function getFileTreeState(): Readonly<FileTreeState> {
   return fileTreeState;
+}
+
+/**
+ * Convert FileEntry from Tauri to FileNode.
+ */
+function entryToNode(entry: FileEntry): FileNode {
+  return {
+    name: entry.name,
+    path: entry.path,
+    isDirectory: entry.is_directory,
+    children: entry.is_directory ? undefined : undefined,
+    isLoading: false,
+  };
+}
+
+/**
+ * Refresh a directory's contents after file operations.
+ * If the path is the root, refreshes the entire tree.
+ * Otherwise, refreshes the children of the specified directory.
+ */
+export async function refreshDirectory(path: string): Promise<void> {
+  try {
+    const entries = await invoke<FileEntry[]>("list_directory", { path });
+    const children = entries.map(entryToNode);
+
+    // If this is the root path, update the root nodes
+    if (path === fileTreeState.rootPath) {
+      setNodes(children);
+    } else {
+      // Update the children of this directory
+      setNodeChildren(path, children);
+    }
+  } catch (err) {
+    console.error("Failed to refresh directory:", err);
+  }
 }
 
 export { fileTreeState, expandedPaths };

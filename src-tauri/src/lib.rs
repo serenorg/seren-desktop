@@ -147,6 +147,7 @@ pub fn run() {
             files::create_directory,
             files::delete_path,
             files::rename_path,
+            files::reveal_in_file_manager,
             commands::chat::save_message,
             commands::chat::get_messages,
             commands::chat::clear_history,
