@@ -145,9 +145,9 @@ export const ProviderSettings: Component = () => {
     );
 
   return (
-    <section class="settings-section">
-      <h3>AI Providers</h3>
-      <p class="settings-description">
+    <section>
+      <h3 class="m-0 mb-2 text-[1.3rem] font-semibold text-foreground">AI Providers</h3>
+      <p class="m-0 mb-6 text-muted-foreground leading-normal">
         Connect your own account to use models directly from Anthropic, OpenAI,
         or Google. Seren Models is always available with your SerenBucks
         balance.
@@ -182,7 +182,7 @@ export const ProviderSettings: Component = () => {
                       </span>
                     </Show>
                   </div>
-                  <span class="text-xs text-muted overflow-hidden text-ellipsis whitespace-nowrap">
+                  <span class="text-xs text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
                     {config.description}
                   </span>
                 </div>
@@ -199,7 +199,7 @@ export const ProviderSettings: Component = () => {
                   <Show when={providerId !== "seren"}>
                     <button
                       type="button"
-                      class="w-7 h-7 flex items-center justify-center bg-transparent border border-[rgba(148,163,184,0.25)] text-muted rounded text-base cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:border-[rgba(239,68,68,0.5)] hover:text-[#ef4444]"
+                      class="w-7 h-7 flex items-center justify-center bg-transparent border border-[rgba(148,163,184,0.25)] text-muted-foreground rounded text-base cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:border-[rgba(239,68,68,0.5)] hover:text-[#ef4444]"
                       onClick={() => handleRemoveProvider(providerId)}
                       title="Remove provider"
                     >
@@ -215,7 +215,9 @@ export const ProviderSettings: Component = () => {
 
       {/* Add New Provider */}
       <Show when={unconfiguredProviders().length > 0}>
-        <h4>Add Provider</h4>
+        <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+          Add Provider
+        </h4>
 
         {/* OAuth Error Display */}
         <Show when={oauthError()}>
@@ -256,16 +258,16 @@ export const ProviderSettings: Component = () => {
         </div>
 
         <div class="flex items-center my-5 gap-4 before:content-[''] before:flex-1 before:h-px before:bg-[rgba(148,163,184,0.25)] after:content-[''] after:flex-1 after:h-px after:bg-[rgba(148,163,184,0.25)]">
-          <span class="text-muted text-xs uppercase tracking-[0.5px]">
+          <span class="text-muted-foreground text-xs uppercase tracking-[0.5px]">
             or use API key
           </span>
         </div>
 
         <div class="mt-4">
-          <div class="settings-group">
-            <label class="settings-label">
-              <span class="label-text">Provider</span>
-              <span class="label-hint">
+          <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <label class="flex flex-col gap-0.5 flex-1">
+              <span class="text-[0.95rem] font-medium text-foreground">Provider</span>
+              <span class="text-[0.8rem] text-muted-foreground">
                 Select a provider to configure with API key
               </span>
             </label>
@@ -278,6 +280,7 @@ export const ProviderSettings: Component = () => {
                 setApiKeyInput("");
                 providerStore.clearValidationError();
               }}
+              class="min-w-[180px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] cursor-pointer focus:outline-none focus:border-accent"
             >
               <option value="">Select provider...</option>
               <For
@@ -297,10 +300,10 @@ export const ProviderSettings: Component = () => {
               const config = () => PROVIDER_CONFIGS[provider()];
               return (
                 <>
-                  <div class="settings-group">
-                    <label class="settings-label">
-                      <span class="label-text">API Key</span>
-                      <span class="label-hint">
+                  <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                    <label class="flex flex-col gap-0.5 flex-1">
+                      <span class="text-[0.95rem] font-medium text-foreground">API Key</span>
+                      <span class="text-[0.8rem] text-muted-foreground">
                         Your {config().name} API key.{" "}
                         <a
                           href={config().docsUrl}
@@ -315,7 +318,7 @@ export const ProviderSettings: Component = () => {
                     <div class="flex gap-2">
                       <input
                         type={showKey() ? "text" : "password"}
-                        class="flex-1 px-3 py-2 bg-surface border border-[rgba(148,163,184,0.25)] rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent placeholder:text-muted placeholder:font-sans"
+                        class="flex-1 min-w-[250px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.25)] rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent placeholder:text-muted-foreground placeholder:font-sans"
                         value={apiKeyInput()}
                         onInput={(e) => {
                           setApiKeyInput(e.currentTarget.value);
@@ -327,7 +330,7 @@ export const ProviderSettings: Component = () => {
                       />
                       <button
                         type="button"
-                        class="px-3 py-2 bg-[rgba(30,41,59,0.5)] border border-[rgba(148,163,184,0.25)] rounded text-muted text-[13px] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-[rgba(148,163,184,0.15)]"
+                        class="px-3 py-2 bg-[rgba(30,41,59,0.5)] border border-[rgba(148,163,184,0.25)] rounded text-muted-foreground text-[13px] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-[rgba(148,163,184,0.15)]"
                         onClick={() => setShowKey(!showKey())}
                         title={showKey() ? "Hide API key" : "Show API key"}
                       >
