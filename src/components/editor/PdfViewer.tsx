@@ -1,7 +1,7 @@
 // ABOUTME: PDF viewer component for displaying PDF files.
 // ABOUTME: Uses pdf.js for rendering with page navigation and zoom controls.
 
-import { Component, createSignal, createEffect, onCleanup, onMount } from "solid-js";
+import { Component, createSignal, createEffect, onCleanup } from "solid-js";
 import * as pdfjsLib from "pdfjs-dist";
 import "./PdfViewer.css";
 
@@ -98,6 +98,7 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
       const renderContext = {
         canvasContext: context,
         viewport: viewport,
+        canvas: canvas,
       };
 
       currentRenderTask = page.render(renderContext);
@@ -114,7 +115,7 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
   // Re-render when page or zoom changes
   createEffect(() => {
     const page = currentPage();
-    const z = zoom();
+    void zoom(); // Track zoom changes for reactivity
     if (pdfDoc && page > 0) {
       renderPage(page);
     }
