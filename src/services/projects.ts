@@ -1,149 +1,92 @@
 // ABOUTME: Project service for CRUD operations via Seren API.
-// ABOUTME: Handles listing, creating, updating, and deleting projects.
+// ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
-import { apiBase } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
-import { getToken } from "@/lib/tauri-bridge";
+import {
+  listProjects,
+  createProject,
+  getProject,
+  updateProject,
+  deleteProject,
+  type Project,
+  type CreateProjectRequest,
+  type UpdateProjectRequest,
+} from "@/api";
 
-/**
- * Project data structure from Seren API.
- */
-export interface Project {
-  id: string;
-  name: string;
-  region: string;
-  created_at: string;
-  updated_at: string;
-}
-
-/**
- * Parameters for creating a new project.
- */
-export interface CreateProjectParams {
-  name: string;
-  region: string;
-}
-
-/**
- * Parameters for updating a project.
- */
-export interface UpdateProjectParams {
-  name?: string;
-}
-
-/**
- * API response wrapper for project list.
- */
-interface ProjectListResponse {
-  projects: Project[];
-}
-
-/**
- * Get authorization headers for API requests.
- */
-async function getAuthHeaders(): Promise<HeadersInit> {
-  const token = await getToken();
-  if (!token) {
-    throw new Error("Not authenticated");
-  }
-  return {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-}
+// Re-export types for backwards compatibility
+export type { Project };
+export type CreateProjectParams = CreateProjectRequest;
+export type UpdateProjectParams = UpdateProjectRequest;
 
 /**
  * Project service for Seren API operations.
+ * Uses generated SDK with full type safety.
  */
 export const projects = {
   /**
    * List all projects for the authenticated user.
    */
   async list(): Promise<Project[]> {
-    const headers = await getAuthHeaders();
-    const response = await appFetch(`${apiBase}/projects`, {
-      method: "GET",
-      headers,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to list projects");
+    const { data, error } = await listProjects({ throwOnError: false });
+    if (error) {
+      throw new Error("Failed to list projects");
     }
-
-    const data: ProjectListResponse = await response.json();
-    return data.projects || [];
+    return data?.data || [];
   },
 
   /**
    * Create a new project.
    */
   async create(params: CreateProjectParams): Promise<Project> {
-    const headers = await getAuthHeaders();
-    const response = await appFetch(`${apiBase}/projects`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(params),
+    const { data, error } = await createProject({
+      body: params,
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to create project");
+    if (error || !data?.data) {
+      throw new Error("Failed to create project");
     }
-
-    return response.json();
+    // ProjectCreatedResponse wraps ProjectCreated which has the project fields
+    return data.data as unknown as Project;
   },
 
   /**
    * Get a single project by ID.
    */
   async get(id: string): Promise<Project> {
-    const headers = await getAuthHeaders();
-    const response = await appFetch(`${apiBase}/projects/${id}`, {
-      method: "GET",
-      headers,
+    const { data, error } = await getProject({
+      path: { project_id: id },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to get project");
+    if (error || !data?.data) {
+      throw new Error("Failed to get project");
     }
-
-    return response.json();
+    return data.data;
   },
 
   /**
    * Update a project.
    */
   async update(id: string, params: UpdateProjectParams): Promise<Project> {
-    const headers = await getAuthHeaders();
-    const response = await appFetch(`${apiBase}/projects/${id}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify(params),
+    const { data, error } = await updateProject({
+      path: { project_id: id },
+      body: params,
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to update project");
+    if (error || !data?.data) {
+      throw new Error("Failed to update project");
     }
-
-    return response.json();
+    return data.data;
   },
 
   /**
    * Delete a project.
    */
   async delete(id: string): Promise<void> {
-    const headers = await getAuthHeaders();
-    const response = await appFetch(`${apiBase}/projects/${id}`, {
-      method: "DELETE",
-      headers,
+    const { error } = await deleteProject({
+      path: { project_id: id },
+      throwOnError: false,
     });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Failed to delete project");
+    if (error) {
+      throw new Error("Failed to delete project");
     }
   },
 };
