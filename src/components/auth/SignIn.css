@@ -5,8 +5,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  background-color: #1e1e1e;
+  height: 100%;
+  padding: 24px;
 }
 
 .signin-card {
@@ -78,6 +78,20 @@
   color: #666;
 }
 
+.signin-forgot {
+  align-self: flex-end;
+  font-size: 13px;
+  color: #0078d4;
+  text-decoration: none;
+  margin-top: 4px;
+  transition: color 0.15s ease;
+}
+
+.signin-forgot:hover {
+  color: #50b0ff;
+  text-decoration: underline;
+}
+
 .signin-submit {
   margin-top: 8px;
   padding: 12px;
@@ -98,4 +112,22 @@
 .signin-submit:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.signin-signup {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 14px;
+  color: #aaa;
+}
+
+.signin-signup a {
+  color: #0078d4;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.signin-signup a:hover {
+  color: #50b0ff;
+  text-decoration: underline;
 }

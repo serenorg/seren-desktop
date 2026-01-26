@@ -179,6 +179,56 @@
   border-radius: 6px;
 }
 
+/* Sign-in prompt for unauthenticated users */
+.chat-signin-prompt {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.signin-prompt-content {
+  text-align: center;
+  max-width: 320px;
+  padding: 40px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-muted);
+  border-radius: 16px;
+}
+
+.signin-prompt-icon {
+  font-size: 3rem;
+  display: block;
+  margin-bottom: 16px;
+}
+
+.signin-prompt-content h2 {
+  margin: 0 0 8px;
+  font-size: 1.3rem;
+  color: var(--text-primary);
+}
+
+.signin-prompt-content p {
+  margin: 0 0 24px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.signin-prompt-button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 10px 28px;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.signin-prompt-button:hover {
+  background: #4f46e5;
+}
+
 @media (max-width: 900px) {
   .chat-panel {
     padding: 16px;

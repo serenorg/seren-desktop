@@ -1,12 +1,13 @@
-// ABOUTME: Main application component with layout and auth integration.
-// ABOUTME: Shows SignIn when not authenticated, main app when authenticated.
+// ABOUTME: Main application component with layout and optional auth.
+// ABOUTME: App is fully usable without login; auth unlocks AI features.
 
-import { createSignal, Match, onMount, Show, Switch } from "solid-js";
+import { createSignal, createEffect, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import { Header } from "@/components/common/Header";
 import { Sidebar, Panel } from "@/components/common/Sidebar";
 import { StatusBar } from "@/components/common/StatusBar";
 import { SignIn } from "@/components/auth/SignIn";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import {
   authStore,
@@ -16,6 +17,12 @@ import {
 } from "@/stores/auth.store";
 import { telemetry } from "@/services/telemetry";
 import { updaterStore } from "@/stores/updater.store";
+import {
+  startAutoRefresh,
+  stopAutoRefresh,
+  resetWalletState,
+} from "@/stores/wallet.store";
+import { initAutoTopUp } from "@/services/autoTopUp";
 import "./App.css";
 
 // Initialize telemetry early to capture startup errors
@@ -26,19 +33,44 @@ function App() {
     return <Phase3Playground />;
   }
 
-  const [activePanel, setActivePanel] = createSignal<Panel>("chat");
+  const [activePanel, setActivePanel] = createSignal<Panel>("editor");
 
   onMount(() => {
     checkAuth();
     updaterStore.initUpdater();
   });
 
+  // Initialize wallet features when authenticated
+  createEffect(() => {
+    if (authStore.isAuthenticated) {
+      // Start wallet balance refresh
+      startAutoRefresh();
+
+      // Initialize auto top-up monitoring
+      const cleanupAutoTopUp = initAutoTopUp();
+
+      onCleanup(() => {
+        stopAutoRefresh();
+        cleanupAutoTopUp();
+      });
+    } else {
+      // Reset wallet state on logout
+      resetWalletState();
+    }
+  });
+
   const handleLoginSuccess = () => {
     setAuthenticated({ id: "", email: "", name: "" });
+    // Switch to chat panel after successful login
+    setActivePanel("chat");
   };
 
   const handleLogout = async () => {
     await logout();
+  };
+
+  const handleSignInClick = () => {
+    setActivePanel("account");
   };
 
   return (
@@ -51,31 +83,41 @@ function App() {
         </div>
       }
     >
-      <Show when={authStore.isAuthenticated} fallback={<SignIn onSuccess={handleLoginSuccess} />}>
-        <div class="app">
-          <Header onLogout={handleLogout} />
-          <div class="app-body">
-            <Sidebar activePanel={activePanel()} onPanelChange={setActivePanel} />
-            <main class="app-main">
-              <Switch fallback={<div class="panel-placeholder">Select a panel</div>}>
-                <Match when={activePanel() === "chat"}>
-                  <ChatPanel />
-                </Match>
-                <Match when={activePanel() === "editor"}>
-                  <div class="panel-placeholder">Editor Panel (Coming Soon)</div>
-                </Match>
-                <Match when={activePanel() === "catalog"}>
-                  <div class="panel-placeholder">Catalog Panel (Coming Soon)</div>
-                </Match>
-                <Match when={activePanel() === "settings"}>
-                  <div class="panel-placeholder">Settings Panel (Coming Soon)</div>
-                </Match>
-              </Switch>
-            </main>
-          </div>
-          <StatusBar />
+      <div class="app">
+        <Header
+          onLogout={handleLogout}
+          onSignIn={handleSignInClick}
+          isAuthenticated={authStore.isAuthenticated}
+        />
+        <div class="app-body">
+          <Sidebar
+            activePanel={activePanel()}
+            onPanelChange={setActivePanel}
+            isAuthenticated={authStore.isAuthenticated}
+          />
+          <main class="app-main">
+            <Switch fallback={<div class="panel-placeholder">Select a panel</div>}>
+              <Match when={activePanel() === "chat"}>
+                <ChatPanel onSignInClick={handleSignInClick} />
+              </Match>
+              <Match when={activePanel() === "editor"}>
+                <div class="panel-placeholder">Editor Panel (Coming Soon)</div>
+              </Match>
+              <Match when={activePanel() === "catalog"}>
+                <div class="panel-placeholder">Catalog Panel (Coming Soon)</div>
+              </Match>
+              <Match when={activePanel() === "settings"}>
+                <div class="panel-placeholder">Settings Panel (Coming Soon)</div>
+              </Match>
+              <Match when={activePanel() === "account"}>
+                <SignIn onSuccess={handleLoginSuccess} />
+              </Match>
+            </Switch>
+          </main>
         </div>
-      </Show>
+        <StatusBar />
+        <LowBalanceModal />
+      </div>
     </Show>
   );
 }

@@ -1,11 +1,13 @@
 // ABOUTME: Application header with title and user actions.
-// ABOUTME: Displays app name and provides access to user menu.
+// ABOUTME: Displays app name and sign-in/logout controls based on auth state.
 
-import { Component } from "solid-js";
+import { Component, Show } from "solid-js";
 import "./Header.css";
 
 interface HeaderProps {
   onLogout?: () => void;
+  onSignIn?: () => void;
+  isAuthenticated?: boolean;
 }
 
 export const Header: Component<HeaderProps> = (props) => {
@@ -13,11 +15,22 @@ export const Header: Component<HeaderProps> = (props) => {
     <header class="header">
       <h1 class="header-title">Seren Desktop</h1>
       <div class="header-actions">
-        {props.onLogout && (
-          <button class="header-logout" onClick={props.onLogout}>
-            Logout
-          </button>
-        )}
+        <Show
+          when={props.isAuthenticated}
+          fallback={
+            props.onSignIn && (
+              <button type="button" class="header-signin" onClick={props.onSignIn}>
+                Sign In
+              </button>
+            )
+          }
+        >
+          {props.onLogout && (
+            <button type="button" class="header-logout" onClick={props.onLogout}>
+              Logout
+            </button>
+          )}
+        </Show>
       </div>
     </header>
   );
