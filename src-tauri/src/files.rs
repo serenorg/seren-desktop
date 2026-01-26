@@ -40,11 +40,6 @@ pub fn list_directory(path: String) -> Result<Vec<FileEntry>, String> {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
 
-            // Skip hidden files (starting with .)
-            if name.starts_with('.') {
-                return None;
-            }
-
             Some(FileEntry {
                 name,
                 path: path.to_string_lossy().to_string(),
