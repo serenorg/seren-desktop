@@ -197,7 +197,7 @@ export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
         "https://www.googleapis.com/auth/generative-language.retriever",
         "https://www.googleapis.com/auth/cloud-platform",
       ],
-      clientId: "", // Set via environment or config
+      clientId: "394120216619-p8h1i4ple18omhcp76h4va64v5ao4jv8.apps.googleusercontent.com",
       usePkce: true,
     },
   },
