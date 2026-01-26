@@ -335,7 +335,7 @@ export const SettingsPanel: Component = () => {
                 </label>
                 <input
                   type="number"
-                  min="5"
+                  min="10"
                   step="5"
                   value={settingsState.app.autoTopUpAmount}
                   onInput={(e) => handleNumberChange("autoTopUpAmount", e.currentTarget.value)}
