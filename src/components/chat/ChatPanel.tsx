@@ -101,6 +101,42 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // Copy button click handler (event delegation)
+  const handleCopyClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement;
+    const copyBtn = target.closest(".code-copy-btn") as HTMLButtonElement;
+
+    if (copyBtn) {
+      const code = copyBtn.dataset.code;
+      if (code) {
+        // Decode HTML entities
+        const textarea = document.createElement("textarea");
+        textarea.innerHTML = code;
+        const decodedCode = textarea.value;
+
+        // Copy to clipboard
+        navigator.clipboard
+          .writeText(decodedCode)
+          .then(() => {
+            // Visual feedback
+            const originalText = copyBtn.innerHTML;
+            copyBtn.classList.add("copied");
+            copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path>
+            </svg>Copied!`;
+
+            setTimeout(() => {
+              copyBtn.classList.remove("copied");
+              copyBtn.innerHTML = originalText;
+            }, 2000);
+          })
+          .catch((err) => {
+            console.error("Failed to copy code:", err);
+          });
+      }
+    }
+  };
+
   const scrollToBottom = () => {
     if (messagesRef) {
       messagesRef.scrollTop = messagesRef.scrollHeight;
@@ -153,6 +189,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     // Register keyboard shortcuts
     document.addEventListener("keydown", handleKeyDown);
 
+    // Register copy button handler (event delegation)
+    messagesRef?.addEventListener("click", handleCopyClick);
+
     try {
       await chatStore.loadHistory();
     } catch (error) {
@@ -171,6 +210,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
 
   onCleanup(() => {
     document.removeEventListener("keydown", handleKeyDown);
+    messagesRef?.removeEventListener("click", handleCopyClick);
     if (suggestionDebounceTimer) {
       clearTimeout(suggestionDebounceTimer);
     }
