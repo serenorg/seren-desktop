@@ -8,7 +8,6 @@ import { StatusBar } from "@/components/common/StatusBar";
 import { SignIn } from "@/components/auth/SignIn";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { EditorPanel } from "@/components/editor/EditorPanel";
-import { FileExplorerPanel } from "@/components/sidebar/FileExplorerPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { CatalogPanel } from "@/components/catalog";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
@@ -29,8 +28,6 @@ import {
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { initAutoTopUp } from "@/services/autoTopUp";
 import { shortcuts } from "@/lib/shortcuts";
-import { openTab } from "@/stores/tabs";
-import { readFile } from "@/lib/tauri-bridge";
 import "./App.css";
 
 // Initialize telemetry early to capture startup errors
@@ -61,13 +58,12 @@ function App() {
     shortcuts.register("toggleSidebar", () => {
       // Toggle between current panel and a minimized state (future enhancement)
       // For now, cycle through main panels
-      const panels: Panel[] = ["files", "chat", "editor"];
+      const panels: Panel[] = ["chat", "editor"];
       const currentIndex = panels.indexOf(activePanel());
       const nextIndex = (currentIndex + 1) % panels.length;
       setActivePanel(panels[nextIndex]);
     });
     shortcuts.register("focusEditor", () => setActivePanel("editor"));
-    shortcuts.register("openFiles", () => setActivePanel("files"));
     shortcuts.register("closePanel", () => {
       // Escape closes settings/account panels, returns to editor
       if (activePanel() === "settings" || activePanel() === "account") {
@@ -117,16 +113,6 @@ function App() {
     setActivePanel("account");
   };
 
-  const handleFileSelect = async (path: string) => {
-    try {
-      const content = await readFile(path);
-      openTab(path, content);
-      setActivePanel("editor");
-    } catch (err) {
-      console.error("Failed to open file:", err);
-    }
-  };
-
   return (
     <Show
       when={!authStore.isLoading}
@@ -151,9 +137,6 @@ function App() {
           />
           <main class="app-main">
             <Switch fallback={<div class="panel-placeholder">Select a panel</div>}>
-              <Match when={activePanel() === "files"}>
-                <FileExplorerPanel onFileSelect={handleFileSelect} />
-              </Match>
               <Match when={activePanel() === "chat"}>
                 <ChatPanel onSignInClick={handleSignInClick} />
               </Match>
