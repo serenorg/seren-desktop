@@ -13,15 +13,17 @@
 .catalog-signin-prompt {
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 24px;
   padding: 24px;
   background: var(--surface, #1e1e1e);
 }
 
-.catalog-signin-prompt .signin-prompt-content {
+.catalog-signin-prompt .signin-prompt-header {
   text-align: center;
-  max-width: 320px;
+  max-width: 400px;
 }
 
 .catalog-signin-prompt .signin-prompt-icon {
@@ -38,25 +40,27 @@
   color: var(--text-primary, #f8fafc);
 }
 
-.catalog-signin-prompt p {
-  margin: 0 0 20px;
+.catalog-signin-prompt .signin-prompt-header p {
+  margin: 0;
   color: var(--text-secondary, #94a3b8);
   line-height: 1.5;
 }
 
-.catalog-signin-prompt .signin-prompt-button {
-  background: var(--accent, #6366f1);
-  color: white;
-  border: none;
-  padding: 10px 24px;
-  border-radius: 6px;
-  font-size: 0.95rem;
-  cursor: pointer;
-  transition: background 0.15s;
+/* Embed SignIn component styles */
+.catalog-signin-prompt .signin {
+  padding: 0;
 }
 
-.catalog-signin-prompt .signin-prompt-button:hover {
-  background: #4f46e5;
+.catalog-signin-prompt .signin-card {
+  background: var(--surface-elevated, rgba(30, 30, 30, 0.6));
+  border: 1px solid var(--border-muted, rgba(148, 163, 184, 0.2));
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 360px;
+}
+
+.catalog-signin-prompt .signin-title {
+  display: none;
 }
 
 /* Header */

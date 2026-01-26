@@ -3,7 +3,8 @@
 
 import { createSignal, createEffect, For, Show, type Component } from "solid-js";
 import { catalog, type Publisher } from "@/services/catalog";
-import { authStore } from "@/stores/auth.store";
+import { authStore, checkAuth } from "@/stores/auth.store";
+import { SignIn } from "@/components/auth/SignIn";
 import "./CatalogPanel.css";
 
 interface CatalogPanelProps {
@@ -91,14 +92,12 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
       when={authStore.isAuthenticated}
       fallback={
         <div class="catalog-signin-prompt">
-          <div class="signin-prompt-content">
+          <div class="signin-prompt-header">
             <span class="signin-prompt-icon">📚</span>
             <h2>Sign in to explore the catalog</h2>
             <p>Browse APIs, databases, and AI services available through Seren.</p>
-            <button type="button" class="signin-prompt-button" onClick={() => props.onSignInClick?.()}>
-              Sign In
-            </button>
           </div>
+          <SignIn onSuccess={() => checkAuth()} />
         </div>
       }
     >

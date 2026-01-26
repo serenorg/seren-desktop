@@ -11,10 +11,11 @@ import {
 import { catalog, type Publisher } from "@/services/catalog";
 import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
-import { authStore } from "@/stores/auth.store";
+import { authStore, checkAuth } from "@/stores/auth.store";
 import { StreamingMessage } from "./StreamingMessage";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { SignIn } from "@/components/auth/SignIn";
 import { formatRelativeTime } from "@/lib/format-time";
 import { renderMarkdown } from "@/lib/render-markdown";
 import { escapeHtml } from "@/lib/escape-html";
@@ -292,14 +293,12 @@ export const ChatPanel: Component<ChatPanelProps> = (props) => {
         when={authStore.isAuthenticated}
         fallback={
           <div class="chat-signin-prompt">
-            <div class="signin-prompt-content">
+            <div class="signin-prompt-header">
               <span class="signin-prompt-icon">💬</span>
               <h2>Sign in to chat with AI</h2>
               <p>Connect with Seren to access AI-powered chat, code completions, and more.</p>
-              <button type="button" class="signin-prompt-button" onClick={() => props.onSignInClick?.()}>
-                Sign In
-              </button>
             </div>
+            <SignIn onSuccess={() => checkAuth()} />
           </div>
         }
       >
