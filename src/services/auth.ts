@@ -5,12 +5,12 @@ import { getCurrentUser } from "@/api";
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import {
-  storeToken,
-  getToken,
-  clearToken,
-  storeRefreshToken,
-  getRefreshToken,
   clearRefreshToken,
+  clearToken,
+  getRefreshToken,
+  getToken,
+  storeRefreshToken,
+  storeToken,
 } from "@/lib/tauri-bridge";
 
 export interface LoginResponse {
@@ -40,7 +40,7 @@ export interface AuthError {
  */
 export async function login(
   email: string,
-  password: string
+  password: string,
 ): Promise<LoginResponse> {
   const response = await appFetch(`${apiBase}/auth/login`, {
     method: "POST",

@@ -1,32 +1,32 @@
 // ABOUTME: Barrel export for MCP module.
 // ABOUTME: Re-exports all MCP types, client, and utilities.
 
-export * from "./types";
-export { mcpClient } from "./client";
 export {
-  initMcpAutoConnect,
-  retryFailedConnections,
   connectAllEnabledServers,
   disconnectAllServers,
+  initMcpAutoConnect,
+  retryFailedConnections,
 } from "./auto-connect";
+export { mcpClient } from "./client";
 export {
-  McpError,
-  McpConnectionError,
-  McpToolError,
-  McpResourceError,
-  McpErrorCode,
-  parseMcpError,
+  formatErrorForLogging,
   getErrorMessage,
   isRecoverableError,
-  formatErrorForLogging,
+  McpConnectionError,
+  McpError,
+  McpErrorCode,
+  McpResourceError,
+  McpToolError,
+  parseMcpError,
 } from "./errors";
-export { getToolRiskLevel, getRiskLabel } from "./risk";
+export { getRiskLabel, getToolRiskLevel } from "./risk";
 export {
-  SERENDB_SERVER_NAME,
-  SERENDB_BUILTIN_ID,
-  serenDbServerConfig,
-  isSerenDbConfigured,
   addSerenDbServer,
-  removeSerenDbServer,
   ensureSerenDbServer,
+  isSerenDbConfigured,
+  removeSerenDbServer,
+  SERENDB_BUILTIN_ID,
+  SERENDB_SERVER_NAME,
+  serenDbServerConfig,
 } from "./serendb";
+export * from "./types";

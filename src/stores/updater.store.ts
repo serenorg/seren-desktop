@@ -1,8 +1,8 @@
-import { createStore } from "solid-js/store";
-import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { telemetry } from "@/services/telemetry";
+import { check } from "@tauri-apps/plugin-updater";
+import { createStore } from "solid-js/store";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { telemetry } from "@/services/telemetry";
 
 export type UpdateStatus =
   | "idle"

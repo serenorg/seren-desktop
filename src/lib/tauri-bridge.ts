@@ -18,7 +18,9 @@ export function isTauriRuntime(): boolean {
 /**
  * Get invoke function only when in Tauri runtime.
  */
-async function getInvoke(): Promise<typeof import("@tauri-apps/api/core").invoke | null> {
+async function getInvoke(): Promise<
+  typeof import("@tauri-apps/api/core").invoke | null
+> {
   if (!isTauriRuntime()) {
     return null;
   }
@@ -178,7 +180,10 @@ export async function isDirectory(path: string): Promise<boolean> {
 /**
  * Create a new file with optional content.
  */
-export async function createFile(path: string, content?: string): Promise<void> {
+export async function createFile(
+  path: string,
+  content?: string,
+): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("File system operations require Tauri runtime");
@@ -211,7 +216,10 @@ export async function deletePath(path: string): Promise<void> {
 /**
  * Rename/move a file or directory.
  */
-export async function renamePath(oldPath: string, newPath: string): Promise<void> {
+export async function renamePath(
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("File system operations require Tauri runtime");
@@ -226,7 +234,10 @@ export async function renamePath(oldPath: string, newPath: string): Promise<void
 /**
  * Store an API key for a provider securely.
  */
-export async function storeProviderKey(provider: string, apiKey: string): Promise<void> {
+export async function storeProviderKey(
+  provider: string,
+  apiKey: string,
+): Promise<void> {
   const invoke = await getInvoke();
   if (invoke) {
     await invoke("store_provider_key", { provider, apiKey });
@@ -290,7 +301,10 @@ export async function getConfiguredProviders(): Promise<string[]> {
  * @param provider - Provider ID (e.g., "openai", "gemini")
  * @param credentials - JSON string of OAuthCredentials
  */
-export async function storeOAuthCredentials(provider: string, credentials: string): Promise<void> {
+export async function storeOAuthCredentials(
+  provider: string,
+  credentials: string,
+): Promise<void> {
   const invoke = await getInvoke();
   if (invoke) {
     await invoke("store_oauth_credentials", { provider, credentials });
@@ -304,7 +318,9 @@ export async function storeOAuthCredentials(provider: string, credentials: strin
  * Get stored OAuth credentials for a provider.
  * Returns null if no credentials are stored.
  */
-export async function getOAuthCredentials(provider: string): Promise<string | null> {
+export async function getOAuthCredentials(
+  provider: string,
+): Promise<string | null> {
   const invoke = await getInvoke();
   if (invoke) {
     return await invoke<string | null>("get_oauth_credentials", { provider });
@@ -351,7 +367,7 @@ export async function getOAuthProviders(): Promise<string[]> {
  * @returns Cleanup function to remove the listener
  */
 export async function listenForOAuthCallback(
-  callback: (url: string) => void
+  callback: (url: string) => void,
 ): Promise<() => void> {
   if (!isTauriRuntime()) {
     // Browser fallback - no deep link support
@@ -396,10 +412,15 @@ export interface SignX402Response {
  * @returns The Ethereum address derived from the private key
  * @throws Error if the key is invalid or storage fails
  */
-export async function storeCryptoPrivateKey(privateKey: string): Promise<string> {
+export async function storeCryptoPrivateKey(
+  privateKey: string,
+): Promise<string> {
   const invoke = await getInvoke();
   if (invoke) {
-    const result = await invoke<WalletCommandResult<string>>("store_crypto_private_key", { privateKey });
+    const result = await invoke<WalletCommandResult<string>>(
+      "store_crypto_private_key",
+      { privateKey },
+    );
     if (!result.success) {
       throw new Error(result.error || "Failed to store private key");
     }
@@ -417,7 +438,9 @@ export async function storeCryptoPrivateKey(privateKey: string): Promise<string>
 export async function getCryptoWalletAddress(): Promise<string | null> {
   const invoke = await getInvoke();
   if (invoke) {
-    const result = await invoke<WalletCommandResult<string | null>>("get_crypto_wallet_address");
+    const result = await invoke<WalletCommandResult<string | null>>(
+      "get_crypto_wallet_address",
+    );
     if (!result.success) {
       throw new Error(result.error || "Failed to get wallet address");
     }
@@ -433,7 +456,9 @@ export async function getCryptoWalletAddress(): Promise<string | null> {
 export async function clearCryptoWallet(): Promise<void> {
   const invoke = await getInvoke();
   if (invoke) {
-    const result = await invoke<WalletCommandResult<null>>("clear_crypto_wallet");
+    const result = await invoke<WalletCommandResult<null>>(
+      "clear_crypto_wallet",
+    );
     if (!result.success) {
       throw new Error(result.error || "Failed to clear wallet");
     }
@@ -450,14 +475,19 @@ export async function clearCryptoWallet(): Promise<void> {
  * @returns The header name and base64-encoded signed payload
  * @throws Error if wallet is not configured or signing fails
  */
-export async function signX402Payment(requirementsJson: string): Promise<SignX402Response> {
+export async function signX402Payment(
+  requirementsJson: string,
+): Promise<SignX402Response> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("x402 signing requires Tauri runtime");
   }
-  const result = await invoke<WalletCommandResult<SignX402Response>>("sign_x402_payment", {
-    request: { requirementsJson }
-  });
+  const result = await invoke<WalletCommandResult<SignX402Response>>(
+    "sign_x402_payment",
+    {
+      request: { requirementsJson },
+    },
+  );
   if (!result.success) {
     throw new Error(result.error || "Failed to sign x402 payment");
   }
@@ -484,7 +514,9 @@ export async function getCryptoUsdcBalance(): Promise<UsdcBalanceResponse> {
   if (!invoke) {
     throw new Error("USDC balance query requires Tauri runtime");
   }
-  const result = await invoke<WalletCommandResult<UsdcBalanceResponse>>("get_crypto_usdc_balance");
+  const result = await invoke<WalletCommandResult<UsdcBalanceResponse>>(
+    "get_crypto_usdc_balance",
+  );
   if (!result.success) {
     throw new Error(result.error || "Failed to get USDC balance");
   }
@@ -526,7 +558,7 @@ export async function createConversation(
   id: string,
   title: string,
   selectedModel?: string,
-  selectedProvider?: string
+  selectedProvider?: string,
 ): Promise<Conversation> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -554,7 +586,9 @@ export async function getConversations(): Promise<Conversation[]> {
 /**
  * Get a single conversation by ID.
  */
-export async function getConversation(id: string): Promise<Conversation | null> {
+export async function getConversation(
+  id: string,
+): Promise<Conversation | null> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("Conversation operations require Tauri runtime");
@@ -569,13 +603,18 @@ export async function updateConversation(
   id: string,
   title?: string,
   selectedModel?: string,
-  selectedProvider?: string
+  selectedProvider?: string,
 ): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("Conversation operations require Tauri runtime");
   }
-  await invoke("update_conversation", { id, title, selectedModel, selectedProvider });
+  await invoke("update_conversation", {
+    id,
+    title,
+    selectedModel,
+    selectedProvider,
+  });
 }
 
 /**
@@ -609,30 +648,45 @@ export async function saveMessage(
   role: string,
   content: string,
   model: string | null,
-  timestamp: number
+  timestamp: number,
 ): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("Message operations require Tauri runtime");
   }
-  await invoke("save_message", { id, conversationId, role, content, model, timestamp });
+  await invoke("save_message", {
+    id,
+    conversationId,
+    role,
+    content,
+    model,
+    timestamp,
+  });
 }
 
 /**
  * Get messages for a conversation.
  */
-export async function getMessages(conversationId: string, limit: number): Promise<StoredMessage[]> {
+export async function getMessages(
+  conversationId: string,
+  limit: number,
+): Promise<StoredMessage[]> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("Message operations require Tauri runtime");
   }
-  return await invoke<StoredMessage[]>("get_messages", { conversationId, limit });
+  return await invoke<StoredMessage[]>("get_messages", {
+    conversationId,
+    limit,
+  });
 }
 
 /**
  * Clear all messages in a conversation.
  */
-export async function clearConversationHistory(conversationId: string): Promise<void> {
+export async function clearConversationHistory(
+  conversationId: string,
+): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("Message operations require Tauri runtime");

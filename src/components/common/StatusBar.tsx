@@ -1,11 +1,11 @@
 // ABOUTME: Application status bar at the bottom.
 // ABOUTME: Displays status messages, MCP state, autocomplete status, and connection state.
 
-import { Component } from "solid-js";
+import type { Component } from "solid-js";
+import { autocompleteStore } from "@/stores/autocomplete.store";
+import { AutocompleteStatus } from "./AutocompleteStatus";
 import { McpStatusIndicator } from "./McpStatusIndicator";
 import { UpdateIndicator } from "./UpdateIndicator";
-import { AutocompleteStatus } from "./AutocompleteStatus";
-import { autocompleteStore } from "@/stores/autocomplete.store";
 import "./StatusBar.css";
 
 interface StatusBarProps {

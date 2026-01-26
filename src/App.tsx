@@ -1,37 +1,45 @@
 // ABOUTME: Main application component with layout and optional auth.
 // ABOUTME: App is fully usable without login; auth unlocks AI features.
 
-import { createSignal, createEffect, Match, onCleanup, onMount, Show, Switch } from "solid-js";
-import { Header, type Panel } from "@/components/common/Header";
-import { StatusBar } from "@/components/common/StatusBar";
+import {
+  createEffect,
+  createSignal,
+  Match,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+} from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
-import { ChatPanel } from "@/components/chat/ChatPanel";
-import { EditorPanel } from "@/components/editor/EditorPanel";
-import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { CatalogPanel } from "@/components/catalog";
-import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
+import { ChatPanel } from "@/components/chat/ChatPanel";
+import { Header, type Panel } from "@/components/common/Header";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
+import { StatusBar } from "@/components/common/StatusBar";
+import { EditorPanel } from "@/components/editor/EditorPanel";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
+import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
+import { initAutoTopUp } from "@/services/autoTopUp";
+import { telemetry } from "@/services/telemetry";
 import {
   authStore,
   checkAuth,
   logout,
   setAuthenticated,
 } from "@/stores/auth.store";
-import { telemetry } from "@/services/telemetry";
-import { updaterStore } from "@/stores/updater.store";
-import {
-  startAutoRefresh,
-  stopAutoRefresh,
-  resetWalletState,
-} from "@/stores/wallet.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
+import { chatStore } from "@/stores/chat.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
-import { chatStore } from "@/stores/chat.store";
-import { initAutoTopUp } from "@/services/autoTopUp";
-import { shortcuts } from "@/lib/shortcuts";
+import { updaterStore } from "@/stores/updater.store";
+import {
+  resetWalletState,
+  startAutoRefresh,
+  stopAutoRefresh,
+} from "@/stores/wallet.store";
 import "./App.css";
 
 // Initialize telemetry early to capture startup errors
@@ -145,7 +153,9 @@ function App() {
           isAuthenticated={authStore.isAuthenticated}
         />
         <main class="app-main">
-          <Switch fallback={<div class="panel-placeholder">Select a panel</div>}>
+          <Switch
+            fallback={<div class="panel-placeholder">Select a panel</div>}
+          >
             <Match when={activePanel() === "chat"}>
               <ChatPanel onSignInClick={handleSignInClick} />
             </Match>

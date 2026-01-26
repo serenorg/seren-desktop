@@ -2,14 +2,14 @@
 // ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
 import {
-  listProjects,
-  createProject,
-  getProject,
-  updateProject,
-  deleteProject,
-  type Project,
   type CreateProjectRequest,
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  type Project,
   type UpdateProjectRequest,
+  updateProject,
 } from "@/api";
 
 // Re-export types for backwards compatibility

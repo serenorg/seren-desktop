@@ -1,8 +1,14 @@
 // ABOUTME: Database panel for browsing SerenDB projects, branches, and databases.
 // ABOUTME: Provides a tree view of the user's database resources.
 
-import { Component, For, createSignal, createResource, Show } from "solid-js";
-import { databases, type Database } from "@/services/databases";
+import {
+  type Component,
+  createResource,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
+import { type Database, databases } from "@/services/databases";
 import { CreateProjectModal } from "./CreateProjectModal";
 import "./DatabasePanel.css";
 
@@ -10,7 +16,7 @@ interface DatabasePanelProps {
   onSelectDatabase?: (
     databaseId: string,
     projectId: string,
-    branchId: string
+    branchId: string,
   ) => void;
 }
 
@@ -26,10 +32,10 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
   });
 
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(
-    null
+    null,
   );
   const [selectedBranchId, setSelectedBranchId] = createSignal<string | null>(
-    null
+    null,
   );
   const [showCreateModal, setShowCreateModal] = createSignal(false);
   const [copyStatus, setCopyStatus] = createSignal<string | null>(null);
@@ -66,7 +72,7 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
         console.error("[DatabasePanel] Failed to fetch databases:", error);
         return [];
       }
-    }
+    },
   );
 
   const toggleProject = (projectId: string) => {
@@ -118,11 +124,11 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
   const handleDeleteProject = async (
     e: MouseEvent,
     projectId: string,
-    projectName: string
+    projectName: string,
   ) => {
     e.stopPropagation();
     const confirmed = window.confirm(
-      `Delete project "${projectName}"? This cannot be undone.`
+      `Delete project "${projectName}"? This cannot be undone.`,
     );
     if (!confirmed) return;
 
@@ -138,13 +144,13 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
   const handleCopyConnectionString = async (
     e: MouseEvent,
     projectId: string,
-    branchId: string
+    branchId: string,
   ) => {
     e.stopPropagation();
     try {
       const connectionString = await databases.getConnectionString(
         projectId,
-        branchId
+        branchId,
       );
       await navigator.clipboard.writeText(connectionString);
       setCopyStatus("Copied!");
@@ -261,7 +267,7 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                                 handleCopyConnectionString(
                                   e,
                                   project.id,
-                                  branch.id
+                                  branch.id,
                                 )
                               }
                               title="Copy connection string"
@@ -294,7 +300,8 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                               >
                                 <Show
                                   when={
-                                    databaseList() && databaseList()!.length > 0
+                                    databaseList() &&
+                                    (databaseList()?.length ?? 0) > 0
                                   }
                                   fallback={
                                     <div class="tree-empty">No databases</div>
@@ -321,7 +328,7 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                       )}
                     </For>
 
-                    <Show when={branches() && branches()!.length === 0}>
+                    <Show when={branches() && branches()?.length === 0}>
                       <div class="tree-empty">No branches</div>
                     </Show>
                   </Show>
@@ -332,7 +339,7 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
         </For>
       </div>
 
-      <Show when={!projects.loading && projects() && projects()!.length === 0}>
+      <Show when={!projects.loading && projects() && projects()?.length === 0}>
         <div class="database-empty">
           <div class="empty-icon">🗄️</div>
           <p>No projects found</p>

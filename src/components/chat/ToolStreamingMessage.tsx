@@ -4,9 +4,9 @@
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import type { ToolStreamEvent } from "@/services/chat";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { renderMarkdown } from "@/lib/render-markdown";
+import type { ToolStreamEvent } from "@/services/chat";
 import "./ToolStreamingMessage.css";
 
 interface ToolStreamingMessageProps {
@@ -22,7 +22,9 @@ interface ToolExecution {
   status: "pending" | "complete" | "error";
 }
 
-export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (props) => {
+export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
+  props,
+) => {
   const [content, setContent] = createSignal("");
   const [toolExecutions, setToolExecutions] = createSignal<ToolExecution[]>([]);
   const [isStreaming, setIsStreaming] = createSignal(true);
@@ -59,7 +61,9 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (props
             // Update tool executions with results
             setToolExecutions((prev) =>
               prev.map((exec) => {
-                const result = event.results.find((r) => r.tool_call_id === exec.call.id);
+                const result = event.results.find(
+                  (r) => r.tool_call_id === exec.call.id,
+                );
                 if (result) {
                   return {
                     ...exec,
@@ -68,7 +72,7 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (props
                   };
                 }
                 return exec;
-              })
+              }),
             );
             props.onContentUpdate?.();
             break;
@@ -120,10 +124,16 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (props
               <div class={`tool-execution ${exec.status}`}>
                 <div class="tool-header">
                   <span class="tool-icon">
-                    {exec.status === "pending" ? "⏳" : exec.status === "error" ? "❌" : "✓"}
+                    {exec.status === "pending"
+                      ? "⏳"
+                      : exec.status === "error"
+                        ? "❌"
+                        : "✓"}
                   </span>
                   <span class="tool-name">{exec.call.function.name}</span>
-                  <span class="tool-args">{formatToolArgs(exec.call.function.arguments)}</span>
+                  <span class="tool-args">
+                    {formatToolArgs(exec.call.function.arguments)}
+                  </span>
                 </div>
                 <Show when={exec.result && exec.status !== "pending"}>
                   <details class="tool-result">

@@ -1,20 +1,20 @@
 // ABOUTME: Provider registry and unified API for multi-provider chat.
 // ABOUTME: Routes requests to the appropriate provider based on settings.
 
-import { serenProvider } from "./seren";
-import { anthropicProvider } from "./anthropic";
-import { openaiProvider } from "./openai";
-import { geminiProvider } from "./gemini";
-import { providerStore } from "@/stores/provider.store";
 import { getOAuthCredentials } from "@/lib/tauri-bridge";
-import { refreshOAuthToken, needsRefresh } from "@/services/oauth";
-import type { OAuthCredentials } from "./types";
+import { needsRefresh, refreshOAuthToken } from "@/services/oauth";
+import { providerStore } from "@/stores/provider.store";
+import { anthropicProvider } from "./anthropic";
+import { geminiProvider } from "./gemini";
+import { openaiProvider } from "./openai";
+import { serenProvider } from "./seren";
 import type {
-  ChatRequest,
-  ProviderId,
-  ProviderAdapter,
-  ProviderModel,
   ChatMessage,
+  ChatRequest,
+  OAuthCredentials,
+  ProviderAdapter,
+  ProviderId,
+  ProviderModel,
 } from "./types";
 
 // Re-export types
@@ -46,7 +46,9 @@ export function getProvider(id: ProviderId): ProviderAdapter {
  * Returns OAuth access token if configured via OAuth, otherwise API key.
  * Handles token refresh if needed.
  */
-async function getAuthToken(providerId: ProviderId): Promise<{ token: string; isOAuth: boolean }> {
+async function getAuthToken(
+  providerId: ProviderId,
+): Promise<{ token: string; isOAuth: boolean }> {
   if (providerId === "seren") {
     return { token: "", isOAuth: false };
   }
@@ -57,7 +59,9 @@ async function getAuthToken(providerId: ProviderId): Promise<{ token: string; is
     // Get OAuth credentials
     const credentialsJson = await getOAuthCredentials(providerId);
     if (!credentialsJson) {
-      throw new Error(`OAuth credentials not found for ${providerId}. Please sign in again.`);
+      throw new Error(
+        `OAuth credentials not found for ${providerId}. Please sign in again.`,
+      );
     }
 
     const credentials = JSON.parse(credentialsJson) as OAuthCredentials;
@@ -65,14 +69,20 @@ async function getAuthToken(providerId: ProviderId): Promise<{ token: string; is
     // Check if token needs refresh
     if (needsRefresh(credentials) && credentials.refreshToken) {
       try {
-        const refreshed = await refreshOAuthToken(providerId, credentials.refreshToken);
+        const refreshed = await refreshOAuthToken(
+          providerId,
+          credentials.refreshToken,
+        );
         // Store refreshed credentials
         const { storeOAuthCredentials } = await import("@/lib/tauri-bridge");
         await storeOAuthCredentials(providerId, JSON.stringify(refreshed));
         return { token: refreshed.accessToken, isOAuth: true };
       } catch (error) {
         // If refresh fails, try using existing token (it may still work)
-        console.warn("Token refresh failed, attempting with existing token:", error);
+        console.warn(
+          "Token refresh failed, attempting with existing token:",
+          error,
+        );
       }
     }
 
@@ -82,7 +92,9 @@ async function getAuthToken(providerId: ProviderId): Promise<{ token: string; is
   // Fall back to API key
   const apiKey = await providerStore.getApiKey(providerId);
   if (!apiKey) {
-    throw new Error(`No API key configured for ${providerId}. Please add your API key in Settings > AI Providers.`);
+    throw new Error(
+      `No API key configured for ${providerId}. Please add your API key in Settings > AI Providers.`,
+    );
   }
 
   return { token: apiKey, isOAuth: false };
@@ -93,7 +105,7 @@ async function getAuthToken(providerId: ProviderId): Promise<{ token: string; is
  */
 export async function sendProviderMessage(
   providerId: ProviderId,
-  request: ChatRequest
+  request: ChatRequest,
 ): Promise<string> {
   const provider = providers[providerId];
   if (!provider) {
@@ -111,7 +123,7 @@ export async function sendProviderMessage(
  */
 export async function* streamProviderMessage(
   providerId: ProviderId,
-  request: ChatRequest
+  request: ChatRequest,
 ): AsyncGenerator<string, void, unknown> {
   const provider = providers[providerId];
   if (!provider) {
@@ -129,7 +141,7 @@ export async function* streamProviderMessage(
  */
 export async function validateProviderKey(
   providerId: ProviderId,
-  apiKey: string
+  apiKey: string,
 ): Promise<boolean> {
   const provider = providers[providerId];
   if (!provider) {
@@ -144,7 +156,7 @@ export async function validateProviderKey(
  */
 export async function getProviderModels(
   providerId: ProviderId,
-  apiKey?: string
+  apiKey?: string,
 ): Promise<ProviderModel[]> {
   const provider = providers[providerId];
   if (!provider) {
@@ -152,11 +164,11 @@ export async function getProviderModels(
   }
 
   // Use provided key or fetch from store
-  const key = apiKey || (
-    providerId === "seren"
+  const key =
+    apiKey ||
+    (providerId === "seren"
       ? ""
-      : await providerStore.getApiKey(providerId) || ""
-  );
+      : (await providerStore.getApiKey(providerId)) || "");
 
   return provider.getModels(key);
 }
@@ -173,7 +185,7 @@ export async function sendMessage(request: ChatRequest): Promise<string> {
  * Stream a message using the currently active provider.
  */
 export async function* streamMessage(
-  request: ChatRequest
+  request: ChatRequest,
 ): AsyncGenerator<string, void, unknown> {
   const providerId = providerStore.activeProvider;
   yield* streamProviderMessage(providerId, request);
@@ -190,7 +202,7 @@ export function buildChatRequest(
     content: string;
     file?: string | null;
     range?: { startLine: number; endLine: number } | null;
-  }
+  },
 ): ChatRequest {
   const messages: ChatMessage[] = [];
 
@@ -202,7 +214,7 @@ export function buildChatRequest(
     }
     if (context.range) {
       locationParts.push(
-        `lines ${context.range.startLine}-${context.range.endLine}`
+        `lines ${context.range.startLine}-${context.range.endLine}`,
       );
     }
     const location = locationParts.length

@@ -1,9 +1,9 @@
 // ABOUTME: Settings panel component for user preferences.
 // ABOUTME: Provides UI for editor, completion, wallet, and auto top-up settings.
 
-import { Component, Show, For } from "solid-js";
-import { settingsStore } from "@/stores/settings.store";
+import { type Component, For, Show } from "solid-js";
 import { logout } from "@/services/auth";
+import { settingsStore } from "@/stores/settings.store";
 import "./SettingsPanel.css";
 
 interface SettingsPanelProps {
@@ -57,7 +57,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             max="32"
             value={settingsStore.get("editorFontSize")}
             onInput={(e) =>
-              settingsStore.set("editorFontSize", parseInt(e.currentTarget.value) || 14)
+              settingsStore.set(
+                "editorFontSize",
+                parseInt(e.currentTarget.value, 10) || 14,
+              )
             }
           />
         </div>
@@ -68,7 +71,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             id="tab-size"
             value={settingsStore.get("editorTabSize")}
             onChange={(e) =>
-              settingsStore.set("editorTabSize", parseInt(e.currentTarget.value))
+              settingsStore.set(
+                "editorTabSize",
+                parseInt(e.currentTarget.value, 10),
+              )
             }
           >
             <option value="2">2 spaces</option>
@@ -82,7 +88,9 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             <input
               type="checkbox"
               checked={settingsStore.get("editorWordWrap")}
-              onChange={(e) => settingsStore.set("editorWordWrap", e.currentTarget.checked)}
+              onChange={(e) =>
+                settingsStore.set("editorWordWrap", e.currentTarget.checked)
+              }
             />
             Word Wrap
           </label>
@@ -117,7 +125,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               step="100"
               value={settingsStore.get("completionDelay")}
               onInput={(e) =>
-                settingsStore.set("completionDelay", parseInt(e.currentTarget.value) || 300)
+                settingsStore.set(
+                  "completionDelay",
+                  parseInt(e.currentTarget.value, 10) || 300,
+                )
               }
             />
           </div>
@@ -133,7 +144,9 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             <input
               type="checkbox"
               checked={settingsStore.get("showBalance")}
-              onChange={(e) => settingsStore.set("showBalance", e.currentTarget.checked)}
+              onChange={(e) =>
+                settingsStore.set("showBalance", e.currentTarget.checked)
+              }
             />
             Show Balance in Status Bar
           </label>
@@ -148,7 +161,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             step="0.5"
             value={settingsStore.get("lowBalanceThreshold")}
             onInput={(e) =>
-              settingsStore.set("lowBalanceThreshold", parseFloat(e.currentTarget.value) || 1)
+              settingsStore.set(
+                "lowBalanceThreshold",
+                parseFloat(e.currentTarget.value) || 1,
+              )
             }
           />
         </div>
@@ -181,7 +197,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               step="1"
               value={settingsStore.get("autoTopUpThreshold")}
               onInput={(e) =>
-                settingsStore.set("autoTopUpThreshold", parseFloat(e.currentTarget.value) || 5)
+                settingsStore.set(
+                  "autoTopUpThreshold",
+                  parseFloat(e.currentTarget.value) || 5,
+                )
               }
             />
           </div>
@@ -192,18 +211,23 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               id="auto-amount"
               value={settingsStore.get("autoTopUpAmount")}
               onChange={(e) =>
-                settingsStore.set("autoTopUpAmount", parseFloat(e.currentTarget.value))
+                settingsStore.set(
+                  "autoTopUpAmount",
+                  parseFloat(e.currentTarget.value),
+                )
               }
             >
               <For each={TOP_UP_AMOUNTS}>
-                {(amount) => <option value={amount.value}>{amount.label}</option>}
+                {(amount) => (
+                  <option value={amount.value}>{amount.label}</option>
+                )}
               </For>
             </select>
           </div>
 
           <p class="setting-hint">
-            When your balance drops below the threshold, you'll be redirected to Stripe
-            to complete the top-up.
+            When your balance drops below the threshold, you'll be redirected to
+            Stripe to complete the top-up.
           </p>
         </Show>
       </section>
@@ -218,7 +242,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             id="theme"
             value={settingsStore.get("theme")}
             onChange={(e) =>
-              settingsStore.set("theme", e.currentTarget.value as "dark" | "light" | "system")
+              settingsStore.set(
+                "theme",
+                e.currentTarget.value as "dark" | "light" | "system",
+              )
             }
           >
             <option value="dark">Dark</option>

@@ -1,9 +1,9 @@
 // ABOUTME: Sync store for managing file sync status.
 // ABOUTME: Listens to Tauri events and provides reactive sync state.
 
-import { createStore } from "solid-js/store";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { createStore } from "solid-js/store";
 
 /**
  * Sync status enum matching Rust backend.
@@ -78,7 +78,8 @@ export const syncStore = {
     } catch (err) {
       setState({
         status: "error",
-        message: err instanceof Error ? err.message : "Failed to start watching",
+        message:
+          err instanceof Error ? err.message : "Failed to start watching",
       });
       throw err;
     }
@@ -134,9 +135,12 @@ export const syncStore = {
 
     // Listen for file changes
     if (!fileChangeUnlisten) {
-      fileChangeUnlisten = await listen<FileChangeEvent>("file-changed", (event) => {
-        fileChangeHandlers.forEach((handler) => handler(event.payload));
-      });
+      fileChangeUnlisten = await listen<FileChangeEvent>(
+        "file-changed",
+        (event) => {
+          fileChangeHandlers.forEach((handler) => handler(event.payload));
+        },
+      );
     }
 
     // Get initial status

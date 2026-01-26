@@ -2,14 +2,22 @@
 // ABOUTME: Shows searchable model list with provider filtering.
 
 import type { Component } from "solid-js";
-import { createSignal, For, onCleanup, onMount, Show, createEffect, createMemo } from "solid-js";
-import { chatStore } from "@/stores/chat.store";
-import { providerStore } from "@/stores/provider.store";
 import {
-  PROVIDER_CONFIGS,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
+import {
   getProviderIcon,
+  PROVIDER_CONFIGS,
   type ProviderId,
 } from "@/lib/providers";
+import { chatStore } from "@/stores/chat.store";
+import { providerStore } from "@/stores/provider.store";
 import "./ModelSelector.css";
 
 export const ModelSelector: Component = () => {
@@ -29,7 +37,7 @@ export const ModelSelector: Component = () => {
     return models.filter(
       (model) =>
         model.name.toLowerCase().includes(query) ||
-        model.id.toLowerCase().includes(query)
+        model.id.toLowerCase().includes(query),
     );
   });
 
@@ -56,7 +64,11 @@ export const ModelSelector: Component = () => {
 
   const handleDocumentClick = (event: MouseEvent) => {
     if (!isOpen()) return;
-    if (containerRef && event.target instanceof Node && !containerRef.contains(event.target)) {
+    if (
+      containerRef &&
+      event.target instanceof Node &&
+      !containerRef.contains(event.target)
+    ) {
       setIsOpen(false);
     }
   };
@@ -98,7 +110,9 @@ export const ModelSelector: Component = () => {
           }
         }}
       >
-        <span class="provider-badge-small">{getProviderIcon(currentProvider())}</span>
+        <span class="provider-badge-small">
+          {getProviderIcon(currentProvider())}
+        </span>
         <span class="model-name">{currentModel()?.name || "Select model"}</span>
         <span class="chevron">{isOpen() ? "▲" : "▼"}</span>
       </button>
@@ -134,8 +148,12 @@ export const ModelSelector: Component = () => {
                   }}
                   title={PROVIDER_CONFIGS[providerId].name}
                 >
-                  <span class="provider-tab-icon">{getProviderIcon(providerId)}</span>
-                  <span class="provider-tab-name">{PROVIDER_CONFIGS[providerId].name}</span>
+                  <span class="provider-tab-icon">
+                    {getProviderIcon(providerId)}
+                  </span>
+                  <span class="provider-tab-name">
+                    {PROVIDER_CONFIGS[providerId].name}
+                  </span>
                 </button>
               )}
             </For>
@@ -176,14 +194,18 @@ export const ModelSelector: Component = () => {
                     <div class="model-info">
                       <span class="model-name">{model.name}</span>
                       <Show when={model.description}>
-                        <span class="model-description">{model.description}</span>
+                        <span class="model-description">
+                          {model.description}
+                        </span>
                       </Show>
                     </div>
                     <div class="model-meta">
                       <Show when={model.id === providerStore.activeModel}>
                         <span class="model-checkmark">&#10003;</span>
                       </Show>
-                      <span class="model-context">{formatContextWindow(model.contextWindow)}</span>
+                      <span class="model-context">
+                        {formatContextWindow(model.contextWindow)}
+                      </span>
                     </div>
                   </button>
                 )}

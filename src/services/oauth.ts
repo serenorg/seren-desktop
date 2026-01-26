@@ -1,9 +1,9 @@
 // ABOUTME: OAuth service for provider authentication flows.
 // ABOUTME: Handles PKCE-based OAuth 2.0 for OpenAI and Google Gemini.
 
-import { isTauriRuntime } from "@/lib/tauri-bridge";
-import type { ProviderId, OAuthCredentials } from "@/lib/providers/types";
+import type { OAuthCredentials, ProviderId } from "@/lib/providers/types";
 import { PROVIDER_CONFIGS, supportsOAuth } from "@/lib/providers/types";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 // OAuth state storage (in-memory during auth flow)
 interface OAuthState {
@@ -19,7 +19,8 @@ let pendingOAuthState: OAuthState | null = null;
  * Generate a cryptographically random string for PKCE.
  */
 function generateRandomString(length: number): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
   const randomValues = new Uint8Array(length);
   crypto.getRandomValues(randomValues);
   return Array.from(randomValues, (v) => chars[v % chars.length]).join("");
@@ -65,7 +66,9 @@ export async function startOAuthFlow(providerId: ProviderId): Promise<void> {
   }
 
   if (!oauthConfig.clientId) {
-    throw new Error(`OAuth client ID not configured for ${providerId}. Please configure in settings.`);
+    throw new Error(
+      `OAuth client ID not configured for ${providerId}. Please configure in settings.`,
+    );
   }
 
   // Generate PKCE values
@@ -110,7 +113,7 @@ export async function startOAuthFlow(providerId: ProviderId): Promise<void> {
  */
 export async function handleOAuthCallback(
   code: string,
-  state: string
+  state: string,
 ): Promise<OAuthCredentials> {
   if (!pendingOAuthState) {
     throw new Error("No pending OAuth flow. Please start the flow again.");
@@ -177,7 +180,7 @@ export async function handleOAuthCallback(
  */
 export async function refreshOAuthToken(
   providerId: ProviderId,
-  refreshToken: string
+  refreshToken: string,
 ): Promise<OAuthCredentials> {
   const config = PROVIDER_CONFIGS[providerId];
   const oauthConfig = config.oauth;

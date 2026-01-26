@@ -1,14 +1,9 @@
-import { For, Show, type Component } from "solid-js";
-import {
-  tabsState,
-  setActiveTab,
-  closeTab,
-  type Tab,
-} from "@/stores/tabs";
+import { type Component, For, Show } from "solid-js";
+import { closeTab, setActiveTab, type Tab, tabsState } from "@/stores/tabs";
 import "./FileTabs.css";
 
 interface FileTabsProps {
-  onTabClose?: (tab: Tab) => boolean | void;
+  onTabClose?: (tab: Tab) => boolean | undefined;
   isMarkdown?: boolean;
   showPreview?: boolean;
   onTogglePreview?: () => void;
@@ -67,7 +62,12 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
                 data-file-path={tab.filePath}
               >
                 <Show when={tab.isDirty}>
-                  <span class="file-tab-dirty-indicator" aria-label="Unsaved changes">●</span>
+                  <span
+                    class="file-tab-dirty-indicator"
+                    aria-label="Unsaved changes"
+                  >
+                    ●
+                  </span>
                 </Show>
                 <span class="file-tab-name">{tab.fileName}</span>
                 <button

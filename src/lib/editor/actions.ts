@@ -11,7 +11,11 @@ export interface CodeAction {
 }
 
 // Handler for explain code action
-type ExplainCodeHandler = (code: string, language: string, filePath: string) => void;
+type ExplainCodeHandler = (
+  code: string,
+  language: string,
+  filePath: string,
+) => void;
 let explainCodeHandler: ExplainCodeHandler | null = null;
 
 /**
@@ -60,7 +64,11 @@ export function registerExplainCodeAction(): Monaco.IDisposable {
 /**
  * Register the "Improve Code" context menu action.
  */
-type ImproveCodeHandler = (code: string, language: string, filePath: string) => void;
+type ImproveCodeHandler = (
+  code: string,
+  language: string,
+  filePath: string,
+) => void;
 let improveCodeHandler: ImproveCodeHandler | null = null;
 
 export function setImproveCodeHandler(handler: ImproveCodeHandler): void {
@@ -102,7 +110,11 @@ export function registerImproveCodeAction(): Monaco.IDisposable {
 /**
  * Register the "Add to Chat" context menu action.
  */
-type AddToChatHandler = (code: string, language: string, filePath: string) => void;
+type AddToChatHandler = (
+  code: string,
+  language: string,
+  filePath: string,
+) => void;
 let addToChatHandler: AddToChatHandler | null = null;
 
 export function setAddToChatHandler(handler: AddToChatHandler): void {

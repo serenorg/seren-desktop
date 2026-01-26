@@ -1,17 +1,17 @@
 // ABOUTME: File explorer panel with folder selection and tree view.
 // ABOUTME: Provides VS Code-like file browsing for local projects.
 
-import { Component, Show, createSignal } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FileTree } from "./FileTree";
+import { type Component, createSignal, Show } from "solid-js";
+import { type FileEntry, listDirectory } from "@/lib/tauri-bridge";
 import {
-  fileTreeState,
-  setRootPath,
-  setNodes,
-  setNodeChildren,
   type FileNode,
+  fileTreeState,
+  setNodeChildren,
+  setNodes,
+  setRootPath,
 } from "@/stores/fileTree";
-import { listDirectory, type FileEntry } from "@/lib/tauri-bridge";
+import { FileTree } from "./FileTree";
 import "./FileExplorerPanel.css";
 
 interface FileExplorerPanelProps {
@@ -50,7 +50,8 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
         await loadFolder(selected);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to open folder";
+      const message =
+        err instanceof Error ? err.message : "Failed to open folder";
       setError(message);
     }
   }
@@ -69,7 +70,8 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
       setRootPath(path);
       setNodes(nodes);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load folder";
+      const message =
+        err instanceof Error ? err.message : "Failed to load folder";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -83,7 +85,10 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
     if (!expanded) return;
 
     // Check if children already loaded
-    const findNode = (nodes: FileNode[], targetPath: string): FileNode | null => {
+    const findNode = (
+      nodes: FileNode[],
+      targetPath: string,
+    ): FileNode | null => {
       for (const node of nodes) {
         if (node.path === targetPath) return node;
         if (node.children) {
@@ -144,7 +149,9 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
       <Show when={error()}>
         <div class="file-explorer-error">
           <span>{error()}</span>
-          <button type="button" onClick={() => setError(null)}>✕</button>
+          <button type="button" onClick={() => setError(null)}>
+            ✕
+          </button>
         </div>
       </Show>
 
@@ -173,7 +180,10 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
         >
           <div class="file-explorer-workspace">
             <div class="file-explorer-workspace-header">
-              <span class="file-explorer-workspace-name" title={fileTreeState.rootPath || ""}>
+              <span
+                class="file-explorer-workspace-name"
+                title={fileTreeState.rootPath || ""}
+              >
                 {getRootFolderName()}
               </span>
               <button

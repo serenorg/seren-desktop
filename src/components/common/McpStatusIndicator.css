@@ -38,7 +38,10 @@
   opacity: 0;
   visibility: hidden;
   transform: translateY(8px);
-  transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+  transition:
+    opacity 0.15s,
+    transform 0.15s,
+    visibility 0.15s;
   z-index: 1000;
 }
 

@@ -1,15 +1,15 @@
-import {
-  createSignal,
-  createEffect,
-  onMount,
-  onCleanup,
-  type Component,
-} from "solid-js";
 import type * as Monaco from "monaco-editor";
 import {
-  initMonaco,
+  type Component,
+  createEffect,
+  createSignal,
+  onCleanup,
+  onMount,
+} from "solid-js";
+import {
   defaultEditorOptions,
   getLanguageFromPath,
+  initMonaco,
 } from "@/lib/editor";
 
 export interface MonacoEditorProps {
@@ -118,7 +118,12 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
   createEffect(() => {
     const ready = isMonacoReady();
     const newValue = props.value;
-    if (ready && newValue !== undefined && model && model.getValue() !== newValue) {
+    if (
+      ready &&
+      newValue !== undefined &&
+      model &&
+      model.getValue() !== newValue
+    ) {
       model.setValue(newValue);
       setOriginalValue(newValue);
       setIsDirty(false);

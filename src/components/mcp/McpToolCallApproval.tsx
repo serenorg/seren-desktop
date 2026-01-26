@@ -1,10 +1,17 @@
 // ABOUTME: Component for approving/denying MCP tool calls requested by AI.
 // ABOUTME: Shows tool details, arguments, and allows user to confirm execution.
 
-import { createSignal, Show, For, onCleanup, createEffect, type Component } from "solid-js";
-import { mcpClient } from "@/lib/mcp/client";
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+} from "solid-js";
 import { isRecoverableError } from "@/lib/mcp";
-import { getToolRiskLevel, getRiskLabel } from "@/lib/mcp/risk";
+import { mcpClient } from "@/lib/mcp/client";
+import { getRiskLabel, getToolRiskLevel } from "@/lib/mcp/risk";
 import type { McpToolResult } from "@/lib/mcp/types";
 import type { ToolCallRequest } from "@/stores/mcp-chat.store";
 import "./McpToolCallApproval.css";
@@ -17,7 +24,9 @@ export interface McpToolCallApprovalProps {
   maxRetryAttempts?: number;
 }
 
-export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) => {
+export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
+  props,
+) => {
   const [isExecuting, setIsExecuting] = createSignal(false);
   const [isPendingRetry, setIsPendingRetry] = createSignal(false);
   const [result, setResult] = createSignal<McpToolResult | null>(null);
@@ -59,7 +68,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) 
 
     if (isMediumRisk()) {
       const confirmed = window.confirm(
-        `Approve ${props.request.call.name} on ${props.request.serverName}?`
+        `Approve ${props.request.call.name} on ${props.request.serverName}?`,
       );
       if (!confirmed) {
         return;
@@ -107,7 +116,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) 
         const execResult = await mcpClient.callTool(
           props.request.serverName,
           props.request.call,
-          { signal: controller.signal }
+          { signal: controller.signal },
         );
         setResult(execResult);
         props.onApprove(props.request.id, execResult);
@@ -221,7 +230,8 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) 
       <Show when={requiresTypeConfirmation()}>
         <div class="confirmation-block">
           <label>
-            Type <strong>{props.request.call.name}</strong> to confirm high-risk execution
+            Type <strong>{props.request.call.name}</strong> to confirm high-risk
+            execution
           </label>
           <input
             value={confirmationInput()}
@@ -232,7 +242,8 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) 
       </Show>
 
       <div class="attempt-meta">
-        Attempt {Math.min(Math.max(attemptCount(), 1), maxAttempts())} / {maxAttempts()}
+        Attempt {Math.min(Math.max(attemptCount(), 1), maxAttempts())} /{" "}
+        {maxAttempts()}
       </div>
 
       <Show when={isPendingRetry()}>
@@ -246,7 +257,8 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) 
           disabled={
             isExecuting() ||
             (requiresTypeConfirmation() &&
-              confirmationInput().trim().toLowerCase() !== props.request.call.name.toLowerCase())
+              confirmationInput().trim().toLowerCase() !==
+                props.request.call.name.toLowerCase())
           }
         >
           {isExecuting() ? "Executing..." : "Approve & Execute"}
@@ -256,11 +268,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) 
             Cancel
           </button>
         </Show>
-        <button
-          class="btn-deny"
-          onClick={handleDeny}
-          disabled={isExecuting()}
-        >
+        <button class="btn-deny" onClick={handleDeny} disabled={isExecuting()}>
           Deny
         </button>
       </div>
@@ -275,7 +283,11 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) 
             <span class="cancelled-note">Call cancelled by user.</span>
           </Show>
           <Show when={!wasCancelled() && attemptCount() < maxAttempts()}>
-            <button class="btn-retry" onClick={handleManualRetry} disabled={isExecuting()}>
+            <button
+              class="btn-retry"
+              onClick={handleManualRetry}
+              disabled={isExecuting()}
+            >
               Retry ({attemptCount()} / {maxAttempts()})
             </button>
           </Show>
@@ -283,7 +295,10 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (props) 
       </Show>
 
       <Show when={result()}>
-        <div class="execution-result" classList={{ "is-error": result()?.isError }}>
+        <div
+          class="execution-result"
+          classList={{ "is-error": result()?.isError }}
+        >
           <span class="result-icon">{result()?.isError ? "⚠️" : "✅"}</span>
           <div class="result-content">
             <pre>{formatResult(result()!)}</pre>

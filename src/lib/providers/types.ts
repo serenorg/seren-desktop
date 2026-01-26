@@ -110,12 +110,15 @@ export interface ChatRequest {
  */
 export interface ToolParameterSchema {
   type: "object";
-  properties: Record<string, {
-    type: string;
-    description?: string;
-    enum?: string[];
-    items?: { type: string };
-  }>;
+  properties: Record<
+    string,
+    {
+      type: string;
+      description?: string;
+      enum?: string[];
+      items?: { type: string };
+    }
+  >;
   required?: string[];
 }
 
@@ -202,14 +205,20 @@ export interface ProviderAdapter {
    * @param request - The chat request
    * @param auth - Authentication token string or AuthOptions object
    */
-  sendMessage(request: ChatRequest, auth: string | AuthOptions): Promise<string>;
+  sendMessage(
+    request: ChatRequest,
+    auth: string | AuthOptions,
+  ): Promise<string>;
 
   /**
    * Stream a message response, yielding chunks as they arrive.
    * @param request - The chat request
    * @param auth - Authentication token string or AuthOptions object
    */
-  streamMessage(request: ChatRequest, auth: string | AuthOptions): AsyncGenerator<string, void, unknown>;
+  streamMessage(
+    request: ChatRequest,
+    auth: string | AuthOptions,
+  ): AsyncGenerator<string, void, unknown>;
 
   /**
    * Validate an API key by making a minimal test request.
@@ -271,7 +280,8 @@ export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
         "https://www.googleapis.com/auth/generative-language.retriever",
         "https://www.googleapis.com/auth/cloud-platform",
       ],
-      clientId: "394120216619-p8h1i4ple18omhcp76h4va64v5ao4jv8.apps.googleusercontent.com",
+      clientId:
+        "394120216619-p8h1i4ple18omhcp76h4va64v5ao4jv8.apps.googleusercontent.com",
       usePkce: true,
     },
   },
@@ -280,7 +290,11 @@ export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
 /**
  * List of provider IDs that can be configured by users (excludes Seren).
  */
-export const CONFIGURABLE_PROVIDERS: ProviderId[] = ["anthropic", "openai", "gemini"];
+export const CONFIGURABLE_PROVIDERS: ProviderId[] = [
+  "anthropic",
+  "openai",
+  "gemini",
+];
 
 /**
  * List of provider IDs that support OAuth.
@@ -307,5 +321,8 @@ export function supportsApiKey(id: ProviderId): boolean {
  */
 export function supportsOAuth(id: ProviderId): boolean {
   const method = PROVIDER_CONFIGS[id].authMethod;
-  return (method === "oauth" || method === "api_key_or_oauth") && !!PROVIDER_CONFIGS[id].oauth;
+  return (
+    (method === "oauth" || method === "api_key_or_oauth") &&
+    !!PROVIDER_CONFIGS[id].oauth
+  );
 }

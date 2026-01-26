@@ -1,7 +1,7 @@
 // ABOUTME: Fetch wrapper for HTTP requests in Tauri environment.
 // ABOUTME: Uses Tauri HTTP plugin when available, falls back to browser fetch.
 
-import { isTauriRuntime, getToken } from "./tauri-bridge";
+import { getToken, isTauriRuntime } from "./tauri-bridge";
 
 type TauriFetch = typeof globalThis.fetch;
 
@@ -37,7 +37,12 @@ const NO_REFRESH_ENDPOINTS = ["/auth/login", "/auth/refresh", "/auth/signup"];
  * Check if the request URL is an auth endpoint that should skip refresh.
  */
 function shouldSkipRefresh(input: RequestInfo | URL): boolean {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
   return NO_REFRESH_ENDPOINTS.some((endpoint) => url.includes(endpoint));
 }
 
@@ -49,7 +54,7 @@ function shouldSkipRefresh(input: RequestInfo | URL): boolean {
  */
 export async function appFetch(
   input: RequestInfo | URL,
-  init?: RequestInit
+  init?: RequestInit,
 ): Promise<Response> {
   console.log("[appFetch] Starting request to:", input);
   console.log("[appFetch] isTauriRuntime:", isTauriRuntime());

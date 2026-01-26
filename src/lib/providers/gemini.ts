@@ -1,7 +1,13 @@
 // ABOUTME: Google Gemini API provider adapter.
 // ABOUTME: Direct integration with Google AI for users with Gemini API access.
 
-import type { ChatRequest, ProviderAdapter, ProviderModel, ChatMessage, AuthOptions } from "./types";
+import type {
+  AuthOptions,
+  ChatMessage,
+  ChatRequest,
+  ProviderAdapter,
+  ProviderModel,
+} from "./types";
 
 /**
  * Normalize auth parameter to AuthOptions object.
@@ -32,10 +38,10 @@ function convertToGeminiFormat(messages: ChatMessage[]): {
   systemInstruction?: { parts: { text: string }[] };
   contents: Array<{ role: "user" | "model"; parts: { text: string }[] }>;
 } {
-  const systemMessage = messages.find(m => m.role === "system");
-  const otherMessages = messages.filter(m => m.role !== "system");
+  const systemMessage = messages.find((m) => m.role === "system");
+  const otherMessages = messages.filter((m) => m.role !== "system");
 
-  const contents = otherMessages.map(m => ({
+  const contents = otherMessages.map((m) => ({
     role: (m.role === "assistant" ? "model" : "user") as "user" | "model",
     parts: [{ text: m.content }],
   }));
@@ -58,7 +64,7 @@ function convertToGeminiFormat(messages: ChatMessage[]): {
  * Parse Gemini SSE stream response.
  */
 async function* parseGeminiSSE(
-  body: ReadableStream<Uint8Array>
+  body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<string, void, unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -100,9 +106,14 @@ async function* parseGeminiSSE(
 export const geminiProvider: ProviderAdapter = {
   id: "gemini",
 
-  async sendMessage(request: ChatRequest, auth: string | AuthOptions): Promise<string> {
+  async sendMessage(
+    request: ChatRequest,
+    auth: string | AuthOptions,
+  ): Promise<string> {
     const { token, isOAuth } = normalizeAuth(auth);
-    const { systemInstruction, contents } = convertToGeminiFormat(request.messages);
+    const { systemInstruction, contents } = convertToGeminiFormat(
+      request.messages,
+    );
 
     const body: Record<string, unknown> = {
       contents,
@@ -125,7 +136,7 @@ export const geminiProvider: ProviderAdapter = {
     };
 
     if (isOAuth) {
-      headers["Authorization"] = `Bearer ${token}`;
+      headers.Authorization = `Bearer ${token}`;
     }
 
     const response = await fetch(url, {
@@ -136,7 +147,8 @@ export const geminiProvider: ProviderAdapter = {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      const message = (error as { error?: { message?: string } }).error?.message;
+      const message = (error as { error?: { message?: string } }).error
+        ?.message;
       throw new Error(message || `Gemini API error: ${response.status}`);
     }
 
@@ -147,10 +159,12 @@ export const geminiProvider: ProviderAdapter = {
 
   async *streamMessage(
     request: ChatRequest,
-    auth: string | AuthOptions
+    auth: string | AuthOptions,
   ): AsyncGenerator<string, void, unknown> {
     const { token, isOAuth } = normalizeAuth(auth);
-    const { systemInstruction, contents } = convertToGeminiFormat(request.messages);
+    const { systemInstruction, contents } = convertToGeminiFormat(
+      request.messages,
+    );
 
     const body: Record<string, unknown> = {
       contents,
@@ -173,7 +187,7 @@ export const geminiProvider: ProviderAdapter = {
     };
 
     if (isOAuth) {
-      headers["Authorization"] = `Bearer ${token}`;
+      headers.Authorization = `Bearer ${token}`;
     }
 
     const response = await fetch(url, {
@@ -184,7 +198,8 @@ export const geminiProvider: ProviderAdapter = {
 
     if (!response.ok || !response.body) {
       const error = await response.json().catch(() => ({}));
-      const message = (error as { error?: { message?: string } }).error?.message;
+      const message = (error as { error?: { message?: string } }).error
+        ?.message;
       throw new Error(message || `Gemini streaming failed: ${response.status}`);
     }
 
@@ -212,12 +227,14 @@ export const geminiProvider: ProviderAdapter = {
       }
 
       const data = await response.json();
-      const models = data.models as Array<{
-        name: string;
-        displayName?: string;
-        inputTokenLimit?: number;
-        supportedGenerationMethods?: string[];
-      }> | undefined;
+      const models = data.models as
+        | Array<{
+            name: string;
+            displayName?: string;
+            inputTokenLimit?: number;
+            supportedGenerationMethods?: string[];
+          }>
+        | undefined;
 
       if (!models) {
         return DEFAULT_MODELS;
@@ -225,11 +242,12 @@ export const geminiProvider: ProviderAdapter = {
 
       // Filter to models that support generateContent
       const chatModels = models
-        .filter(m =>
-          m.supportedGenerationMethods?.includes("generateContent") &&
-          m.name.includes("gemini")
+        .filter(
+          (m) =>
+            m.supportedGenerationMethods?.includes("generateContent") &&
+            m.name.includes("gemini"),
         )
-        .map(m => {
+        .map((m) => {
           // Extract model ID from name (e.g., "models/gemini-1.5-pro" -> "gemini-1.5-pro")
           const id = m.name.replace("models/", "");
           return {
@@ -241,8 +259,8 @@ export const geminiProvider: ProviderAdapter = {
         // Sort by preference
         .sort((a, b) => {
           const order = ["gemini-2.0", "gemini-1.5-pro", "gemini-1.5-flash"];
-          const aIndex = order.findIndex(o => a.id.includes(o));
-          const bIndex = order.findIndex(o => b.id.includes(o));
+          const aIndex = order.findIndex((o) => a.id.includes(o));
+          const bIndex = order.findIndex((o) => b.id.includes(o));
           if (aIndex === -1 && bIndex === -1) return 0;
           if (aIndex === -1) return 1;
           if (bIndex === -1) return -1;

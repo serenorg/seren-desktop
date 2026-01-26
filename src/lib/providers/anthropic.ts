@@ -1,7 +1,13 @@
 // ABOUTME: Anthropic Claude API provider adapter.
 // ABOUTME: Direct integration with api.anthropic.com for users with Anthropic subscriptions.
 
-import type { ChatRequest, ProviderAdapter, ProviderModel, ChatMessage, AuthOptions } from "./types";
+import type {
+  AuthOptions,
+  ChatMessage,
+  ChatRequest,
+  ProviderAdapter,
+  ProviderModel,
+} from "./types";
 
 /**
  * Get API key from auth parameter.
@@ -18,11 +24,31 @@ const ANTHROPIC_VERSION = "2023-06-01";
  * Default models available from Anthropic.
  */
 const DEFAULT_MODELS: ProviderModel[] = [
-  { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", contextWindow: 200000 },
-  { id: "claude-opus-4-20250514", name: "Claude Opus 4", contextWindow: 200000 },
-  { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", contextWindow: 200000 },
-  { id: "claude-3-opus-20240229", name: "Claude 3 Opus", contextWindow: 200000 },
-  { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku", contextWindow: 200000 },
+  {
+    id: "claude-sonnet-4-20250514",
+    name: "Claude Sonnet 4",
+    contextWindow: 200000,
+  },
+  {
+    id: "claude-opus-4-20250514",
+    name: "Claude Opus 4",
+    contextWindow: 200000,
+  },
+  {
+    id: "claude-3-5-sonnet-20241022",
+    name: "Claude 3.5 Sonnet",
+    contextWindow: 200000,
+  },
+  {
+    id: "claude-3-opus-20240229",
+    name: "Claude 3 Opus",
+    contextWindow: 200000,
+  },
+  {
+    id: "claude-3-haiku-20240307",
+    name: "Claude 3 Haiku",
+    contextWindow: 200000,
+  },
 ];
 
 /**
@@ -33,12 +59,12 @@ function convertToAnthropicFormat(messages: ChatMessage[]): {
   system?: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
 } {
-  const systemMessage = messages.find(m => m.role === "system");
-  const otherMessages = messages.filter(m => m.role !== "system");
+  const systemMessage = messages.find((m) => m.role === "system");
+  const otherMessages = messages.filter((m) => m.role !== "system");
 
   return {
     system: systemMessage?.content,
-    messages: otherMessages.map(m => ({
+    messages: otherMessages.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
@@ -49,7 +75,7 @@ function convertToAnthropicFormat(messages: ChatMessage[]): {
  * Parse Anthropic SSE stream response.
  */
 async function* parseAnthropicSSE(
-  body: ReadableStream<Uint8Array>
+  body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<string, void, unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -103,7 +129,10 @@ async function* parseAnthropicSSE(
 export const anthropicProvider: ProviderAdapter = {
   id: "anthropic",
 
-  async sendMessage(request: ChatRequest, auth: string | AuthOptions): Promise<string> {
+  async sendMessage(
+    request: ChatRequest,
+    auth: string | AuthOptions,
+  ): Promise<string> {
     const apiKey = getApiKey(auth);
     const { system, messages } = convertToAnthropicFormat(request.messages);
 
@@ -129,14 +158,17 @@ export const anthropicProvider: ProviderAdapter = {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      const message = (error as { error?: { message?: string } }).error?.message;
+      const message = (error as { error?: { message?: string } }).error
+        ?.message;
       throw new Error(message || `Anthropic API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const content = data.content as Array<{ type: string; text?: string }> | undefined;
+    const content = data.content as
+      | Array<{ type: string; text?: string }>
+      | undefined;
     if (content && content.length > 0) {
-      const textBlock = content.find(b => b.type === "text");
+      const textBlock = content.find((b) => b.type === "text");
       return textBlock?.text || "";
     }
 
@@ -145,7 +177,7 @@ export const anthropicProvider: ProviderAdapter = {
 
   async *streamMessage(
     request: ChatRequest,
-    auth: string | AuthOptions
+    auth: string | AuthOptions,
   ): AsyncGenerator<string, void, unknown> {
     const apiKey = getApiKey(auth);
     const { system, messages } = convertToAnthropicFormat(request.messages);
@@ -173,8 +205,11 @@ export const anthropicProvider: ProviderAdapter = {
 
     if (!response.ok || !response.body) {
       const error = await response.json().catch(() => ({}));
-      const message = (error as { error?: { message?: string } }).error?.message;
-      throw new Error(message || `Anthropic streaming failed: ${response.status}`);
+      const message = (error as { error?: { message?: string } }).error
+        ?.message;
+      throw new Error(
+        message || `Anthropic streaming failed: ${response.status}`,
+      );
     }
 
     yield* parseAnthropicSSE(response.body);

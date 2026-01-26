@@ -50,10 +50,7 @@ function generateRequestId(): string {
  * Create a new tool call request from AI.
  * Returns the request ID for tracking.
  */
-function createToolCallRequest(
-  serverName: string,
-  call: McpToolCall
-): string {
+function createToolCallRequest(serverName: string, call: McpToolCall): string {
   const id = generateRequestId();
 
   const request: ToolCallRequest = {
@@ -84,10 +81,10 @@ function findRequest(id: string): ToolCallRequest | undefined {
  */
 function updatePendingRequest(
   id: string,
-  updates: Partial<ToolCallRequest>
+  updates: Partial<ToolCallRequest>,
 ): void {
   setMcpChatState("pendingRequests", (requests) =>
-    requests.map((r) => (r.id === id ? { ...r, ...updates } : r))
+    requests.map((r) => (r.id === id ? { ...r, ...updates } : r)),
   );
 }
 
@@ -99,7 +96,7 @@ function completeRequest(id: string): void {
   if (!request) return;
 
   setMcpChatState("pendingRequests", (requests) =>
-    requests.filter((r) => r.id !== id)
+    requests.filter((r) => r.id !== id),
   );
   setMcpChatState("completedRequests", (requests) => [
     ...requests,

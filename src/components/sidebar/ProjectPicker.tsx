@@ -1,9 +1,9 @@
 // ABOUTME: Project picker component for selecting and managing projects.
 // ABOUTME: Allows creating, deleting, and switching between projects.
 
-import { Component, For, createSignal, Show, onMount } from "solid-js";
+import { type Component, createSignal, For, onMount, Show } from "solid-js";
+import { getDefaultRegion, REGIONS } from "@/lib/regions";
 import { projectStore } from "@/stores/project.store";
-import { REGIONS, getDefaultRegion } from "@/lib/regions";
 import "./ProjectPicker.css";
 
 export const ProjectPicker: Component = () => {

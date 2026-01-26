@@ -53,7 +53,7 @@ export function closeTab(tabId: string): void {
       index > 0 ? index - 1 : tabsState.tabs.length > 1 ? 1 : null;
     setTabsState(
       "activeTabId",
-      newActiveIndex !== null ? tabsState.tabs[newActiveIndex].id : null
+      newActiveIndex !== null ? tabsState.tabs[newActiveIndex].id : null,
     );
   }
 
@@ -81,24 +81,14 @@ export function setActiveTab(tabId: string): void {
  * Update tab content.
  */
 export function updateTabContent(tabId: string, content: string): void {
-  setTabsState(
-    "tabs",
-    (t) => t.id === tabId,
-    "content",
-    content
-  );
+  setTabsState("tabs", (t) => t.id === tabId, "content", content);
 }
 
 /**
  * Set tab dirty state.
  */
 export function setTabDirty(tabId: string, isDirty: boolean): void {
-  setTabsState(
-    "tabs",
-    (t) => t.id === tabId,
-    "isDirty",
-    isDirty
-  );
+  setTabsState("tabs", (t) => t.id === tabId, "isDirty", isDirty);
 }
 
 /**

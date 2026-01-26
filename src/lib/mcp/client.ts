@@ -1,15 +1,15 @@
 // ABOUTME: MCP client service for frontend communication with MCP servers.
 // ABOUTME: Provides reactive state management and Tauri IPC integration.
 
-import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { parseMcpError, isRecoverableError } from "./errors";
+import { createSignal } from "solid-js";
+import { isRecoverableError, parseMcpError } from "./errors";
 import type {
   McpConnection,
   McpConnectionStatus,
   McpInitializeResult,
-  McpTool,
   McpResource,
+  McpTool,
   McpToolCall,
   McpToolResult,
 } from "./types";
@@ -18,9 +18,9 @@ import type {
  * Create an MCP client with reactive state management.
  */
 function createMcpClient() {
-  const [connections, setConnections] = createSignal<Map<string, McpConnection>>(
-    new Map()
-  );
+  const [connections, setConnections] = createSignal<
+    Map<string, McpConnection>
+  >(new Map());
 
   /**
    * Get a connection by server name.
@@ -34,7 +34,7 @@ function createMcpClient() {
    */
   function updateConnection(
     serverName: string,
-    updates: Partial<McpConnection>
+    updates: Partial<McpConnection>,
   ): void {
     setConnections((prev) => {
       const next = new Map(prev);
@@ -52,7 +52,7 @@ function createMcpClient() {
   function setConnectionStatus(
     serverName: string,
     status: McpConnectionStatus,
-    error?: string
+    error?: string,
   ): void {
     updateConnection(serverName, { status, error });
   }
@@ -64,7 +64,7 @@ function createMcpClient() {
     serverName: string,
     command: string,
     args: string[],
-    env?: Record<string, string>
+    env?: Record<string, string>,
   ): Promise<void> {
     // Initialize connection state
     setConnections((prev) => {
@@ -110,7 +110,7 @@ function createMcpClient() {
       setConnectionStatus(
         serverName,
         "error",
-        error instanceof Error ? error.message : String(error)
+        error instanceof Error ? error.message : String(error),
       );
       throw error;
     }
@@ -164,7 +164,9 @@ function createMcpClient() {
     }
 
     if (signal.aborted) {
-      return Promise.reject(new DOMException("Operation aborted", "AbortError"));
+      return Promise.reject(
+        new DOMException("Operation aborted", "AbortError"),
+      );
     }
 
     return new Promise<T>((resolve, reject) => {
@@ -190,7 +192,7 @@ function createMcpClient() {
   async function callTool(
     serverName: string,
     call: McpToolCall,
-    options?: CallToolOptions
+    options?: CallToolOptions,
   ): Promise<McpToolResult> {
     const invocation = invoke<McpToolResult>("mcp_call_tool", {
       serverName,
@@ -206,7 +208,7 @@ function createMcpClient() {
   async function retryToolCall(
     serverName: string,
     call: McpToolCall,
-    options?: RetryToolOptions
+    options?: RetryToolOptions,
   ): Promise<McpToolResult> {
     const maxAttempts = options?.maxAttempts ?? 3;
     let delay = options?.initialDelayMs ?? 1000;
@@ -246,7 +248,9 @@ function createMcpClient() {
     }
 
     if (signal.aborted) {
-      return Promise.reject(new DOMException("Operation aborted", "AbortError"));
+      return Promise.reject(
+        new DOMException("Operation aborted", "AbortError"),
+      );
     }
 
     return new Promise((resolve, reject) => {
@@ -268,7 +272,10 @@ function createMcpClient() {
   /**
    * Read a resource from an MCP server.
    */
-  async function readResource(serverName: string, uri: string): Promise<unknown> {
+  async function readResource(
+    serverName: string,
+    uri: string,
+  ): Promise<unknown> {
     return invoke("mcp_read_resource", { serverName, uri });
   }
 
@@ -323,7 +330,10 @@ function createMcpClient() {
   /**
    * Get all resources across all connected servers.
    */
-  function getAllResources(): Array<{ serverName: string; resource: McpResource }> {
+  function getAllResources(): Array<{
+    serverName: string;
+    resource: McpResource;
+  }> {
     const result: Array<{ serverName: string; resource: McpResource }> = [];
     const conns = Array.from(connections().values());
     for (const conn of conns) {

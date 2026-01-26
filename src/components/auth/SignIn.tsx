@@ -1,9 +1,9 @@
 // ABOUTME: Sign-in form component for user authentication.
 // ABOUTME: Handles email/password login with validation and error display.
 
-import { Component, createSignal } from "solid-js";
-import { login } from "@/services/auth";
+import { type Component, createSignal } from "solid-js";
 import { openExternalLink } from "@/lib/external-link";
+import { login } from "@/services/auth";
 import "./SignIn.css";
 
 interface SignInProps {
@@ -75,17 +75,15 @@ export const SignIn: Component<SignInProps> = (props) => {
             <button
               type="button"
               class="signin-link"
-              onClick={() => openExternalLink("https://console.serendb.com/forgot-password")}
+              onClick={() =>
+                openExternalLink("https://console.serendb.com/forgot-password")
+              }
             >
               Forgot password?
             </button>
           </div>
 
-          <button
-            type="submit"
-            class="signin-submit"
-            disabled={isLoading()}
-          >
+          <button type="submit" class="signin-submit" disabled={isLoading()}>
             {isLoading() ? "Signing in..." : "Sign In"}
           </button>
         </form>
@@ -95,7 +93,9 @@ export const SignIn: Component<SignInProps> = (props) => {
           <button
             type="button"
             class="signin-link"
-            onClick={() => openExternalLink("https://console.serendb.com/signup")}
+            onClick={() =>
+              openExternalLink("https://console.serendb.com/signup")
+            }
           >
             Sign up for Seren
           </button>

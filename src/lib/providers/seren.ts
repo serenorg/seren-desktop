@@ -5,15 +5,15 @@ import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
 import type {
+  AuthOptions,
+  ChatMessageWithTools,
   ChatRequest,
   ChatResponse,
-  ChatMessageWithTools,
   ProviderAdapter,
   ProviderModel,
-  AuthOptions,
   ToolCall,
-  ToolDefinition,
   ToolChoice,
+  ToolDefinition,
 } from "./types";
 
 const PUBLISHER_SLUG = "seren-models";
@@ -59,17 +59,41 @@ interface AgentApiPayload {
  */
 const DEFAULT_MODELS: ProviderModel[] = [
   // Anthropic
-  { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5", contextWindow: 200000 },
-  { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", contextWindow: 200000 },
-  { id: "anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5", contextWindow: 200000 },
+  {
+    id: "anthropic/claude-opus-4.5",
+    name: "Claude Opus 4.5",
+    contextWindow: 200000,
+  },
+  {
+    id: "anthropic/claude-sonnet-4",
+    name: "Claude Sonnet 4",
+    contextWindow: 200000,
+  },
+  {
+    id: "anthropic/claude-haiku-4.5",
+    name: "Claude Haiku 4.5",
+    contextWindow: 200000,
+  },
   // OpenAI
   { id: "openai/gpt-5", name: "GPT-5", contextWindow: 128000 },
   { id: "openai/gpt-4o", name: "GPT-4o", contextWindow: 128000 },
   { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", contextWindow: 128000 },
   // Google Gemini
-  { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 1000000 },
-  { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000 },
-  { id: "google/gemini-3-flash-preview", name: "Gemini 3 Flash", contextWindow: 1000000 },
+  {
+    id: "google/gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    contextWindow: 1000000,
+  },
+  {
+    id: "google/gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    contextWindow: 1000000,
+  },
+  {
+    id: "google/gemini-3-flash-preview",
+    name: "Gemini 3 Flash",
+    contextWindow: 1000000,
+  },
 ];
 
 async function requireToken(): Promise<string> {
@@ -89,7 +113,9 @@ function extractContent(data: unknown): string {
   // Unwrap body if response is wrapped (e.g., { status: 200, body: { choices: [...] } })
   const body = payload.body as Record<string, unknown> | undefined;
   const responseData = body || payload;
-  const choices = responseData.choices as Array<Record<string, unknown>> | undefined;
+  const choices = responseData.choices as
+    | Array<Record<string, unknown>>
+    | undefined;
   if (choices && choices.length > 0) {
     const first = choices[0];
     const message = first.message as Record<string, unknown> | undefined;
@@ -123,7 +149,9 @@ function extractChatResponse(data: unknown): ChatResponse {
   // Unwrap body if response is wrapped (e.g., { status: 200, body: { choices: [...] } })
   const body = payload.body as Record<string, unknown> | undefined;
   const responseData = body || payload;
-  const choices = responseData.choices as Array<Record<string, unknown>> | undefined;
+  const choices = responseData.choices as
+    | Array<Record<string, unknown>>
+    | undefined;
 
   if (!choices || choices.length === 0) {
     return { content: null, finish_reason: "stop" };
@@ -145,14 +173,17 @@ function extractChatResponse(data: unknown): ChatResponse {
     }
 
     // Extract tool_calls
-    const rawToolCalls = message.tool_calls as Array<Record<string, unknown>> | undefined;
+    const rawToolCalls = message.tool_calls as
+      | Array<Record<string, unknown>>
+      | undefined;
     if (rawToolCalls && rawToolCalls.length > 0) {
       toolCalls = rawToolCalls.map((tc) => ({
         id: tc.id as string,
         type: "function" as const,
         function: {
           name: (tc.function as Record<string, unknown>).name as string,
-          arguments: (tc.function as Record<string, unknown>).arguments as string,
+          arguments: (tc.function as Record<string, unknown>)
+            .arguments as string,
         },
       }));
     }
@@ -161,9 +192,14 @@ function extractChatResponse(data: unknown): ChatResponse {
   return {
     content,
     tool_calls: toolCalls,
-    finish_reason: finishReason === "tool_calls" ? "tool_calls" :
-                   finishReason === "length" ? "length" :
-                   finishReason === "content_filter" ? "content_filter" : "stop",
+    finish_reason:
+      finishReason === "tool_calls"
+        ? "tool_calls"
+        : finishReason === "length"
+          ? "length"
+          : finishReason === "content_filter"
+            ? "content_filter"
+            : "stop",
   };
 }
 
@@ -171,11 +207,11 @@ function parseDelta(data: string): string | null {
   try {
     const parsed = JSON.parse(data);
 
-    if (parsed.delta && parsed.delta.content) {
+    if (parsed.delta?.content) {
       return normalizeContent(parsed.delta.content);
     }
 
-    if (parsed.choices && parsed.choices[0]?.delta?.content) {
+    if (parsed.choices?.[0]?.delta?.content) {
       return normalizeContent(parsed.choices[0].delta.content);
     }
 
@@ -213,7 +249,10 @@ function normalizeContent(chunk: unknown): string | null {
 export const serenProvider: ProviderAdapter = {
   id: "seren",
 
-  async sendMessage(request: ChatRequest, _auth: string | AuthOptions): Promise<string> {
+  async sendMessage(
+    request: ChatRequest,
+    _auth: string | AuthOptions,
+  ): Promise<string> {
     const token = await requireToken();
     const model = normalizeModelId(request.model);
 
@@ -250,7 +289,10 @@ export const serenProvider: ProviderAdapter = {
     return extractContent(data);
   },
 
-  async *streamMessage(request: ChatRequest, _auth: string | AuthOptions): AsyncGenerator<string, void, unknown> {
+  async *streamMessage(
+    request: ChatRequest,
+    _auth: string | AuthOptions,
+  ): AsyncGenerator<string, void, unknown> {
     const token = await requireToken();
     const model = normalizeModelId(request.model);
 
@@ -281,7 +323,9 @@ export const serenProvider: ProviderAdapter = {
         body: errorText,
         payload: agentPayload,
       });
-      throw new Error(`Seren streaming failed: ${response.status} - ${errorText}`);
+      throw new Error(
+        `Seren streaming failed: ${response.status} - ${errorText}`,
+      );
     }
 
     const reader = response.body.getReader();
@@ -355,11 +399,13 @@ export const serenProvider: ProviderAdapter = {
 
       const data = await response.json();
       if (Array.isArray(data.data)) {
-        return data.data.map((m: { id: string; name?: string; context_length?: number }) => ({
-          id: m.id,
-          name: m.name || m.id,
-          contextWindow: m.context_length || 128000,
-        }));
+        return data.data.map(
+          (m: { id: string; name?: string; context_length?: number }) => ({
+            id: m.id,
+            name: m.name || m.id,
+            contextWindow: m.context_length || 128000,
+          }),
+        );
       }
 
       return DEFAULT_MODELS;
@@ -381,7 +427,7 @@ export async function sendMessageWithTools(
   messages: ChatMessageWithTools[],
   model: string,
   tools?: ToolDefinition[],
-  toolChoice?: ToolChoice
+  toolChoice?: ToolChoice,
 ): Promise<ChatResponse> {
   const token = await requireToken();
   const normalizedModel = normalizeModelId(model);

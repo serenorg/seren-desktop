@@ -1,6 +1,6 @@
-import { createStore } from "solid-js/store";
-import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { createSignal } from "solid-js";
+import { createStore } from "solid-js/store";
 
 export interface FileNode {
   name: string;
@@ -49,10 +49,7 @@ export function setNodes(nodes: FileNode[]): void {
 /**
  * Update a specific node in the tree.
  */
-export function updateNode(
-  path: string,
-  updates: Partial<FileNode>
-): void {
+export function updateNode(path: string, updates: Partial<FileNode>): void {
   function updateRecursive(nodes: FileNode[]): FileNode[] {
     return nodes.map((node) => {
       if (node.path === path) {

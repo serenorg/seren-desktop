@@ -1,27 +1,35 @@
 // ABOUTME: Settings panel UI for managing user preferences.
 // ABOUTME: Provides controls for editor, wallet, theme, and MCP settings.
 
-import { createSignal, For, Show, type Component } from "solid-js";
-import {
-  settingsStore,
-  settingsState,
-  mcpSettings,
-  removeMcpServer,
-  toggleMcpServer,
-  type Settings,
-} from "@/stores/settings.store";
+import { type Component, createSignal, For, Show } from "solid-js";
+import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
+import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { providerStore } from "@/stores/provider.store";
-import { chatStore } from "@/stores/chat.store";
-import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
+import {
+  mcpSettings,
+  removeMcpServer,
+  type Settings,
+  settingsState,
+  settingsStore,
+  toggleMcpServer,
+} from "@/stores/settings.store";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
 import "./SettingsPanel.css";
 
-type SettingsSection = "chat" | "providers" | "editor" | "wallet" | "appearance" | "general" | "mcp";
+type SettingsSection =
+  | "chat"
+  | "providers"
+  | "editor"
+  | "wallet"
+  | "appearance"
+  | "general"
+  | "mcp";
 
 export const SettingsPanel: Component = () => {
-  const [activeSection, setActiveSection] = createSignal<SettingsSection>("chat");
+  const [activeSection, setActiveSection] =
+    createSignal<SettingsSection>("chat");
   const [showResetConfirm, setShowResetConfirm] = createSignal(false);
   const [privateKeyInput, setPrivateKeyInput] = createSignal("");
   const [showClearConfirm, setShowClearConfirm] = createSignal(false);
@@ -155,7 +163,9 @@ export const SettingsPanel: Component = () => {
             <div class="settings-group">
               <label class="settings-label">
                 <span class="label-text">History Limit</span>
-                <span class="label-hint">Maximum messages to keep in conversation context</span>
+                <span class="label-hint">
+                  Maximum messages to keep in conversation context
+                </span>
               </label>
               <input
                 type="number"
@@ -163,7 +173,12 @@ export const SettingsPanel: Component = () => {
                 max="200"
                 step="10"
                 value={settingsState.app.chatMaxHistoryMessages}
-                onInput={(e) => handleNumberChange("chatMaxHistoryMessages", e.currentTarget.value)}
+                onInput={(e) =>
+                  handleNumberChange(
+                    "chatMaxHistoryMessages",
+                    e.currentTarget.value,
+                  )
+                }
               />
             </div>
 
@@ -172,11 +187,18 @@ export const SettingsPanel: Component = () => {
                 <input
                   type="checkbox"
                   checked={settingsState.app.chatEnterToSend}
-                  onChange={(e) => handleBooleanChange("chatEnterToSend", e.currentTarget.checked)}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "chatEnterToSend",
+                      e.currentTarget.checked,
+                    )
+                  }
                 />
                 <span class="checkbox-label">
                   <span class="label-text">Enter to Send</span>
-                  <span class="label-hint">Press Enter to send messages (Shift+Enter for new line)</span>
+                  <span class="label-hint">
+                    Press Enter to send messages (Shift+Enter for new line)
+                  </span>
                 </span>
               </label>
             </div>
@@ -204,7 +226,9 @@ export const SettingsPanel: Component = () => {
                 min="10"
                 max="32"
                 value={settingsState.app.editorFontSize}
-                onInput={(e) => handleNumberChange("editorFontSize", e.currentTarget.value)}
+                onInput={(e) =>
+                  handleNumberChange("editorFontSize", e.currentTarget.value)
+                }
               />
             </div>
 
@@ -218,7 +242,9 @@ export const SettingsPanel: Component = () => {
                 min="1"
                 max="8"
                 value={settingsState.app.editorTabSize}
-                onInput={(e) => handleNumberChange("editorTabSize", e.currentTarget.value)}
+                onInput={(e) =>
+                  handleNumberChange("editorTabSize", e.currentTarget.value)
+                }
               />
             </div>
 
@@ -227,11 +253,18 @@ export const SettingsPanel: Component = () => {
                 <input
                   type="checkbox"
                   checked={settingsState.app.editorWordWrap}
-                  onChange={(e) => handleBooleanChange("editorWordWrap", e.currentTarget.checked)}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "editorWordWrap",
+                      e.currentTarget.checked,
+                    )
+                  }
                 />
                 <span class="checkbox-label">
                   <span class="label-text">Word Wrap</span>
-                  <span class="label-hint">Wrap long lines instead of scrolling</span>
+                  <span class="label-hint">
+                    Wrap long lines instead of scrolling
+                  </span>
                 </span>
               </label>
             </div>
@@ -243,11 +276,18 @@ export const SettingsPanel: Component = () => {
                 <input
                   type="checkbox"
                   checked={settingsState.app.completionEnabled}
-                  onChange={(e) => handleBooleanChange("completionEnabled", e.currentTarget.checked)}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "completionEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
                 />
                 <span class="checkbox-label">
                   <span class="label-text">Enable AI Completions</span>
-                  <span class="label-hint">Show AI-powered code suggestions while typing</span>
+                  <span class="label-hint">
+                    Show AI-powered code suggestions while typing
+                  </span>
                 </span>
               </label>
             </div>
@@ -255,7 +295,9 @@ export const SettingsPanel: Component = () => {
             <div class="settings-group">
               <label class="settings-label">
                 <span class="label-text">Completion Delay</span>
-                <span class="label-hint">Milliseconds to wait before showing suggestions</span>
+                <span class="label-hint">
+                  Milliseconds to wait before showing suggestions
+                </span>
               </label>
               <input
                 type="number"
@@ -263,7 +305,9 @@ export const SettingsPanel: Component = () => {
                 max="2000"
                 step="100"
                 value={settingsState.app.completionDelay}
-                onInput={(e) => handleNumberChange("completionDelay", e.currentTarget.value)}
+                onInput={(e) =>
+                  handleNumberChange("completionDelay", e.currentTarget.value)
+                }
               />
             </div>
 
@@ -274,7 +318,9 @@ export const SettingsPanel: Component = () => {
               </label>
               <SearchableModelSelect
                 value={settingsState.app.completionModelId}
-                onChange={(value) => handleStringChange("completionModelId", value)}
+                onChange={(value) =>
+                  handleStringChange("completionModelId", value)
+                }
                 placeholder="Select a model"
               />
             </div>
@@ -282,14 +328,21 @@ export const SettingsPanel: Component = () => {
             <div class="settings-group">
               <label class="settings-label">
                 <span class="label-text">Max Suggestion Lines</span>
-                <span class="label-hint">Maximum lines in code completion suggestions</span>
+                <span class="label-hint">
+                  Maximum lines in code completion suggestions
+                </span>
               </label>
               <input
                 type="number"
                 min="1"
                 max="20"
                 value={settingsState.app.completionMaxSuggestionLines}
-                onInput={(e) => handleNumberChange("completionMaxSuggestionLines", e.currentTarget.value)}
+                onInput={(e) =>
+                  handleNumberChange(
+                    "completionMaxSuggestionLines",
+                    e.currentTarget.value,
+                  )
+                }
               />
             </div>
           </section>
@@ -307,11 +360,15 @@ export const SettingsPanel: Component = () => {
                 <input
                   type="checkbox"
                   checked={settingsState.app.showBalance}
-                  onChange={(e) => handleBooleanChange("showBalance", e.currentTarget.checked)}
+                  onChange={(e) =>
+                    handleBooleanChange("showBalance", e.currentTarget.checked)
+                  }
                 />
                 <span class="checkbox-label">
                   <span class="label-text">Show Balance in Status Bar</span>
-                  <span class="label-hint">Display your SerenBucks balance at the bottom of the app</span>
+                  <span class="label-hint">
+                    Display your SerenBucks balance at the bottom of the app
+                  </span>
                 </span>
               </label>
             </div>
@@ -319,14 +376,21 @@ export const SettingsPanel: Component = () => {
             <div class="settings-group">
               <label class="settings-label">
                 <span class="label-text">Low Balance Warning</span>
-                <span class="label-hint">Show warning when balance falls below this amount ($)</span>
+                <span class="label-hint">
+                  Show warning when balance falls below this amount ($)
+                </span>
               </label>
               <input
                 type="number"
                 min="0"
                 step="0.5"
                 value={settingsState.app.lowBalanceThreshold}
-                onInput={(e) => handleNumberChange("lowBalanceThreshold", e.currentTarget.value)}
+                onInput={(e) =>
+                  handleNumberChange(
+                    "lowBalanceThreshold",
+                    e.currentTarget.value,
+                  )
+                }
               />
             </div>
 
@@ -338,13 +402,17 @@ export const SettingsPanel: Component = () => {
             <div class="settings-group">
               <label class="settings-label">
                 <span class="label-text">Preferred Method</span>
-                <span class="label-hint">Default payment method for MCP tool usage</span>
+                <span class="label-hint">
+                  Default payment method for MCP tool usage
+                </span>
               </label>
               <div class="payment-method-selector">
                 <button
                   type="button"
                   class={`payment-method-option ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "active" : ""}`}
-                  onClick={() => handleStringChange("preferredPaymentMethod", "serenbucks")}
+                  onClick={() =>
+                    handleStringChange("preferredPaymentMethod", "serenbucks")
+                  }
                 >
                   <span class="payment-method-icon">💰</span>
                   <span class="payment-method-label">SerenBucks</span>
@@ -352,9 +420,15 @@ export const SettingsPanel: Component = () => {
                 <button
                   type="button"
                   class={`payment-method-option ${settingsState.app.preferredPaymentMethod === "crypto" ? "active" : ""}`}
-                  onClick={() => handleStringChange("preferredPaymentMethod", "crypto")}
+                  onClick={() =>
+                    handleStringChange("preferredPaymentMethod", "crypto")
+                  }
                   disabled={!cryptoWalletStore.state().isConfigured}
-                  title={!cryptoWalletStore.state().isConfigured ? "Configure crypto wallet first" : ""}
+                  title={
+                    !cryptoWalletStore.state().isConfigured
+                      ? "Configure crypto wallet first"
+                      : ""
+                  }
                 >
                   <span class="payment-method-icon">🔐</span>
                   <span class="payment-method-label">Crypto Wallet</span>
@@ -367,11 +441,18 @@ export const SettingsPanel: Component = () => {
                 <input
                   type="checkbox"
                   checked={settingsState.app.enablePaymentFallback}
-                  onChange={(e) => handleBooleanChange("enablePaymentFallback", e.currentTarget.checked)}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "enablePaymentFallback",
+                      e.currentTarget.checked,
+                    )
+                  }
                 />
                 <span class="checkbox-label">
                   <span class="label-text">Enable Fallback Payment</span>
-                  <span class="label-hint">Use alternate method if preferred has insufficient funds</span>
+                  <span class="label-hint">
+                    Use alternate method if preferred has insufficient funds
+                  </span>
                 </span>
               </label>
             </div>
@@ -383,11 +464,18 @@ export const SettingsPanel: Component = () => {
                 <input
                   type="checkbox"
                   checked={settingsState.app.autoTopUpEnabled}
-                  onChange={(e) => handleBooleanChange("autoTopUpEnabled", e.currentTarget.checked)}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "autoTopUpEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
                 />
                 <span class="checkbox-label">
                   <span class="label-text">Enable Auto Top-Up</span>
-                  <span class="label-hint">Automatically add funds when balance is low</span>
+                  <span class="label-hint">
+                    Automatically add funds when balance is low
+                  </span>
                 </span>
               </label>
             </div>
@@ -396,41 +484,55 @@ export const SettingsPanel: Component = () => {
               <div class="settings-group">
                 <label class="settings-label">
                   <span class="label-text">Top-Up Threshold</span>
-                  <span class="label-hint">Trigger top-up when balance falls below ($)</span>
+                  <span class="label-hint">
+                    Trigger top-up when balance falls below ($)
+                  </span>
                 </label>
                 <input
                   type="number"
                   min="1"
                   step="1"
                   value={settingsState.app.autoTopUpThreshold}
-                  onInput={(e) => handleNumberChange("autoTopUpThreshold", e.currentTarget.value)}
+                  onInput={(e) =>
+                    handleNumberChange(
+                      "autoTopUpThreshold",
+                      e.currentTarget.value,
+                    )
+                  }
                 />
               </div>
 
               <div class="settings-group">
                 <label class="settings-label">
                   <span class="label-text">Top-Up Amount</span>
-                  <span class="label-hint">Amount to add when auto top-up triggers ($)</span>
+                  <span class="label-hint">
+                    Amount to add when auto top-up triggers ($)
+                  </span>
                 </label>
                 <input
                   type="number"
                   min="10"
                   step="5"
                   value={settingsState.app.autoTopUpAmount}
-                  onInput={(e) => handleNumberChange("autoTopUpAmount", e.currentTarget.value)}
+                  onInput={(e) =>
+                    handleNumberChange("autoTopUpAmount", e.currentTarget.value)
+                  }
                 />
               </div>
             </Show>
 
             <h4>Crypto Wallet (USDC Payments)</h4>
             <p class="settings-hint">
-              Configure your crypto wallet for x402 USDC payments to MCP servers.
+              Configure your crypto wallet for x402 USDC payments to MCP
+              servers.
             </p>
 
             <div class="settings-group">
               <label class="settings-label">
                 <span class="label-text">Auto-Approve Limit</span>
-                <span class="label-hint">Auto-approve payments up to this amount (USD)</span>
+                <span class="label-hint">
+                  Auto-approve payments up to this amount (USD)
+                </span>
               </label>
               <input
                 type="number"
@@ -439,7 +541,12 @@ export const SettingsPanel: Component = () => {
                 step="0.01"
                 aria-label="Auto-approve limit in USD"
                 value={settingsState.app.cryptoAutoApproveLimit}
-                onInput={(e) => handleNumberChange("cryptoAutoApproveLimit", e.currentTarget.value)}
+                onInput={(e) =>
+                  handleNumberChange(
+                    "cryptoAutoApproveLimit",
+                    e.currentTarget.value,
+                  )
+                }
               />
             </div>
 
@@ -449,7 +556,9 @@ export const SettingsPanel: Component = () => {
                 <div class="settings-group">
                   <label class="settings-label">
                     <span class="label-text">Private Key</span>
-                    <span class="label-hint">Enter your wallet private key (64 hex characters)</span>
+                    <span class="label-hint">
+                      Enter your wallet private key (64 hex characters)
+                    </span>
                   </label>
                   <div class="crypto-key-input-group">
                     <input
@@ -457,22 +566,41 @@ export const SettingsPanel: Component = () => {
                       placeholder="0x... or 64 hex characters"
                       value={privateKeyInput()}
                       onInput={(e) => setPrivateKeyInput(e.currentTarget.value)}
-                      class={privateKeyInput() && !isValidPrivateKeyFormat(privateKeyInput()) ? "invalid" : ""}
+                      class={
+                        privateKeyInput() &&
+                        !isValidPrivateKeyFormat(privateKeyInput())
+                          ? "invalid"
+                          : ""
+                      }
                     />
                     <button
                       type="button"
                       class="primary"
-                      disabled={!isValidPrivateKeyFormat(privateKeyInput()) || cryptoWalletStore.state().isLoading}
+                      disabled={
+                        !isValidPrivateKeyFormat(privateKeyInput()) ||
+                        cryptoWalletStore.state().isLoading
+                      }
                       onClick={handleSavePrivateKey}
                     >
-                      {cryptoWalletStore.state().isLoading ? "Saving..." : "Save"}
+                      {cryptoWalletStore.state().isLoading
+                        ? "Saving..."
+                        : "Save"}
                     </button>
                   </div>
-                  <Show when={privateKeyInput() && !isValidPrivateKeyFormat(privateKeyInput())}>
-                    <span class="settings-error">Invalid key format. Must be 64 hex characters.</span>
+                  <Show
+                    when={
+                      privateKeyInput() &&
+                      !isValidPrivateKeyFormat(privateKeyInput())
+                    }
+                  >
+                    <span class="settings-error">
+                      Invalid key format. Must be 64 hex characters.
+                    </span>
                   </Show>
                   <Show when={cryptoWalletStore.state().error}>
-                    <span class="settings-error">{cryptoWalletStore.state().error}</span>
+                    <span class="settings-error">
+                      {cryptoWalletStore.state().error}
+                    </span>
                   </Show>
                 </div>
               }
@@ -481,10 +609,14 @@ export const SettingsPanel: Component = () => {
                 <div class="settings-group">
                   <label class="settings-label">
                     <span class="label-text">Wallet Address</span>
-                    <span class="label-hint">Your configured wallet for USDC payments</span>
+                    <span class="label-hint">
+                      Your configured wallet for USDC payments
+                    </span>
                   </label>
                   <div class="crypto-address-display">
-                    <code class="wallet-address">{cryptoWalletStore.state().address}</code>
+                    <code class="wallet-address">
+                      {cryptoWalletStore.state().address}
+                    </code>
                     <button
                       type="button"
                       class="danger-outline"
@@ -498,12 +630,16 @@ export const SettingsPanel: Component = () => {
                 <div class="settings-group">
                   <label class="settings-label">
                     <span class="label-text">USDC Balance (Base)</span>
-                    <span class="label-hint">Your current USDC balance on Base mainnet</span>
+                    <span class="label-hint">
+                      Your current USDC balance on Base mainnet
+                    </span>
                   </label>
                   <div class="crypto-balance-display">
                     <Show
                       when={!cryptoWalletStore.state().balanceLoading}
-                      fallback={<span class="balance-loading">Loading balance...</span>}
+                      fallback={
+                        <span class="balance-loading">Loading balance...</span>
+                      }
                     >
                       <span class="balance-value">
                         {cryptoWalletStore.state().usdcBalance !== null
@@ -537,7 +673,9 @@ export const SettingsPanel: Component = () => {
             <div class="settings-group">
               <label class="settings-label">
                 <span class="label-text">Theme</span>
-                <span class="label-hint">Choose your preferred color scheme</span>
+                <span class="label-hint">
+                  Choose your preferred color scheme
+                </span>
               </label>
               <div class="theme-selector">
                 <For each={["dark", "light", "system"] as const}>
@@ -548,7 +686,11 @@ export const SettingsPanel: Component = () => {
                       onClick={() => handleThemeChange(theme)}
                     >
                       <span class="theme-icon">
-                        {theme === "dark" ? "🌙" : theme === "light" ? "☀️" : "💻"}
+                        {theme === "dark"
+                          ? "🌙"
+                          : theme === "light"
+                            ? "☀️"
+                            : "💻"}
                       </span>
                       <span class="theme-label">
                         {theme.charAt(0).toUpperCase() + theme.slice(1)}
@@ -573,11 +715,18 @@ export const SettingsPanel: Component = () => {
                 <input
                   type="checkbox"
                   checked={settingsState.app.telemetryEnabled}
-                  onChange={(e) => handleBooleanChange("telemetryEnabled", e.currentTarget.checked)}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "telemetryEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
                 />
                 <span class="checkbox-label">
                   <span class="label-text">Enable Telemetry</span>
-                  <span class="label-hint">Help improve Seren by sharing anonymous usage data</span>
+                  <span class="label-hint">
+                    Help improve Seren by sharing anonymous usage data
+                  </span>
                 </span>
               </label>
             </div>
@@ -588,7 +737,8 @@ export const SettingsPanel: Component = () => {
           <section class="settings-section">
             <h3>MCP Servers</h3>
             <p class="settings-description">
-              Manage Model Context Protocol server connections for enhanced AI capabilities.
+              Manage Model Context Protocol server connections for enhanced AI
+              capabilities.
             </p>
 
             <Show
@@ -598,8 +748,8 @@ export const SettingsPanel: Component = () => {
                   <span class="empty-icon">🔌</span>
                   <p>No MCP servers configured</p>
                   <p class="empty-hint">
-                    MCP servers extend AI capabilities with tools like file access,
-                    web browsing, and more.
+                    MCP servers extend AI capabilities with tools like file
+                    access, web browsing, and more.
                   </p>
                 </div>
               }
@@ -607,7 +757,9 @@ export const SettingsPanel: Component = () => {
               <div class="mcp-server-list">
                 <For each={mcpSettings().servers}>
                   {(server) => (
-                    <div class={`mcp-server-item ${server.enabled ? "" : "disabled"}`}>
+                    <div
+                      class={`mcp-server-item ${server.enabled ? "" : "disabled"}`}
+                    >
                       <div class="mcp-server-info">
                         <div class="mcp-server-header">
                           <span class="mcp-server-name">{server.name}</span>
@@ -651,12 +803,22 @@ export const SettingsPanel: Component = () => {
       </main>
 
       <Show when={showResetConfirm()}>
-        <div class="settings-modal-overlay" onClick={() => setShowResetConfirm(false)}>
+        <div
+          class="settings-modal-overlay"
+          onClick={() => setShowResetConfirm(false)}
+        >
           <div class="settings-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Reset All Settings?</h3>
-            <p>This will restore all settings to their default values. This cannot be undone.</p>
+            <p>
+              This will restore all settings to their default values. This
+              cannot be undone.
+            </p>
             <div class="settings-modal-actions">
-              <button type="button" class="secondary" onClick={() => setShowResetConfirm(false)}>
+              <button
+                type="button"
+                class="secondary"
+                onClick={() => setShowResetConfirm(false)}
+              >
                 Cancel
               </button>
               <button type="button" class="danger" onClick={handleResetAll}>
@@ -668,15 +830,29 @@ export const SettingsPanel: Component = () => {
       </Show>
 
       <Show when={showClearConfirm()}>
-        <div class="settings-modal-overlay" onClick={() => setShowClearConfirm(false)}>
+        <div
+          class="settings-modal-overlay"
+          onClick={() => setShowClearConfirm(false)}
+        >
           <div class="settings-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Remove Crypto Wallet?</h3>
-            <p>This will delete your private key from this device. You will need to re-enter it to make USDC payments.</p>
+            <p>
+              This will delete your private key from this device. You will need
+              to re-enter it to make USDC payments.
+            </p>
             <div class="settings-modal-actions">
-              <button type="button" class="secondary" onClick={() => setShowClearConfirm(false)}>
+              <button
+                type="button"
+                class="secondary"
+                onClick={() => setShowClearConfirm(false)}
+              >
                 Cancel
               </button>
-              <button type="button" class="danger" onClick={handleClearCryptoWallet}>
+              <button
+                type="button"
+                class="danger"
+                onClick={handleClearCryptoWallet}
+              >
                 Remove Wallet
               </button>
             </div>

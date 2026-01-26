@@ -2,19 +2,19 @@
 // ABOUTME: Stores conversations, messages, and provides persistence via Tauri.
 
 import { createStore } from "solid-js/store";
-import type { Message } from "@/services/chat";
 import type { ProviderId } from "@/lib/providers/types";
 import {
-  createConversation as createConversationDb,
-  getConversations as getConversationsDb,
-  updateConversation as updateConversationDb,
   archiveConversation as archiveConversationDb,
-  saveMessage as saveMessageDb,
-  getMessages as getMessagesDb,
-  clearConversationHistory as clearConversationHistoryDb,
   clearAllHistory as clearAllHistoryDb,
+  clearConversationHistory as clearConversationHistoryDb,
+  createConversation as createConversationDb,
   type Conversation as DbConversation,
+  getConversations as getConversationsDb,
+  getMessages as getMessagesDb,
+  saveMessage as saveMessageDb,
+  updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
+import type { Message } from "@/services/chat";
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4";
 const MAX_MESSAGES_PER_CONVERSATION = 100;
@@ -31,8 +31,21 @@ export interface Conversation {
   isArchived: boolean;
 }
 
-type MessagePatch = Partial<Omit<Message, "id" | "timestamp" | "role" | "model" | "content">> &
-  Partial<Pick<Message, "content" | "model" | "timestamp" | "role" | "error" | "status" | "attemptCount">>;
+type MessagePatch = Partial<
+  Omit<Message, "id" | "timestamp" | "role" | "model" | "content">
+> &
+  Partial<
+    Pick<
+      Message,
+      | "content"
+      | "model"
+      | "timestamp"
+      | "role"
+      | "error"
+      | "status"
+      | "attemptCount"
+    >
+  >;
 
 interface ChatState {
   conversations: Conversation[];
@@ -78,7 +91,7 @@ function generateTitle(content: string): string {
   // Truncate at word boundary
   const truncated = trimmed.slice(0, maxLen);
   const lastSpace = truncated.lastIndexOf(" ");
-  return (lastSpace > 10 ? truncated.slice(0, lastSpace) : truncated) + "…";
+  return `${lastSpace > 10 ? truncated.slice(0, lastSpace) : truncated}…`;
 }
 
 export const chatStore = {
@@ -96,7 +109,10 @@ export const chatStore = {
 
   get activeConversation(): Conversation | null {
     if (!state.activeConversationId) return null;
-    return state.conversations.find((c) => c.id === state.activeConversationId) ?? null;
+    return (
+      state.conversations.find((c) => c.id === state.activeConversationId) ??
+      null
+    );
   },
 
   /**
@@ -184,12 +200,14 @@ export const chatStore = {
     }
 
     setState("conversations", (convos) =>
-      convos.map((c) => (c.id === id ? { ...c, isArchived: true } : c))
+      convos.map((c) => (c.id === id ? { ...c, isArchived: true } : c)),
     );
 
     // If archiving the active conversation, switch to another
     if (state.activeConversationId === id) {
-      const remaining = state.conversations.filter((c) => c.id !== id && !c.isArchived);
+      const remaining = state.conversations.filter(
+        (c) => c.id !== id && !c.isArchived,
+      );
       if (remaining.length > 0) {
         setState("activeConversationId", remaining[0].id);
       } else {
@@ -210,14 +228,18 @@ export const chatStore = {
     }
 
     setState("conversations", (convos) =>
-      convos.map((c) => (c.id === id ? { ...c, title } : c))
+      convos.map((c) => (c.id === id ? { ...c, title } : c)),
     );
   },
 
   /**
    * Update conversation's selected model.
    */
-  async updateConversationModel(id: string, model: string, provider?: ProviderId) {
+  async updateConversationModel(
+    id: string,
+    model: string,
+    provider?: ProviderId,
+  ) {
     try {
       await updateConversationDb(id, undefined, model, provider);
     } catch (error) {
@@ -226,8 +248,14 @@ export const chatStore = {
 
     setState("conversations", (convos) =>
       convos.map((c) =>
-        c.id === id ? { ...c, selectedModel: model, selectedProvider: provider ?? c.selectedProvider } : c
-      )
+        c.id === id
+          ? {
+              ...c,
+              selectedModel: model,
+              selectedProvider: provider ?? c.selectedProvider,
+            }
+          : c,
+      ),
     );
   },
 
@@ -249,7 +277,11 @@ export const chatStore = {
 
     // Auto-generate title from first user message
     const conversation = this.activeConversation;
-    if (conversation && message.role === "user" && conversation.title === "New Chat") {
+    if (
+      conversation &&
+      message.role === "user" &&
+      conversation.title === "New Chat"
+    ) {
       const title = generateTitle(message.content);
       this.updateConversationTitle(conversationId, title);
     }
@@ -260,12 +292,16 @@ export const chatStore = {
     if (!conversationId) return;
 
     setState("messages", conversationId, (msgs = []) =>
-      msgs.map((msg) => (msg.id === id ? { ...msg, ...patch } : msg))
+      msgs.map((msg) => (msg.id === id ? { ...msg, ...patch } : msg)),
     );
   },
 
   setMessages(conversationId: string, messages: Message[]) {
-    setState("messages", conversationId, messages.slice(-MAX_MESSAGES_PER_CONVERSATION));
+    setState(
+      "messages",
+      conversationId,
+      messages.slice(-MAX_MESSAGES_PER_CONVERSATION),
+    );
   },
 
   clearMessages() {
@@ -315,7 +351,7 @@ export const chatStore = {
         message.role,
         message.content,
         message.model ?? null,
-        message.timestamp
+        message.timestamp,
       );
     } catch (error) {
       console.warn("Unable to persist message", error);
@@ -336,7 +372,10 @@ export const chatStore = {
       // Load messages for each conversation
       for (const convo of conversations) {
         try {
-          const dbMessages = await getMessagesDb(convo.id, MAX_MESSAGES_PER_CONVERSATION);
+          const dbMessages = await getMessagesDb(
+            convo.id,
+            MAX_MESSAGES_PER_CONVERSATION,
+          );
           const messages: Message[] = dbMessages.map((m) => ({
             id: m.id,
             role: m.role as "user" | "assistant",
@@ -347,7 +386,10 @@ export const chatStore = {
           }));
           setState("messages", convo.id, messages);
         } catch (error) {
-          console.warn(`Failed to load messages for conversation ${convo.id}`, error);
+          console.warn(
+            `Failed to load messages for conversation ${convo.id}`,
+            error,
+          );
         }
       }
 

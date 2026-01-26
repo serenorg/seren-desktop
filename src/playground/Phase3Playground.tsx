@@ -1,28 +1,28 @@
-import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { FileTree } from "@/components/sidebar/FileTree";
+import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { FileTabs } from "@/components/editor/FileTabs";
 import { MonacoEditor } from "@/components/editor/MonacoEditor";
-import {
-  setRootPath,
-  setNodes,
-  setSelectedPath,
-  type FileNode,
-} from "@/stores/fileTree";
-import {
-  openTab,
-  tabsState,
-  updateTabContent,
-  setTabDirty,
-  getActiveTab,
-  closeAllTabs,
-} from "@/stores/tabs";
+import { FileTree } from "@/components/sidebar/FileTree";
+import type { CompletionContext, CompletionResult } from "@/lib/completions";
 import {
   initCompletionService,
-  setApiHandler,
   registerInlineCompletionProvider,
+  setApiHandler,
 } from "@/lib/completions";
 import { initMonaco } from "@/lib/editor";
-import type { CompletionContext, CompletionResult } from "@/lib/completions";
+import {
+  type FileNode,
+  setNodes,
+  setRootPath,
+  setSelectedPath,
+} from "@/stores/fileTree";
+import {
+  closeAllTabs,
+  getActiveTab,
+  openTab,
+  setTabDirty,
+  tabsState,
+  updateTabContent,
+} from "@/stores/tabs";
 import "./Phase3Playground.css";
 
 const SAMPLE_FILES: Record<string, string> = {
@@ -147,17 +147,26 @@ export const Phase3Playground = () => {
 
     // expose minimal test API for Playwright helpers
     if (typeof window !== "undefined") {
-      (window as typeof window & { __phase3TestAPI?: unknown }).__phase3TestAPI = {
+      (
+        window as typeof window & { __phase3TestAPI?: unknown }
+      ).__phase3TestAPI = {
         openFile: handleFileSelect,
         getActiveFile: () => getActiveTab()?.filePath ?? null,
-        getDirtyTabs: () => tabsState.tabs.filter((tab) => tab.isDirty).map((tab) => tab.filePath),
+        getDirtyTabs: () =>
+          tabsState.tabs
+            .filter((tab) => tab.isDirty)
+            .map((tab) => tab.filePath),
       };
     }
   });
 
   onCleanup(() => {
-    if (typeof window !== "undefined" && (window as typeof window & { __phase3TestAPI?: unknown }).__phase3TestAPI) {
-      delete (window as typeof window & { __phase3TestAPI?: unknown }).__phase3TestAPI;
+    if (
+      typeof window !== "undefined" &&
+      (window as typeof window & { __phase3TestAPI?: unknown }).__phase3TestAPI
+    ) {
+      delete (window as typeof window & { __phase3TestAPI?: unknown })
+        .__phase3TestAPI;
     }
   });
 
@@ -206,7 +215,9 @@ export const Phase3Playground = () => {
         <div class="phase3-editor-surface" data-testid="phase3-editor-pane">
           <Show
             when={activeFilePath()}
-            fallback={<div class="phase3-editor-empty">Select a file from the tree</div>}
+            fallback={
+              <div class="phase3-editor-empty">Select a file from the tree</div>
+            }
           >
             <div class="phase3-editor-header">
               <span data-testid="active-file-path">{activeFilePath()}</span>
@@ -216,7 +227,9 @@ export const Phase3Playground = () => {
                 filePath={activeFilePath() ?? undefined}
                 value={editorContent()}
                 onChange={handleEditorChange}
-                language={activeFilePath()?.endsWith(".md") ? "markdown" : undefined}
+                language={
+                  activeFilePath()?.endsWith(".md") ? "markdown" : undefined
+                }
               />
             </div>
           </Show>

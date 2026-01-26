@@ -1,19 +1,19 @@
 // ABOUTME: Deposit modal for adding SerenBucks via Stripe or crypto.
 // ABOUTME: Shows preset amounts and supports multiple payment methods.
 
-import { Component, createSignal, For, Show } from "solid-js";
+import { type Component, createSignal, For, Show } from "solid-js";
 import {
-  walletState,
-  walletStore,
-  refreshBalance,
-} from "@/stores/wallet.store";
-import {
+  type CryptoDepositInfo,
+  initiateCryptoDeposit,
   initiateTopUp,
   openCheckout,
-  initiateCryptoDeposit,
-  type CryptoDepositInfo,
 } from "@/services/wallet";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
+import {
+  refreshBalance,
+  walletState,
+  walletStore,
+} from "@/stores/wallet.store";
 import "./DepositModal.css";
 
 interface DepositModalProps {
@@ -42,7 +42,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
   const effectiveAmount = () => {
     if (isCustom()) {
       const parsed = parseFloat(customAmount());
-      return isNaN(parsed) ? 0 : parsed;
+      return Number.isNaN(parsed) ? 0 : parsed;
     }
     return selectedAmount() ?? 0;
   };

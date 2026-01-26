@@ -16,13 +16,19 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-    Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+    Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   font-size: 13px;
   line-height: 1.5;
   color: #ccc;
   background-color: #0b1220;
-  background-image: radial-gradient(circle at top, #1f2937, #0f172a 40%, #020617 100%);
+  background-image: radial-gradient(
+    circle at top,
+    #1f2937,
+    #0f172a 40%,
+    #020617 100%
+  );
 }
 
 button {

@@ -1,12 +1,12 @@
 // ABOUTME: Modal dialog for approving x402 USDC payments to MCP servers.
 // ABOUTME: Shows payment method choices (SerenBucks or crypto) with balances.
 
-import { createSignal, Show, For, type Component } from "solid-js";
+import { type Component, createSignal, For, Show } from "solid-js";
+import { hasX402Option, isInsufficientCredit } from "@/lib/x402";
 import { x402Service } from "@/services/x402";
-import { walletState } from "@/stores/wallet.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { settingsState } from "@/stores/settings.store";
-import { hasX402Option, isInsufficientCredit } from "@/lib/x402";
+import { walletState } from "@/stores/wallet.store";
 import "./X402PaymentApproval.css";
 
 type PaymentMethodChoice = "serenbucks" | "crypto";
@@ -17,7 +17,7 @@ export const X402PaymentApproval: Component = () => {
 
   // Selected payment method - defaults to user preference
   const [selectedMethod, setSelectedMethod] = createSignal<PaymentMethodChoice>(
-    settingsState.app.preferredPaymentMethod
+    settingsState.app.preferredPaymentMethod,
   );
 
   // Check which payment methods are available
@@ -104,7 +104,9 @@ export const X402PaymentApproval: Component = () => {
         id: "crypto",
         label: "Crypto Wallet",
         icon: "🔐",
-        balance: configured ? cryptoWalletStore.state().address?.slice(0, 10) + "..." : "Not configured",
+        balance: configured
+          ? `${cryptoWalletStore.state().address?.slice(0, 10)}...`
+          : "Not configured",
         available: configured,
         reason: configured ? undefined : "Wallet not configured",
       });
@@ -119,7 +121,9 @@ export const X402PaymentApproval: Component = () => {
     const preferred = settingsState.app.preferredPaymentMethod;
 
     // Try preferred method first
-    const preferredMethod = methods.find((m) => m.id === preferred && m.available);
+    const preferredMethod = methods.find(
+      (m) => m.id === preferred && m.available,
+    );
     if (preferredMethod) {
       setSelectedMethod(preferred);
       return;
@@ -157,13 +161,16 @@ export const X402PaymentApproval: Component = () => {
 
               <div class="x402-modal-body">
                 <p class="x402-description">
-                  The tool <strong>{p().toolName}</strong> on <strong>{p().serverName}</strong> requires payment to proceed.
+                  The tool <strong>{p().toolName}</strong> on{" "}
+                  <strong>{p().serverName}</strong> requires payment to proceed.
                 </p>
 
                 <div class="x402-details">
                   <div class="x402-detail-row">
                     <span class="x402-label">Amount</span>
-                    <span class="x402-value x402-amount">{p().amountFormatted}</span>
+                    <span class="x402-value x402-amount">
+                      {p().amountFormatted}
+                    </span>
                   </div>
                   <Show when={selectedMethod() === "crypto"}>
                     <div class="x402-detail-row">
@@ -172,7 +179,10 @@ export const X402PaymentApproval: Component = () => {
                     </div>
                     <div class="x402-detail-row">
                       <span class="x402-label">Recipient</span>
-                      <span class="x402-value x402-address" title={p().recipient}>
+                      <span
+                        class="x402-value x402-address"
+                        title={p().recipient}
+                      >
                         {formatAddress(p().recipient)}
                       </span>
                     </div>
@@ -188,17 +198,25 @@ export const X402PaymentApproval: Component = () => {
                           <button
                             type="button"
                             class={`x402-method-option ${selectedMethod() === method.id ? "selected" : ""} ${!method.available ? "disabled" : ""}`}
-                            onClick={() => method.available && setSelectedMethod(method.id)}
+                            onClick={() =>
+                              method.available && setSelectedMethod(method.id)
+                            }
                             disabled={!method.available}
                             title={method.reason}
                           >
                             <span class="x402-method-icon">{method.icon}</span>
                             <div class="x402-method-info">
-                              <span class="x402-method-name">{method.label}</span>
-                              <span class="x402-method-balance">{method.balance}</span>
+                              <span class="x402-method-name">
+                                {method.label}
+                              </span>
+                              <span class="x402-method-balance">
+                                {method.balance}
+                              </span>
                             </div>
                             <Show when={!method.available}>
-                              <span class="x402-method-unavailable">{method.reason}</span>
+                              <span class="x402-method-unavailable">
+                                {method.reason}
+                              </span>
                             </Show>
                           </button>
                         )}
@@ -209,7 +227,8 @@ export const X402PaymentApproval: Component = () => {
 
                 <Show when={selectedMethod() === "crypto"}>
                   <p class="x402-warning">
-                    This payment will be signed with your crypto wallet and submitted to {p().chainName}.
+                    This payment will be signed with your crypto wallet and
+                    submitted to {p().chainName}.
                   </p>
                 </Show>
 
@@ -233,9 +252,16 @@ export const X402PaymentApproval: Component = () => {
                   type="button"
                   class="x402-btn x402-btn-primary"
                   onClick={handleApprove}
-                  disabled={isProcessing() || !availableMethods().some((m) => m.id === selectedMethod() && m.available)}
+                  disabled={
+                    isProcessing() ||
+                    !availableMethods().some(
+                      (m) => m.id === selectedMethod() && m.available,
+                    )
+                  }
                 >
-                  {isProcessing() ? "Processing..." : `Pay with ${selectedMethod() === "serenbucks" ? "SerenBucks" : "Crypto"}`}
+                  {isProcessing()
+                    ? "Processing..."
+                    : `Pay with ${selectedMethod() === "serenbucks" ? "SerenBucks" : "Crypto"}`}
                 </button>
               </div>
             </div>

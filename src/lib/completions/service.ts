@@ -83,7 +83,7 @@ export function clearCache(): void {
 
 // API call handler (to be set by consumer)
 type ApiCompletionHandler = (
-  context: CompletionContext
+  context: CompletionContext,
 ) => Promise<CompletionResult[]>;
 
 let apiHandler: ApiCompletionHandler | null = null;
@@ -99,7 +99,7 @@ export function setApiHandler(handler: ApiCompletionHandler): void {
  * The main completion handler with debouncing and caching.
  */
 async function handleCompletion(
-  context: CompletionContext
+  context: CompletionContext,
 ): Promise<CompletionResult[]> {
   // Check if completions are enabled
   if (!isEnabled()) {

@@ -1,17 +1,20 @@
 // ABOUTME: File tree component for displaying folder structure in the sidebar.
 // ABOUTME: Supports right-click context menu with file operations.
 
-import { For, Show, createMemo, createSignal, type Component } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import {
+  ContextMenu,
+  type ContextMenuItem,
+} from "@/components/common/ContextMenu";
+import {
+  type FileNode,
   fileTreeState,
   isExpanded,
-  toggleExpanded,
-  setSelectedPath,
   refreshDirectory,
-  type FileNode,
+  setSelectedPath,
+  toggleExpanded,
 } from "@/stores/fileTree";
-import { ContextMenu, type ContextMenuItem } from "@/components/common/ContextMenu";
 import "./FileTree.css";
 
 interface FileTreeProps {
@@ -26,8 +29,13 @@ interface ContextMenuState {
 }
 
 export const FileTree: Component<FileTreeProps> = (props) => {
-  const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null);
-  const [renameState, setRenameState] = createSignal<{ path: string; name: string } | null>(null);
+  const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(
+    null,
+  );
+  const [renameState, setRenameState] = createSignal<{
+    path: string;
+    name: string;
+  } | null>(null);
 
   const folderName = createMemo(() => {
     if (!fileTreeState.rootPath) return null;
@@ -89,7 +97,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
   // Delete file or directory
   const handleDelete = async (node: FileNode) => {
     const confirmDelete = window.confirm(
-      `Delete "${node.name}"?${node.isDirectory ? " This will delete all contents." : ""}`
+      `Delete "${node.name}"?${node.isDirectory ? " This will delete all contents." : ""}`,
     );
     if (!confirmDelete) return;
 
@@ -215,10 +223,10 @@ interface FileTreeNodeProps {
 const FileTreeNode: Component<FileTreeNodeProps> = (props) => {
   const expanded = createMemo(() => isExpanded(props.node.path));
   const isSelected = createMemo(
-    () => fileTreeState.selectedPath === props.node.path
+    () => fileTreeState.selectedPath === props.node.path,
   );
   const isRenaming = createMemo(
-    () => props.renameState?.path === props.node.path
+    () => props.renameState?.path === props.node.path,
   );
 
   let renameInputRef: HTMLInputElement | undefined;

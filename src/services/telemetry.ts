@@ -3,8 +3,8 @@
 
 import { API_BASE } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { getErrorKey, RateLimiter } from "@/lib/rate-limiter";
 import { scrubSensitive } from "@/lib/scrub-sensitive";
-import { RateLimiter, getErrorKey } from "@/lib/rate-limiter";
 import { getToken } from "@/lib/tauri-bridge";
 
 export interface ErrorReport {
@@ -125,7 +125,7 @@ class TelemetryService {
         "Content-Type": "application/json",
       };
       if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
+        headers.Authorization = `Bearer ${token}`;
       }
 
       await appFetch(`${API_BASE}/diagnostics/errors`, {

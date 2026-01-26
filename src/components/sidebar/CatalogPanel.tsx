@@ -1,8 +1,19 @@
 // ABOUTME: Publisher catalog panel for browsing Seren publishers.
 // ABOUTME: Provides search, filtering, and navigation to publisher details.
 
-import { Component, For, createSignal, createResource, Show } from "solid-js";
-import { catalog, getPricingDisplay, type Publisher, type PublisherType } from "@/services/catalog";
+import {
+  type Component,
+  createResource,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
+import {
+  catalog,
+  getPricingDisplay,
+  type Publisher,
+  type PublisherType,
+} from "@/services/catalog";
 import "./CatalogPanel.css";
 
 interface CatalogPanelProps {
@@ -11,7 +22,9 @@ interface CatalogPanelProps {
 
 export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
   const [search, setSearch] = createSignal("");
-  const [selectedType, setSelectedType] = createSignal<PublisherType | null>(null);
+  const [selectedType, setSelectedType] = createSignal<PublisherType | null>(
+    null,
+  );
 
   const [publishers, { refetch }] = createResource(async () => {
     try {
@@ -139,7 +152,9 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
                 </div>
                 <p class="publisher-description">{publisher.description}</p>
                 <div class="publisher-meta">
-                  <span class="publisher-category">{publisher.publisher_type}</span>
+                  <span class="publisher-category">
+                    {publisher.publisher_type}
+                  </span>
                   <span class="publisher-price">
                     {getPricingDisplay(publisher)}
                   </span>

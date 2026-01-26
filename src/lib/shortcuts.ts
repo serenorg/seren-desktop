@@ -34,7 +34,9 @@ const SHORTCUTS: ShortcutDefinition[] = [
 ];
 
 // Platform detection
-const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+const isMac =
+  typeof navigator !== "undefined" &&
+  /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
 class ShortcutManager {
   private handlers: Map<ShortcutAction, () => void> = new Map();
@@ -116,10 +118,14 @@ class ShortcutManager {
     }
   }
 
-  private matchesShortcut(e: KeyboardEvent, shortcut: ShortcutDefinition): boolean {
+  private matchesShortcut(
+    e: KeyboardEvent,
+    shortcut: ShortcutDefinition,
+  ): boolean {
     // Key match (case-insensitive for letters)
     const keyMatch =
-      e.key.toLowerCase() === shortcut.key.toLowerCase() || e.key === shortcut.key;
+      e.key.toLowerCase() === shortcut.key.toLowerCase() ||
+      e.key === shortcut.key;
 
     if (!keyMatch) return false;
 

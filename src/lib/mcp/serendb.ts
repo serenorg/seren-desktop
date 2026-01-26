@@ -1,8 +1,12 @@
 // ABOUTME: SerenDB MCP integration for built-in gateway access.
 // ABOUTME: Auto-adds SerenDB server on sign-in and removes on sign-out.
 
+import {
+  addMcpServer,
+  mcpSettings,
+  removeMcpServer,
+} from "@/stores/settings.store";
 import type { McpBuiltinServerConfig } from "./types";
-import { mcpSettings, addMcpServer, removeMcpServer } from "@/stores/settings.store";
 
 export const SERENDB_SERVER_NAME = "SerenDB";
 export const SERENDB_BUILTIN_ID = "serendb";
@@ -24,7 +28,9 @@ export const serenDbServerConfig: McpBuiltinServerConfig = {
  */
 export function isSerenDbConfigured(): boolean {
   return mcpSettings().servers.some(
-    (s) => s.name === SERENDB_SERVER_NAME || (s.type === "builtin" && s.builtinId === SERENDB_BUILTIN_ID)
+    (s) =>
+      s.name === SERENDB_SERVER_NAME ||
+      (s.type === "builtin" && s.builtinId === SERENDB_BUILTIN_ID),
   );
 }
 

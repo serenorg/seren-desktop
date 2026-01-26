@@ -1,17 +1,17 @@
 // ABOUTME: UI panel for managing MCP server configurations.
 // ABOUTME: Allows adding, removing, enabling/disabling MCP servers.
 
-import { createSignal, For, Show, type Component } from "solid-js";
-import type { McpServerConfig, McpLocalServerConfig } from "@/lib/mcp/types";
-import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
+import { type Component, createSignal, For, Show } from "solid-js";
+import { mcpClient } from "@/lib/mcp/client";
+import type { McpLocalServerConfig, McpServerConfig } from "@/lib/mcp/types";
+import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
+import { authStore } from "@/stores/auth.store";
 import {
-  mcpSettings,
   addMcpServer,
+  mcpSettings,
   removeMcpServer,
   toggleMcpServer,
 } from "@/stores/settings.store";
-import { mcpClient } from "@/lib/mcp/client";
-import { authStore } from "@/stores/auth.store";
 import "./McpServersPanel.css";
 
 export const McpServersPanel: Component = () => {
@@ -102,7 +102,12 @@ export const McpServersPanel: Component = () => {
     setError(null);
 
     try {
-      await mcpClient.connect(server.name, server.command, server.args, server.env);
+      await mcpClient.connect(
+        server.name,
+        server.command,
+        server.args,
+        server.env,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to connect");
     } finally {
@@ -132,10 +137,7 @@ export const McpServersPanel: Component = () => {
     <div class="mcp-servers-panel">
       <div class="panel-header">
         <h3>MCP Servers</h3>
-        <button
-          class="btn-add"
-          onClick={() => setShowAddForm(!showAddForm())}
-        >
+        <button class="btn-add" onClick={() => setShowAddForm(!showAddForm())}>
           {showAddForm() ? "Cancel" : "Add Server"}
         </button>
       </div>

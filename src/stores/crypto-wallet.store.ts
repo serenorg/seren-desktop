@@ -1,12 +1,12 @@
 // ABOUTME: Store for managing crypto wallet state for x402 USDC payments.
 // ABOUTME: Handles wallet address, configuration status, and key operations via Tauri IPC.
 
-import { createSignal, createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import {
-  storeCryptoPrivateKey,
-  getCryptoWalletAddress,
   clearCryptoWallet,
   getCryptoUsdcBalance,
+  getCryptoWalletAddress,
+  storeCryptoPrivateKey,
 } from "@/lib/tauri-bridge";
 
 interface CryptoWalletState {
@@ -95,7 +95,8 @@ function createCryptoWalletStore() {
       fetchBalance();
       return address;
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to store key";
+      const errorMsg =
+        err instanceof Error ? err.message : "Failed to store key";
       setState((prev) => ({
         ...prev,
         isLoading: false,

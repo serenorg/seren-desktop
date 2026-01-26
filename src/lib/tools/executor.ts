@@ -52,7 +52,9 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         const path = args.path as string;
         validatePath(path);
         const exists = await invoke<boolean>("path_exists", { path });
-        result = exists ? `Path exists: ${path}` : `Path does not exist: ${path}`;
+        result = exists
+          ? `Path exists: ${path}`
+          : `Path does not exist: ${path}`;
         break;
       }
 
@@ -70,7 +72,8 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
 
     return {
       tool_call_id: toolCall.id,
-      content: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+      content:
+        typeof result === "string" ? result : JSON.stringify(result, null, 2),
       is_error: false,
     };
   } catch (error) {
@@ -86,7 +89,9 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
 /**
  * Execute multiple tool calls in parallel.
  */
-export async function executeTools(toolCalls: ToolCall[]): Promise<ToolResult[]> {
+export async function executeTools(
+  toolCalls: ToolCall[],
+): Promise<ToolResult[]> {
   return Promise.all(toolCalls.map(executeTool));
 }
 
@@ -108,7 +113,9 @@ function validatePath(path: string): void {
   // The Tauri sandbox should handle actual security
   const normalized = path.replace(/\\/g, "/");
   if (normalized.includes("/../") || normalized.startsWith("../")) {
-    console.warn(`[Tool Executor] Path contains parent directory traversal: ${path}`);
+    console.warn(
+      `[Tool Executor] Path contains parent directory traversal: ${path}`,
+    );
   }
 }
 

@@ -1,7 +1,7 @@
 // ABOUTME: Panel for browsing and reading MCP resources.
 // ABOUTME: Shows available resources across connected servers with content preview.
 
-import { createSignal, For, Show, type Component } from "solid-js";
+import { type Component, createSignal, For, Show } from "solid-js";
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpResource } from "@/lib/mcp/types";
 import "./McpResourcesPanel.css";
@@ -19,7 +19,8 @@ export const McpResourcesPanel: Component = () => {
     serverName: string;
     resource: McpResource;
   } | null>(null);
-  const [resourceContent, setResourceContent] = createSignal<ResourceContent | null>(null);
+  const [resourceContent, setResourceContent] =
+    createSignal<ResourceContent | null>(null);
   const [searchQuery, setSearchQuery] = createSignal("");
 
   const resources = () => mcpClient.getAllResources();
@@ -31,11 +32,14 @@ export const McpResourcesPanel: Component = () => {
       ({ resource }) =>
         resource.name.toLowerCase().includes(query) ||
         resource.uri.toLowerCase().includes(query) ||
-        (resource.description?.toLowerCase().includes(query) ?? false)
+        (resource.description?.toLowerCase().includes(query) ?? false),
     );
   };
 
-  async function selectResource(serverName: string, resource: McpResource): Promise<void> {
+  async function selectResource(
+    serverName: string,
+    resource: McpResource,
+  ): Promise<void> {
     setSelectedResource({ serverName, resource });
     setResourceContent({
       serverName,
@@ -123,7 +127,8 @@ export const McpResourcesPanel: Component = () => {
                 const isSelected = () => {
                   const sel = selectedResource();
                   return (
-                    sel?.serverName === serverName && sel?.resource.uri === resource.uri
+                    sel?.serverName === serverName &&
+                    sel?.resource.uri === resource.uri
                   );
                 };
 
@@ -133,7 +138,9 @@ export const McpResourcesPanel: Component = () => {
                     classList={{ selected: isSelected() }}
                     onClick={() => selectResource(serverName, resource)}
                   >
-                    <span class="resource-icon">{getMimeIcon(resource.mimeType)}</span>
+                    <span class="resource-icon">
+                      {getMimeIcon(resource.mimeType)}
+                    </span>
                     <div class="resource-info">
                       <span class="resource-name">{resource.name}</span>
                       <span class="resource-uri">{resource.uri}</span>

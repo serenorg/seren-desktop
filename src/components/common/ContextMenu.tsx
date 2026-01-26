@@ -1,7 +1,14 @@
 // ABOUTME: Reusable context menu component for right-click actions.
 // ABOUTME: Renders a menu at a specified position with customizable menu items.
 
-import { createSignal, For, Show, onCleanup, createEffect, type Component } from "solid-js";
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+} from "solid-js";
 import "./ContextMenu.css";
 
 export interface ContextMenuItem {

@@ -2,8 +2,8 @@
 // ABOUTME: Persists settings to Tauri store for cross-session persistence.
 
 import { createStore } from "solid-js/store";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
 import type { McpServerConfig, McpSettings } from "@/lib/mcp/types";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 const SETTINGS_STORE = "settings.json";
 const MCP_SETTINGS_KEY = "mcp";
@@ -14,7 +14,9 @@ const BROWSER_MCP_KEY = "seren_mcp_settings";
 /**
  * Get invoke function only when in Tauri runtime.
  */
-async function getInvoke(): Promise<typeof import("@tauri-apps/api/core").invoke | null> {
+async function getInvoke(): Promise<
+  typeof import("@tauri-apps/api/core").invoke | null
+> {
   if (!isTauriRuntime()) {
     return null;
   }
@@ -92,7 +94,7 @@ const DEFAULT_SETTINGS: Settings = {
   autoTopUpThreshold: 5.0,
   autoTopUpAmount: 25.0,
   // Crypto wallet
-  cryptoAutoApproveLimit: 0.10,
+  cryptoAutoApproveLimit: 0.1,
   // Payment method
   preferredPaymentMethod: "serenbucks",
   enablePaymentFallback: true,
@@ -297,7 +299,7 @@ async function saveMcpSettings(): Promise<void> {
  * Update MCP settings and persist.
  */
 async function updateMcpSettings(
-  updater: (prev: McpSettings) => McpSettings
+  updater: (prev: McpSettings) => McpSettings,
 ): Promise<void> {
   const updated = updater(settingsState.mcp);
   setSettingsState("mcp", updated);
@@ -329,12 +331,12 @@ async function removeMcpServer(name: string): Promise<void> {
  */
 async function updateMcpServer(
   name: string,
-  updates: Partial<Omit<McpServerConfig, "type">>
+  updates: Partial<Omit<McpServerConfig, "type">>,
 ): Promise<void> {
   await updateMcpSettings((prev) => ({
     ...prev,
     servers: prev.servers.map((s) =>
-      s.name === name ? ({ ...s, ...updates } as McpServerConfig) : s
+      s.name === name ? ({ ...s, ...updates } as McpServerConfig) : s,
     ),
   }));
 }
@@ -346,7 +348,7 @@ async function toggleMcpServer(name: string): Promise<void> {
   await updateMcpSettings((prev) => ({
     ...prev,
     servers: prev.servers.map((s) =>
-      s.name === name ? { ...s, enabled: !s.enabled } : s
+      s.name === name ? { ...s, enabled: !s.enabled } : s,
     ),
   }));
 }

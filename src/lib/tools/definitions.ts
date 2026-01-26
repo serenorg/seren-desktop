@@ -12,7 +12,8 @@ export const FILE_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "read_file",
-      description: "Read the contents of a file at the given path. Returns the file contents as text.",
+      description:
+        "Read the contents of a file at the given path. Returns the file contents as text.",
       parameters: {
         type: "object",
         properties: {
@@ -29,13 +30,15 @@ export const FILE_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "list_directory",
-      description: "List all files and subdirectories in a directory. Returns name, path, and whether each entry is a directory.",
+      description:
+        "List all files and subdirectories in a directory. Returns name, path, and whether each entry is a directory.",
       parameters: {
         type: "object",
         properties: {
           path: {
             type: "string",
-            description: "The absolute or relative path to the directory to list",
+            description:
+              "The absolute or relative path to the directory to list",
           },
         },
         required: ["path"],
@@ -46,7 +49,8 @@ export const FILE_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "write_file",
-      description: "Write content to a file, creating it if it doesn't exist or overwriting if it does. Use with caution.",
+      description:
+        "Write content to a file, creating it if it doesn't exist or overwriting if it does. Use with caution.",
       parameters: {
         type: "object",
         properties: {
@@ -84,7 +88,8 @@ export const FILE_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "create_directory",
-      description: "Create a new directory at the given path, including any parent directories that don't exist.",
+      description:
+        "Create a new directory at the given path, including any parent directories that don't exist.",
       parameters: {
         type: "object",
         properties: {

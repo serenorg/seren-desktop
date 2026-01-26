@@ -1,11 +1,17 @@
 // ABOUTME: Application header with horizontal navigation, balance, and user actions.
 // ABOUTME: Provides navigation between Chat, Editor, Catalog, Settings with Cursor-like styling.
 
-import { Component, For, Show } from "solid-js";
+import { type Component, For, Show } from "solid-js";
 import { BalanceDisplay } from "./BalanceDisplay";
 import "./Header.css";
 
-export type Panel = "chat" | "editor" | "catalog" | "database" | "settings" | "account";
+export type Panel =
+  | "chat"
+  | "editor"
+  | "catalog"
+  | "database"
+  | "settings"
+  | "account";
 
 interface NavItem {
   id: Panel;
@@ -69,7 +75,11 @@ export const Header: Component<HeaderProps> = (props) => {
         >
           <BalanceDisplay />
           {props.onLogout && (
-            <button type="button" class="header-logout" onClick={props.onLogout}>
+            <button
+              type="button"
+              class="header-logout"
+              onClick={props.onLogout}
+            >
               Logout
             </button>
           )}

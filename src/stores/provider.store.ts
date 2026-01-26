@@ -2,17 +2,20 @@
 // ABOUTME: Persists provider configuration to Tauri encrypted store.
 
 import { createStore } from "solid-js/store";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
+import type { ProviderId, ProviderModel } from "@/lib/providers/types";
 import {
-  storeProviderKey,
-  getProviderKey,
+  CONFIGURABLE_PROVIDERS,
+  PROVIDER_CONFIGS,
+} from "@/lib/providers/types";
+import {
+  clearOAuthCredentials,
   clearProviderKey,
   getConfiguredProviders,
-  clearOAuthCredentials,
   getOAuthProviders,
+  getProviderKey,
+  isTauriRuntime,
+  storeProviderKey,
 } from "@/lib/tauri-bridge";
-import type { ProviderId, ProviderModel } from "@/lib/providers/types";
-import { PROVIDER_CONFIGS, CONFIGURABLE_PROVIDERS } from "@/lib/providers/types";
 
 const PROVIDER_SETTINGS_STORE = "provider-settings.json";
 const PROVIDER_SETTINGS_KEY = "provider-settings";
@@ -21,7 +24,9 @@ const BROWSER_PROVIDER_SETTINGS_KEY = "seren_provider_settings";
 /**
  * Get invoke function only when in Tauri runtime.
  */
-async function getInvoke(): Promise<typeof import("@tauri-apps/api/core").invoke | null> {
+async function getInvoke(): Promise<
+  typeof import("@tauri-apps/api/core").invoke | null
+> {
   if (!isTauriRuntime()) {
     return null;
   }
@@ -70,24 +75,68 @@ interface ProviderState {
 const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
   seren: [
     // Anthropic
-    { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5", contextWindow: 200000 },
-    { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", contextWindow: 200000 },
-    { id: "anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5", contextWindow: 200000 },
+    {
+      id: "anthropic/claude-opus-4.5",
+      name: "Claude Opus 4.5",
+      contextWindow: 200000,
+    },
+    {
+      id: "anthropic/claude-sonnet-4",
+      name: "Claude Sonnet 4",
+      contextWindow: 200000,
+    },
+    {
+      id: "anthropic/claude-haiku-4.5",
+      name: "Claude Haiku 4.5",
+      contextWindow: 200000,
+    },
     // OpenAI
     { id: "openai/gpt-5", name: "GPT-5", contextWindow: 128000 },
     { id: "openai/gpt-4o", name: "GPT-4o", contextWindow: 128000 },
     { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", contextWindow: 128000 },
     // Google Gemini
-    { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 1000000 },
-    { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000 },
-    { id: "google/gemini-3-flash-preview", name: "Gemini 3 Flash", contextWindow: 1000000 },
+    {
+      id: "google/gemini-2.5-pro",
+      name: "Gemini 2.5 Pro",
+      contextWindow: 1000000,
+    },
+    {
+      id: "google/gemini-2.5-flash",
+      name: "Gemini 2.5 Flash",
+      contextWindow: 1000000,
+    },
+    {
+      id: "google/gemini-3-flash-preview",
+      name: "Gemini 3 Flash",
+      contextWindow: 1000000,
+    },
   ],
   anthropic: [
-    { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", contextWindow: 200000 },
-    { id: "claude-opus-4-20250514", name: "Claude Opus 4", contextWindow: 200000 },
-    { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", contextWindow: 200000 },
-    { id: "claude-3-opus-20240229", name: "Claude 3 Opus", contextWindow: 200000 },
-    { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku", contextWindow: 200000 },
+    {
+      id: "claude-sonnet-4-20250514",
+      name: "Claude Sonnet 4",
+      contextWindow: 200000,
+    },
+    {
+      id: "claude-opus-4-20250514",
+      name: "Claude Opus 4",
+      contextWindow: 200000,
+    },
+    {
+      id: "claude-3-5-sonnet-20241022",
+      name: "Claude 3.5 Sonnet",
+      contextWindow: 200000,
+    },
+    {
+      id: "claude-3-opus-20240229",
+      name: "Claude 3 Opus",
+      contextWindow: 200000,
+    },
+    {
+      id: "claude-3-haiku-20240307",
+      name: "Claude 3 Haiku",
+      contextWindow: 200000,
+    },
   ],
   openai: [
     { id: "gpt-4o", name: "GPT-4o", contextWindow: 128000 },
@@ -98,8 +147,16 @@ const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
   ],
   gemini: [
     { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 1000000 },
-    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000 },
-    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", contextWindow: 1000000 },
+    {
+      id: "gemini-2.5-flash",
+      name: "Gemini 2.5 Flash",
+      contextWindow: 1000000,
+    },
+    {
+      id: "gemini-2.0-flash",
+      name: "Gemini 2.0 Flash",
+      contextWindow: 1000000,
+    },
   ],
 };
 
@@ -235,7 +292,7 @@ async function loadProviderSettings(): Promise<void> {
 async function configureProvider(
   providerId: ProviderId,
   apiKey: string,
-  validateFn?: (providerId: ProviderId, apiKey: string) => Promise<boolean>
+  validateFn?: (providerId: ProviderId, apiKey: string) => Promise<boolean>,
 ): Promise<boolean> {
   if (providerId === "seren") {
     return false; // Can't configure Seren with API key
@@ -249,7 +306,10 @@ async function configureProvider(
     if (validateFn) {
       const isValid = await validateFn(providerId, apiKey);
       if (!isValid) {
-        setState("validationError", `Invalid API key for ${PROVIDER_CONFIGS[providerId].name}. Please check and try again.`);
+        setState(
+          "validationError",
+          `Invalid API key for ${PROVIDER_CONFIGS[providerId].name}. Please check and try again.`,
+        );
         return false;
       }
     }
@@ -259,13 +319,19 @@ async function configureProvider(
 
     // Update configured providers list
     if (!state.configuredProviders.includes(providerId)) {
-      setState("configuredProviders", [...state.configuredProviders, providerId]);
+      setState("configuredProviders", [
+        ...state.configuredProviders,
+        providerId,
+      ]);
     }
 
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    setState("validationError", `Failed to configure ${PROVIDER_CONFIGS[providerId].name}: ${message}`);
+    setState(
+      "validationError",
+      `Failed to configure ${PROVIDER_CONFIGS[providerId].name}: ${message}`,
+    );
     return false;
   } finally {
     setState("isValidating", false);
@@ -327,10 +393,16 @@ async function removeProvider(providerId: ProviderId): Promise<void> {
   // Clear OAuth credentials if configured
   if (state.oauthProviders.includes(providerId)) {
     await clearOAuthCredentials(providerId);
-    setState("oauthProviders", state.oauthProviders.filter((p: ProviderId) => p !== providerId));
+    setState(
+      "oauthProviders",
+      state.oauthProviders.filter((p: ProviderId) => p !== providerId),
+    );
   }
 
-  setState("configuredProviders", state.configuredProviders.filter(p => p !== providerId));
+  setState(
+    "configuredProviders",
+    state.configuredProviders.filter((p) => p !== providerId),
+  );
 
   // If this was the active provider, switch to Seren
   if (state.activeProvider === providerId) {
@@ -367,7 +439,7 @@ function setActiveProvider(providerId: ProviderId): void {
 
   // Set default model for this provider
   const models = state.providerModels[providerId];
-  if (models.length > 0 && !models.some(m => m.id === state.activeModel)) {
+  if (models.length > 0 && !models.some((m) => m.id === state.activeModel)) {
     setState("activeModel", models[0].id);
   }
 
@@ -385,7 +457,10 @@ function setActiveModel(modelId: string): void {
 /**
  * Update available models for a provider.
  */
-function setProviderModels(providerId: ProviderId, models: ProviderModel[]): void {
+function setProviderModels(
+  providerId: ProviderId,
+  models: ProviderModel[],
+): void {
   setState("providerModels", providerId, models);
 }
 
@@ -407,7 +482,9 @@ function clearValidationError(): void {
  * Get providers that can be added (not yet configured).
  */
 function getUnconfiguredProviders(): ProviderId[] {
-  return CONFIGURABLE_PROVIDERS.filter(p => !state.configuredProviders.includes(p));
+  return CONFIGURABLE_PROVIDERS.filter(
+    (p) => !state.configuredProviders.includes(p),
+  );
 }
 
 // ============================================================================
@@ -416,14 +493,30 @@ function getUnconfiguredProviders(): ProviderId[] {
 
 export const providerStore = {
   // State accessors
-  get state() { return state; },
-  get activeProvider() { return state.activeProvider; },
-  get activeModel() { return state.activeModel; },
-  get configuredProviders() { return state.configuredProviders; },
-  get oauthProviders() { return state.oauthProviders; },
-  get isValidating() { return state.isValidating; },
-  get validationError() { return state.validationError; },
-  get isLoading() { return state.isLoading; },
+  get state() {
+    return state;
+  },
+  get activeProvider() {
+    return state.activeProvider;
+  },
+  get activeModel() {
+    return state.activeModel;
+  },
+  get configuredProviders() {
+    return state.configuredProviders;
+  },
+  get oauthProviders() {
+    return state.oauthProviders;
+  },
+  get isValidating() {
+    return state.isValidating;
+  },
+  get validationError() {
+    return state.validationError;
+  },
+  get isLoading() {
+    return state.isLoading;
+  },
 
   // Functions
   loadSettings: loadProviderSettings,

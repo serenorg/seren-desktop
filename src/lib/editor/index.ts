@@ -1,16 +1,15 @@
 export {
-  initMonaco,
-  getMonaco,
-  defaultEditorOptions,
-  getLanguageFromPath,
-} from "./monaco-config";
-
-export {
-  registerExplainCodeAction,
-  registerImproveCodeAction,
   registerAddToChatAction,
   registerAllCodeActions,
+  registerExplainCodeAction,
+  registerImproveCodeAction,
+  setAddToChatHandler,
   setExplainCodeHandler,
   setImproveCodeHandler,
-  setAddToChatHandler,
 } from "./actions";
+export {
+  defaultEditorOptions,
+  getLanguageFromPath,
+  getMonaco,
+  initMonaco,
+} from "./monaco-config";

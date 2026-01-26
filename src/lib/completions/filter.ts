@@ -80,7 +80,9 @@ const DISABLED_LANGUAGES = new Set([
 
 // Custom language settings (user overrides)
 const [customEnabled, setCustomEnabled] = createSignal<Set<string>>(new Set());
-const [customDisabled, setCustomDisabled] = createSignal<Set<string>>(new Set());
+const [customDisabled, setCustomDisabled] = createSignal<Set<string>>(
+  new Set(),
+);
 
 /**
  * Check if completions should be enabled for a language.

@@ -2,19 +2,19 @@
 // ABOUTME: Routes requests through provider abstraction for Seren, Anthropic, OpenAI, Gemini.
 
 import {
+  buildChatRequest,
   sendProviderMessage,
   streamProviderMessage,
-  buildChatRequest,
 } from "@/lib/providers";
 import { sendMessageWithTools as sendWithTools } from "@/lib/providers/seren";
-import { providerStore } from "@/stores/provider.store";
-import { getAllTools, executeTools } from "@/lib/tools";
 import type {
   ChatMessageWithTools,
   ChatResponse,
   ToolCall,
   ToolResult,
 } from "@/lib/providers/types";
+import { executeTools, getAllTools } from "@/lib/tools";
+import { providerStore } from "@/stores/provider.store";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -53,7 +53,7 @@ const INITIAL_DELAY = 1000;
 export async function sendMessage(
   content: string,
   model: string,
-  context?: ChatContext
+  context?: ChatContext,
 ): Promise<string> {
   const request = buildChatRequest(content, model, context);
   const providerId = providerStore.activeProvider;
@@ -67,7 +67,7 @@ export async function sendMessage(
 export async function* streamMessage(
   content: string,
   model: string,
-  context?: ChatContext
+  context?: ChatContext,
 ): AsyncGenerator<string> {
   const request = buildChatRequest(content, model, context);
   request.stream = true;
@@ -83,7 +83,7 @@ export async function sendMessageWithRetry(
   content: string,
   model: string,
   context: ChatContext | undefined,
-  onRetry?: (attempt: number) => void
+  onRetry?: (attempt: number) => void,
 ): Promise<string> {
   let lastError: Error | null = null;
 
@@ -95,12 +95,16 @@ export async function sendMessageWithRetry(
 
       const message = lastError.message || "";
       // Don't retry auth errors
-      if (message.includes("401") || message.includes("403") || message.includes("API key")) {
+      if (
+        message.includes("401") ||
+        message.includes("403") ||
+        message.includes("API key")
+      ) {
         throw lastError;
       }
 
       if (attempt < CHAT_MAX_RETRIES) {
-        const delay = INITIAL_DELAY * Math.pow(2, attempt - 1);
+        const delay = INITIAL_DELAY * 2 ** (attempt - 1);
         onRetry?.(attempt);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
@@ -152,14 +156,15 @@ export async function* streamMessageWithTools(
   content: string,
   model: string,
   context?: ChatContext,
-  enableTools = true
+  enableTools = true,
 ): AsyncGenerator<ToolStreamEvent> {
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
 
   // Add system message with context if provided
   if (context) {
-    let systemContent = "You are a helpful coding assistant with access to the user's local files.";
+    let systemContent =
+      "You are a helpful coding assistant with access to the user's local files.";
     if (context.file) {
       systemContent += `\n\nThe user has selected code from ${context.file}`;
       if (context.range) {
@@ -173,7 +178,8 @@ export async function* streamMessageWithTools(
   } else {
     messages.push({
       role: "system",
-      content: "You are a helpful coding assistant with access to the user's local files. Use the available tools to read, list, and write files when needed to help the user.",
+      content:
+        "You are a helpful coding assistant with access to the user's local files. Use the available tools to read, list, and write files when needed to help the user.",
     });
   }
 
@@ -188,7 +194,12 @@ export async function* streamMessageWithTools(
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     // Send request with tools
-    const response: ChatResponse = await sendWithTools(messages, model, tools, tools ? "auto" : undefined);
+    const response: ChatResponse = await sendWithTools(
+      messages,
+      model,
+      tools,
+      tools ? "auto" : undefined,
+    );
 
     // Yield content if present
     if (response.content) {
@@ -232,7 +243,10 @@ export async function* streamMessageWithTools(
   }
 
   // If we hit max iterations, yield what we have
-  yield { type: "complete", finalContent: fullContent + "\n\n(Reached maximum tool iterations)" };
+  yield {
+    type: "complete",
+    finalContent: `${fullContent}\n\n(Reached maximum tool iterations)`,
+  };
 }
 
 /**

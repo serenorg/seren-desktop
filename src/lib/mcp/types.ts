@@ -68,7 +68,10 @@ export interface McpToolResult {
 export type McpContent =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string }
-  | { type: "resource"; resource: { uri: string; text?: string; blob?: string } };
+  | {
+      type: "resource";
+      resource: { uri: string; text?: string; blob?: string };
+    };
 
 export interface McpError {
   code: number;
@@ -133,14 +136,18 @@ export type McpServerConfig = McpLocalServerConfig | McpBuiltinServerConfig;
 /**
  * Type guard for local server config.
  */
-export function isLocalServer(config: McpServerConfig): config is McpLocalServerConfig {
+export function isLocalServer(
+  config: McpServerConfig,
+): config is McpLocalServerConfig {
   return config.type === "local";
 }
 
 /**
  * Type guard for builtin server config.
  */
-export function isBuiltinServer(config: McpServerConfig): config is McpBuiltinServerConfig {
+export function isBuiltinServer(
+  config: McpServerConfig,
+): config is McpBuiltinServerConfig {
   return config.type === "builtin";
 }
 

@@ -1,14 +1,14 @@
 // ABOUTME: Low balance warning component that appears when SerenBucks is low.
 // ABOUTME: Shows in status bar and as a modal when balance first drops.
 
-import { Component, Show, createSignal, createEffect } from "solid-js";
+import { type Component, createEffect, createSignal, Show } from "solid-js";
+import { initiateTopUp, openCheckout } from "@/services/wallet";
+import { settingsStore } from "@/stores/settings.store";
 import {
-  walletState,
   dismissLowBalanceWarning,
   shouldShowLowBalanceWarning,
+  walletState,
 } from "@/stores/wallet.store";
-import { settingsStore } from "@/stores/settings.store";
-import { initiateTopUp, openCheckout } from "@/services/wallet";
 import "./LowBalanceWarning.css";
 
 interface LowBalanceWarningProps {

@@ -1,9 +1,9 @@
 // ABOUTME: Wallet status component for status bar.
 // ABOUTME: Displays current balance with low balance indicator.
 
-import { Component, Show } from "solid-js";
-import { walletState, walletStore } from "@/stores/wallet.store";
+import { type Component, Show } from "solid-js";
 import { settingsStore } from "@/stores/settings.store";
+import { walletState, walletStore } from "@/stores/wallet.store";
 import { LowBalanceIndicator } from "./LowBalanceWarning";
 import "./WalletStatus.css";
 

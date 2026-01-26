@@ -2,8 +2,8 @@
 // ABOUTME: Tracks user session and provides login/logout actions.
 
 import { createStore } from "solid-js/store";
-import { isLoggedIn, logout as authLogout } from "@/services/auth";
 import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
+import { logout as authLogout, isLoggedIn } from "@/services/auth";
 
 export interface User {
   id: string;

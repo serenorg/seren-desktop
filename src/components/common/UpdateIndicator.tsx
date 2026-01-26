@@ -1,4 +1,4 @@
-import { Show, Switch, Match } from "solid-js";
+import { Match, Show, Switch } from "solid-js";
 import { updaterStore } from "@/stores/updater.store";
 import "./UpdateIndicator.css";
 
@@ -7,7 +7,11 @@ export const UpdateIndicator = () => {
 
   return (
     <div class="update-indicator" data-status={state().status}>
-      <Switch fallback={<IdleIndicator onCheck={() => updaterStore.checkForUpdates(true)} /> }>
+      <Switch
+        fallback={
+          <IdleIndicator onCheck={() => updaterStore.checkForUpdates(true)} />
+        }
+      >
         <Match when={state().status === "checking"}>
           <span class="update-pill">Checking for updates…</span>
         </Match>
@@ -23,7 +27,11 @@ export const UpdateIndicator = () => {
           />
         </Match>
         <Match when={state().status === "deferred"}>
-          <button class="update-link" type="button" onClick={() => updaterStore.checkForUpdates(true)}>
+          <button
+            class="update-link"
+            type="button"
+            onClick={() => updaterStore.checkForUpdates(true)}
+          >
             Update deferred – Check again
           </button>
         </Match>

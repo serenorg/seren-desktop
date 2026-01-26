@@ -1,7 +1,7 @@
 // ABOUTME: Status indicator for AI autocomplete feature in the status bar.
 // ABOUTME: Shows Active (green), Loading (yellow), Disabled (gray), Error (red) states.
 
-import { Component, Show } from "solid-js";
+import { type Component, Show } from "solid-js";
 import "./AutocompleteStatus.css";
 
 export type AutocompleteState = "active" | "loading" | "disabled" | "error";
@@ -12,14 +12,17 @@ interface AutocompleteStatusProps {
   onToggle?: () => void;
 }
 
-const STATE_CONFIG: Record<AutocompleteState, { label: string; icon: string }> = {
-  active: { label: "AI Active", icon: "●" },
-  loading: { label: "AI Loading", icon: "◐" },
-  disabled: { label: "AI Disabled", icon: "○" },
-  error: { label: "AI Error", icon: "⚠" },
-};
+const STATE_CONFIG: Record<AutocompleteState, { label: string; icon: string }> =
+  {
+    active: { label: "AI Active", icon: "●" },
+    loading: { label: "AI Loading", icon: "◐" },
+    disabled: { label: "AI Disabled", icon: "○" },
+    error: { label: "AI Error", icon: "⚠" },
+  };
 
-export const AutocompleteStatus: Component<AutocompleteStatusProps> = (props) => {
+export const AutocompleteStatus: Component<AutocompleteStatusProps> = (
+  props,
+) => {
   const config = () => STATE_CONFIG[props.state];
 
   return (

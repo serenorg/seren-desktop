@@ -1,13 +1,13 @@
 // ABOUTME: MCP auto-connect service for startup connection.
 // ABOUTME: Connects to local servers marked with autoConnect when app loads.
 
-import { mcpClient } from "./client";
-import { isLocalServer } from "./types";
 import {
-  loadMcpSettings,
   getAutoConnectMcpServers,
+  loadMcpSettings,
   mcpSettings,
 } from "@/stores/settings.store";
+import { mcpClient } from "./client";
+import { isLocalServer } from "./types";
 
 export interface AutoConnectResult {
   serverName: string;
@@ -41,7 +41,12 @@ export async function initMcpAutoConnect(): Promise<AutoConnectResult[]> {
   const results = await Promise.allSettled(
     localServers.map(async (server) => {
       try {
-        await mcpClient.connect(server.name, server.command, server.args, server.env);
+        await mcpClient.connect(
+          server.name,
+          server.command,
+          server.args,
+          server.env,
+        );
         return {
           serverName: server.name,
           success: true,
@@ -53,7 +58,7 @@ export async function initMcpAutoConnect(): Promise<AutoConnectResult[]> {
           error: error instanceof Error ? error.message : String(error),
         };
       }
-    })
+    }),
   );
 
   // Extract results
@@ -64,7 +69,10 @@ export async function initMcpAutoConnect(): Promise<AutoConnectResult[]> {
     return {
       serverName: localServers[index].name,
       success: false,
-      error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      error:
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason),
     };
   });
 }
@@ -74,7 +82,7 @@ export async function initMcpAutoConnect(): Promise<AutoConnectResult[]> {
  * Only retries local servers (builtin servers connect via gateway).
  */
 export async function retryFailedConnections(
-  failedServers: string[]
+  failedServers: string[],
 ): Promise<AutoConnectResult[]> {
   const servers = mcpSettings()
     .servers.filter((s) => failedServers.includes(s.name) && s.enabled)
@@ -87,7 +95,12 @@ export async function retryFailedConnections(
   const results = await Promise.allSettled(
     servers.map(async (server) => {
       try {
-        await mcpClient.connect(server.name, server.command, server.args, server.env);
+        await mcpClient.connect(
+          server.name,
+          server.command,
+          server.args,
+          server.env,
+        );
         return {
           serverName: server.name,
           success: true,
@@ -99,7 +112,7 @@ export async function retryFailedConnections(
           error: error instanceof Error ? error.message : String(error),
         };
       }
-    })
+    }),
   );
 
   return results.map((result, index) => {
@@ -109,7 +122,10 @@ export async function retryFailedConnections(
     return {
       serverName: servers[index].name,
       success: false,
-      error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      error:
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason),
     };
   });
 }
@@ -120,7 +136,9 @@ export async function retryFailedConnections(
  * Only connects local servers (builtin servers connect via gateway).
  */
 export async function connectAllEnabledServers(): Promise<AutoConnectResult[]> {
-  const servers = mcpSettings().servers.filter((s) => s.enabled).filter(isLocalServer);
+  const servers = mcpSettings()
+    .servers.filter((s) => s.enabled)
+    .filter(isLocalServer);
 
   // Skip already connected servers
   const toConnect = servers.filter((s) => {
@@ -135,7 +153,12 @@ export async function connectAllEnabledServers(): Promise<AutoConnectResult[]> {
   const results = await Promise.allSettled(
     toConnect.map(async (server) => {
       try {
-        await mcpClient.connect(server.name, server.command, server.args, server.env);
+        await mcpClient.connect(
+          server.name,
+          server.command,
+          server.args,
+          server.env,
+        );
         return {
           serverName: server.name,
           success: true,
@@ -147,7 +170,7 @@ export async function connectAllEnabledServers(): Promise<AutoConnectResult[]> {
           error: error instanceof Error ? error.message : String(error),
         };
       }
-    })
+    }),
   );
 
   return results.map((result, index) => {
@@ -157,7 +180,10 @@ export async function connectAllEnabledServers(): Promise<AutoConnectResult[]> {
     return {
       serverName: toConnect[index].name,
       success: false,
-      error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      error:
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason),
     };
   });
 }
@@ -171,6 +197,6 @@ export async function disconnectAllServers(): Promise<void> {
   const connected = connections.filter((c) => c.status === "connected");
 
   await Promise.allSettled(
-    connected.map((conn) => mcpClient.disconnect(conn.serverName))
+    connected.map((conn) => mcpClient.disconnect(conn.serverName)),
   );
 }

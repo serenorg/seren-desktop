@@ -1,11 +1,15 @@
 // ABOUTME: MCP connection status indicator for the status bar.
 // ABOUTME: Shows connected server count, builtin servers, and overall MCP health.
 
-import { createMemo, For, Show, type Component } from "solid-js";
+import { type Component, createMemo, For, Show } from "solid-js";
 import { mcpClient } from "@/lib/mcp/client";
-import { mcpSettings } from "@/stores/settings.store";
-import { isBuiltinServer, type McpConnectionStatus, type McpBuiltinServerConfig } from "@/lib/mcp/types";
+import {
+  isBuiltinServer,
+  type McpBuiltinServerConfig,
+  type McpConnectionStatus,
+} from "@/lib/mcp/types";
 import { authStore } from "@/stores/auth.store";
+import { mcpSettings } from "@/stores/settings.store";
 import "./McpStatusIndicator.css";
 
 export const McpStatusIndicator: Component = () => {
@@ -20,33 +24,33 @@ export const McpStatusIndicator: Component = () => {
   // Enabled builtin servers from settings (route through Gateway)
   const builtinServers = createMemo(() => {
     return mcpSettings().servers.filter(
-      (s): s is McpBuiltinServerConfig => isBuiltinServer(s) && s.enabled
+      (s): s is McpBuiltinServerConfig => isBuiltinServer(s) && s.enabled,
     );
   });
 
-  const connectedCount = createMemo(() =>
-    connectionList().filter((c) => c.status === "connected").length
+  const connectedCount = createMemo(
+    () => connectionList().filter((c) => c.status === "connected").length,
   );
 
   // Builtin servers are "connected" when authenticated
   const builtinConnectedCount = createMemo(() =>
-    authStore.isAuthenticated ? builtinServers().length : 0
+    authStore.isAuthenticated ? builtinServers().length : 0,
   );
 
-  const totalConnected = createMemo(() =>
-    connectedCount() + builtinConnectedCount()
+  const totalConnected = createMemo(
+    () => connectedCount() + builtinConnectedCount(),
   );
 
-  const totalServers = createMemo(() =>
-    connectionList().length + builtinServers().length
+  const totalServers = createMemo(
+    () => connectionList().length + builtinServers().length,
   );
 
   const hasErrors = createMemo(() =>
-    connectionList().some((c) => c.status === "error")
+    connectionList().some((c) => c.status === "error"),
   );
 
   const isConnecting = createMemo(() =>
-    connectionList().some((c) => c.status === "connecting")
+    connectionList().some((c) => c.status === "connecting"),
   );
 
   const overallStatus = createMemo((): McpConnectionStatus => {
@@ -91,10 +95,7 @@ export const McpStatusIndicator: Component = () => {
           {/* Builtin servers (Gateway) */}
           <For each={builtinServers()}>
             {(server) => (
-              <div
-                class="server-status"
-                classList={{ gateway: true }}
-              >
+              <div class="server-status" classList={{ gateway: true }}>
                 <span class="server-icon">
                   {authStore.isAuthenticated ? "🟢" : "⚪"}
                 </span>
@@ -107,15 +108,18 @@ export const McpStatusIndicator: Component = () => {
           {/* Local MCP servers */}
           <For each={connectionList()}>
             {(conn) => (
-              <div class="server-status" classList={{ error: conn.status === "error" }}>
+              <div
+                class="server-status"
+                classList={{ error: conn.status === "error" }}
+              >
                 <span class="server-icon">
                   {conn.status === "connected"
                     ? "🟢"
                     : conn.status === "connecting"
-                    ? "🟡"
-                    : conn.status === "error"
-                    ? "🔴"
-                    : "⚪"}
+                      ? "🟡"
+                      : conn.status === "error"
+                        ? "🔴"
+                        : "⚪"}
                 </span>
                 <span class="server-name">{conn.serverName}</span>
                 <span class="server-tools">{conn.tools.length} tools</span>

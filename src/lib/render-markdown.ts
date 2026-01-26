@@ -1,5 +1,5 @@
-import { marked, type Tokens } from "marked";
 import hljs from "highlight.js";
+import { marked, type Tokens } from "marked";
 import { escapeHtml } from "@/lib/escape-html";
 
 // Custom renderer for markdown

@@ -102,7 +102,9 @@
   cursor: pointer;
   border-radius: 3px;
   opacity: 0;
-  transition: opacity 0.1s ease, background-color 0.1s ease;
+  transition:
+    opacity 0.1s ease,
+    background-color 0.1s ease;
 }
 
 .file-tab:hover .file-tab-close,
@@ -136,7 +138,9 @@
   color: var(--text-muted, #707070);
   font-size: 16px;
   cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
 }
 
 .file-tabs-preview-toggle:hover {

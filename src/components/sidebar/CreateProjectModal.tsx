@@ -1,7 +1,13 @@
 // ABOUTME: Modal dialog for creating a new SerenDB project.
 // ABOUTME: Allows user to select organization and enter project name.
 
-import { Component, createSignal, createResource, Show, For } from "solid-js";
+import {
+  type Component,
+  createResource,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
 import { databases } from "@/services/databases";
 import "./CreateProjectModal.css";
 
@@ -10,7 +16,9 @@ interface CreateProjectModalProps {
   onCreated: () => void;
 }
 
-export const CreateProjectModal: Component<CreateProjectModalProps> = (props) => {
+export const CreateProjectModal: Component<CreateProjectModalProps> = (
+  props,
+) => {
   const [projectName, setProjectName] = createSignal("");
   const [selectedOrgId, setSelectedOrgId] = createSignal<string>("");
   const [isCreating, setIsCreating] = createSignal(false);
@@ -91,7 +99,9 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (props) =>
             <label for="organization">Organization</label>
             <Show
               when={!organizations.loading}
-              fallback={<div class="form-loading">Loading organizations...</div>}
+              fallback={
+                <div class="form-loading">Loading organizations...</div>
+              }
             >
               <select
                 id="organization"
@@ -99,13 +109,11 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (props) =>
                 onChange={(e) => setSelectedOrgId(e.currentTarget.value)}
                 disabled={isCreating()}
               >
-                <Show when={organizations() && organizations()!.length === 0}>
+                <Show when={organizations() && organizations()?.length === 0}>
                   <option value="">No organizations available</option>
                 </Show>
                 <For each={organizations()}>
-                  {(org) => (
-                    <option value={org.id}>{org.name}</option>
-                  )}
+                  {(org) => <option value={org.id}>{org.name}</option>}
                 </For>
               </select>
             </Show>

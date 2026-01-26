@@ -2,10 +2,10 @@
 // ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
 import {
-  listStorePublishers,
   getStorePublisher,
-  suggestPublishers,
+  listStorePublishers,
   type PublisherResponse,
+  suggestPublishers,
 } from "@/api";
 import { apiBase } from "@/lib/config";
 
@@ -52,11 +52,11 @@ type RawPublisher = PublisherResponse;
  * Parse a numeric value that could be string or number.
  */
 function parseNumericPrice(
-  value: string | number | null | undefined
+  value: string | number | null | undefined,
 ): number | null {
   if (value === null || value === undefined) return null;
   const num = typeof value === "string" ? parseFloat(value) : value;
-  return isNaN(num) ? null : num;
+  return Number.isNaN(num) ? null : num;
 }
 
 /**
@@ -65,7 +65,7 @@ function parseNumericPrice(
 function transformPublisher(raw: RawPublisher): Publisher {
   // Handle logo_url - convert relative paths to absolute URLs
   let logoUrl = raw.logo_url;
-  if (logoUrl && logoUrl.startsWith("/")) {
+  if (logoUrl?.startsWith("/")) {
     logoUrl = `${apiBase}${logoUrl}`;
   }
 

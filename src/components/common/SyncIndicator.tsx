@@ -1,8 +1,8 @@
 // ABOUTME: Sync status indicator component.
 // ABOUTME: Shows current sync status with visual feedback (idle, syncing, synced, error).
 
-import { Component, onMount, onCleanup } from "solid-js";
-import { syncStore, SyncStatus } from "@/stores/sync.store";
+import { type Component, onCleanup, onMount } from "solid-js";
+import { type SyncStatus, syncStore } from "@/stores/sync.store";
 import "./SyncIndicator.css";
 
 /**

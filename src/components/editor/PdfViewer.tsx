@@ -1,14 +1,19 @@
 // ABOUTME: PDF viewer component for displaying PDF files.
 // ABOUTME: Uses pdf.js for rendering with page navigation and zoom controls.
 
-import { Component, createSignal, createEffect, onCleanup } from "solid-js";
 import * as pdfjsLib from "pdfjs-dist";
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  onCleanup,
+} from "solid-js";
 import "./PdfViewer.css";
 
 // Set up the worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
+  import.meta.url,
 ).toString();
 
 interface PdfViewerProps {
@@ -148,7 +153,7 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
   function handlePageInput(e: Event) {
     const input = e.target as HTMLInputElement;
     const page = parseInt(input.value, 10);
-    if (!isNaN(page) && page >= 1 && page <= totalPages()) {
+    if (!Number.isNaN(page) && page >= 1 && page <= totalPages()) {
       setCurrentPage(page);
     }
   }

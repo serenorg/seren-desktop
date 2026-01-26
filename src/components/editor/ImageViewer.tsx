@@ -1,8 +1,13 @@
 // ABOUTME: Image viewer component for displaying image files.
 // ABOUTME: Supports zoom, pan, and displays image metadata.
 
-import { Component, createSignal, createEffect, onCleanup } from "solid-js";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  onCleanup,
+} from "solid-js";
 import "./ImageViewer.css";
 
 interface ImageViewerProps {
@@ -12,7 +17,10 @@ interface ImageViewerProps {
 export const ImageViewer: Component<ImageViewerProps> = (props) => {
   const [zoom, setZoom] = createSignal(100);
   const [imageUrl, setImageUrl] = createSignal<string | null>(null);
-  const [dimensions, setDimensions] = createSignal<{ width: number; height: number } | null>(null);
+  const [dimensions, setDimensions] = createSignal<{
+    width: number;
+    height: number;
+  } | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   const [isDragging, setIsDragging] = createSignal(false);
   const [position, setPosition] = createSignal({ x: 0, y: 0 });
@@ -104,7 +112,7 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
           <span class="image-viewer-filename">{fileName()}</span>
           {dimensions() && (
             <span class="image-viewer-dimensions">
-              {dimensions()!.width} × {dimensions()!.height}
+              {dimensions()?.width} × {dimensions()?.height}
             </span>
           )}
         </div>

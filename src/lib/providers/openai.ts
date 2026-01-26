@@ -1,7 +1,12 @@
 // ABOUTME: OpenAI API provider adapter.
 // ABOUTME: Direct integration with api.openai.com for users with OpenAI subscriptions.
 
-import type { ChatRequest, ProviderAdapter, ProviderModel, AuthOptions } from "./types";
+import type {
+  AuthOptions,
+  ChatRequest,
+  ProviderAdapter,
+  ProviderModel,
+} from "./types";
 
 /**
  * Normalize auth parameter to get the token string.
@@ -34,7 +39,7 @@ const CONTEXT_WINDOWS: Record<string, number> = {
   "gpt-4-turbo-preview": 128000,
   "gpt-4": 8192,
   "gpt-3.5-turbo": 16385,
-  "o1": 200000,
+  o1: 200000,
   "o1-mini": 128000,
   "o1-preview": 128000,
 };
@@ -51,7 +56,7 @@ function formatModelName(id: string): string {
     "gpt-4-turbo-preview": "GPT-4 Turbo Preview",
     "gpt-4": "GPT-4",
     "gpt-3.5-turbo": "GPT-3.5 Turbo",
-    "o1": "o1",
+    o1: "o1",
     "o1-mini": "o1 Mini",
     "o1-preview": "o1 Preview",
   };
@@ -63,7 +68,7 @@ function formatModelName(id: string): string {
  * Parse OpenAI SSE stream response.
  */
 async function* parseOpenAISSE(
-  body: ReadableStream<Uint8Array>
+  body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<string, void, unknown> {
   const reader = body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -108,7 +113,10 @@ async function* parseOpenAISSE(
 export const openaiProvider: ProviderAdapter = {
   id: "openai",
 
-  async sendMessage(request: ChatRequest, auth: string | AuthOptions): Promise<string> {
+  async sendMessage(
+    request: ChatRequest,
+    auth: string | AuthOptions,
+  ): Promise<string> {
     const token = getToken(auth);
     const response = await fetch(`${OPENAI_API_URL}/chat/completions`, {
       method: "POST",
@@ -125,7 +133,8 @@ export const openaiProvider: ProviderAdapter = {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      const message = (error as { error?: { message?: string } }).error?.message;
+      const message = (error as { error?: { message?: string } }).error
+        ?.message;
       throw new Error(message || `OpenAI API error: ${response.status}`);
     }
 
@@ -135,7 +144,7 @@ export const openaiProvider: ProviderAdapter = {
 
   async *streamMessage(
     request: ChatRequest,
-    auth: string | AuthOptions
+    auth: string | AuthOptions,
   ): AsyncGenerator<string, void, unknown> {
     const token = getToken(auth);
     const response = await fetch(`${OPENAI_API_URL}/chat/completions`, {
@@ -154,7 +163,8 @@ export const openaiProvider: ProviderAdapter = {
 
     if (!response.ok || !response.body) {
       const error = await response.json().catch(() => ({}));
-      const message = (error as { error?: { message?: string } }).error?.message;
+      const message = (error as { error?: { message?: string } }).error
+        ?.message;
       throw new Error(message || `OpenAI streaming failed: ${response.status}`);
     }
 
@@ -183,7 +193,9 @@ export const openaiProvider: ProviderAdapter = {
       }
 
       const data = await response.json();
-      const models = data.data as Array<{ id: string; owned_by?: string }> | undefined;
+      const models = data.data as
+        | Array<{ id: string; owned_by?: string }>
+        | undefined;
 
       if (!models) {
         return DEFAULT_MODELS;
@@ -191,27 +203,35 @@ export const openaiProvider: ProviderAdapter = {
 
       // Filter to chat models only (GPT and o1 models)
       const chatModels = models
-        .filter(m =>
-          m.id.includes("gpt") ||
-          m.id.startsWith("o1") ||
-          m.id.includes("turbo")
+        .filter(
+          (m) =>
+            m.id.includes("gpt") ||
+            m.id.startsWith("o1") ||
+            m.id.includes("turbo"),
         )
-        .filter(m =>
-          !m.id.includes("instruct") &&
-          !m.id.includes("vision") &&
-          !m.id.includes("audio") &&
-          !m.id.includes("realtime")
+        .filter(
+          (m) =>
+            !m.id.includes("instruct") &&
+            !m.id.includes("vision") &&
+            !m.id.includes("audio") &&
+            !m.id.includes("realtime"),
         )
-        .map(m => ({
+        .map((m) => ({
           id: m.id,
           name: formatModelName(m.id),
           contextWindow: CONTEXT_WINDOWS[m.id] || 128000,
         }))
         // Sort by preference
         .sort((a, b) => {
-          const order = ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini", "gpt-4-turbo"];
-          const aIndex = order.findIndex(o => a.id.includes(o));
-          const bIndex = order.findIndex(o => b.id.includes(o));
+          const order = [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "o1",
+            "o1-mini",
+            "gpt-4-turbo",
+          ];
+          const aIndex = order.findIndex((o) => a.id.includes(o));
+          const bIndex = order.findIndex((o) => b.id.includes(o));
           if (aIndex === -1 && bIndex === -1) return 0;
           if (aIndex === -1) return 1;
           if (bIndex === -1) return -1;

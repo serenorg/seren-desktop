@@ -1,7 +1,13 @@
 // ABOUTME: Transaction history component showing deposits, charges, and refunds.
 // ABOUTME: Displays paginated list with filtering options.
 
-import { Component, createSignal, createResource, For, Show } from "solid-js";
+import {
+  type Component,
+  createResource,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
 import { fetchTransactions, type Transaction } from "@/services/wallet";
 import "./TransactionHistory.css";
 
@@ -18,7 +24,7 @@ interface TransactionHistoryProps {
  * Infer transaction category from source string.
  */
 function getTransactionCategory(
-  source: string
+  source: string,
 ): "deposit" | "charge" | "refund" {
   const s = source.toLowerCase();
   if (
@@ -45,7 +51,6 @@ function getTransactionIcon(source: string): string {
       return "⬆";
     case "refund":
       return "↩";
-    case "charge":
     default:
       return "⬇";
   }
@@ -61,7 +66,6 @@ function getTransactionLabel(source: string): string {
       return "Deposit";
     case "refund":
       return "Refund";
-    case "charge":
     default:
       return "Charge";
   }
@@ -102,7 +106,7 @@ function formatTime(dateString: string): string {
  * Transaction history component.
  */
 export const TransactionHistory: Component<TransactionHistoryProps> = (
-  props
+  props,
 ) => {
   const [filter, setFilter] = createSignal<FilterType>("all");
   const [offset, setOffset] = createSignal(0);
@@ -111,7 +115,7 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
     () => ({ filter: filter(), offset: offset() }),
     async ({ offset: currentOffset }) => {
       return fetchTransactions(20, currentOffset);
-    }
+    },
   );
 
   const filteredTransactions = () => {
@@ -119,7 +123,7 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
     const currentFilter = filter();
     if (currentFilter === "all") return transactions;
     return transactions.filter(
-      (t) => getTransactionCategory(t.source) === currentFilter
+      (t) => getTransactionCategory(t.source) === currentFilter,
     );
   };
 

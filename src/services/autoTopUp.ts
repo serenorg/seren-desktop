@@ -2,14 +2,14 @@
 // ABOUTME: Monitors balance and triggers Stripe checkout when below threshold.
 
 import { createEffect } from "solid-js";
-import {
-  walletState,
-  refreshBalance,
-  isTopUpInProgress,
-  setTopUpInProgress,
-} from "@/stores/wallet.store";
-import { settingsStore } from "@/stores/settings.store";
 import { initiateTopUp, openCheckout } from "@/services/wallet";
+import { settingsStore } from "@/stores/settings.store";
+import {
+  isTopUpInProgress,
+  refreshBalance,
+  setTopUpInProgress,
+  walletState,
+} from "@/stores/wallet.store";
 
 /**
  * Auto top-up event types.
@@ -48,7 +48,7 @@ function logEvent(
   balance: number | null,
   threshold: number,
   amount: number,
-  error?: string
+  error?: string,
 ): void {
   const event: AutoTopUpEvent = {
     type,

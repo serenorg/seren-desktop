@@ -2,7 +2,7 @@
 // ABOUTME: Displays rendered HTML with syntax highlighting for code blocks.
 
 /* eslint-disable solid/no-innerhtml */
-import { Component, createMemo } from "solid-js";
+import { type Component, createMemo } from "solid-js";
 import { renderMarkdown } from "@/lib/render-markdown";
 import "highlight.js/styles/github-dark.css";
 import "./MarkdownPreview.css";

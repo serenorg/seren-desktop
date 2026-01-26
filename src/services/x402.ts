@@ -1,15 +1,15 @@
 // ABOUTME: x402 payment service for handling USDC payments to MCP servers.
 // ABOUTME: Supports both SerenBucks (prepaid) and crypto wallet payment methods.
 
-import { createSignal, createRoot } from "solid-js";
-import { signX402Payment, getCryptoWalletAddress } from "@/lib/tauri-bridge";
+import { createRoot, createSignal } from "solid-js";
+import { getCryptoWalletAddress, signX402Payment } from "@/lib/tauri-bridge";
 import {
-  parsePaymentRequirements,
-  hasX402Option,
-  getX402Option,
   formatUsdcAmount,
   getChainName,
+  getX402Option,
+  hasX402Option,
   type PaymentRequirements,
+  parsePaymentRequirements,
 } from "@/lib/x402";
 import { settingsState } from "@/stores/settings.store";
 
@@ -48,9 +48,11 @@ export interface X402PaymentResult {
  * Create the x402 payment service.
  */
 function createX402Service() {
-  const [pendingPayment, setPendingPayment] = createSignal<PendingPayment | null>(null);
+  const [pendingPayment, setPendingPayment] =
+    createSignal<PendingPayment | null>(null);
   const [isProcessing, setIsProcessing] = createSignal(false);
-  const [selectedMethod, setSelectedMethod] = createSignal<PaymentMethod | null>(null);
+  const [selectedMethod, setSelectedMethod] =
+    createSignal<PaymentMethod | null>(null);
 
   /**
    * Check if an error is an x402 payment required error.
@@ -98,7 +100,7 @@ function createX402Service() {
   async function requestApproval(
     serverName: string,
     toolName: string,
-    requirements: PaymentRequirements
+    requirements: PaymentRequirements,
   ): Promise<{ approved: boolean; method?: PaymentMethod }> {
     const x402Option = getX402Option(requirements);
 
@@ -132,7 +134,9 @@ function createX402Service() {
   /**
    * Sign an x402 payment and get the payment header.
    */
-  async function signPayment(requirements: PaymentRequirements): Promise<X402PaymentResult> {
+  async function signPayment(
+    requirements: PaymentRequirements,
+  ): Promise<X402PaymentResult> {
     setIsProcessing(true);
 
     try {
@@ -141,7 +145,8 @@ function createX402Service() {
       if (!address) {
         return {
           success: false,
-          error: "Crypto wallet not configured. Please add your private key in Settings > Wallet.",
+          error:
+            "Crypto wallet not configured. Please add your private key in Settings > Wallet.",
         };
       }
 
@@ -157,7 +162,8 @@ function createX402Service() {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Payment signing failed",
+        error:
+          error instanceof Error ? error.message : "Payment signing failed",
       };
     } finally {
       setIsProcessing(false);
@@ -191,7 +197,7 @@ function createX402Service() {
   async function handlePaymentRequired(
     serverName: string,
     toolName: string,
-    error: unknown
+    error: unknown,
   ): Promise<X402PaymentResult | null> {
     // Extract payment requirements from the error
     const requirements = extractRequirements(error);
@@ -211,7 +217,11 @@ function createX402Service() {
     }
 
     // Check for auto-approve with crypto (only if crypto is available and preferred)
-    if (hasCrypto && x402Option && settingsState.app.preferredPaymentMethod === "crypto") {
+    if (
+      hasCrypto &&
+      x402Option &&
+      settingsState.app.preferredPaymentMethod === "crypto"
+    ) {
       const amount = x402Option.amount;
       if (shouldAutoApprove(amount)) {
         return await signPayment(requirements);
@@ -240,7 +250,10 @@ function createX402Service() {
   function approvePendingPayment(): void {
     const payment = pendingPayment();
     if (payment) {
-      payment.resolve({ approved: true, method: settingsState.app.preferredPaymentMethod });
+      payment.resolve({
+        approved: true,
+        method: settingsState.app.preferredPaymentMethod,
+      });
     }
   }
 

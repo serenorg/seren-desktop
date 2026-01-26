@@ -1,8 +1,8 @@
 // ABOUTME: Publisher details view component.
 // ABOUTME: Shows full publisher information including pricing and categories.
 
-import { Component, Show, createResource, For } from "solid-js";
-import { catalog, getPricingDisplay, formatPrice } from "@/services/catalog";
+import { type Component, createResource, For, Show } from "solid-js";
+import { catalog, formatPrice, getPricingDisplay } from "@/services/catalog";
 import "./PublisherDetails.css";
 
 interface PublisherDetailsProps {
@@ -19,7 +19,7 @@ export const PublisherDetails: Component<PublisherDetailsProps> = (props) => {
       } catch {
         return null;
       }
-    }
+    },
   );
 
   return (
@@ -29,7 +29,9 @@ export const PublisherDetails: Component<PublisherDetailsProps> = (props) => {
       </button>
 
       <Show when={publisher.loading}>
-        <div class="publisher-details-loading">Loading publisher details...</div>
+        <div class="publisher-details-loading">
+          Loading publisher details...
+        </div>
       </Show>
 
       <Show when={publisher.error || (!publisher.loading && !publisher())}>
@@ -80,19 +82,25 @@ export const PublisherDetails: Component<PublisherDetailsProps> = (props) => {
                 <Show when={pub().price_per_call !== null}>
                   <div class="pricing-item">
                     <span class="pricing-label">Per Call</span>
-                    <span class="pricing-value">{formatPrice(pub().price_per_call)}</span>
+                    <span class="pricing-value">
+                      {formatPrice(pub().price_per_call)}
+                    </span>
                   </div>
                 </Show>
                 <Show when={pub().base_price_per_1000_rows !== null}>
                   <div class="pricing-item">
                     <span class="pricing-label">Per 1K Rows</span>
-                    <span class="pricing-value">{formatPrice(pub().base_price_per_1000_rows)}</span>
+                    <span class="pricing-value">
+                      {formatPrice(pub().base_price_per_1000_rows)}
+                    </span>
                   </div>
                 </Show>
                 <Show when={pub().price_per_execution !== null}>
                   <div class="pricing-item">
                     <span class="pricing-label">Per Execution</span>
-                    <span class="pricing-value">{formatPrice(pub().price_per_execution)}</span>
+                    <span class="pricing-value">
+                      {formatPrice(pub().price_per_execution)}
+                    </span>
                   </div>
                 </Show>
               </div>
@@ -118,7 +126,9 @@ export const PublisherDetails: Component<PublisherDetailsProps> = (props) => {
                 </div>
                 <div class="details-item">
                   <span class="details-label">Status</span>
-                  <span class={`details-value status-${pub().is_active ? "active" : "inactive"}`}>
+                  <span
+                    class={`details-value status-${pub().is_active ? "active" : "inactive"}`}
+                  >
                     {pub().is_active ? "Active" : "Inactive"}
                   </span>
                 </div>

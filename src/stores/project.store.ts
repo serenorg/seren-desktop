@@ -2,7 +2,7 @@
 // ABOUTME: Handles active project selection and project list caching.
 
 import { createStore } from "solid-js/store";
-import { projects, Project } from "@/services/projects";
+import { type Project, projects } from "@/services/projects";
 
 /**
  * Project store state.
@@ -87,7 +87,8 @@ export const projectStore = {
         setState("activeProjectId", projectList[0].id);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load projects";
+      const message =
+        err instanceof Error ? err.message : "Failed to load projects";
       setState("error", message);
     } finally {
       setState("loading", false);
@@ -106,7 +107,8 @@ export const projectStore = {
       setState("projects", [...state.projects, project]);
       return project;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to create project";
+      const message =
+        err instanceof Error ? err.message : "Failed to create project";
       setState("error", message);
       throw err;
     } finally {
@@ -125,16 +127,20 @@ export const projectStore = {
       await projects.delete(id);
       setState(
         "projects",
-        state.projects.filter((p) => p.id !== id)
+        state.projects.filter((p) => p.id !== id),
       );
 
       // Clear active project if it was deleted
       if (state.activeProjectId === id) {
         const remaining = state.projects.filter((p) => p.id !== id);
-        setState("activeProjectId", remaining.length > 0 ? remaining[0].id : null);
+        setState(
+          "activeProjectId",
+          remaining.length > 0 ? remaining[0].id : null,
+        );
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to delete project";
+      const message =
+        err instanceof Error ? err.message : "Failed to delete project";
       setState("error", message);
       throw err;
     } finally {

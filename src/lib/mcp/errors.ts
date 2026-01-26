@@ -12,7 +12,7 @@ export class McpError extends Error {
   constructor(
     message: string,
     code: string,
-    options?: { serverName?: string; recoverable?: boolean; cause?: Error }
+    options?: { serverName?: string; recoverable?: boolean; cause?: Error },
   ) {
     super(message, { cause: options?.cause });
     this.name = "McpError";
@@ -64,7 +64,7 @@ export class McpConnectionError extends McpError {
   constructor(
     message: string,
     code: string = McpErrorCode.CONNECTION_FAILED,
-    options?: { serverName?: string; cause?: Error }
+    options?: { serverName?: string; cause?: Error },
   ) {
     super(message, code, { ...options, recoverable: true });
     this.name = "McpConnectionError";
@@ -80,7 +80,7 @@ export class McpToolError extends McpError {
   constructor(
     message: string,
     toolName: string,
-    options?: { serverName?: string; code?: string; cause?: Error }
+    options?: { serverName?: string; code?: string; cause?: Error },
   ) {
     super(message, options?.code || McpErrorCode.TOOL_EXECUTION_FAILED, {
       ...options,
@@ -100,7 +100,7 @@ export class McpResourceError extends McpError {
   constructor(
     message: string,
     resourceUri: string,
-    options?: { serverName?: string; code?: string; cause?: Error }
+    options?: { serverName?: string; code?: string; cause?: Error },
   ) {
     super(message, options?.code || McpErrorCode.RESOURCE_READ_FAILED, {
       ...options,
@@ -114,10 +114,7 @@ export class McpResourceError extends McpError {
 /**
  * Parse an unknown error into an McpError.
  */
-export function parseMcpError(
-  error: unknown,
-  serverName?: string
-): McpError {
+export function parseMcpError(error: unknown, serverName?: string): McpError {
   if (error instanceof McpError) {
     return error;
   }
@@ -126,11 +123,14 @@ export function parseMcpError(
     const message = error.message.toLowerCase();
 
     // Connection errors
-    if (message.includes("connection refused") || message.includes("econnrefused")) {
+    if (
+      message.includes("connection refused") ||
+      message.includes("econnrefused")
+    ) {
       return new McpConnectionError(
         `Connection refused to MCP server`,
         McpErrorCode.CONNECTION_REFUSED,
-        { serverName, cause: error }
+        { serverName, cause: error },
       );
     }
 
@@ -138,7 +138,7 @@ export function parseMcpError(
       return new McpConnectionError(
         `Connection timed out`,
         McpErrorCode.CONNECTION_TIMEOUT,
-        { serverName, cause: error }
+        { serverName, cause: error },
       );
     }
 
@@ -146,7 +146,7 @@ export function parseMcpError(
       return new McpConnectionError(
         `MCP server command not found`,
         McpErrorCode.SERVER_NOT_FOUND,
-        { serverName, cause: error }
+        { serverName, cause: error },
       );
     }
 
@@ -154,7 +154,7 @@ export function parseMcpError(
       return new McpConnectionError(
         `MCP server process crashed`,
         McpErrorCode.SERVER_CRASHED,
-        { serverName, cause: error }
+        { serverName, cause: error },
       );
     }
 
@@ -163,7 +163,7 @@ export function parseMcpError(
       return new McpError(
         `Invalid response from MCP server`,
         McpErrorCode.INVALID_RESPONSE,
-        { serverName, cause: error, recoverable: false }
+        { serverName, cause: error, recoverable: false },
       );
     }
 
@@ -176,11 +176,10 @@ export function parseMcpError(
   }
 
   // Non-Error thrown
-  return new McpError(
-    String(error),
-    McpErrorCode.UNKNOWN,
-    { serverName, recoverable: false }
-  );
+  return new McpError(String(error), McpErrorCode.UNKNOWN, {
+    serverName,
+    recoverable: false,
+  });
 }
 
 /**

@@ -1,10 +1,21 @@
 // ABOUTME: Publisher catalog panel for browsing available API and database publishers.
 // ABOUTME: Shows searchable list of publishers with pricing, stats, and categories.
 
-import { createSignal, createEffect, For, Show, type Component } from "solid-js";
-import { catalog, getPricingDisplay, formatNumber, type Publisher } from "@/services/catalog";
-import { authStore, checkAuth } from "@/stores/auth.store";
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
+import {
+  catalog,
+  formatNumber,
+  getPricingDisplay,
+  type Publisher,
+} from "@/services/catalog";
+import { authStore, checkAuth } from "@/stores/auth.store";
 import "./CatalogPanel.css";
 
 interface CatalogPanelProps {
@@ -13,12 +24,15 @@ interface CatalogPanelProps {
 
 export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
   const [publishers, setPublishers] = createSignal<Publisher[]>([]);
-  const [filteredPublishers, setFilteredPublishers] = createSignal<Publisher[]>([]);
+  const [filteredPublishers, setFilteredPublishers] = createSignal<Publisher[]>(
+    [],
+  );
   const [searchQuery, setSearchQuery] = createSignal("");
   const [selectedType, setSelectedType] = createSignal<string | null>(null);
   const [isLoading, setIsLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  const [selectedPublisher, setSelectedPublisher] = createSignal<Publisher | null>(null);
+  const [selectedPublisher, setSelectedPublisher] =
+    createSignal<Publisher | null>(null);
 
   const publisherTypes = [
     { id: "database", label: "Databases", icon: "🗄️" },
@@ -42,15 +56,16 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
     let filtered = publishers();
 
     if (type) {
-      filtered = filtered.filter(p => p.publisher_type === type);
+      filtered = filtered.filter((p) => p.publisher_type === type);
     }
 
     if (query) {
-      filtered = filtered.filter(p =>
-        p.name.toLowerCase().includes(query) ||
-        (p.resource_name?.toLowerCase().includes(query)) ||
-        p.description.toLowerCase().includes(query) ||
-        p.categories.some(c => c.toLowerCase().includes(query))
+      filtered = filtered.filter(
+        (p) =>
+          p.name.toLowerCase().includes(query) ||
+          p.resource_name?.toLowerCase().includes(query) ||
+          p.description.toLowerCase().includes(query) ||
+          p.categories.some((c) => c.toLowerCase().includes(query)),
       );
     }
 
@@ -71,7 +86,7 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
   }
 
   function handleTypeClick(typeId: string) {
-    setSelectedType(prev => prev === typeId ? null : typeId);
+    setSelectedType((prev) => (prev === typeId ? null : typeId));
   }
 
   // Get display name - prefer resource_name
@@ -92,7 +107,9 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
           <div class="signin-prompt-header">
             <span class="signin-prompt-icon">📚</span>
             <h2>Sign in to explore the catalog</h2>
-            <p>Browse APIs, databases, and AI services available through Seren.</p>
+            <p>
+              Browse APIs, databases, and AI services available through Seren.
+            </p>
           </div>
           <SignIn onSuccess={() => checkAuth()} />
         </div>
@@ -136,7 +153,9 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
         <Show when={error()}>
           <div class="catalog-error">
             <p>{error()}</p>
-            <button type="button" onClick={loadPublishers}>Retry</button>
+            <button type="button" onClick={loadPublishers}>
+              Retry
+            </button>
           </div>
         </Show>
 
@@ -175,7 +194,9 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                           when={publisher.logo_url}
                           fallback={
                             <div class="publisher-logo-placeholder">
-                              {getDisplayName(publisher).charAt(0).toUpperCase()}
+                              {getDisplayName(publisher)
+                                .charAt(0)
+                                .toUpperCase()}
                             </div>
                           }
                         >
@@ -188,16 +209,25 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                         <div class="publisher-title">
                           <h3>{getDisplayName(publisher)}</h3>
                           <Show when={publisher.is_verified}>
-                            <span class="verified-badge" title="Verified publisher">✓</span>
+                            <span
+                              class="verified-badge"
+                              title="Verified publisher"
+                            >
+                              ✓
+                            </span>
                           </Show>
                         </div>
                       </div>
 
                       <Show when={getPublisherName(publisher)}>
-                        <p class="publisher-byline">by {getPublisherName(publisher)}</p>
+                        <p class="publisher-byline">
+                          by {getPublisherName(publisher)}
+                        </p>
                       </Show>
 
-                      <p class="publisher-description">{publisher.description}</p>
+                      <p class="publisher-description">
+                        {publisher.description}
+                      </p>
 
                       {/* Categories */}
                       <Show when={publisher.categories.length > 0}>
@@ -222,10 +252,13 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                           </span>
                           <span class="stat-item" title="Agents served">
                             <span class="stat-icon">🤖</span>
-                            {formatNumber(publisher.unique_agents_served)} agents
+                            {formatNumber(publisher.unique_agents_served)}{" "}
+                            agents
                           </span>
                         </div>
-                        <span class="publisher-price">{getPricingDisplay(publisher)}</span>
+                        <span class="publisher-price">
+                          {getPricingDisplay(publisher)}
+                        </span>
                       </div>
                     </article>
                   )}
@@ -246,30 +279,42 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                   </button>
                 </div>
                 <div class="detail-content">
-                  <Show when={selectedPublisher()!.logo_url}>
+                  <Show when={selectedPublisher()?.logo_url}>
                     <img
-                      src={selectedPublisher()!.logo_url!}
-                      alt={selectedPublisher()!.name}
+                      src={selectedPublisher()?.logo_url ?? ""}
+                      alt={selectedPublisher()?.name}
                       class="detail-logo"
                     />
                   </Show>
 
                   <Show when={getPublisherName(selectedPublisher()!)}>
-                    <p class="detail-byline">by {getPublisherName(selectedPublisher()!)}</p>
+                    <p class="detail-byline">
+                      by {getPublisherName(selectedPublisher()!)}
+                    </p>
                   </Show>
 
-                  <p class="detail-description">{selectedPublisher()!.description}</p>
+                  <p class="detail-description">
+                    {selectedPublisher()?.description}
+                  </p>
 
                   {/* Stats section */}
                   <div class="detail-section">
                     <h4>Usage</h4>
                     <div class="detail-stats">
                       <div class="stat-card">
-                        <span class="stat-value">{formatNumber(selectedPublisher()!.total_transactions)}</span>
+                        <span class="stat-value">
+                          {formatNumber(
+                            selectedPublisher()?.total_transactions ?? 0,
+                          )}
+                        </span>
                         <span class="stat-label">Transactions</span>
                       </div>
                       <div class="stat-card">
-                        <span class="stat-value">{formatNumber(selectedPublisher()!.unique_agents_served)}</span>
+                        <span class="stat-value">
+                          {formatNumber(
+                            selectedPublisher()?.unique_agents_served ?? 0,
+                          )}
+                        </span>
                         <span class="stat-label">Agents</span>
                       </div>
                     </div>
@@ -279,21 +324,29 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                   <div class="detail-section">
                     <h4>Pricing</h4>
                     <div class="detail-pricing">
-                      <span class="pricing-badge">{getPricingDisplay(selectedPublisher()!)}</span>
-                      <Show when={selectedPublisher()!.billing_model}>
+                      <span class="pricing-badge">
+                        {getPricingDisplay(selectedPublisher()!)}
+                      </span>
+                      <Show when={selectedPublisher()?.billing_model}>
                         <p class="pricing-model">
-                          Model: {selectedPublisher()!.billing_model === "prepaid_credits" ? "Prepaid Credits" : "Pay per Request"}
+                          Model:{" "}
+                          {selectedPublisher()?.billing_model ===
+                          "prepaid_credits"
+                            ? "Prepaid Credits"
+                            : "Pay per Request"}
                         </p>
                       </Show>
                     </div>
                   </div>
 
                   {/* Categories section */}
-                  <Show when={selectedPublisher()!.categories.length > 0}>
+                  <Show
+                    when={(selectedPublisher()?.categories?.length ?? 0) > 0}
+                  >
                     <div class="detail-section">
                       <h4>Categories</h4>
                       <div class="detail-categories">
-                        <For each={selectedPublisher()!.categories}>
+                        <For each={selectedPublisher()?.categories}>
                           {(cat) => <span class="category-tag">{cat}</span>}
                         </For>
                       </div>
@@ -304,10 +357,10 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                   <div class="detail-section">
                     <h4>Integration</h4>
                     <p class="detail-slug">
-                      Slug: <code>{selectedPublisher()!.slug}</code>
+                      Slug: <code>{selectedPublisher()?.slug}</code>
                     </p>
                     <p class="detail-type">
-                      Type: <code>{selectedPublisher()!.publisher_type}</code>
+                      Type: <code>{selectedPublisher()?.publisher_type}</code>
                     </p>
                   </div>
                 </div>

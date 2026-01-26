@@ -161,7 +161,7 @@ export function hasX402Option(requirements: PaymentRequirements): boolean {
  * Get the first x402 payment option, if any.
  */
 export function getX402Option(
-  requirements: PaymentRequirements
+  requirements: PaymentRequirements,
 ): X402PaymentOption | null {
   for (const accept of requirements.accepts) {
     if (accept.type === "x402") {
@@ -174,7 +174,9 @@ export function getX402Option(
 /**
  * Check if this is an insufficient credit error.
  */
-export function isInsufficientCredit(requirements: PaymentRequirements): boolean {
+export function isInsufficientCredit(
+  requirements: PaymentRequirements,
+): boolean {
   return requirements.insufficientCredit !== undefined;
 }
 

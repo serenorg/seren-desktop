@@ -21,7 +21,7 @@ export interface CompletionResult {
 }
 
 type CompletionHandler = (
-  context: CompletionContext
+  context: CompletionContext,
 ) => Promise<CompletionResult[]>;
 
 let completionHandler: CompletionHandler | null = null;
@@ -52,7 +52,7 @@ export function registerInlineCompletionProvider(): Monaco.IDisposable {
         model: Monaco.editor.ITextModel,
         position: Monaco.Position,
         _context: Monaco.languages.InlineCompletionContext,
-        token: Monaco.CancellationToken
+        token: Monaco.CancellationToken,
       ): Promise<Monaco.languages.InlineCompletions | null> => {
         if (!completionHandler) {
           return null;
@@ -80,7 +80,7 @@ export function registerInlineCompletionProvider(): Monaco.IDisposable {
                 result.range.startLineNumber,
                 result.range.startColumn,
                 result.range.endLineNumber,
-                result.range.endColumn
+                result.range.endColumn,
               ),
             })),
           };
@@ -93,7 +93,7 @@ export function registerInlineCompletionProvider(): Monaco.IDisposable {
       disposeInlineCompletions: () => {
         // Cleanup if needed
       },
-    }
+    },
   );
 
   return disposable;
@@ -104,7 +104,7 @@ export function registerInlineCompletionProvider(): Monaco.IDisposable {
  */
 function extractCompletionContext(
   model: Monaco.editor.ITextModel,
-  position: Monaco.Position
+  position: Monaco.Position,
 ): CompletionContext {
   const maxPrefixChars = 4000;
   const maxSuffixChars = 1000;

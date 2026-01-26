@@ -1,8 +1,15 @@
 // ABOUTME: Searchable dropdown for selecting AI models from OpenRouter.
 // ABOUTME: Fetches full model list and allows filtering by name/provider.
 
-import { createSignal, createEffect, For, Show, onCleanup, type Component } from "solid-js";
-import { modelsService, type Model } from "@/services/models";
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+} from "solid-js";
+import { type Model, modelsService } from "@/services/models";
 import "./SearchableModelSelect.css";
 
 interface SearchableModelSelectProps {
@@ -11,7 +18,9 @@ interface SearchableModelSelectProps {
   placeholder?: string;
 }
 
-export const SearchableModelSelect: Component<SearchableModelSelectProps> = (props) => {
+export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
+  props,
+) => {
   const [isOpen, setIsOpen] = createSignal(false);
   const [search, setSearch] = createSignal("");
   const [models, setModels] = createSignal<Model[]>([]);
@@ -50,7 +59,7 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (pro
       (m) =>
         m.name.toLowerCase().includes(query) ||
         m.id.toLowerCase().includes(query) ||
-        m.provider.toLowerCase().includes(query)
+        m.provider.toLowerCase().includes(query),
     );
   };
 
@@ -122,23 +131,33 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (pro
               onKeyDown={handleKeyDown}
             />
             <Show when={!isLoading() && models().length > 0}>
-              <span class="select-count">{filteredModels().length} of {models().length}</span>
+              <span class="select-count">
+                {filteredModels().length} of {models().length}
+              </span>
             </Show>
           </div>
 
           <div class="select-options">
             <Show when={isLoading()}>
-              <div class="select-loading">Loading models from OpenRouter...</div>
+              <div class="select-loading">
+                Loading models from OpenRouter...
+              </div>
             </Show>
 
             <Show when={!isLoading() && loadError()}>
               <div class="select-error">
                 {loadError()}
-                <button type="button" onClick={loadModels}>Retry</button>
+                <button type="button" onClick={loadModels}>
+                  Retry
+                </button>
               </div>
             </Show>
 
-            <Show when={!isLoading() && !loadError() && filteredModels().length === 0}>
+            <Show
+              when={
+                !isLoading() && !loadError() && filteredModels().length === 0
+              }
+            >
               <div class="select-empty">No models match "{search()}"</div>
             </Show>
 

@@ -15,7 +15,10 @@ const PATTERNS: Array<{ regex: RegExp; replacement: string }> = [
   },
 
   // Email addresses
-  { regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, replacement: "[REDACTED_EMAIL]" },
+  {
+    regex: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+    replacement: "[REDACTED_EMAIL]",
+  },
 
   // Unix-style paths with usernames (/Users/username/ or /home/username/)
   {

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { setNodes, setRootPath, type FileNode } from "@/stores/fileTree";
+import { type FileNode, setNodes, setRootPath } from "@/stores/fileTree";
 import { openTab, setTabDirty } from "@/stores/tabs";
 
 export interface FileEntry {
@@ -49,7 +49,7 @@ export async function isDirectory(path: string): Promise<boolean> {
  */
 export async function createFile(
   path: string,
-  content?: string
+  content?: string,
 ): Promise<void> {
   return invoke("create_file", { path, content });
 }
@@ -73,7 +73,7 @@ export async function deletePath(path: string): Promise<void> {
  */
 export async function renamePath(
   oldPath: string,
-  newPath: string
+  newPath: string,
 ): Promise<void> {
   return invoke("rename_path", { oldPath, newPath });
 }
@@ -139,7 +139,11 @@ export async function openFileInTab(path: string): Promise<void> {
 /**
  * Save the content of a tab to disk.
  */
-export async function saveTab(tabId: string, path: string, content: string): Promise<void> {
+export async function saveTab(
+  tabId: string,
+  path: string,
+  content: string,
+): Promise<void> {
   await writeFile(path, content);
   setTabDirty(tabId, false);
 }
@@ -164,7 +168,9 @@ export async function openFilePicker(): Promise<string | null> {
 /**
  * Open a save file dialog.
  */
-export async function saveFileDialog(defaultPath?: string): Promise<string | null> {
+export async function saveFileDialog(
+  defaultPath?: string,
+): Promise<string | null> {
   const selected = await save({
     defaultPath,
     title: "Save File",

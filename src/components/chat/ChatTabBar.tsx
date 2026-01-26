@@ -2,7 +2,7 @@
 // ABOUTME: Displays tabs with close buttons and a new chat button.
 
 import { type Component, For, Show } from "solid-js";
-import { chatStore, type Conversation } from "@/stores/chat.store";
+import { type Conversation, chatStore } from "@/stores/chat.store";
 import "./ChatTabBar.css";
 
 export const ChatTabBar: Component = () => {

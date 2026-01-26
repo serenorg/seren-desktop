@@ -1,39 +1,61 @@
 /* eslint-disable solid/no-innerhtml */
 import type { Component } from "solid-js";
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import {
-  type ChatContext,
-  type Message,
-  type ToolStreamEvent,
-  streamMessage,
-  streamMessageWithTools,
-  areToolsAvailable,
-  sendMessageWithRetry,
-  CHAT_MAX_RETRIES,
-} from "@/services/chat";
-import { catalog, type Publisher } from "@/services/catalog";
-import { chatStore } from "@/stores/chat.store";
-import { editorStore } from "@/stores/editor.store";
-import { authStore, checkAuth } from "@/stores/auth.store";
-import { settingsStore } from "@/stores/settings.store";
-import { StreamingMessage } from "./StreamingMessage";
-import { ToolStreamingMessage } from "./ToolStreamingMessage";
-import { ModelSelector } from "./ModelSelector";
-import { PublisherSuggestions } from "./PublisherSuggestions";
-import { ChatTabBar } from "./ChatTabBar";
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
 import { FileTree } from "@/components/sidebar/FileTree";
-import { fileTreeState, setNodes } from "@/stores/fileTree";
-import { openFolder, openFileInTab, loadDirectoryChildren } from "@/lib/files/service";
-import { renderMarkdown } from "@/lib/render-markdown";
 import { escapeHtml } from "@/lib/escape-html";
+import {
+  loadDirectoryChildren,
+  openFileInTab,
+  openFolder,
+} from "@/lib/files/service";
+import { renderMarkdown } from "@/lib/render-markdown";
+import { catalog, type Publisher } from "@/services/catalog";
+import {
+  areToolsAvailable,
+  CHAT_MAX_RETRIES,
+  type ChatContext,
+  type Message,
+  sendMessageWithRetry,
+  streamMessage,
+  streamMessageWithTools,
+  type ToolStreamEvent,
+} from "@/services/chat";
+import { authStore, checkAuth } from "@/stores/auth.store";
+import { chatStore } from "@/stores/chat.store";
+import { editorStore } from "@/stores/editor.store";
+import { fileTreeState, setNodes } from "@/stores/fileTree";
+import { settingsStore } from "@/stores/settings.store";
+import { ChatTabBar } from "./ChatTabBar";
+import { ModelSelector } from "./ModelSelector";
+import { PublisherSuggestions } from "./PublisherSuggestions";
+import { StreamingMessage } from "./StreamingMessage";
+import { ToolStreamingMessage } from "./ToolStreamingMessage";
 import "./ChatPanel.css";
 import "highlight.js/styles/github-dark.css";
 
 // Keywords that trigger publisher suggestions
 const SUGGESTION_KEYWORDS = [
-  "scrape", "crawl", "fetch", "search", "query", "database",
-  "api", "web", "data", "analyze", "extract", "research",
+  "scrape",
+  "crawl",
+  "fetch",
+  "search",
+  "query",
+  "database",
+  "api",
+  "web",
+  "data",
+  "analyze",
+  "extract",
+  "research",
 ];
 
 interface StreamingSession {
@@ -68,7 +90,8 @@ interface ChatPanelComponent extends Component<ChatPanelProps> {
 
 export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [input, setInput] = createSignal("");
-  const [streamingSession, setStreamingSession] = createSignal<ActiveStreamingSession | null>(null);
+  const [streamingSession, setStreamingSession] =
+    createSignal<ActiveStreamingSession | null>(null);
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
@@ -109,11 +132,13 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     // Ctrl+Tab / Ctrl+Shift+Tab: Switch tabs
     if (event.ctrlKey && event.key === "Tab") {
       event.preventDefault();
-      const conversations = chatStore.conversations.filter((c) => !c.isArchived);
+      const conversations = chatStore.conversations.filter(
+        (c) => !c.isArchived,
+      );
       if (conversations.length < 2) return;
 
       const currentIndex = conversations.findIndex(
-        (c) => c.id === chatStore.activeConversationId
+        (c) => c.id === chatStore.activeConversationId,
       );
       if (currentIndex === -1) return;
 
@@ -235,7 +260,11 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     if (expanded) {
       try {
         const children = await loadDirectoryChildren(path);
-        const updatedNodes = updateNodeChildren(fileTreeState.nodes, path, children);
+        const updatedNodes = updateNodeChildren(
+          fileTreeState.nodes,
+          path,
+          children,
+        );
         setNodes(updatedNodes);
       } catch (error) {
         console.error("Failed to load directory:", error);
@@ -274,7 +303,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     chatStore.messages
       .filter((m) => m.role === "user")
       .map((m) => m.content)
-      .reverse()
+      .reverse(),
   );
 
   const buildContext = (): ChatContext | undefined => {
@@ -314,7 +343,12 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
           prompt: trimmed,
           model: chatStore.selectedModel,
           context,
-          stream: streamMessageWithTools(trimmed, chatStore.selectedModel, context, true),
+          stream: streamMessageWithTools(
+            trimmed,
+            chatStore.selectedModel,
+            context,
+            true,
+          ),
           toolsEnabled: true,
         }
       : {
@@ -336,7 +370,10 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     setSavedInput("");
   };
 
-  const handleStreamingComplete = async (session: ActiveStreamingSession, content: string) => {
+  const handleStreamingComplete = async (
+    session: ActiveStreamingSession,
+    content: string,
+  ) => {
     const assistantMessage: Message = {
       id: session.id,
       role: "assistant",
@@ -353,7 +390,10 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     chatStore.setLoading(false);
   };
 
-  const handleStreamingError = async (session: ActiveStreamingSession, error: Error) => {
+  const handleStreamingError = async (
+    session: ActiveStreamingSession,
+    error: Error,
+  ) => {
     setStreamingSession(null);
     chatStore.setLoading(false);
     chatStore.setError(error.message);
@@ -392,7 +432,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             status: "pending",
             attemptCount: attempt + 1,
           });
-        }
+        },
       );
 
       const updated = {
@@ -460,213 +500,241 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             <div class="chat-signin-prompt">
               <div class="signin-prompt-header">
                 <h2>Sign in to chat</h2>
-                <p>Connect with Seren to access AI-powered conversations and code assistance.</p>
+                <p>
+                  Connect with Seren to access AI-powered conversations and code
+                  assistance.
+                </p>
               </div>
               <SignIn onSuccess={() => checkAuth()} />
             </div>
           }
         >
-        <ChatTabBar />
-        <header class="chat-header">
-          <div class="chat-header-left">
-            {/* Model selector in input area, tab bar above */}
-          </div>
-          <div class="chat-actions">
-            <button type="button" class="clear-btn" onClick={clearHistory}>
-              Clear
-            </button>
-          </div>
-        </header>
-
-      <div class="chat-messages" ref={messagesRef}>
-        <Show
-          when={chatStore.messages.length > 0}
-          fallback={
-            <div class="chat-empty">
-              <h3>Start a conversation</h3>
-              <p>Ask questions about code, get explanations, or request help with programming tasks.</p>
+          <ChatTabBar />
+          <header class="chat-header">
+            <div class="chat-header-left">
+              {/* Model selector in input area, tab bar above */}
             </div>
-          }
-        >
-          <For each={chatStore.messages}>
-            {(message) => (
-              <article class={`chat-message ${message.role}`}>
-                <div
-                  class="message-content"
-                  innerHTML={
-                    message.role === "assistant"
-                      ? renderMarkdown(message.content)
-                      : escapeHtml(message.content)
-                  }
-                />
-                <Show when={message.status === "error"}>
-                  <div class="message-error">
-                    <span>{message.error ?? "Message failed"}</span>
-                    <Show when={chatStore.retryingMessageId === message.id}>
-                      <span>
-                        Retrying ({Math.min(message.attemptCount ?? 1, CHAT_MAX_RETRIES)}/
-                        {CHAT_MAX_RETRIES})…
-                      </span>
-                    </Show>
-                    <Show when={message.request}>
-                      <button type="button" onClick={() => handleManualRetry(message)}>Retry</button>
-                    </Show>
-                  </div>
-                </Show>
-              </article>
-            )}
-          </For>
-        </Show>
-
-        <Show when={streamingSession()}>
-          {(sessionAccessor) => {
-            // Capture session immediately to avoid stale accessor in callbacks
-            const session = sessionAccessor();
-            return (
-              <Show
-                when={session.toolsEnabled}
-                fallback={
-                  <StreamingMessage
-                    stream={(session as StreamingSession).stream}
-                    onComplete={(content) => handleStreamingComplete(session, content)}
-                    onError={(error) => handleStreamingError(session, error)}
-                    onContentUpdate={scrollToBottom}
-                  />
-                }
-              >
-                <ToolStreamingMessage
-                  stream={(session as ToolStreamingSession).stream}
-                  onComplete={(content) => handleStreamingComplete(session, content)}
-                  onError={(error) => handleStreamingError(session, error)}
-                  onContentUpdate={scrollToBottom}
-                />
-              </Show>
-            );
-          }}
-        </Show>
-      </div>
-
-      <Show when={contextPreview()}>
-        {(ctx) => (
-          <div class="chat-context">
-            <div class="context-header">
-              <span>
-                Context from {ctx().file ?? "selection"}
-                {ctx().range &&
-                  ` (${ctx().range?.startLine}-${ctx().range?.endLine})`}
-              </span>
-              <button type="button" class="icon" onClick={() => editorStore.clearSelection()}>
-                ×
+            <div class="chat-actions">
+              <button type="button" class="clear-btn" onClick={clearHistory}>
+                Clear
               </button>
             </div>
-            <pre>{ctx().text}</pre>
+          </header>
+
+          <div class="chat-messages" ref={messagesRef}>
+            <Show
+              when={chatStore.messages.length > 0}
+              fallback={
+                <div class="chat-empty">
+                  <h3>Start a conversation</h3>
+                  <p>
+                    Ask questions about code, get explanations, or request help
+                    with programming tasks.
+                  </p>
+                </div>
+              }
+            >
+              <For each={chatStore.messages}>
+                {(message) => (
+                  <article class={`chat-message ${message.role}`}>
+                    <div
+                      class="message-content"
+                      innerHTML={
+                        message.role === "assistant"
+                          ? renderMarkdown(message.content)
+                          : escapeHtml(message.content)
+                      }
+                    />
+                    <Show when={message.status === "error"}>
+                      <div class="message-error">
+                        <span>{message.error ?? "Message failed"}</span>
+                        <Show when={chatStore.retryingMessageId === message.id}>
+                          <span>
+                            Retrying (
+                            {Math.min(
+                              message.attemptCount ?? 1,
+                              CHAT_MAX_RETRIES,
+                            )}
+                            /{CHAT_MAX_RETRIES})…
+                          </span>
+                        </Show>
+                        <Show when={message.request}>
+                          <button
+                            type="button"
+                            onClick={() => handleManualRetry(message)}
+                          >
+                            Retry
+                          </button>
+                        </Show>
+                      </div>
+                    </Show>
+                  </article>
+                )}
+              </For>
+            </Show>
+
+            <Show when={streamingSession()}>
+              {(sessionAccessor) => {
+                // Capture session immediately to avoid stale accessor in callbacks
+                const session = sessionAccessor();
+                return (
+                  <Show
+                    when={session.toolsEnabled}
+                    fallback={
+                      <StreamingMessage
+                        stream={(session as StreamingSession).stream}
+                        onComplete={(content) =>
+                          handleStreamingComplete(session, content)
+                        }
+                        onError={(error) =>
+                          handleStreamingError(session, error)
+                        }
+                        onContentUpdate={scrollToBottom}
+                      />
+                    }
+                  >
+                    <ToolStreamingMessage
+                      stream={(session as ToolStreamingSession).stream}
+                      onComplete={(content) =>
+                        handleStreamingComplete(session, content)
+                      }
+                      onError={(error) => handleStreamingError(session, error)}
+                      onContentUpdate={scrollToBottom}
+                    />
+                  </Show>
+                );
+              }}
+            </Show>
           </div>
-        )}
-      </Show>
 
-      <div class="chat-input-container">
-        <form
-          class="chat-input"
-          onSubmit={(event) => {
-            event.preventDefault();
-            sendMessage();
-          }}
-        >
-          <PublisherSuggestions
-            suggestions={suggestions()}
-            isLoading={suggestionsLoading()}
-            onSelect={handlePublisherSelect}
-            onDismiss={dismissSuggestions}
-          />
-          <textarea
-            ref={inputRef}
-            value={input()}
-            placeholder="Ask Seren anything…"
-            onInput={(event) => {
-              setInput(event.currentTarget.value);
-              // Reset history browsing when user types manually
-              if (historyIndex() !== -1) {
-                setHistoryIndex(-1);
-                setSavedInput("");
-              }
-            }}
-            onKeyDown={(event) => {
-              const history = userMessageHistory();
+          <Show when={contextPreview()}>
+            {(ctx) => (
+              <div class="chat-context">
+                <div class="context-header">
+                  <span>
+                    Context from {ctx().file ?? "selection"}
+                    {ctx().range &&
+                      ` (${ctx().range?.startLine}-${ctx().range?.endLine})`}
+                  </span>
+                  <button
+                    type="button"
+                    class="icon"
+                    onClick={() => editorStore.clearSelection()}
+                  >
+                    ×
+                  </button>
+                </div>
+                <pre>{ctx().text}</pre>
+              </div>
+            )}
+          </Show>
 
-              // Up arrow: navigate to older message
-              if (event.key === "ArrowUp" && history.length > 0) {
-                const textarea = event.currentTarget;
-                // Only trigger if cursor at start or input empty
-                if (textarea.selectionStart === 0 || input() === "") {
-                  event.preventDefault();
-
-                  if (historyIndex() === -1) {
-                    // Starting to browse - save current input
-                    setSavedInput(input());
-                  }
-
-                  const newIndex = Math.min(historyIndex() + 1, history.length - 1);
-                  setHistoryIndex(newIndex);
-                  setInput(history[newIndex]);
-                }
-              }
-
-              // Down arrow: navigate to newer message
-              if (event.key === "ArrowDown" && historyIndex() >= 0) {
-                const textarea = event.currentTarget;
-                // Only trigger if cursor at end
-                if (textarea.selectionStart === textarea.value.length) {
-                  event.preventDefault();
-
-                  const newIndex = historyIndex() - 1;
-                  setHistoryIndex(newIndex);
-
-                  if (newIndex < 0) {
-                    // Back to current input
-                    setInput(savedInput());
+          <div class="chat-input-container">
+            <form
+              class="chat-input"
+              onSubmit={(event) => {
+                event.preventDefault();
+                sendMessage();
+              }}
+            >
+              <PublisherSuggestions
+                suggestions={suggestions()}
+                isLoading={suggestionsLoading()}
+                onSelect={handlePublisherSelect}
+                onDismiss={dismissSuggestions}
+              />
+              <textarea
+                ref={inputRef}
+                value={input()}
+                placeholder="Ask Seren anything…"
+                onInput={(event) => {
+                  setInput(event.currentTarget.value);
+                  // Reset history browsing when user types manually
+                  if (historyIndex() !== -1) {
+                    setHistoryIndex(-1);
                     setSavedInput("");
-                  } else {
-                    setInput(history[newIndex]);
                   }
-                }
-              }
+                }}
+                onKeyDown={(event) => {
+                  const history = userMessageHistory();
 
-              // Enter key handling
-              if (event.key === "Enter") {
-                const enterToSend = settingsStore.get("chatEnterToSend");
-                if (enterToSend) {
-                  // Enter sends, Shift+Enter for newline
-                  if (!event.shiftKey) {
-                    event.preventDefault();
-                    sendMessage();
+                  // Up arrow: navigate to older message
+                  if (event.key === "ArrowUp" && history.length > 0) {
+                    const textarea = event.currentTarget;
+                    // Only trigger if cursor at start or input empty
+                    if (textarea.selectionStart === 0 || input() === "") {
+                      event.preventDefault();
+
+                      if (historyIndex() === -1) {
+                        // Starting to browse - save current input
+                        setSavedInput(input());
+                      }
+
+                      const newIndex = Math.min(
+                        historyIndex() + 1,
+                        history.length - 1,
+                      );
+                      setHistoryIndex(newIndex);
+                      setInput(history[newIndex]);
+                    }
                   }
-                } else {
-                  // Ctrl/Cmd+Enter sends
-                  if (event.metaKey || event.ctrlKey) {
-                    event.preventDefault();
-                    sendMessage();
+
+                  // Down arrow: navigate to newer message
+                  if (event.key === "ArrowDown" && historyIndex() >= 0) {
+                    const textarea = event.currentTarget;
+                    // Only trigger if cursor at end
+                    if (textarea.selectionStart === textarea.value.length) {
+                      event.preventDefault();
+
+                      const newIndex = historyIndex() - 1;
+                      setHistoryIndex(newIndex);
+
+                      if (newIndex < 0) {
+                        // Back to current input
+                        setInput(savedInput());
+                        setSavedInput("");
+                      } else {
+                        setInput(history[newIndex]);
+                      }
+                    }
                   }
-                }
-              }
-            }}
-            disabled={chatStore.isLoading}
-          />
-          <div class="input-footer">
-            <div class="input-footer-left">
-              <ModelSelector />
-              <span class="input-hint">
-                {settingsStore.get("chatEnterToSend")
-                  ? "Enter to send"
-                  : "Ctrl+Enter to send"}
-              </span>
-            </div>
-            <button type="submit" disabled={chatStore.isLoading}>
-              Send
-            </button>
+
+                  // Enter key handling
+                  if (event.key === "Enter") {
+                    const enterToSend = settingsStore.get("chatEnterToSend");
+                    if (enterToSend) {
+                      // Enter sends, Shift+Enter for newline
+                      if (!event.shiftKey) {
+                        event.preventDefault();
+                        sendMessage();
+                      }
+                    } else {
+                      // Ctrl/Cmd+Enter sends
+                      if (event.metaKey || event.ctrlKey) {
+                        event.preventDefault();
+                        sendMessage();
+                      }
+                    }
+                  }
+                }}
+                disabled={chatStore.isLoading}
+              />
+              <div class="input-footer">
+                <div class="input-footer-left">
+                  <ModelSelector />
+                  <span class="input-hint">
+                    {settingsStore.get("chatEnterToSend")
+                      ? "Enter to send"
+                      : "Ctrl+Enter to send"}
+                  </span>
+                </div>
+                <button type="submit" disabled={chatStore.isLoading}>
+                  Send
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
-      </div>
-      </Show>
+        </Show>
       </div>
     </section>
   );
@@ -678,7 +746,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
 function updateNodeChildren(
   nodes: typeof fileTreeState.nodes,
   path: string,
-  children: typeof fileTreeState.nodes
+  children: typeof fileTreeState.nodes,
 ): typeof fileTreeState.nodes {
   return nodes.map((node) => {
     if (node.path === path) {

@@ -1,7 +1,7 @@
 // ABOUTME: Publisher suggestion component that displays relevant publishers based on chat input.
 // ABOUTME: Shows clickable suggestions with name, description, and pricing info.
 
-import { Component, For, Show } from "solid-js";
+import { type Component, For, Show } from "solid-js";
 import { getPricingDisplay, type Publisher } from "@/services/catalog";
 import "./PublisherSuggestions.css";
 
@@ -12,7 +12,9 @@ interface PublisherSuggestionsProps {
   onDismiss: () => void;
 }
 
-export const PublisherSuggestions: Component<PublisherSuggestionsProps> = (props) => {
+export const PublisherSuggestions: Component<PublisherSuggestionsProps> = (
+  props,
+) => {
   return (
     <Show when={props.suggestions.length > 0 || props.isLoading}>
       <div class="publisher-suggestions">
@@ -63,7 +65,10 @@ export const PublisherSuggestions: Component<PublisherSuggestionsProps> = (props
                       <span class="publisher-suggestion__name">
                         {publisher.name}
                         <Show when={publisher.is_verified}>
-                          <span class="publisher-suggestion__verified" title="Verified">
+                          <span
+                            class="publisher-suggestion__verified"
+                            title="Verified"
+                          >
                             ✓
                           </span>
                         </Show>

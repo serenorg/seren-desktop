@@ -2,20 +2,20 @@
 // ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
 import {
-  listOrganizations as apiListOrganizations,
-  listProjects as apiListProjects,
   createProject as apiCreateProject,
   deleteProject as apiDeleteProject,
-  getProject as apiGetProject,
-  listBranches as apiListBranches,
   getBranch as apiGetBranch,
   getConnectionString as apiGetConnectionString,
-  listDatabases as apiListDatabases,
   getDatabase as apiGetDatabase,
-  type Organization,
-  type Project,
+  getProject as apiGetProject,
+  listBranches as apiListBranches,
+  listDatabases as apiListDatabases,
+  listOrganizations as apiListOrganizations,
+  listProjects as apiListProjects,
   type Branch,
   type DatabaseWithOwner,
+  type Organization,
+  type Project,
 } from "@/api";
 
 // Use DatabaseWithOwner as the Database type (list endpoint returns this)
@@ -65,7 +65,7 @@ export const databases = {
    */
   async createProject(
     name: string,
-    _organizationId?: string
+    _organizationId?: string,
   ): Promise<Project> {
     console.log("[Databases] Creating project:", name);
     const { data, error } = await apiCreateProject({
@@ -118,7 +118,7 @@ export const databases = {
    */
   async getConnectionString(
     projectId: string,
-    branchId: string
+    branchId: string,
   ): Promise<string> {
     console.log("[Databases] Fetching connection string");
     const { data, error } = await apiGetConnectionString({
@@ -137,7 +137,7 @@ export const databases = {
    */
   async listDatabases(
     projectId: string,
-    branchId: string
+    branchId: string,
   ): Promise<Database[]> {
     console.log("[Databases] Fetching databases for branch:", branchId);
     const { data, error } = await apiListDatabases({
@@ -187,7 +187,7 @@ export const databases = {
   async getDatabase(
     projectId: string,
     branchId: string,
-    databaseId: string
+    databaseId: string,
   ): Promise<Database> {
     const { data, error } = await apiGetDatabase({
       path: {

@@ -1,14 +1,14 @@
 // ABOUTME: Wallet service for fetching and managing SerenBucks balance.
 // ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
-import { getWalletBalance, createDeposit, getTransactions } from "@/api";
+import { createDeposit, getTransactions, getWalletBalance } from "@/api";
 
 // Re-export generated types directly
 export type {
-  WalletBalanceResponse as WalletBalance,
   DepositResponse as TopUpCheckout,
-  WalletTransactionResponse as Transaction,
+  WalletBalanceResponse as WalletBalance,
   WalletTransactionHistoryResponse as TransactionsResponse,
+  WalletTransactionResponse as Transaction,
 } from "@/api";
 
 /**
@@ -78,7 +78,7 @@ export async function openCheckout(checkoutUrl: string): Promise<void> {
  * Note: Not yet in OpenAPI spec - placeholder implementation.
  */
 export async function initiateCryptoDeposit(
-  _amount: number
+  _amount: number,
 ): Promise<CryptoDepositInfo> {
   throw new Error("Crypto deposits not yet supported");
 }

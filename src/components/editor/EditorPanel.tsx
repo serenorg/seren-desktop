@@ -1,27 +1,32 @@
 // ABOUTME: Main editor panel with file tree, tabs, and Monaco editor.
 // ABOUTME: Provides full-featured code editing with file system integration.
 
-import { Show, createEffect, createSignal, createMemo, type Component } from "solid-js";
+import {
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  Show,
+} from "solid-js";
 import { FileTree } from "@/components/sidebar/FileTree";
-import { FileTabs } from "./FileTabs";
-import { MonacoEditor } from "./MonacoEditor";
-import { MarkdownPreview } from "./MarkdownPreview";
-import { ImageViewer } from "./ImageViewer";
-import { PdfViewer } from "./PdfViewer";
-import { fileTreeState, setSelectedPath } from "@/stores/fileTree";
 import {
-  tabsState,
-  updateTabContent,
-  setTabDirty,
-  getActiveTab,
-} from "@/stores/tabs";
-import {
-  openFolder,
-  openFileInTab,
   loadDirectoryChildren,
+  openFileInTab,
+  openFolder,
   saveTab,
 } from "@/lib/files/service";
-import { setNodes } from "@/stores/fileTree";
+import { fileTreeState, setNodes, setSelectedPath } from "@/stores/fileTree";
+import {
+  getActiveTab,
+  setTabDirty,
+  tabsState,
+  updateTabContent,
+} from "@/stores/tabs";
+import { FileTabs } from "./FileTabs";
+import { ImageViewer } from "./ImageViewer";
+import { MarkdownPreview } from "./MarkdownPreview";
+import { MonacoEditor } from "./MonacoEditor";
+import { PdfViewer } from "./PdfViewer";
 import "./EditorPanel.css";
 
 export const EditorPanel: Component = () => {
@@ -34,7 +39,10 @@ export const EditorPanel: Component = () => {
   const isMarkdownFile = createMemo(() => {
     const path = activeFilePath();
     if (!path) return false;
-    return path.toLowerCase().endsWith(".md") || path.toLowerCase().endsWith(".markdown");
+    return (
+      path.toLowerCase().endsWith(".md") ||
+      path.toLowerCase().endsWith(".markdown")
+    );
   });
 
   // Check if current file is an image
@@ -42,7 +50,9 @@ export const EditorPanel: Component = () => {
     const path = activeFilePath();
     if (!path) return false;
     const ext = path.toLowerCase().split(".").pop();
-    return ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(ext || "");
+    return ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(
+      ext || "",
+    );
   });
 
   // Check if current file is a PDF
@@ -90,7 +100,11 @@ export const EditorPanel: Component = () => {
       try {
         const children = await loadDirectoryChildren(path);
         // Update the node's children in the tree
-        const updatedNodes = updateNodeChildren(fileTreeState.nodes, path, children);
+        const updatedNodes = updateNodeChildren(
+          fileTreeState.nodes,
+          path,
+          children,
+        );
         setNodes(updatedNodes);
       } catch (error) {
         console.error("Failed to load directory:", error);
@@ -161,7 +175,10 @@ export const EditorPanel: Component = () => {
             onTogglePreview={() => setShowPreview((prev) => !prev)}
           />
         </div>
-        <div class="editor-content" classList={{ "split-view": showPreview() && isMarkdownFile() }}>
+        <div
+          class="editor-content"
+          classList={{ "split-view": showPreview() && isMarkdownFile() }}
+        >
           <Show
             when={activeFilePath()}
             fallback={
@@ -171,7 +188,9 @@ export const EditorPanel: Component = () => {
                   <h2>No file open</h2>
                   <p>
                     Open a folder to browse files, or use{" "}
-                    <kbd>{navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+O</kbd>{" "}
+                    <kbd>
+                      {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+O
+                    </kbd>{" "}
                     to open a file.
                   </p>
                   <Show when={!fileTreeState.rootPath}>
@@ -227,7 +246,7 @@ export const EditorPanel: Component = () => {
 function updateNodeChildren(
   nodes: typeof fileTreeState.nodes,
   path: string,
-  children: typeof fileTreeState.nodes
+  children: typeof fileTreeState.nodes,
 ): typeof fileTreeState.nodes {
   return nodes.map((node) => {
     if (node.path === path) {

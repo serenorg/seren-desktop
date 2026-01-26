@@ -1,7 +1,7 @@
 // ABOUTME: Panel for discovering and executing MCP tools.
 // ABOUTME: Shows available tools across all connected servers with execution UI.
 
-import { createSignal, For, Show, type Component } from "solid-js";
+import { type Component, createSignal, For, Show } from "solid-js";
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool, McpToolResult } from "@/lib/mcp/types";
 import "./McpToolsPanel.css";
@@ -20,7 +20,9 @@ export const McpToolsPanel: Component = () => {
     serverName: string;
     tool: McpTool;
   } | null>(null);
-  const [execution, setExecution] = createSignal<ToolExecutionState | null>(null);
+  const [execution, setExecution] = createSignal<ToolExecutionState | null>(
+    null,
+  );
   const [argInputs, setArgInputs] = createSignal<Record<string, string>>({});
 
   const tools = () => mcpClient.getAllTools();
@@ -62,7 +64,8 @@ export const McpToolsPanel: Component = () => {
       const propSchema = tool.inputSchema.properties[key];
       if (!propSchema) continue;
 
-      const schemaType = (propSchema as unknown as Record<string, unknown>).type;
+      const schemaType = (propSchema as unknown as Record<string, unknown>)
+        .type;
 
       if (schemaType === "number") {
         args[key] = parseFloat(value) || 0;
@@ -95,9 +98,7 @@ export const McpToolsPanel: Component = () => {
       });
 
       setExecution((prev) =>
-        prev
-          ? { ...prev, isRunning: false, result, error: null }
-          : null
+        prev ? { ...prev, isRunning: false, result, error: null } : null,
       );
     } catch (err) {
       setExecution((prev) =>
@@ -107,7 +108,7 @@ export const McpToolsPanel: Component = () => {
               isRunning: false,
               error: err instanceof Error ? err.message : String(err),
             }
-          : null
+          : null,
       );
     }
   }
@@ -144,7 +145,10 @@ export const McpToolsPanel: Component = () => {
               {({ serverName, tool }) => {
                 const isSelected = () => {
                   const sel = selectedTool();
-                  return sel?.serverName === serverName && sel?.tool.name === tool.name;
+                  return (
+                    sel?.serverName === serverName &&
+                    sel?.tool.name === tool.name
+                  );
                 };
 
                 return (
@@ -185,7 +189,9 @@ export const McpToolsPanel: Component = () => {
                 <h4>Arguments</h4>
                 <Show
                   when={getArgProperties(sel().tool).length > 0}
-                  fallback={<p class="no-args">This tool takes no arguments.</p>}
+                  fallback={
+                    <p class="no-args">This tool takes no arguments.</p>
+                  }
                 >
                   <For each={getArgProperties(sel().tool)}>
                     {(arg) => (
@@ -207,7 +213,9 @@ export const McpToolsPanel: Component = () => {
                               : ""
                           }`}
                           value={argInputs()[arg.name] || ""}
-                          onInput={(e) => updateArg(arg.name, e.currentTarget.value)}
+                          onInput={(e) =>
+                            updateArg(arg.name, e.currentTarget.value)
+                          }
                         />
                       </div>
                     )}
