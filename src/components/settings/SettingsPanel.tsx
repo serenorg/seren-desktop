@@ -12,18 +12,10 @@ import {
 } from "@/stores/settings.store";
 import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
 import { ProviderSettings } from "./ProviderSettings";
+import { SearchableModelSelect } from "./SearchableModelSelect";
 import "./SettingsPanel.css";
 
 type SettingsSection = "chat" | "providers" | "editor" | "wallet" | "appearance" | "general" | "mcp";
-
-// Available AI models for chat and completion (OpenRouter format for Seren)
-const AI_MODELS = [
-  { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
-  { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5" },
-  { id: "anthropic/claude-haiku-4.5", name: "Claude Haiku 4.5" },
-  { id: "openai/gpt-4o", name: "GPT-4o" },
-  { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-] as const;
 
 export const SettingsPanel: Component = () => {
   const [activeSection, setActiveSection] = createSignal<SettingsSection>("chat");
@@ -118,16 +110,11 @@ export const SettingsPanel: Component = () => {
                 <span class="label-text">Default Model</span>
                 <span class="label-hint">AI model for chat conversations</span>
               </label>
-              <select
+              <SearchableModelSelect
                 value={settingsState.app.chatDefaultModel}
-                onChange={(e) => handleStringChange("chatDefaultModel", e.currentTarget.value)}
-              >
-                <For each={AI_MODELS}>
-                  {(model) => (
-                    <option value={model.id}>{model.name}</option>
-                  )}
-                </For>
-              </select>
+                onChange={(value) => handleStringChange("chatDefaultModel", value)}
+                placeholder="Select a model"
+              />
             </div>
 
             <div class="settings-group">
@@ -250,16 +237,11 @@ export const SettingsPanel: Component = () => {
                 <span class="label-text">Completion Model</span>
                 <span class="label-hint">AI model for code completions</span>
               </label>
-              <select
+              <SearchableModelSelect
                 value={settingsState.app.completionModelId}
-                onChange={(e) => handleStringChange("completionModelId", e.currentTarget.value)}
-              >
-                <For each={AI_MODELS}>
-                  {(model) => (
-                    <option value={model.id}>{model.name}</option>
-                  )}
-                </For>
-              </select>
+                onChange={(value) => handleStringChange("completionModelId", value)}
+                placeholder="Select a model"
+              />
             </div>
 
             <div class="settings-group">
