@@ -1,10 +1,11 @@
-// ABOUTME: Tool executor that routes tool calls to file operations or MCP servers.
+// ABOUTME: Tool executor that routes tool calls to file operations, local MCP, or gateway MCP.
 // ABOUTME: Handles tool call parsing, execution, and result formatting.
 
 import { invoke } from "@tauri-apps/api/core";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { parseMcpToolName } from "./definitions";
+import { gatewayMcpClient, parseGatewayMcpToolName } from "./gateway-mcp";
 
 /**
  * File entry returned by list_directory.
@@ -17,7 +18,7 @@ interface FileEntry {
 
 /**
  * Execute a single tool call and return the result.
- * Routes to MCP server if tool name is prefixed, otherwise uses local file tools.
+ * Routes to local MCP, gateway MCP, or file tools based on prefix.
  */
 export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
   const { name, arguments: argsJson } = toolCall.function;
@@ -25,7 +26,18 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
   try {
     const args = JSON.parse(argsJson) as Record<string, unknown>;
 
-    // Check if this is an MCP tool call
+    // Check if this is a gateway MCP tool call (from publishers)
+    const gatewayInfo = parseGatewayMcpToolName(name);
+    if (gatewayInfo) {
+      return await executeGatewayMcpTool(
+        toolCall.id,
+        gatewayInfo.publisherSlug,
+        gatewayInfo.toolName,
+        args,
+      );
+    }
+
+    // Check if this is a local MCP tool call
     const mcpInfo = parseMcpToolName(name);
     if (mcpInfo) {
       return await executeMcpTool(toolCall.id, mcpInfo.serverName, mcpInfo.toolName, args);
@@ -134,6 +146,33 @@ async function executeMcpTool(
     return {
       tool_call_id: toolCallId,
       content: `MCP tool error: ${message}`,
+      is_error: true,
+    };
+  }
+}
+
+/**
+ * Execute a gateway MCP tool call via the Seren Gateway API.
+ */
+async function executeGatewayMcpTool(
+  toolCallId: string,
+  publisherSlug: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  try {
+    const result = await gatewayMcpClient.callTool(publisherSlug, toolName, args);
+
+    return {
+      tool_call_id: toolCallId,
+      content: result.content,
+      is_error: result.isError,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      tool_call_id: toolCallId,
+      content: `Gateway MCP tool error: ${message}`,
       is_error: true,
     };
   }
