@@ -72,6 +72,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
+  // Input history navigation (terminal-style up/down arrow)
+  const [historyIndex, setHistoryIndex] = createSignal(-1); // -1 = not browsing history
+  const [savedInput, setSavedInput] = createSignal(""); // save current input before browsing
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -266,6 +269,14 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     };
   });
 
+  // User message history for up/down arrow navigation (most recent first)
+  const userMessageHistory = createMemo(() =>
+    chatStore.messages
+      .filter((m) => m.role === "user")
+      .map((m) => m.content)
+      .reverse()
+  );
+
   const buildContext = (): ChatContext | undefined => {
     if (!editorStore.selectedText) return undefined;
     return {
@@ -320,6 +331,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     setStreamingSession(session);
     chatStore.setError(null);
     setInput("");
+    // Reset history navigation state
+    setHistoryIndex(-1);
+    setSavedInput("");
   };
 
   const handleStreamingComplete = async (session: ActiveStreamingSession, content: string) => {
@@ -568,8 +582,56 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             ref={inputRef}
             value={input()}
             placeholder="Ask Seren anything…"
-            onInput={(event) => setInput(event.currentTarget.value)}
+            onInput={(event) => {
+              setInput(event.currentTarget.value);
+              // Reset history browsing when user types manually
+              if (historyIndex() !== -1) {
+                setHistoryIndex(-1);
+                setSavedInput("");
+              }
+            }}
             onKeyDown={(event) => {
+              const history = userMessageHistory();
+
+              // Up arrow: navigate to older message
+              if (event.key === "ArrowUp" && history.length > 0) {
+                const textarea = event.currentTarget;
+                // Only trigger if cursor at start or input empty
+                if (textarea.selectionStart === 0 || input() === "") {
+                  event.preventDefault();
+
+                  if (historyIndex() === -1) {
+                    // Starting to browse - save current input
+                    setSavedInput(input());
+                  }
+
+                  const newIndex = Math.min(historyIndex() + 1, history.length - 1);
+                  setHistoryIndex(newIndex);
+                  setInput(history[newIndex]);
+                }
+              }
+
+              // Down arrow: navigate to newer message
+              if (event.key === "ArrowDown" && historyIndex() >= 0) {
+                const textarea = event.currentTarget;
+                // Only trigger if cursor at end
+                if (textarea.selectionStart === textarea.value.length) {
+                  event.preventDefault();
+
+                  const newIndex = historyIndex() - 1;
+                  setHistoryIndex(newIndex);
+
+                  if (newIndex < 0) {
+                    // Back to current input
+                    setInput(savedInput());
+                    setSavedInput("");
+                  } else {
+                    setInput(history[newIndex]);
+                  }
+                }
+              }
+
+              // Enter key handling
               if (event.key === "Enter") {
                 const enterToSend = settingsStore.get("chatEnterToSend");
                 if (enterToSend) {
