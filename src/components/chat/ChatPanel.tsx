@@ -75,8 +75,8 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   // Auto-scroll to bottom when messages change or streaming starts
   createEffect(() => {
     // Track both messages array and streaming session
-    const _messages = chatStore.messages;
-    const _streaming = streamingSession();
+    void chatStore.messages;
+    void streamingSession();
     // Scroll after render
     requestAnimationFrame(scrollToBottom);
   });
