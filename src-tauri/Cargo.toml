@@ -30,3 +30,4 @@ notify = "6"
 lazy_static = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync"] }
 uuid = { version = "1", features = ["v4"] }
+tauri-plugin-http = "2.5.6"

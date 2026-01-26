@@ -5,7 +5,20 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default",
-    "dialog:default"
+    "dialog:default",
+    {
+      "identifier": "opener:default",
+      "allow": [
+        { "url": "https://console.serendb.com/**" },
+        { "url": "https://docs.serendb.com/**" },
+        { "url": "https://*.serendb.com/**" }
+      ]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.serendb.com/**" }
+      ]
+    }
   ]
 }
