@@ -11,7 +11,7 @@ interface CatalogPanelProps {
   onSignInClick?: () => void;
 }
 
-export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
+export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
   const [publishers, setPublishers] = createSignal<Publisher[]>([]);
   const [filteredPublishers, setFilteredPublishers] = createSignal<Publisher[]>([]);
   const [searchQuery, setSearchQuery] = createSignal("");

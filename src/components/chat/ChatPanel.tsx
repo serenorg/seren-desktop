@@ -45,7 +45,7 @@ interface ChatPanelComponent extends Component<ChatPanelProps> {
   focusInput?: () => void;
 }
 
-export const ChatPanel: Component<ChatPanelProps> = (props) => {
+export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [input, setInput] = createSignal("");
   const [streamingSession, setStreamingSession] = createSignal<StreamingSession | null>(null);
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
