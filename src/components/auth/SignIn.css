@@ -78,16 +78,20 @@
   color: #666;
 }
 
-.signin-forgot {
+.signin-link {
   align-self: flex-end;
   font-size: 13px;
   color: #0078d4;
-  text-decoration: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
   margin-top: 4px;
+  text-decoration: none;
   transition: color 0.15s ease;
 }
 
-.signin-forgot:hover {
+.signin-link:hover {
   color: #50b0ff;
   text-decoration: underline;
 }
@@ -121,13 +125,7 @@
   color: #aaa;
 }
 
-.signin-signup a {
-  color: #0078d4;
-  text-decoration: none;
-  transition: color 0.15s ease;
-}
-
-.signin-signup a:hover {
-  color: #50b0ff;
-  text-decoration: underline;
+.signin-signup .signin-link {
+  font-size: 14px;
+  margin-top: 0;
 }

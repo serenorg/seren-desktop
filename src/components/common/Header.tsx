@@ -20,7 +20,12 @@ export const Header: Component<HeaderProps> = (props) => {
           when={props.isAuthenticated}
           fallback={
             props.onSignIn && (
-              <button type="button" class="header-signin" onClick={props.onSignIn}>
+              <button
+                type="button"
+                class="header-signin"
+                data-testid="header-signin-button"
+                onClick={props.onSignIn}
+              >
                 Sign In
               </button>
             )
