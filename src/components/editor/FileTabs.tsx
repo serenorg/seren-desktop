@@ -9,6 +9,9 @@ import "./FileTabs.css";
 
 interface FileTabsProps {
   onTabClose?: (tab: Tab) => boolean | void;
+  isMarkdown?: boolean;
+  showPreview?: boolean;
+  onTogglePreview?: () => void;
 }
 
 export const FileTabs: Component<FileTabsProps> = (props) => {
@@ -41,46 +44,61 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
   }
 
   return (
-    <div class="file-tabs" role="tablist" aria-label="Open files">
-      <div class="file-tabs-scroll">
-        <For each={tabsState.tabs}>
-          {(tab) => (
-            <div
-              class="file-tab"
-              classList={{
-                active: tab.id === tabsState.activeTabId,
-                dirty: tab.isDirty,
-              }}
-              onClick={() => handleTabClick(tab)}
-              onMouseDown={(e) => handleMiddleClick(e, tab)}
-              onKeyDown={(e) => handleKeyDown(e, tab)}
-              role="tab"
-              aria-selected={tab.id === tabsState.activeTabId}
-              aria-controls={`panel-${tab.id}`}
-              tabIndex={tab.id === tabsState.activeTabId ? 0 : -1}
-              title={tab.filePath}
-              data-testid="file-tab"
-              data-file-path={tab.filePath}
-            >
-              <Show when={tab.isDirty}>
-                <span class="file-tab-dirty-indicator" aria-label="Unsaved changes">●</span>
-              </Show>
-              <span class="file-tab-name">{tab.fileName}</span>
-              <button
-                class="file-tab-close"
-                onClick={(e) => handleTabClose(e, tab)}
-                aria-label={`Close ${tab.fileName}`}
-                tabIndex={-1}
-                data-testid="file-tab-close"
+    <div class="file-tabs-container">
+      <div class="file-tabs" role="tablist" aria-label="Open files">
+        <div class="file-tabs-scroll">
+          <For each={tabsState.tabs}>
+            {(tab) => (
+              <div
+                class="file-tab"
+                classList={{
+                  active: tab.id === tabsState.activeTabId,
+                  dirty: tab.isDirty,
+                }}
+                onClick={() => handleTabClick(tab)}
+                onMouseDown={(e) => handleMiddleClick(e, tab)}
+                onKeyDown={(e) => handleKeyDown(e, tab)}
+                role="tab"
+                aria-selected={tab.id === tabsState.activeTabId}
+                aria-controls={`panel-${tab.id}`}
+                tabIndex={tab.id === tabsState.activeTabId ? 0 : -1}
+                title={tab.filePath}
+                data-testid="file-tab"
+                data-file-path={tab.filePath}
               >
-                ×
-              </button>
-            </div>
-          )}
-        </For>
+                <Show when={tab.isDirty}>
+                  <span class="file-tab-dirty-indicator" aria-label="Unsaved changes">●</span>
+                </Show>
+                <span class="file-tab-name">{tab.fileName}</span>
+                <button
+                  type="button"
+                  class="file-tab-close"
+                  onClick={(e) => handleTabClose(e, tab)}
+                  aria-label={`Close ${tab.fileName}`}
+                  tabIndex={-1}
+                  data-testid="file-tab-close"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+        <Show when={tabsState.tabs.length === 0}>
+          <div class="file-tabs-empty">No files open</div>
+        </Show>
       </div>
-      <Show when={tabsState.tabs.length === 0}>
-        <div class="file-tabs-empty">No files open</div>
+      <Show when={props.isMarkdown}>
+        <button
+          type="button"
+          class="file-tabs-preview-toggle"
+          classList={{ active: props.showPreview }}
+          onClick={props.onTogglePreview}
+          title={props.showPreview ? "Hide Preview" : "Show Preview"}
+          aria-pressed={props.showPreview ? "true" : "false"}
+        >
+          👁
+        </button>
       </Show>
     </div>
   );

@@ -1,9 +1,16 @@
-.file-tabs {
+.file-tabs-container {
   display: flex;
   align-items: center;
   height: 36px;
   background-color: var(--bg-secondary, #252526);
   border-bottom: 1px solid var(--border-color, #3c3c3c);
+}
+
+.file-tabs {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -114,4 +121,30 @@
 
 .file-tab.dirty:hover .file-tab-close {
   opacity: 1;
+}
+
+/* Markdown preview toggle button */
+.file-tabs-preview-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-color, #3c3c3c);
+  color: var(--text-muted, #707070);
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.file-tabs-preview-toggle:hover {
+  background-color: var(--bg-tertiary, #2d2d2d);
+  color: var(--text-primary, #e0e0e0);
+}
+
+.file-tabs-preview-toggle.active {
+  background-color: var(--accent-color, #4fc3f7);
+  color: white;
 }

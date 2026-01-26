@@ -75,6 +75,28 @@
   flex: 1;
   min-height: 0;
   position: relative;
+  display: flex;
+}
+
+/* Split view for markdown preview */
+.editor-content.split-view {
+  display: flex;
+}
+
+.editor-content.split-view .editor-pane {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-content.split-view .markdown-preview {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
 }
 
 /* Empty state when no file is open */

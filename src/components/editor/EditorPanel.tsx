@@ -1,10 +1,11 @@
 // ABOUTME: Main editor panel with file tree, tabs, and Monaco editor.
 // ABOUTME: Provides full-featured code editing with file system integration.
 
-import { Show, createEffect, createSignal, type Component } from "solid-js";
+import { Show, createEffect, createSignal, createMemo, type Component } from "solid-js";
 import { FileTree } from "@/components/sidebar/FileTree";
 import { FileTabs } from "./FileTabs";
 import { MonacoEditor } from "./MonacoEditor";
+import { MarkdownPreview } from "./MarkdownPreview";
 import { fileTreeState, setSelectedPath } from "@/stores/fileTree";
 import {
   tabsState,
@@ -25,6 +26,14 @@ export const EditorPanel: Component = () => {
   const [editorContent, setEditorContent] = createSignal("");
   const [activeFilePath, setActiveFilePath] = createSignal<string | null>(null);
   const [isLoading, setIsLoading] = createSignal(false);
+  const [showPreview, setShowPreview] = createSignal(false);
+
+  // Check if current file is markdown
+  const isMarkdownFile = createMemo(() => {
+    const path = activeFilePath();
+    if (!path) return false;
+    return path.toLowerCase().endsWith(".md") || path.toLowerCase().endsWith(".markdown");
+  });
 
   // Sync editor content with active tab
   createEffect(() => {
@@ -130,9 +139,13 @@ export const EditorPanel: Component = () => {
 
       <section class="editor-main">
         <div class="editor-tabs">
-          <FileTabs />
+          <FileTabs
+            isMarkdown={isMarkdownFile()}
+            showPreview={showPreview()}
+            onTogglePreview={() => setShowPreview((prev) => !prev)}
+          />
         </div>
-        <div class="editor-content">
+        <div class="editor-content" classList={{ "split-view": showPreview() && isMarkdownFile() }}>
           <Show
             when={activeFilePath()}
             fallback={
@@ -158,12 +171,17 @@ export const EditorPanel: Component = () => {
               </div>
             }
           >
-            <MonacoEditor
-              filePath={activeFilePath() ?? undefined}
-              value={editorContent()}
-              onChange={handleEditorChange}
-              onDirtyChange={handleEditorDirtyChange}
-            />
+            <div class="editor-pane">
+              <MonacoEditor
+                filePath={activeFilePath() ?? undefined}
+                value={editorContent()}
+                onChange={handleEditorChange}
+                onDirtyChange={handleEditorDirtyChange}
+              />
+            </div>
+            <Show when={showPreview() && isMarkdownFile()}>
+              <MarkdownPreview content={editorContent()} />
+            </Show>
           </Show>
         </div>
       </section>
