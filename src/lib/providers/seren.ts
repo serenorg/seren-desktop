@@ -10,6 +10,27 @@ const PUBLISHER_SLUG = "seren-models";
 const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
 const AGENT_STREAM_ENDPOINT = `${apiBase}/agent/stream`;
 
+/**
+ * Normalize old model IDs to current OpenRouter format.
+ * Handles migration from date-suffixed IDs to clean IDs.
+ */
+function normalizeModelId(modelId: string): string {
+  // Map of old IDs to new IDs
+  const migrations: Record<string, string> = {
+    // Anthropic - remove date suffixes
+    "anthropic/claude-sonnet-4-20250514": "anthropic/claude-sonnet-4",
+    "anthropic/claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+    "anthropic/claude-haiku-4-20250514": "anthropic/claude-haiku-4.5",
+    // Also handle without namespace prefix (from old settings)
+    "claude-sonnet-4-20250514": "anthropic/claude-sonnet-4",
+    "claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+    "claude-haiku-4-20250514": "anthropic/claude-haiku-4.5",
+    "claude-haiku-3-20240307": "anthropic/claude-3-haiku-20240307",
+  };
+
+  return migrations[modelId] || modelId;
+}
+
 interface AgentApiPayload {
   publisher: string;
   path: string;
@@ -122,13 +143,14 @@ export const serenProvider: ProviderAdapter = {
 
   async sendMessage(request: ChatRequest, _apiKey: string): Promise<string> {
     const token = await requireToken();
+    const model = normalizeModelId(request.model);
 
     const agentPayload: AgentApiPayload = {
       publisher: PUBLISHER_SLUG,
       path: "/chat/completions",
       method: "POST",
       body: {
-        model: request.model,
+        model,
         messages: request.messages,
         stream: false,
       },
@@ -154,13 +176,14 @@ export const serenProvider: ProviderAdapter = {
 
   async *streamMessage(request: ChatRequest, _apiKey: string): AsyncGenerator<string, void, unknown> {
     const token = await requireToken();
+    const model = normalizeModelId(request.model);
 
     const agentPayload: AgentApiPayload = {
       publisher: PUBLISHER_SLUG,
       path: "/chat/completions",
       method: "POST",
       body: {
-        model: request.model,
+        model,
         messages: request.messages,
         stream: true,
       },
