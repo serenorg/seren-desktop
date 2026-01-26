@@ -3,8 +3,8 @@
 
 import { createStore } from "solid-js/store";
 import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
-import { gatewayMcpClient } from "@/lib/tools";
 import { logout as authLogout, isLoggedIn } from "@/services/auth";
+import { getToken } from "@/lib/tauri-bridge";
 
 export interface User {
   id: string;
@@ -37,11 +37,10 @@ export async function checkAuth(): Promise<void> {
     // Ensure SerenDB is configured for authenticated users
     if (authenticated) {
       try {
-        await addSerenDbServer();
-        // Fetch gateway MCP tools in background (don't block auth)
-        gatewayMcpClient.fetchAllTools().catch((error) => {
-          console.warn("Failed to fetch gateway MCP tools:", error);
-        });
+        const token = await getToken();
+        if (token) {
+          await addSerenDbServer(token);
+        }
       } catch (error) {
         console.error("Failed to add SerenDB MCP server:", error);
       }
@@ -64,11 +63,10 @@ export async function setAuthenticated(user: User): Promise<void> {
 
   // Add SerenDB as default MCP server on sign-in
   try {
-    await addSerenDbServer();
-    // Fetch gateway MCP tools in background (don't block login)
-    gatewayMcpClient.fetchAllTools().catch((error) => {
-      console.warn("Failed to fetch gateway MCP tools:", error);
-    });
+    const token = await getToken();
+    if (token) {
+      await addSerenDbServer(token);
+    }
   } catch (error) {
     console.error("Failed to add SerenDB MCP server:", error);
   }
@@ -82,8 +80,6 @@ export async function logout(): Promise<void> {
   // Remove SerenDB MCP server on sign-out
   try {
     await removeSerenDbServer();
-    // Clear gateway MCP tools cache
-    gatewayMcpClient.clearCache();
   } catch (error) {
     console.error("Failed to remove SerenDB MCP server:", error);
   }

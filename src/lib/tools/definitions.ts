@@ -1,14 +1,9 @@
-// ABOUTME: Tool definitions combining local file operations, local MCP, and gateway MCP tools.
+// ABOUTME: Tool definitions combining local file operations and MCP tools.
 // ABOUTME: Follows OpenAI function calling format for use with chat completions.
 
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool } from "@/lib/mcp/types";
 import type { ToolDefinition, ToolParameterSchema } from "@/lib/providers/types";
-import {
-  gatewayMcpClient,
-  GATEWAY_MCP_TOOL_PREFIX,
-  type GatewayMcpTool,
-} from "./gateway-mcp";
 
 /**
  * Prefix added to MCP tool names to identify them during execution.
@@ -71,45 +66,6 @@ function convertMcpToolToDefinition(
   };
 }
 
-/**
- * Convert a gateway MCP tool to OpenAI function calling format.
- */
-function convertGatewayMcpToolToDefinition(
-  gatewayTool: GatewayMcpTool,
-): ToolDefinition {
-  // Build parameter properties from MCP input schema
-  const properties: ToolParameterSchema["properties"] = {};
-  const inputSchema = gatewayTool.tool.input_schema as {
-    properties?: Record<string, { type?: string; description?: string; enum?: string[] }>;
-    required?: string[];
-  } | undefined;
-
-  if (inputSchema?.properties) {
-    for (const [key, schema] of Object.entries(inputSchema.properties)) {
-      properties[key] = {
-        type: schema.type || "string",
-        description: schema.description,
-        enum: schema.enum,
-      };
-    }
-  }
-
-  return {
-    type: "function",
-    function: {
-      // Prefix with publisher slug to route through gateway during execution
-      name: `${GATEWAY_MCP_TOOL_PREFIX}${gatewayTool.publisherSlug}__${gatewayTool.tool.name}`,
-      description:
-        gatewayTool.tool.description ||
-        `MCP tool from ${gatewayTool.publisherName}`,
-      parameters: {
-        type: "object",
-        properties,
-        required: inputSchema?.required,
-      },
-    },
-  };
-}
 
 /**
  * File operation tools available to the chat AI.
@@ -213,21 +169,16 @@ export const FILE_TOOLS: ToolDefinition[] = [
 ];
 
 /**
- * Get all available tools, including file tools, local MCP, and gateway MCP tools.
+ * Get all available tools, including file tools and MCP tools.
+ * MCP tools include both local servers and the SerenDB gateway server.
  */
 export function getAllTools(): ToolDefinition[] {
   const tools: ToolDefinition[] = [...FILE_TOOLS];
 
-  // Add tools from connected local MCP servers
+  // Add tools from connected MCP servers (including SerenDB gateway)
   const mcpTools = mcpClient.getAllTools();
   for (const { serverName, tool } of mcpTools) {
     tools.push(convertMcpToolToDefinition(serverName, tool));
-  }
-
-  // Add tools from gateway MCP publishers (cached)
-  const gatewayTools = gatewayMcpClient.getAllTools();
-  for (const gatewayTool of gatewayTools) {
-    tools.push(convertGatewayMcpToolToDefinition(gatewayTool));
   }
 
   return tools;
