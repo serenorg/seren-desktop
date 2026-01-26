@@ -147,3 +147,102 @@
 .x402-btn-primary:hover:not(:disabled) {
   background: #16a34a;
 }
+
+/* Payment method selection */
+.x402-method-selection {
+  margin: 16px 0;
+}
+
+.x402-method-label {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-secondary, #94a3b8);
+  margin-bottom: 12px;
+}
+
+.x402-method-options {
+  display: flex;
+  gap: 12px;
+}
+
+.x402-method-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 2px solid var(--border-muted, rgba(148, 163, 184, 0.2));
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+
+.x402-method-option:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.x402-method-option.selected {
+  border-color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.x402-method-option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.x402-method-icon {
+  font-size: 1.3rem;
+}
+
+.x402-method-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.x402-method-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary, #f8fafc);
+}
+
+.x402-method-balance {
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+  font-family: monospace;
+}
+
+.x402-method-unavailable {
+  font-size: 0.75rem;
+  color: #ef4444;
+  position: absolute;
+  bottom: 4px;
+  right: 8px;
+}
+
+.x402-method-option {
+  position: relative;
+}
+
+/* Info message (for SerenBucks) */
+.x402-info {
+  margin: 0;
+  padding: 12px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--accent, #6366f1);
+  line-height: 1.4;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .x402-method-options {
+    flex-direction: column;
+  }
+}

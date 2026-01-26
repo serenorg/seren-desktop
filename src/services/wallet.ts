@@ -15,11 +15,24 @@ export interface WalletBalance {
 }
 
 /**
- * Top-up checkout response.
+ * Top-up checkout response (Stripe).
  */
 export interface TopUpCheckout {
   checkoutUrl: string;
   sessionId: string;
+}
+
+/**
+ * Crypto deposit response.
+ */
+export interface CryptoDepositInfo {
+  depositAddress: string;
+  network: string;
+  chainId: number;
+  amount: string; // USDC amount in 6 decimal format
+  amountUsd: number;
+  expiresAt: string;
+  reference: string;
 }
 
 /**
@@ -105,6 +118,41 @@ export async function openCheckout(checkoutUrl: string): Promise<void> {
   // Use Tauri's opener plugin to open URL in default browser
   const { openUrl } = await import("@tauri-apps/plugin-opener");
   await openUrl(checkoutUrl);
+}
+
+/**
+ * Initiate a crypto deposit to get deposit address and payment details.
+ * @param amount Amount in USD to deposit
+ * @throws Error if not authenticated or network error
+ */
+export async function initiateCryptoDeposit(amount: number): Promise<CryptoDepositInfo> {
+  const token = await getToken();
+
+  if (!token) {
+    throw new Error("Not authenticated");
+  }
+
+  const response = await appFetch(`${API_BASE}/agent/wallet/deposit/crypto`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ amount }),
+  });
+
+  if (response.status === 401) {
+    throw new Error("Authentication expired. Please log in again.");
+  }
+
+  if (!response.ok) {
+    const error: WalletError = await response.json().catch(() => ({
+      message: "Failed to initiate crypto deposit",
+    }));
+    throw new Error(error.message);
+  }
+
+  return response.json();
 }
 
 /**

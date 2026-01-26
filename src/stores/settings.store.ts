@@ -54,6 +54,10 @@ export interface Settings {
   // Crypto wallet settings
   cryptoAutoApproveLimit: number;
 
+  // Payment method settings
+  preferredPaymentMethod: "serenbucks" | "crypto";
+  enablePaymentFallback: boolean;
+
   // Theme settings
   theme: "dark" | "light" | "system";
 
@@ -87,6 +91,9 @@ const DEFAULT_SETTINGS: Settings = {
   autoTopUpAmount: 25.0,
   // Crypto wallet
   cryptoAutoApproveLimit: 0.10,
+  // Payment method
+  preferredPaymentMethod: "serenbucks",
+  enablePaymentFallback: true,
   // Theme
   theme: "dark",
   // General

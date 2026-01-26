@@ -438,7 +438,53 @@
   background: #dc2626;
 }
 
-/* Responsive adjustments */
+/* Payment method selector */
+.payment-method-selector {
+  display: flex;
+  gap: 12px;
+}
+
+.payment-method-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 24px;
+  background: var(--surface-elevated, rgba(30, 30, 30, 0.6));
+  border: 2px solid var(--border-muted, rgba(148, 163, 184, 0.2));
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-width: 120px;
+}
+
+.payment-method-option:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.payment-method-option.active {
+  border-color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.payment-method-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.payment-method-icon {
+  font-size: 1.5rem;
+}
+
+.payment-method-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.payment-method-option.active .payment-method-label {
+  color: var(--text-primary, #f8fafc);
+}
+
 /* Crypto wallet settings */
 .settings-hint {
   margin: 0 0 16px;

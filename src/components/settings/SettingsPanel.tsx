@@ -322,6 +322,52 @@ export const SettingsPanel: Component = () => {
               />
             </div>
 
+            <h4>Payment Method</h4>
+            <p class="settings-hint">
+              Choose your preferred payment method for MCP server tools.
+            </p>
+
+            <div class="settings-group">
+              <label class="settings-label">
+                <span class="label-text">Preferred Method</span>
+                <span class="label-hint">Default payment method for MCP tool usage</span>
+              </label>
+              <div class="payment-method-selector">
+                <button
+                  type="button"
+                  class={`payment-method-option ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "active" : ""}`}
+                  onClick={() => handleStringChange("preferredPaymentMethod", "serenbucks")}
+                >
+                  <span class="payment-method-icon">💰</span>
+                  <span class="payment-method-label">SerenBucks</span>
+                </button>
+                <button
+                  type="button"
+                  class={`payment-method-option ${settingsState.app.preferredPaymentMethod === "crypto" ? "active" : ""}`}
+                  onClick={() => handleStringChange("preferredPaymentMethod", "crypto")}
+                  disabled={!cryptoWalletStore.state().isConfigured}
+                  title={!cryptoWalletStore.state().isConfigured ? "Configure crypto wallet first" : ""}
+                >
+                  <span class="payment-method-icon">🔐</span>
+                  <span class="payment-method-label">Crypto Wallet</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-group checkbox">
+              <label class="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.enablePaymentFallback}
+                  onChange={(e) => handleBooleanChange("enablePaymentFallback", e.currentTarget.checked)}
+                />
+                <span class="checkbox-label">
+                  <span class="label-text">Enable Fallback Payment</span>
+                  <span class="label-hint">Use alternate method if preferred has insufficient funds</span>
+                </span>
+              </label>
+            </div>
+
             <h4>Auto Top-Up</h4>
 
             <div class="settings-group checkbox">

@@ -1,5 +1,5 @@
 // ABOUTME: x402 payment service for handling USDC payments to MCP servers.
-// ABOUTME: Detects 402 responses, signs payments, and retries with payment headers.
+// ABOUTME: Supports both SerenBucks (prepaid) and crypto wallet payment methods.
 
 import { createSignal, createRoot } from "solid-js";
 import { signX402Payment, getCryptoWalletAddress } from "@/lib/tauri-bridge";
@@ -14,6 +14,11 @@ import {
 import { settingsState } from "@/stores/settings.store";
 
 /**
+ * Payment method choice.
+ */
+export type PaymentMethod = "serenbucks" | "crypto";
+
+/**
  * Payment request waiting for user approval.
  */
 export interface PendingPayment {
@@ -26,7 +31,7 @@ export interface PendingPayment {
   network: string;
   chainName: string;
   requirements: PaymentRequirements;
-  resolve: (approved: boolean) => void;
+  resolve: (result: { approved: boolean; method?: PaymentMethod }) => void;
 }
 
 /**
@@ -35,6 +40,7 @@ export interface PendingPayment {
 export interface X402PaymentResult {
   success: boolean;
   paymentHeader?: string;
+  method?: PaymentMethod;
   error?: string;
 }
 
@@ -44,6 +50,7 @@ export interface X402PaymentResult {
 function createX402Service() {
   const [pendingPayment, setPendingPayment] = createSignal<PendingPayment | null>(null);
   const [isProcessing, setIsProcessing] = createSignal(false);
+  const [selectedMethod, setSelectedMethod] = createSignal<PaymentMethod | null>(null);
 
   /**
    * Check if an error is an x402 payment required error.
@@ -92,12 +99,13 @@ function createX402Service() {
     serverName: string,
     toolName: string,
     requirements: PaymentRequirements
-  ): Promise<boolean> {
+  ): Promise<{ approved: boolean; method?: PaymentMethod }> {
     const x402Option = getX402Option(requirements);
-    if (!x402Option) {
-      console.error("No x402 payment option found in requirements");
-      return false;
-    }
+
+    // For display, use x402 option info if available, otherwise use generic values
+    const amount = x402Option?.amount ?? "0";
+    const recipient = x402Option?.payTo ?? "";
+    const network = x402Option?.network ?? "";
 
     return new Promise((resolve) => {
       const id = `payment-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -106,15 +114,16 @@ function createX402Service() {
         id,
         serverName,
         toolName,
-        amount: x402Option.amount,
-        amountFormatted: formatUsdcAmount(x402Option.amount),
-        recipient: x402Option.payTo,
-        network: x402Option.network,
-        chainName: getChainName(x402Option.network),
+        amount,
+        amountFormatted: formatUsdcAmount(amount),
+        recipient,
+        network,
+        chainName: getChainName(network),
         requirements,
-        resolve: (approved: boolean) => {
+        resolve: (result) => {
           setPendingPayment(null);
-          resolve(approved);
+          setSelectedMethod(result.method ?? null);
+          resolve(result);
         },
       });
     });
@@ -143,6 +152,7 @@ function createX402Service() {
       return {
         success: true,
         paymentHeader: result.headerValue,
+        method: "crypto",
       };
     } catch (error) {
       return {
@@ -155,15 +165,34 @@ function createX402Service() {
   }
 
   /**
+   * Handle a SerenBucks payment (prepaid credits).
+   * This doesn't need a payment header - the server handles it via auth token.
+   */
+  async function handleSerenBucksPayment(): Promise<X402PaymentResult> {
+    setIsProcessing(true);
+    try {
+      // SerenBucks payments are handled server-side via the auth token
+      // We just need to signal that we want to use this method
+      return {
+        success: true,
+        method: "serenbucks",
+        // No payment header needed - server uses auth token
+      };
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  /**
    * Handle an x402 payment required error.
    *
-   * Returns the payment header if successful, or null if payment was declined/failed.
+   * Returns the payment result including which method was used.
    */
   async function handlePaymentRequired(
     serverName: string,
     toolName: string,
     error: unknown
-  ): Promise<string | null> {
+  ): Promise<X402PaymentResult | null> {
     // Extract payment requirements from the error
     const requirements = extractRequirements(error);
     if (!requirements) {
@@ -171,43 +200,57 @@ function createX402Service() {
       return null;
     }
 
-    // Check for x402 payment option
-    if (!hasX402Option(requirements)) {
-      console.error("No x402 payment option in requirements");
-      return null;
-    }
-
     const x402Option = getX402Option(requirements);
-    if (!x402Option) {
+    const hasPrepaid = requirements.accepts.some((a) => a.type === "prepaid");
+    const hasCrypto = hasX402Option(requirements);
+
+    // If no valid payment options, fail
+    if (!hasPrepaid && !hasCrypto) {
+      console.error("No valid payment options in requirements");
       return null;
     }
 
-    const amount = x402Option.amount;
-
-    // Check if we should auto-approve
-    if (shouldAutoApprove(amount)) {
-      const result = await signPayment(requirements);
-      return result.success ? result.paymentHeader ?? null : null;
+    // Check for auto-approve with crypto (only if crypto is available and preferred)
+    if (hasCrypto && x402Option && settingsState.app.preferredPaymentMethod === "crypto") {
+      const amount = x402Option.amount;
+      if (shouldAutoApprove(amount)) {
+        return await signPayment(requirements);
+      }
     }
 
-    // Request user approval
-    const approved = await requestApproval(serverName, toolName, requirements);
-    if (!approved) {
+    // Request user approval with method selection
+    const result = await requestApproval(serverName, toolName, requirements);
+    if (!result.approved) {
       return null;
     }
 
-    // Sign the payment
-    const result = await signPayment(requirements);
-    return result.success ? result.paymentHeader ?? null : null;
+    // Process payment based on selected method
+    if (result.method === "crypto") {
+      return await signPayment(requirements);
+    } else if (result.method === "serenbucks") {
+      return await handleSerenBucksPayment();
+    }
+
+    return null;
   }
 
   /**
-   * Approve the current pending payment.
+   * Approve the current pending payment (legacy - uses default method).
    */
   function approvePendingPayment(): void {
     const payment = pendingPayment();
     if (payment) {
-      payment.resolve(true);
+      payment.resolve({ approved: true, method: settingsState.app.preferredPaymentMethod });
+    }
+  }
+
+  /**
+   * Approve the current pending payment with a specific method.
+   */
+  function approveWithMethod(method: PaymentMethod): void {
+    const payment = pendingPayment();
+    if (payment) {
+      payment.resolve({ approved: true, method });
     }
   }
 
@@ -217,19 +260,22 @@ function createX402Service() {
   function declinePendingPayment(): void {
     const payment = pendingPayment();
     if (payment) {
-      payment.resolve(false);
+      payment.resolve({ approved: false });
     }
   }
 
   return {
     pendingPayment,
     isProcessing,
+    selectedMethod,
     isX402Error,
     extractRequirements,
     shouldAutoApprove,
     handlePaymentRequired,
     signPayment,
+    handleSerenBucksPayment,
     approvePendingPayment,
+    approveWithMethod,
     declinePendingPayment,
   };
 }
