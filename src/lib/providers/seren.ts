@@ -112,7 +112,7 @@ function normalizeContent(chunk: unknown): string | null {
 export const serenProvider: ProviderAdapter = {
   id: "seren",
 
-  async sendMessage(request: ChatRequest): Promise<string> {
+  async sendMessage(request: ChatRequest, _apiKey: string): Promise<string> {
     const token = await requireToken();
 
     const agentPayload: AgentApiPayload = {
@@ -144,7 +144,7 @@ export const serenProvider: ProviderAdapter = {
     return extractContent(data);
   },
 
-  async *streamMessage(request: ChatRequest): AsyncGenerator<string, void, unknown> {
+  async *streamMessage(request: ChatRequest, _apiKey: string): AsyncGenerator<string, void, unknown> {
     const token = await requireToken();
 
     const agentPayload: AgentApiPayload = {
@@ -206,13 +206,13 @@ export const serenProvider: ProviderAdapter = {
     }
   },
 
-  async validateKey(): Promise<boolean> {
+  async validateKey(_apiKey: string): Promise<boolean> {
     // Seren uses Seren auth token, not API key - always valid if logged in
     const token = await getToken();
     return token !== null;
   },
 
-  async getModels(): Promise<ProviderModel[]> {
+  async getModels(_apiKey: string): Promise<ProviderModel[]> {
     // Try to fetch from Seren's models endpoint
     try {
       const token = await getToken();
