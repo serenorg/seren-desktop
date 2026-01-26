@@ -1,3 +1,4 @@
+/* eslint-disable solid/no-innerhtml */
 // ABOUTME: Streaming message component with tool execution display.
 // ABOUTME: Shows tool calls being executed and their results during chat.
 
