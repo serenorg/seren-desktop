@@ -10,6 +10,7 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { EditorPanel } from "@/components/editor/EditorPanel";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { Phase3Playground } from "@/playground/Phase3Playground";
+import { SignInPlayground } from "@/playground/SignInPlayground";
 import {
   authStore,
   checkAuth,
@@ -34,11 +35,23 @@ function App() {
     return <Phase3Playground />;
   }
 
-  const [activePanel, setActivePanel] = createSignal<Panel>("editor");
+  if (shouldRenderSignInPlayground()) {
+    return <SignInPlayground />;
+  }
+
+  const [activePanel, setActivePanel] = createSignal<Panel>(getInitialPanel());
 
   onMount(() => {
     checkAuth();
     updaterStore.initUpdater();
+
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const requestedPanel = params.get("panel") as Panel | null;
+      if (requestedPanel) {
+        setActivePanel(requestedPanel);
+      }
+    }
   });
 
   // Initialize wallet features when authenticated
@@ -130,4 +143,25 @@ function shouldRenderPhase3Playground(): boolean {
   if (typeof window === "undefined") return false;
   const params = new URLSearchParams(window.location.search);
   return params.get("test") === "phase3";
+}
+
+function shouldRenderSignInPlayground(): boolean {
+  if (!import.meta.env.DEV) return false;
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get("test") === "signin";
+}
+
+function getInitialPanel(): Panel {
+  if (typeof window === "undefined") {
+    return "editor";
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const requestedPanel = params.get("panel") as Panel | null;
+  const validPanels: Panel[] = ["chat", "editor", "catalog", "settings", "account"];
+  if (requestedPanel && validPanels.includes(requestedPanel)) {
+    return requestedPanel;
+  }
+  return "editor";
 }

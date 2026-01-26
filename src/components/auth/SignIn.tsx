@@ -3,6 +3,7 @@
 
 import { Component, createSignal } from "solid-js";
 import { login } from "@/services/auth";
+import { openExternalLink } from "@/lib/external-link";
 import "./SignIn.css";
 
 interface SignInProps {
@@ -71,14 +72,13 @@ export const SignIn: Component<SignInProps> = (props) => {
               autocomplete="off"
               disabled={isLoading()}
             />
-            <a
-              href="https://console.serendb.com/forgot-password"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="signin-forgot"
+            <button
+              type="button"
+              class="signin-link"
+              onClick={() => openExternalLink("https://console.serendb.com/forgot-password")}
             >
               Forgot password?
-            </a>
+            </button>
           </div>
 
           <button
@@ -92,13 +92,13 @@ export const SignIn: Component<SignInProps> = (props) => {
 
         <p class="signin-signup">
           Don't have an account?{" "}
-          <a
-            href="https://console.serendb.com/signup"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            class="signin-link"
+            onClick={() => openExternalLink("https://console.serendb.com/signup")}
           >
             Sign up for Seren
-          </a>
+          </button>
         </p>
       </div>
     </div>

@@ -1,0 +1,7 @@
+.signin-playground {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top, #121829, #040711);
+}
