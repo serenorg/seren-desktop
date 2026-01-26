@@ -6,6 +6,7 @@ interface StreamingMessageProps {
   stream: AsyncGenerator<string>;
   onComplete: (fullContent: string) => void;
   onError?: (error: Error) => void;
+  onContentUpdate?: () => void;
 }
 
 export const StreamingMessage: Component<StreamingMessageProps> = (props) => {
@@ -21,6 +22,7 @@ export const StreamingMessage: Component<StreamingMessageProps> = (props) => {
         if (isCancelled) break;
         fullContent += token;
         setContent(fullContent);
+        props.onContentUpdate?.();
       }
     } catch (error) {
       hadError = true;

@@ -55,7 +55,14 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
   let inputRef: HTMLTextAreaElement | undefined;
+  let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const scrollToBottom = () => {
+    if (messagesRef) {
+      messagesRef.scrollTop = messagesRef.scrollHeight;
+    }
+  };
 
   onMount(async () => {
     try {
@@ -63,6 +70,15 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     } catch (error) {
       chatStore.setError((error as Error).message);
     }
+  });
+
+  // Auto-scroll to bottom when messages change or streaming starts
+  createEffect(() => {
+    // Track both messages array and streaming session
+    const _messages = chatStore.messages;
+    const _streaming = streamingSession();
+    // Scroll after render
+    requestAnimationFrame(scrollToBottom);
   });
 
   onCleanup(() => {
@@ -372,7 +388,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
           </div>
         </header>
 
-      <div class="chat-messages">
+      <div class="chat-messages" ref={messagesRef}>
         <Show
           when={chatStore.messages.length > 0}
           fallback={
@@ -413,13 +429,18 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
         </Show>
 
         <Show when={streamingSession()}>
-          {(sessionAccessor) => (
-            <StreamingMessage
-              stream={sessionAccessor().stream}
-              onComplete={(content) => handleStreamingComplete(sessionAccessor(), content)}
-              onError={(error) => handleStreamingError(sessionAccessor(), error)}
-            />
-          )}
+          {(sessionAccessor) => {
+            // Capture session immediately to avoid stale accessor in callbacks
+            const session = sessionAccessor();
+            return (
+              <StreamingMessage
+                stream={session.stream}
+                onComplete={(content) => handleStreamingComplete(session, content)}
+                onError={(error) => handleStreamingError(session, error)}
+                onContentUpdate={scrollToBottom}
+              />
+            );
+          }}
         </Show>
       </div>
 
