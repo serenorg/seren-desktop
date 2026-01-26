@@ -4,7 +4,17 @@
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
-import type { ChatRequest, ProviderAdapter, ProviderModel, AuthOptions } from "./types";
+import type {
+  ChatRequest,
+  ChatResponse,
+  ChatMessageWithTools,
+  ProviderAdapter,
+  ProviderModel,
+  AuthOptions,
+  ToolCall,
+  ToolDefinition,
+  ToolChoice,
+} from "./types";
 
 const PUBLISHER_SLUG = "seren-models";
 const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
@@ -37,8 +47,10 @@ interface AgentApiPayload {
   method: string;
   body: {
     model: string;
-    messages: ChatRequest["messages"];
+    messages: ChatRequest["messages"] | ChatMessageWithTools[];
     stream: boolean;
+    tools?: ToolDefinition[];
+    tool_choice?: ToolChoice;
   };
 }
 
@@ -93,6 +105,60 @@ function extractContent(data: unknown): string {
   }
 
   return JSON.stringify(data);
+}
+
+/**
+ * Extract a structured ChatResponse from API response data.
+ * Handles both content and tool_calls.
+ */
+function extractChatResponse(data: unknown): ChatResponse {
+  if (!data || typeof data !== "object") {
+    return { content: "", finish_reason: "stop" };
+  }
+
+  const payload = data as Record<string, unknown>;
+  const choices = payload.choices as Array<Record<string, unknown>> | undefined;
+
+  if (!choices || choices.length === 0) {
+    return { content: null, finish_reason: "stop" };
+  }
+
+  const first = choices[0];
+  const message = first.message as Record<string, unknown> | undefined;
+  const finishReason = (first.finish_reason as string) || "stop";
+
+  let content: string | null = null;
+  let toolCalls: ToolCall[] | undefined;
+
+  if (message) {
+    // Extract content
+    if (typeof message.content === "string") {
+      content = message.content;
+    } else if (message.content === null) {
+      content = null;
+    }
+
+    // Extract tool_calls
+    const rawToolCalls = message.tool_calls as Array<Record<string, unknown>> | undefined;
+    if (rawToolCalls && rawToolCalls.length > 0) {
+      toolCalls = rawToolCalls.map((tc) => ({
+        id: tc.id as string,
+        type: "function" as const,
+        function: {
+          name: (tc.function as Record<string, unknown>).name as string,
+          arguments: (tc.function as Record<string, unknown>).arguments as string,
+        },
+      }));
+    }
+  }
+
+  return {
+    content,
+    tool_calls: toolCalls,
+    finish_reason: finishReason === "tool_calls" ? "tool_calls" :
+                   finishReason === "length" ? "length" :
+                   finishReason === "content_filter" ? "content_filter" : "stop",
+  };
 }
 
 function parseDelta(data: string): string | null {
@@ -153,6 +219,8 @@ export const serenProvider: ProviderAdapter = {
         model,
         messages: request.messages,
         stream: false,
+        tools: request.tools,
+        tool_choice: request.tool_choice,
       },
     };
 
@@ -294,3 +362,51 @@ export const serenProvider: ProviderAdapter = {
     }
   },
 };
+
+// ============================================================================
+// Tool-aware API Functions
+// ============================================================================
+
+/**
+ * Send a message with tool support and get a structured response.
+ * Unlike sendMessage which returns string, this returns ChatResponse with tool_calls.
+ */
+export async function sendMessageWithTools(
+  messages: ChatMessageWithTools[],
+  model: string,
+  tools?: ToolDefinition[],
+  toolChoice?: ToolChoice
+): Promise<ChatResponse> {
+  const token = await requireToken();
+  const normalizedModel = normalizeModelId(model);
+
+  const agentPayload: AgentApiPayload = {
+    publisher: PUBLISHER_SLUG,
+    path: "/chat/completions",
+    method: "POST",
+    body: {
+      model: normalizedModel,
+      messages,
+      stream: false,
+      tools,
+      tool_choice: toolChoice,
+    },
+  };
+
+  const response = await appFetch(AGENT_API_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(agentPayload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`Seren request failed: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  return extractChatResponse(data);
+}

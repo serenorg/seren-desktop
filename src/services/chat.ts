@@ -6,7 +6,15 @@ import {
   streamProviderMessage,
   buildChatRequest,
 } from "@/lib/providers";
+import { sendMessageWithTools as sendWithTools } from "@/lib/providers/seren";
 import { providerStore } from "@/stores/provider.store";
+import { getAllTools, executeTools } from "@/lib/tools";
+import type {
+  ChatMessageWithTools,
+  ChatResponse,
+  ToolCall,
+  ToolResult,
+} from "@/lib/providers/types";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -114,4 +122,123 @@ export function getActiveProvider(): string {
  */
 export function getActiveModel(): string {
   return providerStore.activeModel;
+}
+
+// ============================================================================
+// Tool-aware Chat Functions
+// ============================================================================
+
+const MAX_TOOL_ITERATIONS = 10;
+
+/**
+ * Event types yielded during tool-aware message streaming.
+ */
+export type ToolStreamEvent =
+  | { type: "content"; content: string }
+  | { type: "tool_calls"; toolCalls: ToolCall[] }
+  | { type: "tool_results"; results: ToolResult[] }
+  | { type: "complete"; finalContent: string };
+
+/**
+ * Send a message with tool support enabled.
+ * Implements the tool execution loop: send → tool_calls → execute → send results → repeat.
+ *
+ * @param content - User's message content
+ * @param model - Model ID to use
+ * @param context - Optional code context
+ * @param enableTools - Whether to enable tools (default true)
+ */
+export async function* streamMessageWithTools(
+  content: string,
+  model: string,
+  context?: ChatContext,
+  enableTools = true
+): AsyncGenerator<ToolStreamEvent> {
+  // Build initial messages array
+  const messages: ChatMessageWithTools[] = [];
+
+  // Add system message with context if provided
+  if (context) {
+    let systemContent = "You are a helpful coding assistant with access to the user's local files.";
+    if (context.file) {
+      systemContent += `\n\nThe user has selected code from ${context.file}`;
+      if (context.range) {
+        systemContent += ` (lines ${context.range.startLine}-${context.range.endLine})`;
+      }
+      systemContent += `:\n\n\`\`\`\n${context.content}\n\`\`\``;
+    } else {
+      systemContent += `\n\nThe user has selected this code:\n\n\`\`\`\n${context.content}\n\`\`\``;
+    }
+    messages.push({ role: "system", content: systemContent });
+  } else {
+    messages.push({
+      role: "system",
+      content: "You are a helpful coding assistant with access to the user's local files. Use the available tools to read, list, and write files when needed to help the user.",
+    });
+  }
+
+  // Add user message
+  messages.push({ role: "user", content });
+
+  // Get tools if enabled
+  const tools = enableTools ? getAllTools() : undefined;
+
+  // Accumulated content across all iterations
+  let fullContent = "";
+
+  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    // Send request with tools
+    const response: ChatResponse = await sendWithTools(messages, model, tools, tools ? "auto" : undefined);
+
+    // Yield content if present
+    if (response.content) {
+      fullContent += response.content;
+      yield { type: "content", content: response.content };
+    }
+
+    // Check if model wants to call tools
+    if (!response.tool_calls || response.tool_calls.length === 0) {
+      // No tool calls, we're done
+      yield { type: "complete", finalContent: fullContent };
+      return;
+    }
+
+    // Yield tool calls for UI
+    yield { type: "tool_calls", toolCalls: response.tool_calls };
+
+    // Add assistant message with tool_calls to history
+    messages.push({
+      role: "assistant",
+      content: response.content,
+      tool_calls: response.tool_calls,
+    });
+
+    // Execute tools
+    const results = await executeTools(response.tool_calls);
+
+    // Yield results for UI
+    yield { type: "tool_results", results };
+
+    // Add tool results to messages
+    for (const result of results) {
+      messages.push({
+        role: "tool",
+        content: result.content,
+        tool_call_id: result.tool_call_id,
+      });
+    }
+
+    // Continue loop to get model's response to tool results
+  }
+
+  // If we hit max iterations, yield what we have
+  yield { type: "complete", finalContent: fullContent + "\n\n(Reached maximum tool iterations)" };
+}
+
+/**
+ * Check if tools are available for the current provider.
+ * Currently only Seren provider supports tools.
+ */
+export function areToolsAvailable(): boolean {
+  return providerStore.activeProvider === "seren";
 }

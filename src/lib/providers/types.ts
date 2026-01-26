@@ -97,6 +97,87 @@ export interface ChatRequest {
   model: string;
   stream: boolean;
   maxTokens?: number;
+  tools?: ToolDefinition[];
+  tool_choice?: ToolChoice;
+}
+
+// ============================================================================
+// Tool Types (OpenAI Function Calling Format)
+// ============================================================================
+
+/**
+ * JSON Schema for tool parameters.
+ */
+export interface ToolParameterSchema {
+  type: "object";
+  properties: Record<string, {
+    type: string;
+    description?: string;
+    enum?: string[];
+    items?: { type: string };
+  }>;
+  required?: string[];
+}
+
+/**
+ * Tool definition following OpenAI function calling format.
+ */
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: ToolParameterSchema;
+  };
+}
+
+/**
+ * Tool choice options for controlling tool usage.
+ */
+export type ToolChoice =
+  | "auto"
+  | "none"
+  | "required"
+  | { type: "function"; function: { name: string } };
+
+/**
+ * A tool call returned by the model.
+ */
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string; // JSON string of arguments
+  };
+}
+
+/**
+ * Extended message that can include tool calls (assistant) or tool results.
+ */
+export interface ChatMessageWithTools {
+  role: "user" | "assistant" | "system" | "tool";
+  content: string | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string; // Required when role is "tool"
+}
+
+/**
+ * Structured response from a chat completion that may contain tool calls.
+ */
+export interface ChatResponse {
+  content: string | null;
+  tool_calls?: ToolCall[];
+  finish_reason: "stop" | "tool_calls" | "length" | "content_filter";
+}
+
+/**
+ * Result from executing a tool.
+ */
+export interface ToolResult {
+  tool_call_id: string;
+  content: string;
+  is_error: boolean;
 }
 
 /**

@@ -4,7 +4,10 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import {
   type ChatContext,
   type Message,
+  type ToolStreamEvent,
   streamMessage,
+  streamMessageWithTools,
+  areToolsAvailable,
   sendMessageWithRetry,
   CHAT_MAX_RETRIES,
 } from "@/services/chat";
@@ -14,6 +17,7 @@ import { editorStore } from "@/stores/editor.store";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { settingsStore } from "@/stores/settings.store";
 import { StreamingMessage } from "./StreamingMessage";
+import { ToolStreamingMessage } from "./ToolStreamingMessage";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { ChatTabBar } from "./ChatTabBar";
@@ -39,7 +43,20 @@ interface StreamingSession {
   model: string;
   context?: ChatContext;
   stream: AsyncGenerator<string>;
+  toolsEnabled: false;
 }
+
+interface ToolStreamingSession {
+  id: string;
+  userMessageId: string;
+  prompt: string;
+  model: string;
+  context?: ChatContext;
+  stream: AsyncGenerator<ToolStreamEvent>;
+  toolsEnabled: true;
+}
+
+type ActiveStreamingSession = StreamingSession | ToolStreamingSession;
 
 interface ChatPanelProps {
   onSignInClick?: () => void;
@@ -51,7 +68,7 @@ interface ChatPanelComponent extends Component<ChatPanelProps> {
 
 export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [input, setInput] = createSignal("");
-  const [streamingSession, setStreamingSession] = createSignal<StreamingSession | null>(null);
+  const [streamingSession, setStreamingSession] = createSignal<ActiveStreamingSession | null>(null);
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
@@ -277,14 +294,27 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     const context = buildContext();
     const assistantId = crypto.randomUUID();
 
-    const session: StreamingSession = {
-      id: assistantId,
-      userMessageId: userMessage.id,
-      prompt: trimmed,
-      model: chatStore.selectedModel,
-      context,
-      stream: streamMessage(trimmed, chatStore.selectedModel, context),
-    };
+    // Use tool-aware streaming if tools are available (Seren provider)
+    const useTools = areToolsAvailable();
+    const session: ActiveStreamingSession = useTools
+      ? {
+          id: assistantId,
+          userMessageId: userMessage.id,
+          prompt: trimmed,
+          model: chatStore.selectedModel,
+          context,
+          stream: streamMessageWithTools(trimmed, chatStore.selectedModel, context, true),
+          toolsEnabled: true,
+        }
+      : {
+          id: assistantId,
+          userMessageId: userMessage.id,
+          prompt: trimmed,
+          model: chatStore.selectedModel,
+          context,
+          stream: streamMessage(trimmed, chatStore.selectedModel, context),
+          toolsEnabled: false,
+        };
 
     chatStore.setLoading(true);
     setStreamingSession(session);
@@ -292,7 +322,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     setInput("");
   };
 
-  const handleStreamingComplete = async (session: StreamingSession, content: string) => {
+  const handleStreamingComplete = async (session: ActiveStreamingSession, content: string) => {
     const assistantMessage: Message = {
       id: session.id,
       role: "assistant",
@@ -309,7 +339,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     chatStore.setLoading(false);
   };
 
-  const handleStreamingError = async (session: StreamingSession, error: Error) => {
+  const handleStreamingError = async (session: ActiveStreamingSession, error: Error) => {
     setStreamingSession(null);
     chatStore.setLoading(false);
     chatStore.setError(error.message);
@@ -479,12 +509,24 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             // Capture session immediately to avoid stale accessor in callbacks
             const session = sessionAccessor();
             return (
-              <StreamingMessage
-                stream={session.stream}
-                onComplete={(content) => handleStreamingComplete(session, content)}
-                onError={(error) => handleStreamingError(session, error)}
-                onContentUpdate={scrollToBottom}
-              />
+              <Show
+                when={session.toolsEnabled}
+                fallback={
+                  <StreamingMessage
+                    stream={(session as StreamingSession).stream}
+                    onComplete={(content) => handleStreamingComplete(session, content)}
+                    onError={(error) => handleStreamingError(session, error)}
+                    onContentUpdate={scrollToBottom}
+                  />
+                }
+              >
+                <ToolStreamingMessage
+                  stream={(session as ToolStreamingSession).stream}
+                  onComplete={(content) => handleStreamingComplete(session, content)}
+                  onError={(error) => handleStreamingError(session, error)}
+                  onContentUpdate={scrollToBottom}
+                />
+              </Show>
             );
           }}
         </Show>
