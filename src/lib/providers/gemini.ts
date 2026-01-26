@@ -1,7 +1,17 @@
 // ABOUTME: Google Gemini API provider adapter.
 // ABOUTME: Direct integration with Google AI for users with Gemini API access.
 
-import type { ChatRequest, ProviderAdapter, ProviderModel, ChatMessage } from "./types";
+import type { ChatRequest, ProviderAdapter, ProviderModel, ChatMessage, AuthOptions } from "./types";
+
+/**
+ * Normalize auth parameter to AuthOptions object.
+ */
+function normalizeAuth(auth: string | AuthOptions): AuthOptions {
+  if (typeof auth === "string") {
+    return { token: auth, isOAuth: false };
+  }
+  return auth;
+}
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -90,7 +100,8 @@ async function* parseGeminiSSE(
 export const geminiProvider: ProviderAdapter = {
   id: "gemini",
 
-  async sendMessage(request: ChatRequest, apiKey: string): Promise<string> {
+  async sendMessage(request: ChatRequest, auth: string | AuthOptions): Promise<string> {
+    const { token, isOAuth } = normalizeAuth(auth);
     const { systemInstruction, contents } = convertToGeminiFormat(request.messages);
 
     const body: Record<string, unknown> = {
@@ -104,13 +115,22 @@ export const geminiProvider: ProviderAdapter = {
       body.systemInstruction = systemInstruction;
     }
 
-    const url = `${GEMINI_API_URL}/models/${request.model}:generateContent?key=${apiKey}`;
+    // OAuth uses Authorization header, API key uses query parameter
+    const url = isOAuth
+      ? `${GEMINI_API_URL}/models/${request.model}:generateContent`
+      : `${GEMINI_API_URL}/models/${request.model}:generateContent?key=${token}`;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (isOAuth) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
 
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify(body),
     });
 
@@ -127,8 +147,9 @@ export const geminiProvider: ProviderAdapter = {
 
   async *streamMessage(
     request: ChatRequest,
-    apiKey: string
+    auth: string | AuthOptions
   ): AsyncGenerator<string, void, unknown> {
+    const { token, isOAuth } = normalizeAuth(auth);
     const { systemInstruction, contents } = convertToGeminiFormat(request.messages);
 
     const body: Record<string, unknown> = {
@@ -142,13 +163,22 @@ export const geminiProvider: ProviderAdapter = {
       body.systemInstruction = systemInstruction;
     }
 
-    const url = `${GEMINI_API_URL}/models/${request.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
+    // OAuth uses Authorization header, API key uses query parameter
+    const url = isOAuth
+      ? `${GEMINI_API_URL}/models/${request.model}:streamGenerateContent?alt=sse`
+      : `${GEMINI_API_URL}/models/${request.model}:streamGenerateContent?key=${token}&alt=sse`;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (isOAuth) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
 
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify(body),
     });
 

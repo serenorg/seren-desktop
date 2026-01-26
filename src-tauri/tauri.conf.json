@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://api.serendb.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https:",
+      "csp": "default-src 'self'; connect-src 'self' https://api.serendb.com https://api.openai.com https://auth.openai.com https://accounts.google.com https://oauth2.googleapis.com https://generativelanguage.googleapis.com https://openrouter.ai; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https:",
       "assetProtocol": {
         "enable": true,
         "scope": ["**"]
@@ -37,6 +37,14 @@
       ],
       "pubkey": "SEREN_RELEASES_PUBLIC_KEY_PLACEHOLDER",
       "dialog": false
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["seren"]
+      }
+    },
+    "shell": {
+      "open": true
     }
   },
   "bundle": {

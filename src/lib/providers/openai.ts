@@ -1,7 +1,15 @@
 // ABOUTME: OpenAI API provider adapter.
 // ABOUTME: Direct integration with api.openai.com for users with OpenAI subscriptions.
 
-import type { ChatRequest, ProviderAdapter, ProviderModel } from "./types";
+import type { ChatRequest, ProviderAdapter, ProviderModel, AuthOptions } from "./types";
+
+/**
+ * Normalize auth parameter to get the token string.
+ * OpenAI uses Bearer token for both API keys and OAuth tokens.
+ */
+function getToken(auth: string | AuthOptions): string {
+  return typeof auth === "string" ? auth : auth.token;
+}
 
 const OPENAI_API_URL = "https://api.openai.com/v1";
 
@@ -100,12 +108,13 @@ async function* parseOpenAISSE(
 export const openaiProvider: ProviderAdapter = {
   id: "openai",
 
-  async sendMessage(request: ChatRequest, apiKey: string): Promise<string> {
+  async sendMessage(request: ChatRequest, auth: string | AuthOptions): Promise<string> {
+    const token = getToken(auth);
     const response = await fetch(`${OPENAI_API_URL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         model: request.model,
@@ -126,13 +135,14 @@ export const openaiProvider: ProviderAdapter = {
 
   async *streamMessage(
     request: ChatRequest,
-    apiKey: string
+    auth: string | AuthOptions
   ): AsyncGenerator<string, void, unknown> {
+    const token = getToken(auth);
     const response = await fetch(`${OPENAI_API_URL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         model: request.model,

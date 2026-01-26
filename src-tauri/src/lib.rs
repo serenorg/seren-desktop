@@ -1,6 +1,7 @@
 // ABOUTME: Core library for the Seren Desktop Tauri application.
 // ABOUTME: Contains Tauri commands and the application run function.
 
+use tauri::Emitter;
 use tauri_plugin_store::StoreExt;
 
 pub mod commands {
@@ -20,6 +21,7 @@ mod wallet;
 const AUTH_STORE: &str = "auth.json";
 const TOKEN_KEY: &str = "token";
 const PROVIDERS_STORE: &str = "providers.json";
+const OAUTH_STORE: &str = "oauth.json";
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -108,6 +110,47 @@ fn get_configured_providers(app: tauri::AppHandle) -> Result<Vec<String>, String
     Ok(providers)
 }
 
+// OAuth credential storage commands
+#[tauri::command]
+fn store_oauth_credentials(app: tauri::AppHandle, provider: String, credentials: String) -> Result<(), String> {
+    let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
+    store.set(&provider, serde_json::json!(credentials));
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_oauth_credentials(app: tauri::AppHandle, provider: String) -> Result<Option<String>, String> {
+    let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
+    let creds = store
+        .get(&provider)
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    Ok(creds)
+}
+
+#[tauri::command]
+fn clear_oauth_credentials(app: tauri::AppHandle, provider: String) -> Result<(), String> {
+    let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
+    store.delete(&provider);
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_oauth_providers(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
+    let providers: Vec<String> = store
+        .keys()
+        .into_iter()
+        .filter(|k| {
+            store.get(k)
+                .map(|v| v.as_str().is_some())
+                .unwrap_or(false)
+        })
+        .collect();
+    Ok(providers)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -116,6 +159,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(mcp::McpState::new())
         .setup(|app| {
             // Configure embedded runtime early in startup
@@ -125,6 +170,23 @@ pub fn run() {
                 println!("[Seren] Embedded runtime configured: node={:?}, git={:?}",
                     paths.node_dir.is_some(), paths.git_dir.is_some());
             }
+
+            // Register deep link handler for OAuth callbacks
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    let urls = event.urls();
+                    for url in urls {
+                        if url.scheme() == "seren" && url.path() == "/oauth/callback" {
+                            // Emit event to frontend with OAuth callback data
+                            let _ = handle.emit("oauth-callback", url.to_string());
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -168,6 +230,10 @@ pub fn run() {
             wallet::commands::sign_x402_payment,
             wallet::commands::get_crypto_usdc_balance,
             embedded_runtime::get_embedded_runtime_info,
+            store_oauth_credentials,
+            get_oauth_credentials,
+            clear_oauth_credentials,
+            get_oauth_providers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
