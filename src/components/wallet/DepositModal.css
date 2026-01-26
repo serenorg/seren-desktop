@@ -1,0 +1,267 @@
+/* ABOUTME: Styles for deposit modal. */
+
+.deposit-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.deposit-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 420px;
+  box-shadow: var(--shadow-lg);
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.deposit-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.deposit-modal-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.deposit-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 24px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.deposit-modal-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.deposit-modal-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.deposit-current-balance {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+}
+
+.deposit-balance-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.deposit-balance-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.deposit-amounts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.deposit-amounts-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.deposit-preset-amounts {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.deposit-amount-btn {
+  padding: 12px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.deposit-amount-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.deposit-amount-btn.selected {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--text-inverse);
+}
+
+.deposit-custom-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.deposit-currency {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.deposit-custom-input input {
+  flex: 1;
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  font-size: 18px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.deposit-custom-input input:focus {
+  border-color: var(--accent-primary);
+}
+
+.deposit-custom-input input::placeholder {
+  color: var(--text-muted);
+}
+
+.deposit-custom-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 0;
+}
+
+.deposit-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.deposit-new-balance {
+  font-weight: 600;
+  color: var(--success, #28a745);
+}
+
+.deposit-error {
+  padding: 12px 16px;
+  background: var(--bg-error, rgba(220, 53, 69, 0.1));
+  border: 1px solid var(--error, #dc3545);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--error, #dc3545);
+}
+
+.deposit-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-primary);
+}
+
+.deposit-modal-footer .btn-primary,
+.deposit-modal-footer .btn-secondary {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.deposit-modal-footer .btn-primary {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  border: none;
+}
+
+.deposit-modal-footer .btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.deposit-modal-footer .btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.deposit-modal-footer .btn-secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+}
+
+.deposit-modal-footer .btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.deposit-modal-footer .btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .deposit-modal-backdrop,
+  .deposit-modal {
+    animation: none;
+  }
+}

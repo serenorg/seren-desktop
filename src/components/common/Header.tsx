@@ -1,7 +1,8 @@
-// ABOUTME: Application header with title and user actions.
-// ABOUTME: Displays app name and sign-in/logout controls based on auth state.
+// ABOUTME: Application header with title, balance, and user actions.
+// ABOUTME: Displays app name, wallet balance, and sign-in/logout controls based on auth state.
 
 import { Component, Show } from "solid-js";
+import { BalanceDisplay } from "./BalanceDisplay";
 import "./Header.css";
 
 interface HeaderProps {
@@ -25,6 +26,7 @@ export const Header: Component<HeaderProps> = (props) => {
             )
           }
         >
+          <BalanceDisplay />
           {props.onLogout && (
             <button type="button" class="header-logout" onClick={props.onLogout}>
               Logout
