@@ -22,12 +22,11 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
     if runtime_dir.exists() {
         Some(runtime_dir)
     } else {
-        // In development mode, check if there's a .build directory
+        // In development mode, check src-tauri/embedded-runtime
         if cfg!(debug_assertions) {
             // Try to find it relative to the source directory
             let dev_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .map(|p| p.join(".build").join("embedded-runtime"))?;
+                .join("embedded-runtime");
 
             // Detect current platform/arch
             let platform = if cfg!(target_os = "windows") {

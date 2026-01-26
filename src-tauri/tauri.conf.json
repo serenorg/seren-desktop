@@ -49,7 +49,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../.build/embedded-runtime/": "embedded-runtime/"
+      "embedded-runtime/": "embedded-runtime/"
     }
   }
 }

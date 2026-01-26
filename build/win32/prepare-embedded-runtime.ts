@@ -176,7 +176,7 @@ export async function prepareEmbeddedRuntime(arch: 'x64' | 'arm64', outputDir: s
 
 // CLI entry point (ESM compatible)
 const arch = (process.argv[2] as 'x64' | 'arm64') || 'x64';
-const outputDir = process.argv[3] || path.join(process.cwd(), '.build', 'embedded-runtime', `win32-${arch}`);
+const outputDir = process.argv[3] || path.join(process.cwd(), 'src-tauri', 'embedded-runtime', `win32-${arch}`);
 
 prepareEmbeddedRuntime(arch, outputDir)
 	.then(() => process.exit(0))

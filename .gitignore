@@ -32,6 +32,12 @@ coverage/
 src-tauri/WixTools/
 src-tauri/gen/schemas/
 
+# Embedded runtime binaries (downloaded, not committed)
+# Keep .gitkeep placeholder for CI
+src-tauri/embedded-runtime/darwin-*/
+src-tauri/embedded-runtime/win32-*/
+src-tauri/embedded-runtime/linux-*/
+
 # Generated icons (note: icon.ico is tracked for Windows builds)
 
 # OS files
