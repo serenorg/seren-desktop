@@ -168,19 +168,12 @@ export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
   openai: {
     id: "openai",
     name: "OpenAI",
-    description: "Access GPT models via sign-in or API key",
-    authMethod: "api_key_or_oauth",
+    description: "Direct access to GPT models with your OpenAI API key",
+    authMethod: "api_key",
     apiKeyPrefix: "sk-",
     apiKeyPlaceholder: "sk-proj-...",
     baseUrl: "https://api.openai.com",
     docsUrl: "https://platform.openai.com/docs",
-    oauth: {
-      authUrl: "https://auth.openai.com/authorize",
-      tokenUrl: "https://auth.openai.com/oauth/token",
-      scopes: ["openai.organization.read", "openai.chat.completions.create"],
-      clientId: "", // Set via environment or config
-      usePkce: true,
-    },
   },
   gemini: {
     id: "gemini",
@@ -211,7 +204,7 @@ export const CONFIGURABLE_PROVIDERS: ProviderId[] = ["anthropic", "openai", "gem
 /**
  * List of provider IDs that support OAuth.
  */
-export const OAUTH_PROVIDERS: ProviderId[] = ["openai", "gemini"];
+export const OAUTH_PROVIDERS: ProviderId[] = ["gemini"];
 
 /**
  * Get provider configuration by ID.
