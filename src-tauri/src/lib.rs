@@ -17,6 +17,7 @@ mod sync;
 
 const AUTH_STORE: &str = "auth.json";
 const TOKEN_KEY: &str = "token";
+const PROVIDERS_STORE: &str = "providers.json";
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -65,6 +66,46 @@ fn set_setting(app: tauri::AppHandle, store: String, key: String, value: String)
     Ok(())
 }
 
+#[tauri::command]
+fn store_provider_key(app: tauri::AppHandle, provider: String, api_key: String) -> Result<(), String> {
+    let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
+    store.set(&provider, serde_json::json!(api_key));
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_provider_key(app: tauri::AppHandle, provider: String) -> Result<Option<String>, String> {
+    let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
+    let key = store
+        .get(&provider)
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    Ok(key)
+}
+
+#[tauri::command]
+fn clear_provider_key(app: tauri::AppHandle, provider: String) -> Result<(), String> {
+    let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
+    store.delete(&provider);
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_configured_providers(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
+    let providers: Vec<String> = store
+        .keys()
+        .into_iter()
+        .filter(|k| {
+            store.get(k)
+                .map(|v| v.as_str().is_some())
+                .unwrap_or(false)
+        })
+        .collect();
+    Ok(providers)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -81,6 +122,10 @@ pub fn run() {
             clear_token,
             get_setting,
             set_setting,
+            store_provider_key,
+            get_provider_key,
+            clear_provider_key,
+            get_configured_providers,
             files::read_file,
             files::write_file,
             files::list_directory,
