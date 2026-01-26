@@ -55,10 +55,8 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
 
     if !has_conversation_id {
         // Add the column to existing table
-        conn.execute(
-            "ALTER TABLE messages ADD COLUMN conversation_id TEXT",
-            [],
-        ).ok(); // Ignore error if column already exists
+        conn.execute("ALTER TABLE messages ADD COLUMN conversation_id TEXT", [])
+            .ok(); // Ignore error if column already exists
     }
 
     // Migration: Create default conversation for orphan messages

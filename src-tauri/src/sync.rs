@@ -4,7 +4,7 @@
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
@@ -109,11 +109,14 @@ pub fn start_watching(app: AppHandle, path: String) -> Result<(), String> {
     });
 
     // Emit initial status
-    let _ = app.emit("sync-status", SyncState {
-        status: SyncStatus::Synced,
-        message: Some(format!("Watching: {}", path)),
-        watching_path: Some(path),
-    });
+    let _ = app.emit(
+        "sync-status",
+        SyncState {
+            status: SyncStatus::Synced,
+            message: Some(format!("Watching: {}", path)),
+            watching_path: Some(path),
+        },
+    );
 
     Ok(())
 }
@@ -142,11 +145,14 @@ fn handle_file_events(
                 let kind = format!("{:?}", event.kind);
 
                 // Emit syncing status
-                let _ = app.emit("sync-status", SyncState {
-                    status: SyncStatus::Syncing,
-                    message: Some(format!("File changed: {:?}", paths)),
-                    watching_path: None,
-                });
+                let _ = app.emit(
+                    "sync-status",
+                    SyncState {
+                        status: SyncStatus::Syncing,
+                        message: Some(format!("File changed: {:?}", paths)),
+                        watching_path: None,
+                    },
+                );
 
                 // Emit file change event
                 let _ = app.emit("file-changed", FileChangeEvent { paths, kind });
@@ -155,20 +161,26 @@ fn handle_file_events(
                 let app_clone = app.clone();
                 thread::spawn(move || {
                     thread::sleep(std::time::Duration::from_millis(500));
-                    let _ = app_clone.emit("sync-status", SyncState {
-                        status: SyncStatus::Synced,
-                        message: None,
-                        watching_path: None,
-                    });
+                    let _ = app_clone.emit(
+                        "sync-status",
+                        SyncState {
+                            status: SyncStatus::Synced,
+                            message: None,
+                            watching_path: None,
+                        },
+                    );
                 });
             }
             Ok(Err(e)) => {
                 // Emit error status
-                let _ = app.emit("sync-status", SyncState {
-                    status: SyncStatus::Error,
-                    message: Some(format!("Watch error: {}", e)),
-                    watching_path: None,
-                });
+                let _ = app.emit(
+                    "sync-status",
+                    SyncState {
+                        status: SyncStatus::Error,
+                        message: Some(format!("Watch error: {}", e)),
+                        watching_path: None,
+                    },
+                );
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 // No event, continue loop
@@ -197,11 +209,14 @@ pub fn stop_watching(app: AppHandle) -> Result<(), String> {
     state.status = SyncStatus::Idle;
     state.message = None;
 
-    let _ = app.emit("sync-status", SyncState {
-        status: SyncStatus::Idle,
-        message: None,
-        watching_path: None,
-    });
+    let _ = app.emit(
+        "sync-status",
+        SyncState {
+            status: SyncStatus::Idle,
+            message: None,
+            watching_path: None,
+        },
+    );
 
     Ok(())
 }

@@ -249,15 +249,14 @@ pub fn select_payment_method(
     user: &UserCapabilities,
 ) -> Option<PaymentMethod> {
     // Try x402 first if available and user has wallet
-    if let Some(x402_opt) = requirements.x402_option() {
-        if user.has_wallet {
-            if let Some(ref addr) = user.wallet_address {
-                return Some(PaymentMethod::X402 {
-                    option: x402_opt.clone(),
-                    wallet_address: addr.clone(),
-                });
-            }
-        }
+    if let Some(x402_opt) = requirements.x402_option()
+        && user.has_wallet
+        && let Some(ref addr) = user.wallet_address
+    {
+        return Some(PaymentMethod::X402 {
+            option: x402_opt.clone(),
+            wallet_address: addr.clone(),
+        });
     }
 
     // Fall back to prepaid if available
@@ -422,13 +421,13 @@ async fn build_x402_payment_payload_v2(
         .and_then(|v| v.get("domain"))
         .and_then(|v| v.get("verifyingContract"))
         .and_then(|v| v.as_str());
-    if let Some(vc) = typed_verifying_contract {
-        if !vc.eq_ignore_ascii_case(&option.asset) {
-            return Err(PaymentError::SigningFailed(format!(
-                "Mismatched verifyingContract ({}) for asset {}",
-                vc, option.asset
-            )));
-        }
+    if let Some(vc) = typed_verifying_contract
+        && !vc.eq_ignore_ascii_case(&option.asset)
+    {
+        return Err(PaymentError::SigningFailed(format!(
+            "Mismatched verifyingContract ({}) for asset {}",
+            vc, option.asset
+        )));
     }
     let verifying_contract = typed_verifying_contract.unwrap_or(&option.asset);
     let verifying_contract = verifying_contract.parse().map_err(|_| {
@@ -560,13 +559,13 @@ async fn build_x402_payment_payload_v1(
         .and_then(|v| v.get("domain"))
         .and_then(|v| v.get("verifyingContract"))
         .and_then(|v| v.as_str());
-    if let Some(vc) = typed_verifying_contract {
-        if !vc.eq_ignore_ascii_case(&option.asset) {
-            return Err(PaymentError::SigningFailed(format!(
-                "Mismatched verifyingContract ({}) for asset {}",
-                vc, option.asset
-            )));
-        }
+    if let Some(vc) = typed_verifying_contract
+        && !vc.eq_ignore_ascii_case(&option.asset)
+    {
+        return Err(PaymentError::SigningFailed(format!(
+            "Mismatched verifyingContract ({}) for asset {}",
+            vc, option.asset
+        )));
     }
     let verifying_contract = typed_verifying_contract.unwrap_or(&option.asset);
     let verifying_contract = verifying_contract.parse().map_err(|_| {

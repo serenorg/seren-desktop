@@ -80,7 +80,11 @@ fn clear_refresh_token(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_setting(app: tauri::AppHandle, store: String, key: String) -> Result<Option<String>, String> {
+fn get_setting(
+    app: tauri::AppHandle,
+    store: String,
+    key: String,
+) -> Result<Option<String>, String> {
     let store_handle = app.store(&store).map_err(|e| e.to_string())?;
     let value = store_handle
         .get(&key)
@@ -89,7 +93,12 @@ fn get_setting(app: tauri::AppHandle, store: String, key: String) -> Result<Opti
 }
 
 #[tauri::command]
-fn set_setting(app: tauri::AppHandle, store: String, key: String, value: String) -> Result<(), String> {
+fn set_setting(
+    app: tauri::AppHandle,
+    store: String,
+    key: String,
+    value: String,
+) -> Result<(), String> {
     let store_handle = app.store(&store).map_err(|e| e.to_string())?;
     store_handle.set(&key, serde_json::json!(value));
     store_handle.save().map_err(|e| e.to_string())?;
@@ -97,7 +106,11 @@ fn set_setting(app: tauri::AppHandle, store: String, key: String, value: String)
 }
 
 #[tauri::command]
-fn store_provider_key(app: tauri::AppHandle, provider: String, api_key: String) -> Result<(), String> {
+fn store_provider_key(
+    app: tauri::AppHandle,
+    provider: String,
+    api_key: String,
+) -> Result<(), String> {
     let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
     store.set(&provider, serde_json::json!(api_key));
     store.save().map_err(|e| e.to_string())?;
@@ -127,18 +140,18 @@ fn get_configured_providers(app: tauri::AppHandle) -> Result<Vec<String>, String
     let providers: Vec<String> = store
         .keys()
         .into_iter()
-        .filter(|k| {
-            store.get(k)
-                .map(|v| v.as_str().is_some())
-                .unwrap_or(false)
-        })
+        .filter(|k| store.get(k).map(|v| v.as_str().is_some()).unwrap_or(false))
         .collect();
     Ok(providers)
 }
 
 // OAuth credential storage commands
 #[tauri::command]
-fn store_oauth_credentials(app: tauri::AppHandle, provider: String, credentials: String) -> Result<(), String> {
+fn store_oauth_credentials(
+    app: tauri::AppHandle,
+    provider: String,
+    credentials: String,
+) -> Result<(), String> {
     let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
     store.set(&provider, serde_json::json!(credentials));
     store.save().map_err(|e| e.to_string())?;
@@ -146,7 +159,10 @@ fn store_oauth_credentials(app: tauri::AppHandle, provider: String, credentials:
 }
 
 #[tauri::command]
-fn get_oauth_credentials(app: tauri::AppHandle, provider: String) -> Result<Option<String>, String> {
+fn get_oauth_credentials(
+    app: tauri::AppHandle,
+    provider: String,
+) -> Result<Option<String>, String> {
     let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
     let creds = store
         .get(&provider)
@@ -168,11 +184,7 @@ fn get_oauth_providers(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let providers: Vec<String> = store
         .keys()
         .into_iter()
-        .filter(|k| {
-            store.get(k)
-                .map(|v| v.as_str().is_some())
-                .unwrap_or(false)
-        })
+        .filter(|k| store.get(k).map(|v| v.as_str().is_some()).unwrap_or(false))
         .collect();
     Ok(providers)
 }
@@ -191,10 +203,13 @@ pub fn run() {
         .setup(|app| {
             // Configure embedded runtime early in startup
             // This prepends bundled Node.js and Git to PATH
-            let paths = embedded_runtime::configure_embedded_runtime(&app.handle());
+            let paths = embedded_runtime::configure_embedded_runtime(app.handle());
             if paths.node_dir.is_some() || paths.git_dir.is_some() {
-                println!("[Seren] Embedded runtime configured: node={:?}, git={:?}",
-                    paths.node_dir.is_some(), paths.git_dir.is_some());
+                println!(
+                    "[Seren] Embedded runtime configured: node={:?}, git={:?}",
+                    paths.node_dir.is_some(),
+                    paths.git_dir.is_some()
+                );
             }
 
             // Register deep link handler for OAuth callbacks

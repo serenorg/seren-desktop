@@ -1,9 +1,14 @@
 // ABOUTME: Configures embedded Node.js and Git runtime paths at application startup.
-// ABOUTME: Prepends bundled runtime directories to PATH for Seren Desktop's sandboxed environment.
+// ABOUTME: Stores bundled runtime directories for injection into child process environments.
 
 use std::env;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
+
+/// Global storage for the computed PATH with embedded runtime directories.
+/// This is set once during app initialization and read when spawning child processes.
+static EMBEDDED_PATH: OnceLock<String> = OnceLock::new();
 
 /// Paths to the embedded runtime binaries
 #[derive(Debug, Clone)]
@@ -25,8 +30,7 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
         // In development mode, check src-tauri/embedded-runtime
         if cfg!(debug_assertions) {
             // Try to find it relative to the source directory
-            let dev_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("embedded-runtime");
+            let dev_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
 
             // Detect current platform/arch
             let platform = if cfg!(target_os = "windows") {
@@ -62,7 +66,7 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
             return EmbeddedRuntimePaths {
                 node_dir: None,
                 git_dir: None,
-            }
+            };
         }
     };
 
@@ -120,9 +124,9 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     EmbeddedRuntimePaths { node_dir, git_dir }
 }
 
-/// Configures the process environment to use embedded runtime.
-/// Prepends embedded Node.js and Git paths to PATH, ensuring bundled versions
-/// take precedence over system-installed versions.
+/// Configures the embedded runtime paths.
+/// Computes and stores the PATH with embedded runtime directories prepended.
+/// The computed PATH can be retrieved via `get_embedded_path()` for use when spawning processes.
 pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     let paths = discover_embedded_runtime(app);
     let mut paths_to_add: Vec<String> = Vec::new();
@@ -134,28 +138,47 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
         paths_to_add.push(git_dir.to_string_lossy().to_string());
     }
 
-    if !paths_to_add.is_empty() {
-        #[cfg(target_os = "windows")]
-        let path_separator = ";";
-        #[cfg(not(target_os = "windows"))]
-        let path_separator = ":";
+    // Compute the new PATH but store it instead of modifying global env
+    #[cfg(target_os = "windows")]
+    let path_separator = ";";
+    #[cfg(not(target_os = "windows"))]
+    let path_separator = ":";
 
-        let current_path = env::var("PATH").unwrap_or_default();
-        let new_path = format!("{}{}{}", paths_to_add.join(path_separator), path_separator, current_path);
+    let current_path = env::var("PATH").unwrap_or_default();
+    let new_path = if paths_to_add.is_empty() {
+        current_path
+    } else {
+        format!(
+            "{}{}{}",
+            paths_to_add.join(path_separator),
+            path_separator,
+            current_path
+        )
+    };
 
-        env::set_var("PATH", &new_path);
+    // Store the computed PATH for later use
+    let _ = EMBEDDED_PATH.set(new_path.clone());
 
-        // On Windows, also set Path for compatibility
-        #[cfg(target_os = "windows")]
-        env::set_var("Path", &new_path);
-
-        // Log for debugging if SEREN_DEBUG_RUNTIME is set
-        if env::var("SEREN_DEBUG_RUNTIME").is_ok() {
-            println!("[EmbeddedRuntime] Configured paths: {:?}", paths_to_add);
-        }
+    // Log for debugging if SEREN_DEBUG_RUNTIME is set
+    if env::var("SEREN_DEBUG_RUNTIME").is_ok() {
+        println!("[EmbeddedRuntime] Configured paths: {:?}", paths_to_add);
+        println!("[EmbeddedRuntime] Full PATH: {}", new_path);
     }
 
     paths
+}
+
+/// Returns the PATH value with embedded runtime directories prepended.
+/// Use this when spawning child processes that need access to embedded node/git.
+///
+/// # Example
+/// ```ignore
+/// use std::process::Command;
+/// let mut cmd = Command::new("node");
+/// cmd.env("PATH", embedded_runtime::get_embedded_path());
+/// ```
+pub fn get_embedded_path() -> &'static str {
+    EMBEDDED_PATH.get().map(|s| s.as_str()).unwrap_or("")
 }
 
 /// Tauri command to get embedded runtime information (for debugging/UI)

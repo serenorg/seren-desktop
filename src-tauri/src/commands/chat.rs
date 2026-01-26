@@ -2,7 +2,7 @@
 // ABOUTME: Handles CRUD operations for conversations and messages in SQLite.
 
 use crate::services::database::init_db;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
@@ -254,7 +254,10 @@ pub async fn get_messages(
 }
 
 #[tauri::command]
-pub async fn clear_conversation_history(app: AppHandle, conversation_id: String) -> Result<(), String> {
+pub async fn clear_conversation_history(
+    app: AppHandle,
+    conversation_id: String,
+) -> Result<(), String> {
     run_db(app, move |conn| {
         conn.execute(
             "DELETE FROM messages WHERE conversation_id = ?1",

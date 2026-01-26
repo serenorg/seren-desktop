@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
-use super::{
-    PaymentRequirements, PrivateKeyWallet, WalletError, build_x402_payment_payload,
-};
+use super::{PaymentRequirements, PrivateKeyWallet, WalletError, build_x402_payment_payload};
 
 const WALLET_STORE: &str = "crypto-wallet.json";
 const PRIVATE_KEY_KEY: &str = "private_key";
@@ -190,9 +188,7 @@ pub async fn sign_x402_payment<R: Runtime>(
     // Get the first x402 payment option
     let option = match requirements.x402_option() {
         Some(o) => o,
-        None => {
-            return WalletCommandResult::err("No x402 payment option in requirements")
-        }
+        None => return WalletCommandResult::err("No x402 payment option in requirements"),
     };
 
     // Build and sign the payment payload
@@ -290,12 +286,7 @@ pub async fn get_crypto_usdc_balance<R: Runtime>(
 
     // Make the RPC call
     let client = reqwest::Client::new();
-    let response = match client
-        .post(BASE_RPC_URL)
-        .json(&request)
-        .send()
-        .await
-    {
+    let response = match client.post(BASE_RPC_URL).json(&request).send().await {
         Ok(r) => r,
         Err(e) => return WalletCommandResult::err(format!("RPC request failed: {}", e)),
     };

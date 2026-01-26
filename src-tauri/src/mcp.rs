@@ -1,12 +1,13 @@
 // ABOUTME: MCP (Model Context Protocol) server process management.
 // ABOUTME: Handles spawning, communicating with, and terminating MCP server processes.
 
+use crate::embedded_runtime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::State;
 
 /// Global request ID counter for JSON-RPC
@@ -140,8 +141,8 @@ fn send_request<T: Serialize>(
         .read_line(&mut response_line)
         .map_err(|e| e.to_string())?;
 
-    let response: JsonRpcResponse =
-        serde_json::from_str(&response_line).map_err(|e| format!("Failed to parse response: {}", e))?;
+    let response: JsonRpcResponse = serde_json::from_str(&response_line)
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     if let Some(error) = response.error {
         return Err(format!("MCP error {}: {}", error.code, error.message));
@@ -185,22 +186,24 @@ pub fn mcp_connect(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    // Inject the embedded runtime PATH so child processes can find bundled node/git
+    let embedded_path = embedded_runtime::get_embedded_path();
+    if !embedded_path.is_empty() {
+        cmd.env("PATH", embedded_path);
+    }
+
     if let Some(env_vars) = env {
         for (key, value) in env_vars {
             cmd.env(key, value);
         }
     }
 
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn MCP server: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn MCP server: {}", e))?;
 
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or("Failed to get stdin")?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or("Failed to get stdout")?;
+    let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
 
     let mut process = McpProcess {
         child,
@@ -220,8 +223,8 @@ pub fn mcp_connect(
 
     let result = send_request(&mut process, "initialize", Some(init_params))?;
 
-    let init_result: McpInitializeResult =
-        serde_json::from_value(result).map_err(|e| format!("Failed to parse init result: {}", e))?;
+    let init_result: McpInitializeResult = serde_json::from_value(result)
+        .map_err(|e| format!("Failed to parse init result: {}", e))?;
 
     // Send initialized notification (no response expected, but we need to send it)
     let notification = serde_json::json!({
@@ -256,7 +259,10 @@ pub fn mcp_disconnect(state: State<'_, McpState>, server_name: String) -> Result
 
 /// List available tools from an MCP server
 #[tauri::command]
-pub fn mcp_list_tools(state: State<'_, McpState>, server_name: String) -> Result<Vec<McpTool>, String> {
+pub fn mcp_list_tools(
+    state: State<'_, McpState>,
+    server_name: String,
+) -> Result<Vec<McpTool>, String> {
     let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
 
     let process = processes
@@ -322,8 +328,8 @@ pub fn mcp_call_tool(
 
     let result = send_request(process, "tools/call", Some(params))?;
 
-    let tool_result: McpToolResult =
-        serde_json::from_value(result).map_err(|e| format!("Failed to parse tool result: {}", e))?;
+    let tool_result: McpToolResult = serde_json::from_value(result)
+        .map_err(|e| format!("Failed to parse tool result: {}", e))?;
 
     Ok(tool_result)
 }

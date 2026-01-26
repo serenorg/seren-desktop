@@ -49,12 +49,10 @@ pub fn list_directory(path: String) -> Result<Vec<FileEntry>, String> {
         .collect();
 
     // Sort: directories first, then alphabetically
-    entries.sort_by(|a, b| {
-        match (a.is_directory, b.is_directory) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
+    entries.sort_by(|a, b| match (a.is_directory, b.is_directory) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
 
     Ok(entries)
@@ -79,8 +77,7 @@ pub fn create_file(path: String, content: Option<String>) -> Result<(), String> 
 
     // Create parent directories if they don't exist
     if let Some(parent) = file_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directories: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {}", e))?;
     }
 
     let content = content.unwrap_or_default();

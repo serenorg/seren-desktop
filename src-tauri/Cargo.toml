@@ -3,7 +3,7 @@ name = "seren-desktop"
 version = "0.1.0"
 description = "Open source AI-powered desktop IDE with integrated chat, code completion, and MCP integration"
 authors = ["SerenAI <hello@serendb.com>"]
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
