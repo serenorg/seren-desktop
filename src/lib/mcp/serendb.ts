@@ -12,16 +12,16 @@ export const SERENDB_SERVER_NAME = "SerenDB";
 
 /**
  * SerenDB server configuration for the Gateway MCP server.
- * Connects to mcp.serendb.com via SSE using a Node.js bridge.
- * Token is injected at runtime from auth store.
+ * Connects to api.serendb.com using a Node.js bridge.
+ * API key is injected at runtime from auth store.
  */
 export const serenDbServerConfig: Omit<McpLocalServerConfig, "env"> = {
   type: "local",
   name: SERENDB_SERVER_NAME,
   command: "node",
   args: [
-    "scripts/mcp-gateway-bridge.js",
-    "--token={{TOKEN}}", // Placeholder - replaced at runtime
+    "scripts/mcp-gateway-bridge.cjs",
+    "--token={{API_KEY}}",
   ],
   description: "Seren's built-in MCP server for AI agents and publishers",
   enabled: true,
@@ -36,27 +36,22 @@ export function isSerenDbConfigured(): boolean {
 }
 
 /**
- * Get SerenDB server config with token injected.
- */
-function getSerenDbConfigWithToken(token: string): McpLocalServerConfig {
-  return {
-    ...serenDbServerConfig,
-    args: serenDbServerConfig.args.map((arg) =>
-      arg.replace("{{TOKEN}}", token),
-    ),
-  };
-}
-
-/**
  * Add SerenDB as a default MCP server.
- * Called when user signs in successfully.
+ * Injects the API key into the bridge command.
  */
-export async function addSerenDbServer(token: string): Promise<void> {
+export async function addSerenDbServer(apiKey: string): Promise<void> {
   if (isSerenDbConfigured()) {
     return;
   }
 
-  const config = getSerenDbConfigWithToken(token);
+  // Replace {{API_KEY}} placeholder with actual API key
+  const config = {
+    ...serenDbServerConfig,
+    args: serenDbServerConfig.args.map((arg) =>
+      arg.replace("{{API_KEY}}", apiKey)
+    ),
+  } as McpLocalServerConfig;
+
   await addMcpServer(config);
 }
 
@@ -73,9 +68,9 @@ export async function removeSerenDbServer(): Promise<void> {
 }
 
 /**
- * Ensure SerenDB server is configured for authenticated users.
+ * Ensure SerenDB server is configured.
  * Idempotent - safe to call multiple times.
  */
-export async function ensureSerenDbServer(token: string): Promise<void> {
-  await addSerenDbServer(token);
+export async function ensureSerenDbServer(apiKey: string): Promise<void> {
+  await addSerenDbServer(apiKey);
 }

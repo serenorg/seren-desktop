@@ -162,3 +162,33 @@ export async function isLoggedIn(): Promise<boolean> {
  * Returns null if not logged in.
  */
 export { getToken };
+
+/**
+ * Get or create an API key for MCP authentication.
+ * If no API key exists, the endpoint auto-creates one named "MCP Auto-Generated".
+ * @returns API key (seren_xxx_yyy format)
+ * @throws Error if not authenticated or request fails
+ */
+export async function getApiKey(): Promise<string> {
+  const token = await getToken();
+  if (!token) {
+    throw new Error("Not authenticated");
+  }
+
+  const response = await appFetch(`${apiBase}/auth/api-key`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error: AuthError = await response.json().catch(() => ({
+      message: "Failed to get API key",
+    }));
+    throw new Error(error.message);
+  }
+
+  const data = await response.json();
+  return data.data.api_key;
+}
