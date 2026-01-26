@@ -21,6 +21,8 @@ interface WalletState {
   error: string | null;
   /** For dismissing low balance warning */
   lastDismissedBalanceAtomic: number | null;
+  /** Track if auto-refresh is active (HMR-resistant) */
+  autoRefreshActive: boolean;
 }
 
 /**
@@ -34,6 +36,7 @@ const initialState: WalletState = {
   isLoading: false,
   error: null,
   lastDismissedBalanceAtomic: null,
+  autoRefreshActive: false,
 };
 
 const [walletState, setWalletState] = createStore<WalletState>(initialState);
@@ -96,12 +99,15 @@ async function refreshBalance(): Promise<void> {
  * Start automatic balance refresh.
  */
 function startAutoRefresh(): void {
-  if (refreshTimer) {
-    console.log("[Wallet Store] Auto-refresh already running");
+  // Check store flag instead of module-level variable (HMR-resistant)
+  if (walletState.autoRefreshActive) {
+    console.log("[Wallet Store] Auto-refresh already active");
     return;
   }
 
   console.log("[Wallet Store] Starting auto-refresh");
+  setWalletState("autoRefreshActive", true);
+
   // Fetch immediately (but only if not already loading)
   if (!walletState.isLoading) {
     refreshBalance();
@@ -121,6 +127,7 @@ function stopAutoRefresh(): void {
     clearInterval(refreshTimer);
     refreshTimer = null;
   }
+  setWalletState("autoRefreshActive", false);
 }
 
 /**
