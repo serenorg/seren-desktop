@@ -220,6 +220,7 @@ export const ProviderSettings: Component = () => {
               <span class="label-hint">Select a provider to configure with API key</span>
             </label>
             <select
+              aria-label="Select provider"
               value={selectedProvider() || ""}
               onChange={(e) => {
                 const value = e.currentTarget.value;

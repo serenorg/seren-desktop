@@ -379,7 +379,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
         >
         <header class="chat-header">
           <div class="chat-header-left">
-            <ModelSelector />
+            {/* Model selector moved to input area */}
           </div>
           <div class="chat-actions">
             <button type="button" class="clear-btn" onClick={clearHistory}>
@@ -502,11 +502,14 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             disabled={chatStore.isLoading}
           />
           <div class="input-footer">
-            <span class="input-hint">
-              {settingsStore.get("chatEnterToSend")
-                ? "Enter to send"
-                : "Ctrl+Enter to send"}
-            </span>
+            <div class="input-footer-left">
+              <ModelSelector />
+              <span class="input-hint">
+                {settingsStore.get("chatEnterToSend")
+                  ? "Enter to send"
+                  : "Ctrl+Enter to send"}
+              </span>
+            </div>
             <button type="submit" disabled={chatStore.isLoading}>
               Send
             </button>

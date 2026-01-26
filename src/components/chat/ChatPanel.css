@@ -364,6 +364,12 @@
   align-items: center;
 }
 
+.input-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .input-hint {
   font-size: 12px;
   color: #484f58;

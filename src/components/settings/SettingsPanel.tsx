@@ -11,6 +11,8 @@ import {
   type Settings,
 } from "@/stores/settings.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
+import { providerStore } from "@/stores/provider.store";
+import { chatStore } from "@/stores/chat.store";
 import { isLocalServer, isBuiltinServer } from "@/lib/mcp/types";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
@@ -43,6 +45,14 @@ export const SettingsPanel: Component = () => {
 
   const handleStringChange = (key: keyof Settings, value: string) => {
     settingsStore.set(key, value as Settings[typeof key]);
+  };
+
+  const handleDefaultModelChange = (modelId: string) => {
+    // Update settings store
+    settingsStore.set("chatDefaultModel", modelId);
+    // Sync to provider store and chat store so it's reflected immediately
+    providerStore.setActiveModel(modelId);
+    chatStore.setModel(modelId);
   };
 
   const handleResetAll = () => {
@@ -137,7 +147,7 @@ export const SettingsPanel: Component = () => {
               </label>
               <SearchableModelSelect
                 value={settingsState.app.chatDefaultModel}
-                onChange={(value) => handleStringChange("chatDefaultModel", value)}
+                onChange={handleDefaultModelChange}
                 placeholder="Select a model"
               />
             </div>

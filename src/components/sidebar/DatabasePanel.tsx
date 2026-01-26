@@ -1,8 +1,9 @@
 // ABOUTME: Database panel for browsing SerenDB projects, branches, and databases.
-// ABOUTME: Provides a tree view of the user's database resources.
+// ABOUTME: Provides a tree view with create, delete, and connection string features.
 
 import { Component, For, createSignal, createResource, Show } from "solid-js";
 import { databases, type Database } from "@/services/databases";
+import { CreateProjectModal } from "./CreateProjectModal";
 import "./DatabasePanel.css";
 
 interface DatabasePanelProps {
@@ -22,6 +23,8 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
 
   const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
   const [selectedBranchId, setSelectedBranchId] = createSignal<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = createSignal(false);
+  const [copyStatus, setCopyStatus] = createSignal<string | null>(null);
 
   // Fetch projects
   const [projects, { refetch: refetchProjects }] = createResource(async () => {
@@ -99,6 +102,33 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
     }
   };
 
+  const handleDeleteProject = async (e: MouseEvent, projectId: string, projectName: string) => {
+    e.stopPropagation();
+    const confirmed = window.confirm(`Delete project "${projectName}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      await databases.deleteProject(projectId);
+      refetchProjects();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete project";
+      alert(message);
+    }
+  };
+
+  const handleCopyConnectionString = async (e: MouseEvent, projectId: string, branchId: string) => {
+    e.stopPropagation();
+    try {
+      const connectionString = await databases.getConnectionString(projectId, branchId);
+      await navigator.clipboard.writeText(connectionString);
+      setCopyStatus("Copied!");
+      setTimeout(() => setCopyStatus(null), 2000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to get connection string";
+      alert(message);
+    }
+  };
+
   const isProjectExpanded = (projectId: string) => expanded().projects.has(projectId);
   const isBranchExpanded = (branchId: string) => expanded().branches.has(branchId);
 
@@ -106,14 +136,29 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
     <div class="database-panel">
       <div class="database-header">
         <h2>Databases</h2>
-        <button
-          class="database-refresh-btn"
-          onClick={() => refetchProjects()}
-          title="Refresh projects"
-        >
-          ↻
-        </button>
+        <div class="database-header-actions">
+          <button
+            type="button"
+            class="database-action-btn"
+            onClick={() => setShowCreateModal(true)}
+            title="Create project"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            class="database-action-btn"
+            onClick={() => refetchProjects()}
+            title="Refresh projects"
+          >
+            ↻
+          </button>
+        </div>
       </div>
+
+      <Show when={copyStatus()}>
+        <div class="database-copy-status">{copyStatus()}</div>
+      </Show>
 
       <Show when={projects.loading}>
         <div class="database-loading">Loading projects...</div>
@@ -135,6 +180,14 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                   {isProjectExpanded(project.id) ? "📂" : "📁"}
                 </span>
                 <span class="tree-label">{project.name}</span>
+                <button
+                  type="button"
+                  class="tree-action-btn delete-btn"
+                  onClick={(e) => handleDeleteProject(e, project.id, project.name)}
+                  title="Delete project"
+                >
+                  🗑️
+                </button>
                 <span class="tree-chevron">
                   {isProjectExpanded(project.id) ? "▼" : "▶"}
                 </span>
@@ -163,6 +216,14 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
                                 <span class="default-badge">default</span>
                               </Show>
                             </span>
+                            <button
+                              type="button"
+                              class="tree-action-btn copy-btn"
+                              onClick={(e) => handleCopyConnectionString(e, project.id, branch.id)}
+                              title="Copy connection string"
+                            >
+                              📋
+                            </button>
                             <span class="tree-chevron">
                               {isBranchExpanded(branch.id) ? "▼" : "▶"}
                             </span>
@@ -220,8 +281,15 @@ export const DatabasePanel: Component<DatabasePanelProps> = (props) => {
         <div class="database-empty">
           <div class="empty-icon">🗄️</div>
           <p>No projects found</p>
-          <p class="empty-hint">Create a project in the SerenDB console to get started.</p>
+          <p class="empty-hint">Click + to create your first project.</p>
         </div>
+      </Show>
+
+      <Show when={showCreateModal()}>
+        <CreateProjectModal
+          onClose={() => setShowCreateModal(false)}
+          onCreated={() => refetchProjects()}
+        />
       </Show>
     </div>
   );

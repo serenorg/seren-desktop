@@ -28,6 +28,8 @@ import {
 } from "@/stores/wallet.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { providerStore } from "@/stores/provider.store";
+import { loadAllSettings } from "@/stores/settings.store";
+import { chatStore } from "@/stores/chat.store";
 import { initAutoTopUp } from "@/services/autoTopUp";
 import { shortcuts } from "@/lib/shortcuts";
 import "./App.css";
@@ -45,10 +47,19 @@ function App() {
   // Reference to focus chat input
   let chatPanelRef: { focusInput?: () => void } | undefined;
 
-  onMount(() => {
+  onMount(async () => {
     checkAuth();
     updaterStore.initUpdater();
-    providerStore.loadSettings();
+
+    // Load all settings including app settings (chatDefaultModel, etc.) and MCP settings
+    await loadAllSettings();
+
+    // Load provider settings - this restores the last used model from previous session
+    await providerStore.loadSettings();
+
+    // Sync chatStore with the active model from provider store
+    // (providerStore already loaded the persisted activeModel)
+    chatStore.setModel(providerStore.activeModel);
 
     // Initialize keyboard shortcuts
     shortcuts.init();
