@@ -3,7 +3,14 @@
 
 import { API_BASE } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
-import { storeToken, getToken, clearToken } from "@/lib/tauri-bridge";
+import {
+  storeToken,
+  getToken,
+  clearToken,
+  storeRefreshToken,
+  getRefreshToken,
+  clearRefreshToken,
+} from "@/lib/tauri-bridge";
 
 export interface LoginResponse {
   data: {
@@ -53,14 +60,58 @@ export async function login(
 
   const data: LoginResponse = await response.json();
   await storeToken(data.data.access_token);
+  await storeRefreshToken(data.data.refresh_token);
   return data;
 }
 
 /**
- * Logout and clear stored token.
+ * Logout and clear stored tokens.
  */
 export async function logout(): Promise<void> {
   await clearToken();
+  await clearRefreshToken();
+}
+
+/**
+ * Refresh the access token using the stored refresh token.
+ * @returns true if refresh succeeded, false if refresh token is missing or invalid
+ */
+export async function refreshAccessToken(): Promise<boolean> {
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) {
+    return false;
+  }
+
+  try {
+    // Use native fetch to avoid auto-refresh loop
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!response.ok) {
+      // Refresh token is invalid or expired - clear all tokens
+      if (response.status === 401) {
+        await clearToken();
+        await clearRefreshToken();
+      }
+      return false;
+    }
+
+    const data: LoginResponse = await response.json();
+    await storeToken(data.data.access_token);
+    // Store new refresh token if provided (token rotation)
+    if (data.data.refresh_token) {
+      await storeRefreshToken(data.data.refresh_token);
+    }
+    return true;
+  } catch {
+    // Network error - don't clear tokens
+    return false;
+  }
 }
 
 /**

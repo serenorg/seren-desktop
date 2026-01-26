@@ -1,7 +1,7 @@
 // ABOUTME: Fetch wrapper for HTTP requests in Tauri environment.
 // ABOUTME: Uses Tauri HTTP plugin when available, falls back to browser fetch.
 
-import { isTauriRuntime } from "./tauri-bridge";
+import { isTauriRuntime, getToken } from "./tauri-bridge";
 
 type TauriFetch = typeof globalThis.fetch;
 
@@ -30,10 +30,22 @@ async function getFetch(): Promise<TauriFetch> {
   }
 }
 
+// Endpoints that should not trigger auto-refresh (to avoid loops)
+const NO_REFRESH_ENDPOINTS = ["/auth/login", "/auth/refresh", "/auth/signup"];
+
+/**
+ * Check if the request URL is an auth endpoint that should skip refresh.
+ */
+function shouldSkipRefresh(input: RequestInfo | URL): boolean {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  return NO_REFRESH_ENDPOINTS.some((endpoint) => url.includes(endpoint));
+}
+
 /**
  * Make an HTTP request using the appropriate fetch for the environment.
  * In Tauri, uses the HTTP plugin which bypasses CORS restrictions.
  * In browser, uses native fetch.
+ * Automatically refreshes access token on 401 and retries once.
  */
 export async function appFetch(
   input: RequestInfo | URL,
@@ -48,6 +60,33 @@ export async function appFetch(
   try {
     const response = await fetchFn(input, init);
     console.log("[appFetch] Response status:", response.status);
+
+    // Handle 401 with auto-refresh (skip for auth endpoints to avoid loops)
+    if (response.status === 401 && !shouldSkipRefresh(input)) {
+      console.log("[appFetch] Got 401, attempting token refresh...");
+      // Dynamic import to avoid circular dependency
+      const { refreshAccessToken } = await import("@/services/auth");
+      const refreshed = await refreshAccessToken();
+
+      if (refreshed) {
+        console.log("[appFetch] Token refreshed, retrying request...");
+        // Get new token and retry with updated Authorization header
+        const newToken = await getToken();
+        const retryInit: RequestInit = {
+          ...init,
+          headers: {
+            ...init?.headers,
+            Authorization: `Bearer ${newToken}`,
+          },
+        };
+        const retryResponse = await fetchFn(input, retryInit);
+        console.log("[appFetch] Retry response status:", retryResponse.status);
+        return retryResponse;
+      } else {
+        console.log("[appFetch] Token refresh failed, returning 401");
+      }
+    }
+
     return response;
   } catch (error) {
     console.error("[appFetch] Fetch error:", error);

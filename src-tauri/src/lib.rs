@@ -20,6 +20,7 @@ mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
 const TOKEN_KEY: &str = "token";
+const REFRESH_TOKEN_KEY: &str = "refresh_token";
 const PROVIDERS_STORE: &str = "providers.json";
 const OAUTH_STORE: &str = "oauth.json";
 
@@ -49,6 +50,31 @@ fn get_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
 fn clear_token(app: tauri::AppHandle) -> Result<(), String> {
     let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
     store.delete(TOKEN_KEY);
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn store_refresh_token(app: tauri::AppHandle, token: String) -> Result<(), String> {
+    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
+    store.set(REFRESH_TOKEN_KEY, serde_json::json!(token));
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_refresh_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
+    let token = store
+        .get(REFRESH_TOKEN_KEY)
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    Ok(token)
+}
+
+#[tauri::command]
+fn clear_refresh_token(app: tauri::AppHandle) -> Result<(), String> {
+    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
+    store.delete(REFRESH_TOKEN_KEY);
     store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -194,6 +220,9 @@ pub fn run() {
             store_token,
             get_token,
             clear_token,
+            store_refresh_token,
+            get_refresh_token,
+            clear_refresh_token,
             get_setting,
             set_setting,
             store_provider_key,
