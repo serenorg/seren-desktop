@@ -44,8 +44,8 @@ export const projects = {
     if (error || !data?.data) {
       throw new Error("Failed to create project");
     }
-    // ProjectCreatedResponse wraps ProjectCreated which has the project fields
-    return data.data as unknown as Project;
+    // createProject returns ProjectCreated (subset of fields); fetch full Project
+    return this.get(data.data.id);
   },
 
   /**
