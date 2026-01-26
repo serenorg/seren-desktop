@@ -64,9 +64,10 @@ The app connects to `https://api.serendb.com` (no version prefix):
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/oauth2/authorize` | GET | OAuth authorization (browser redirect) |
-| `/oauth2/token` | POST | Exchange code for tokens |
-| `/oauth2/revoke` | POST | Revoke tokens (logout) |
+| `/auth/login` | POST | User login (email + password) |
+| `/auth/signup` | POST | User registration |
+| `/auth/forgot-password` | POST | Password reset request |
+| `/auth/refresh` | POST | Refresh access token |
 | `/auth/me` | GET | Get user profile (with Bearer token) |
 | `/auth/api-key` | GET | Get/create API key |
 | `/agent/api` | POST | Execute AI/API requests |
@@ -74,9 +75,8 @@ The app connects to `https://api.serendb.com` (no version prefix):
 | `/agent/wallet/deposit` | POST | Deposit via Stripe |
 | `/agent/publishers` | GET | Publisher catalog |
 
-**Authentication:** Uses OAuth 2.1 with PKCE. The desktop app opens a browser for
-authentication, receives callback on localhost, and exchanges code for tokens.
-Do NOT use `/auth/verify-email` for login - that endpoint is for email verification tokens.
+**Authentication:** Simple email/password login to `/auth/login`. Returns `access_token`,
+`refresh_token`, and user info wrapped in a `data` object. Same pattern as seren-vscode.
 
 See full API docs at [docs.serendb.com](https://docs.serendb.com)
 
