@@ -59,17 +59,15 @@ export const LowBalanceWarning: Component<LowBalanceWarningProps> = (props) => {
 
   return (
     <Show when={shouldShow()}>
-      <div
-        class={containerClasses()}
-        role="alert"
-        aria-live="polite"
-      >
+      <div class={containerClasses()} role="alert" aria-live="polite">
         <div class="flex items-start gap-3">
           <span class="text-xl text-warning shrink-0" aria-hidden="true">
             &#9888;
           </span>
           <div class="flex flex-col gap-1 min-w-0">
-            <span class="text-sm font-semibold text-foreground">Low Balance</span>
+            <span class="text-sm font-semibold text-foreground">
+              Low Balance
+            </span>
             <span class="text-[13px] text-muted-foreground">
               Your SerenBucks balance (${walletState.balance?.toFixed(2)}) is
               below ${threshold().toFixed(2)}.
@@ -78,7 +76,9 @@ export const LowBalanceWarning: Component<LowBalanceWarningProps> = (props) => {
         </div>
 
         <Show when={topUpError()}>
-          <div class="text-xs text-destructive p-2 bg-destructive/10 rounded">{topUpError()}</div>
+          <div class="text-xs text-destructive p-2 bg-destructive/10 rounded">
+            {topUpError()}
+          </div>
         </Show>
 
         <div class="flex justify-end gap-2">
@@ -140,7 +140,10 @@ export const LowBalanceModal: Component = () => {
 
   return (
     <Show when={isVisible()}>
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] animate-[fadeIn_0.2s_ease-out]" onClick={handleClose}>
+      <div
+        class="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] animate-[fadeIn_0.2s_ease-out]"
+        onClick={handleClose}
+      >
         <div
           class="bg-card border border-border rounded-xl p-6 max-w-[400px] w-[90%] shadow-xl animate-[slideUp_0.2s_ease-out]"
           onClick={(e) => e.stopPropagation()}
@@ -148,7 +151,10 @@ export const LowBalanceModal: Component = () => {
           aria-modal="true"
           aria-labelledby="low-balance-modal-title"
         >
-          <h2 id="low-balance-modal-title" class="text-lg font-semibold text-foreground m-0 mb-4">
+          <h2
+            id="low-balance-modal-title"
+            class="text-lg font-semibold text-foreground m-0 mb-4"
+          >
             Low Balance Warning
           </h2>
           <LowBalanceWarning variant="modal" onTopUp={handleClose} />
@@ -172,7 +178,10 @@ export const LowBalanceIndicator: Component = () => {
 
   return (
     <Show when={showBalance() && isLow()}>
-      <span class="inline-flex items-center justify-center w-5 h-5 text-sm text-warning cursor-pointer rounded transition-colors duration-150 hover:bg-secondary" title="Low balance - click to top up">
+      <span
+        class="inline-flex items-center justify-center w-5 h-5 text-sm text-warning cursor-pointer rounded transition-colors duration-150 hover:bg-secondary"
+        title="Low balance - click to top up"
+      >
         &#9888;
       </span>
     </Show>

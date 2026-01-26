@@ -39,7 +39,11 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
 
   return (
     <div class="flex items-center h-9 bg-secondary border-b border-border">
-      <div class="flex items-center flex-1 h-full overflow-hidden" role="tablist" aria-label="Open files">
+      <div
+        class="flex items-center flex-1 h-full overflow-hidden"
+        role="tablist"
+        aria-label="Open files"
+      >
         <div class="flex items-center overflow-x-auto overflow-y-hidden flex-1 scrollbar-thin [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-sm">
           <For each={tabsState.tabs}>
             {(tab) => (
@@ -64,7 +68,9 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
                     ●
                   </span>
                 </Show>
-                <span class="tab-name text-foreground max-w-[150px] overflow-hidden text-ellipsis">{tab.fileName}</span>
+                <span class="tab-name text-foreground max-w-[150px] overflow-hidden text-ellipsis">
+                  {tab.fileName}
+                </span>
                 <button
                   type="button"
                   class={`flex items-center justify-center w-4 h-4 border-none bg-transparent text-muted-foreground text-base leading-none cursor-pointer rounded-sm transition-all ${tab.isDirty ? "opacity-0 group-hover:opacity-100" : "opacity-0 group-hover:opacity-100"} hover:bg-muted hover:text-foreground`}
@@ -80,7 +86,9 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
           </For>
         </div>
         <Show when={tabsState.tabs.length === 0}>
-          <div class="px-4 text-muted-foreground text-xs italic">No files open</div>
+          <div class="px-4 text-muted-foreground text-xs italic">
+            No files open
+          </div>
         </Show>
       </div>
       <Show when={props.isMarkdown}>

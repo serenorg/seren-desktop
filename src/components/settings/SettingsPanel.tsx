@@ -113,7 +113,9 @@ export const SettingsPanel: Component = () => {
   return (
     <div class="flex h-full bg-surface text-foreground">
       <aside class="w-[220px] min-w-[180px] flex flex-col bg-popover border-r border-[rgba(148,163,184,0.25)]">
-        <h2 class="px-4 pt-5 pb-3 m-0 text-[1.1rem] font-semibold text-foreground">Settings</h2>
+        <h2 class="px-4 pt-5 pb-3 m-0 text-[1.1rem] font-semibold text-foreground">
+          Settings
+        </h2>
         <nav class="flex-1 flex flex-col px-2 py-1 gap-0.5">
           <For each={sections}>
             {(section) => (
@@ -153,8 +155,12 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Default Model</span>
-                <span class="text-[0.8rem] text-muted">AI model for chat conversations</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Default Model
+                </span>
+                <span class="text-[0.8rem] text-muted">
+                  AI model for chat conversations
+                </span>
               </label>
               <SearchableModelSelect
                 value={settingsState.app.chatDefaultModel}
@@ -165,7 +171,9 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">History Limit</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  History Limit
+                </span>
                 <span class="text-[0.8rem] text-muted">
                   Maximum messages to keep in conversation context
                 </span>
@@ -200,7 +208,9 @@ export const SettingsPanel: Component = () => {
                   class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
                 <span class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">Enter to Send</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enter to Send
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Press Enter to send messages (Shift+Enter for new line)
                   </span>
@@ -216,15 +226,21 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "editor"}>
           <section class="settings-section">
-            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Editor Settings</h3>
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
+              Editor Settings
+            </h3>
             <p class="m-0 mb-6 text-muted leading-normal">
               Customize your code editing experience.
             </p>
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Font Size</span>
-                <span class="text-[0.8rem] text-muted">Size of text in the editor (px)</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Font Size
+                </span>
+                <span class="text-[0.8rem] text-muted">
+                  Size of text in the editor (px)
+                </span>
               </label>
               <input
                 type="number"
@@ -240,8 +256,12 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Tab Size</span>
-                <span class="text-[0.8rem] text-muted">Number of spaces per tab</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Tab Size
+                </span>
+                <span class="text-[0.8rem] text-muted">
+                  Number of spaces per tab
+                </span>
               </label>
               <input
                 type="number"
@@ -269,7 +289,9 @@ export const SettingsPanel: Component = () => {
                   class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
                 <span class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">Word Wrap</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Word Wrap
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Wrap long lines instead of scrolling
                   </span>
@@ -277,7 +299,9 @@ export const SettingsPanel: Component = () => {
               </label>
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">Code Completion</h4>
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">
+              Code Completion
+            </h4>
 
             <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex items-start gap-3 cursor-pointer">
@@ -293,7 +317,9 @@ export const SettingsPanel: Component = () => {
                   class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
                 <span class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">Enable AI Completions</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable AI Completions
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Show AI-powered code suggestions while typing
                   </span>
@@ -303,7 +329,9 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Completion Delay</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Completion Delay
+                </span>
                 <span class="text-[0.8rem] text-muted">
                   Milliseconds to wait before showing suggestions
                 </span>
@@ -323,8 +351,12 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Completion Model</span>
-                <span class="text-[0.8rem] text-muted">AI model for code completions</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Completion Model
+                </span>
+                <span class="text-[0.8rem] text-muted">
+                  AI model for code completions
+                </span>
               </label>
               <SearchableModelSelect
                 value={settingsState.app.completionModelId}
@@ -337,7 +369,9 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Max Suggestion Lines</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Max Suggestion Lines
+                </span>
                 <span class="text-[0.8rem] text-muted">
                   Maximum lines in code completion suggestions
                 </span>
@@ -361,7 +395,9 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "wallet"}>
           <section class="settings-section">
-            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Wallet Settings</h3>
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
+              Wallet Settings
+            </h3>
             <p class="m-0 mb-6 text-muted leading-normal">
               Configure your SerenBucks balance display and auto top-up.
             </p>
@@ -377,7 +413,9 @@ export const SettingsPanel: Component = () => {
                   class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
                 <span class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">Show Balance in Status Bar</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Show Balance in Status Bar
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Display your SerenBucks balance at the bottom of the app
                   </span>
@@ -387,7 +425,9 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Low Balance Warning</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Low Balance Warning
+                </span>
                 <span class="text-[0.8rem] text-muted">
                   Show warning when balance falls below this amount ($)
                 </span>
@@ -407,14 +447,18 @@ export const SettingsPanel: Component = () => {
               />
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">Payment Method</h4>
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">
+              Payment Method
+            </h4>
             <p class="m-0 mb-4 text-[0.85rem] text-muted leading-relaxed">
               Choose your preferred payment method for MCP server tools.
             </p>
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Preferred Method</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Preferred Method
+                </span>
                 <span class="text-[0.8rem] text-muted">
                   Default payment method for MCP tool usage
                 </span>
@@ -432,7 +476,11 @@ export const SettingsPanel: Component = () => {
                   }
                 >
                   <span class="text-2xl">💰</span>
-                  <span class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "text-foreground" : "text-muted"}`}>SerenBucks</span>
+                  <span
+                    class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "serenbucks" ? "text-foreground" : "text-muted"}`}
+                  >
+                    SerenBucks
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -452,7 +500,11 @@ export const SettingsPanel: Component = () => {
                   }
                 >
                   <span class="text-2xl">🔐</span>
-                  <span class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "crypto" ? "text-foreground" : "text-muted"}`}>Crypto Wallet</span>
+                  <span
+                    class={`text-[0.85rem] ${settingsState.app.preferredPaymentMethod === "crypto" ? "text-foreground" : "text-muted"}`}
+                  >
+                    Crypto Wallet
+                  </span>
                 </button>
               </div>
             </div>
@@ -471,7 +523,9 @@ export const SettingsPanel: Component = () => {
                   class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
                 <span class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">Enable Fallback Payment</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable Fallback Payment
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Use alternate method if preferred has insufficient funds
                   </span>
@@ -479,7 +533,9 @@ export const SettingsPanel: Component = () => {
               </label>
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">Auto Top-Up</h4>
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">
+              Auto Top-Up
+            </h4>
 
             <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex items-start gap-3 cursor-pointer">
@@ -495,7 +551,9 @@ export const SettingsPanel: Component = () => {
                   class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
                 <span class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">Enable Auto Top-Up</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable Auto Top-Up
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Automatically add funds when balance is low
                   </span>
@@ -506,7 +564,9 @@ export const SettingsPanel: Component = () => {
             <Show when={settingsState.app.autoTopUpEnabled}>
               <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
                 <label class="flex flex-col gap-0.5 flex-1">
-                  <span class="text-[0.95rem] font-medium text-foreground">Top-Up Threshold</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Top-Up Threshold
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Trigger top-up when balance falls below ($)
                   </span>
@@ -528,7 +588,9 @@ export const SettingsPanel: Component = () => {
 
               <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
                 <label class="flex flex-col gap-0.5 flex-1">
-                  <span class="text-[0.95rem] font-medium text-foreground">Top-Up Amount</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Top-Up Amount
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Amount to add when auto top-up triggers ($)
                   </span>
@@ -546,7 +608,9 @@ export const SettingsPanel: Component = () => {
               </div>
             </Show>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">Crypto Wallet (USDC Payments)</h4>
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted border-t border-[rgba(148,163,184,0.15)] pt-5">
+              Crypto Wallet (USDC Payments)
+            </h4>
             <p class="m-0 mb-4 text-[0.85rem] text-muted leading-relaxed">
               Configure your crypto wallet for x402 USDC payments to MCP
               servers.
@@ -554,7 +618,9 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Auto-Approve Limit</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Auto-Approve Limit
+                </span>
                 <span class="text-[0.8rem] text-muted">
                   Auto-approve payments up to this amount (USD)
                 </span>
@@ -581,7 +647,9 @@ export const SettingsPanel: Component = () => {
               fallback={
                 <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
                   <label class="flex flex-col gap-0.5 flex-1">
-                    <span class="text-[0.95rem] font-medium text-foreground">Private Key</span>
+                    <span class="text-[0.95rem] font-medium text-foreground">
+                      Private Key
+                    </span>
                     <span class="text-[0.8rem] text-muted">
                       Enter your wallet private key (64 hex characters)
                     </span>
@@ -592,9 +660,12 @@ export const SettingsPanel: Component = () => {
                         type="password"
                         placeholder="0x... or 64 hex characters"
                         value={privateKeyInput()}
-                        onInput={(e) => setPrivateKeyInput(e.currentTarget.value)}
+                        onInput={(e) =>
+                          setPrivateKeyInput(e.currentTarget.value)
+                        }
                         class={`flex-1 px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent ${
-                          privateKeyInput() && !isValidPrivateKeyFormat(privateKeyInput())
+                          privateKeyInput() &&
+                          !isValidPrivateKeyFormat(privateKeyInput())
                             ? "border-[#ef4444]"
                             : "border-[rgba(148,163,184,0.3)]"
                         }`}
@@ -635,7 +706,9 @@ export const SettingsPanel: Component = () => {
               <div class="mt-2">
                 <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
                   <label class="flex flex-col gap-0.5 flex-1">
-                    <span class="text-[0.95rem] font-medium text-foreground">Wallet Address</span>
+                    <span class="text-[0.95rem] font-medium text-foreground">
+                      Wallet Address
+                    </span>
                     <span class="text-[0.8rem] text-muted">
                       Your configured wallet for USDC payments
                     </span>
@@ -656,7 +729,9 @@ export const SettingsPanel: Component = () => {
 
                 <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
                   <label class="flex flex-col gap-0.5 flex-1">
-                    <span class="text-[0.95rem] font-medium text-foreground">USDC Balance (Base)</span>
+                    <span class="text-[0.95rem] font-medium text-foreground">
+                      USDC Balance (Base)
+                    </span>
                     <span class="text-[0.8rem] text-muted">
                       Your current USDC balance on Base mainnet
                     </span>
@@ -665,7 +740,9 @@ export const SettingsPanel: Component = () => {
                     <Show
                       when={!cryptoWalletStore.state().balanceLoading}
                       fallback={
-                        <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[0.9rem] text-muted min-w-[140px]">Loading balance...</span>
+                        <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[0.9rem] text-muted min-w-[140px]">
+                          Loading balance...
+                        </span>
                       }
                     >
                       <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[1.1rem] font-semibold text-foreground font-mono min-w-[140px]">
@@ -699,7 +776,9 @@ export const SettingsPanel: Component = () => {
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">Theme</span>
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Theme
+                </span>
                 <span class="text-[0.8rem] text-muted">
                   Choose your preferred color scheme
                 </span>
@@ -723,7 +802,9 @@ export const SettingsPanel: Component = () => {
                             ? "☀️"
                             : "💻"}
                       </span>
-                      <span class={`text-[0.85rem] ${settingsState.app.theme === theme ? "text-foreground" : "text-muted"}`}>
+                      <span
+                        class={`text-[0.85rem] ${settingsState.app.theme === theme ? "text-foreground" : "text-muted"}`}
+                      >
                         {theme.charAt(0).toUpperCase() + theme.slice(1)}
                       </span>
                     </button>
@@ -736,7 +817,9 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "general"}>
           <section class="settings-section">
-            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">General Settings</h3>
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
+              General Settings
+            </h3>
             <p class="m-0 mb-6 text-muted leading-normal">
               Configure application behavior and privacy options.
             </p>
@@ -755,7 +838,9 @@ export const SettingsPanel: Component = () => {
                   class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
                 />
                 <span class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">Enable Telemetry</span>
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable Telemetry
+                  </span>
                   <span class="text-[0.8rem] text-muted">
                     Help improve Seren by sharing anonymous usage data
                   </span>
@@ -796,9 +881,13 @@ export const SettingsPanel: Component = () => {
                     >
                       <div class="flex flex-col gap-1">
                         <div class="flex items-center gap-2">
-                          <span class="font-medium text-foreground">{server.name}</span>
+                          <span class="font-medium text-foreground">
+                            {server.name}
+                          </span>
                           <Show when={server.autoConnect}>
-                            <span class="px-1.5 py-0.5 bg-[rgba(99,102,241,0.2)] rounded text-[0.7rem] text-accent">Auto-connect</span>
+                            <span class="px-1.5 py-0.5 bg-[rgba(99,102,241,0.2)] rounded text-[0.7rem] text-accent">
+                              Auto-connect
+                            </span>
                           </Show>
                         </div>
                         <span class="text-[0.8rem] text-muted font-mono">
@@ -845,7 +934,10 @@ export const SettingsPanel: Component = () => {
           class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000]"
           onClick={() => setShowResetConfirm(false)}
         >
-          <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-6 max-w-[400px] w-[90%]" onClick={(e) => e.stopPropagation()}>
+          <div
+            class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-6 max-w-[400px] w-[90%]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 class="m-0 mb-3 text-[1.1rem]">Reset All Settings?</h3>
             <p class="m-0 mb-5 text-muted leading-normal">
               This will restore all settings to their default values. This
@@ -859,7 +951,11 @@ export const SettingsPanel: Component = () => {
               >
                 Cancel
               </button>
-              <button type="button" class="px-4 py-2 bg-[#ef4444] border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[#dc2626]" onClick={handleResetAll}>
+              <button
+                type="button"
+                class="px-4 py-2 bg-[#ef4444] border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[#dc2626]"
+                onClick={handleResetAll}
+              >
                 Reset All
               </button>
             </div>
@@ -872,7 +968,10 @@ export const SettingsPanel: Component = () => {
           class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000]"
           onClick={() => setShowClearConfirm(false)}
         >
-          <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-6 max-w-[400px] w-[90%]" onClick={(e) => e.stopPropagation()}>
+          <div
+            class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-6 max-w-[400px] w-[90%]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 class="m-0 mb-3 text-[1.1rem]">Remove Crypto Wallet?</h3>
             <p class="m-0 mb-5 text-muted leading-normal">
               This will delete your private key from this device. You will need

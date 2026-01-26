@@ -7,6 +7,7 @@ import {
   createEffect,
   createSignal,
   onCleanup,
+  Show,
 } from "solid-js";
 
 interface ImageViewerProps {
@@ -124,7 +125,9 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
           >
             −
           </button>
-          <span class="min-w-[50px] text-center text-[13px] text-muted-foreground">{zoom()}%</span>
+          <span class="min-w-[50px] text-center text-[13px] text-muted-foreground">
+            {zoom()}%
+          </span>
           <button
             type="button"
             class="bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)]"
@@ -151,20 +154,27 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
       >
         {error() ? (
           <div class="text-destructive text-sm">{error()}</div>
-        ) : imageUrl() ? (
-          <img
-            src={imageUrl()!}
-            alt={fileName()}
-            class={`max-w-none max-h-none origin-center select-none relative z-[1] ${isDragging() ? "" : "transition-transform duration-100 ease-out"}`}
-            style={{
-              transform: `translate(${position().x}px, ${position().y}px) scale(${zoom() / 100})`,
-            }}
-            onLoad={handleImageLoad}
-            onError={handleImageError}
-            draggable={false}
-          />
         ) : (
-          <div class="text-muted-foreground text-sm">Loading...</div>
+          <Show
+            when={imageUrl()}
+            fallback={
+              <div class="text-muted-foreground text-sm">Loading...</div>
+            }
+          >
+            {(url) => (
+              <img
+                src={url()}
+                alt={fileName()}
+                class={`max-w-none max-h-none origin-center select-none relative z-[1] ${isDragging() ? "" : "transition-transform duration-100 ease-out"}`}
+                style={{
+                  transform: `translate(${position().x}px, ${position().y}px) scale(${zoom() / 100})`,
+                }}
+                onLoad={handleImageLoad}
+                onError={handleImageError}
+                draggable={false}
+              />
+            )}
+          </Show>
         )}
       </div>
     </div>

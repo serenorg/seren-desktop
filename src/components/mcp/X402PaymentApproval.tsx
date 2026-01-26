@@ -155,13 +155,17 @@ export const X402PaymentApproval: Component = () => {
             <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-2xl p-6 max-w-[420px] w-[90%] shadow-[0_16px_48px_rgba(0,0,0,0.4)]">
               <div class="flex items-center gap-3 mb-4">
                 <span class="text-2xl">💳</span>
-                <h3 class="m-0 text-[1.2rem] font-semibold text-foreground">Payment Required</h3>
+                <h3 class="m-0 text-[1.2rem] font-semibold text-foreground">
+                  Payment Required
+                </h3>
               </div>
 
               <div class="mb-5">
                 <p class="m-0 mb-4 text-muted leading-normal text-[0.95rem]">
-                  The tool <strong class="text-foreground">{p().toolName}</strong> on{" "}
-                  <strong class="text-foreground">{p().serverName}</strong> requires payment to proceed.
+                  The tool{" "}
+                  <strong class="text-foreground">{p().toolName}</strong> on{" "}
+                  <strong class="text-foreground">{p().serverName}</strong>{" "}
+                  requires payment to proceed.
                 </p>
 
                 <div class="bg-black/20 border border-[rgba(148,163,184,0.15)] rounded-xl p-4 mb-4">
@@ -174,7 +178,9 @@ export const X402PaymentApproval: Component = () => {
                   <Show when={selectedMethod() === "crypto"}>
                     <div class="flex justify-between items-center py-2 border-b border-[rgba(148,163,184,0.1)]">
                       <span class="text-[0.9rem] text-muted">Network</span>
-                      <span class="text-[0.9rem] text-foreground font-medium">{p().chainName}</span>
+                      <span class="text-[0.9rem] text-foreground font-medium">
+                        {p().chainName}
+                      </span>
                     </div>
                     <div class="flex justify-between items-center py-2">
                       <span class="text-[0.9rem] text-muted">Recipient</span>
@@ -190,7 +196,9 @@ export const X402PaymentApproval: Component = () => {
 
                 <Show when={availableMethods().length > 1}>
                   <div class="my-4">
-                    <span class="block text-[0.9rem] text-muted mb-3">Pay with:</span>
+                    <span class="block text-[0.9rem] text-muted mb-3">
+                      Pay with:
+                    </span>
                     <div class="flex gap-3 max-sm:flex-col">
                       <For each={availableMethods()}>
                         {(method) => (

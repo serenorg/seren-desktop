@@ -83,13 +83,20 @@ export const McpStatusIndicator: Component = () => {
   };
 
   return (
-    <div class="mcp-status-indicator relative flex items-center gap-1.5 py-1 px-2.5 rounded cursor-default text-xs transition-colors duration-150 hover:bg-black/10 group" title={statusLabel()}>
+    <div
+      class="mcp-status-indicator relative flex items-center gap-1.5 py-1 px-2.5 rounded cursor-default text-xs transition-colors duration-150 hover:bg-black/10 group"
+      title={statusLabel()}
+    >
       <span class="text-[10px]">{statusIcon()}</span>
-      <span class="status-label text-secondary-foreground">{statusLabel()}</span>
+      <span class="status-label text-secondary-foreground">
+        {statusLabel()}
+      </span>
 
       <Show when={totalServers() > 0}>
         <div class="absolute bottom-full right-0 mb-1 min-w-[220px] bg-popover border border-border rounded-lg shadow-lg opacity-0 invisible translate-y-2 transition-all duration-150 z-[1000] group-hover:opacity-100 group-hover:visible group-hover:translate-y-0">
-          <div class="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">MCP Servers</div>
+          <div class="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">
+            MCP Servers
+          </div>
 
           {/* Builtin servers (Gateway) */}
           <For each={builtinServers()}>
@@ -98,8 +105,12 @@ export const McpStatusIndicator: Component = () => {
                 <span class="text-[10px] shrink-0">
                   {authStore.isAuthenticated ? "🟢" : "⚪"}
                 </span>
-                <span class="flex-1 font-medium overflow-hidden text-ellipsis whitespace-nowrap">{server.name}</span>
-                <span class="text-[11px] text-muted-foreground shrink-0">Gateway</span>
+                <span class="flex-1 font-medium overflow-hidden text-ellipsis whitespace-nowrap">
+                  {server.name}
+                </span>
+                <span class="text-[11px] text-muted-foreground shrink-0">
+                  Gateway
+                </span>
               </div>
             )}
           </For>
@@ -119,10 +130,17 @@ export const McpStatusIndicator: Component = () => {
                         ? "🔴"
                         : "⚪"}
                 </span>
-                <span class="flex-1 font-medium overflow-hidden text-ellipsis whitespace-nowrap">{conn.serverName}</span>
-                <span class="text-[11px] text-muted-foreground shrink-0">{conn.tools.length} tools</span>
+                <span class="flex-1 font-medium overflow-hidden text-ellipsis whitespace-nowrap">
+                  {conn.serverName}
+                </span>
+                <span class="text-[11px] text-muted-foreground shrink-0">
+                  {conn.tools.length} tools
+                </span>
                 <Show when={conn.error}>
-                  <span class="text-[11px] text-destructive overflow-hidden text-ellipsis whitespace-nowrap max-w-[150px]" title={conn.error}>
+                  <span
+                    class="text-[11px] text-destructive overflow-hidden text-ellipsis whitespace-nowrap max-w-[150px]"
+                    title={conn.error}
+                  >
                     {conn.error}
                   </span>
                 </Show>

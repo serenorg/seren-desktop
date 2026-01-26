@@ -11,13 +11,15 @@ interface AutocompleteStatusProps {
   onToggle?: () => void;
 }
 
-const STATE_CONFIG: Record<AutocompleteState, { label: string; icon: string; colorClass: string }> =
-  {
-    active: { label: "AI Active", icon: "●", colorClass: "text-green-400" },
-    loading: { label: "AI Loading", icon: "◐", colorClass: "text-yellow-400" },
-    disabled: { label: "AI Disabled", icon: "○", colorClass: "text-gray-500" },
-    error: { label: "AI Error", icon: "⚠", colorClass: "text-red-500" },
-  };
+const STATE_CONFIG: Record<
+  AutocompleteState,
+  { label: string; icon: string; colorClass: string }
+> = {
+  active: { label: "AI Active", icon: "●", colorClass: "text-green-400" },
+  loading: { label: "AI Loading", icon: "◐", colorClass: "text-yellow-400" },
+  disabled: { label: "AI Disabled", icon: "○", colorClass: "text-gray-500" },
+  error: { label: "AI Error", icon: "⚠", colorClass: "text-red-500" },
+};
 
 export const AutocompleteStatus: Component<AutocompleteStatusProps> = (
   props,
@@ -31,7 +33,11 @@ export const AutocompleteStatus: Component<AutocompleteStatusProps> = (
       title={props.errorMessage || config().label}
       aria-label={config().label}
     >
-      <span class={`text-[10px] leading-none ${props.state === "loading" ? "animate-pulse" : ""}`}>{config().icon}</span>
+      <span
+        class={`text-[10px] leading-none ${props.state === "loading" ? "animate-pulse" : ""}`}
+      >
+        {config().icon}
+      </span>
       <Show when={props.state === "loading"}>
         <span class="w-2.5 h-2.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
       </Show>

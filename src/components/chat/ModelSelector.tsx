@@ -112,8 +112,12 @@ export const ModelSelector: Component = () => {
         <span class="inline-flex items-center justify-center w-[18px] h-[18px] bg-accent text-white rounded text-[11px] font-semibold">
           {getProviderIcon(currentProvider())}
         </span>
-        <span class="text-foreground">{currentModel()?.name || "Select model"}</span>
-        <span class="text-[10px] text-muted-foreground">{isOpen() ? "▲" : "▼"}</span>
+        <span class="text-foreground">
+          {currentModel()?.name || "Select model"}
+        </span>
+        <span class="text-[10px] text-muted-foreground">
+          {isOpen() ? "▲" : "▼"}
+        </span>
       </button>
 
       <Show when={isOpen()}>
@@ -148,7 +152,9 @@ export const ModelSelector: Component = () => {
                   }}
                   title={PROVIDER_CONFIGS[providerId].name}
                 >
-                  <span class={`w-4 h-4 inline-flex items-center justify-center bg-[#3c3c3c] rounded-sm text-[10px] font-semibold ${providerId === currentProvider() ? "bg-accent text-white" : ""}`}>
+                  <span
+                    class={`w-4 h-4 inline-flex items-center justify-center bg-[#3c3c3c] rounded-sm text-[10px] font-semibold ${providerId === currentProvider() ? "bg-accent text-white" : ""}`}
+                  >
                     {getProviderIcon(providerId)}
                   </span>
                   <span class="max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">
@@ -192,7 +198,9 @@ export const ModelSelector: Component = () => {
                     onClick={() => selectModel(model.id)}
                   >
                     <div class="flex flex-col gap-0.5 min-w-0 flex-1">
-                      <span class="text-foreground font-medium">{model.name}</span>
+                      <span class="text-foreground font-medium">
+                        {model.name}
+                      </span>
                       <Show when={model.description}>
                         <span class="text-[11px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
                           {model.description}
@@ -201,7 +209,9 @@ export const ModelSelector: Component = () => {
                     </div>
                     <div class="flex items-center gap-2">
                       <Show when={model.id === providerStore.activeModel}>
-                        <span class="text-success text-sm font-semibold">&#10003;</span>
+                        <span class="text-success text-sm font-semibold">
+                          &#10003;
+                        </span>
                       </Show>
                       <span class="text-[11px] text-[#94a3b8] px-1.5 py-0.5 bg-[#2d2d2d] rounded whitespace-nowrap">
                         {formatContextWindow(model.contextWindow)}

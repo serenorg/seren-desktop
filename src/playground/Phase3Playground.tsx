@@ -202,26 +202,39 @@ export const Phase3Playground = () => {
   }
 
   return (
-    <div class="flex h-screen bg-[radial-gradient(circle_at_top,#111827,#020617_70%)] text-white" data-testid="phase3-playground">
+    <div
+      class="flex h-screen bg-[radial-gradient(circle_at_top,#111827,#020617_70%)] text-white"
+      data-testid="phase3-playground"
+    >
       <aside class="w-[280px] p-4 border-r border-[rgba(255,255,255,0.1)] bg-[rgba(2,6,23,0.85)]">
-        <h2 class="mt-0 text-base uppercase tracking-[0.08em] text-[#94a3b8]">File Tree</h2>
+        <h2 class="mt-0 text-base uppercase tracking-[0.08em] text-[#94a3b8]">
+          File Tree
+        </h2>
         <FileTree onFileSelect={handleFileSelect} />
       </aside>
       <section class="flex-1 flex flex-col bg-[rgba(15,23,42,0.8)]">
         <div class="p-3 border-b border-[rgba(255,255,255,0.08)]">
           <FileTabs />
         </div>
-        <div class="flex-1 flex flex-col px-3 pb-3" data-testid="phase3-editor-pane">
+        <div
+          class="flex-1 flex flex-col px-3 pb-3"
+          data-testid="phase3-editor-pane"
+        >
           <Show
             when={activeFilePath()}
             fallback={
-              <div class="flex-1 flex items-center justify-center text-[#94a3b8]">Select a file from the tree</div>
+              <div class="flex-1 flex items-center justify-center text-[#94a3b8]">
+                Select a file from the tree
+              </div>
             }
           >
             <div class="text-[0.9rem] text-[#94a3b8] my-3">
               <span data-testid="active-file-path">{activeFilePath()}</span>
             </div>
-            <div data-testid="monaco-editor" class="flex-1 border border-[rgba(255,255,255,0.12)] rounded-lg overflow-hidden bg-[#0f172a]">
+            <div
+              data-testid="monaco-editor"
+              class="flex-1 border border-[rgba(255,255,255,0.12)] rounded-lg overflow-hidden bg-[#0f172a]"
+            >
               <MonacoEditor
                 filePath={activeFilePath() ?? undefined}
                 value={editorContent()}

@@ -163,18 +163,28 @@ export const ProviderSettings: Component = () => {
               <div class="flex items-center justify-between px-4 py-3 bg-[rgba(30,41,59,0.5)] border border-[rgba(148,163,184,0.15)] rounded-lg transition-[border-color] duration-150 hover:border-[rgba(148,163,184,0.25)]">
                 <div class="flex flex-col gap-1 min-w-0 flex-1">
                   <div class="flex items-center gap-2">
-                    <span class="font-medium text-foreground">{config.name}</span>
+                    <span class="font-medium text-foreground">
+                      {config.name}
+                    </span>
                     <Show when={providerId === "seren"}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(99,102,241,0.2)] text-[#818cf8]">Default</span>
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(99,102,241,0.2)] text-[#818cf8]">
+                        Default
+                      </span>
                     </Show>
                     <Show when={providerId === providerStore.activeProvider}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(34,197,94,0.2)] text-[#4ade80]">Active</span>
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(34,197,94,0.2)] text-[#4ade80]">
+                        Active
+                      </span>
                     </Show>
                     <Show when={authType === "oauth"}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(59,130,246,0.2)] text-[#60a5fa]">Signed In</span>
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(59,130,246,0.2)] text-[#60a5fa]">
+                        Signed In
+                      </span>
                     </Show>
                   </div>
-                  <span class="text-xs text-muted overflow-hidden text-ellipsis whitespace-nowrap">{config.description}</span>
+                  <span class="text-xs text-muted overflow-hidden text-ellipsis whitespace-nowrap">
+                    {config.description}
+                  </span>
                 </div>
                 <div class="flex items-center gap-2 ml-4">
                   <Show when={providerId !== providerStore.activeProvider}>
@@ -209,7 +219,9 @@ export const ProviderSettings: Component = () => {
 
         {/* OAuth Error Display */}
         <Show when={oauthError()}>
-          <div class="mt-3 px-3.5 py-2.5 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-md text-[#ef4444] text-[13px]">{oauthError()}</div>
+          <div class="mt-3 px-3.5 py-2.5 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-md text-[#ef4444] text-[13px]">
+            {oauthError()}
+          </div>
         </Show>
 
         {/* Quick OAuth Sign-in Buttons */}
@@ -244,7 +256,9 @@ export const ProviderSettings: Component = () => {
         </div>
 
         <div class="flex items-center my-5 gap-4 before:content-[''] before:flex-1 before:h-px before:bg-[rgba(148,163,184,0.25)] after:content-[''] after:flex-1 after:h-px after:bg-[rgba(148,163,184,0.25)]">
-          <span class="text-muted text-xs uppercase tracking-[0.5px]">or use API key</span>
+          <span class="text-muted text-xs uppercase tracking-[0.5px]">
+            or use API key
+          </span>
         </div>
 
         <div class="mt-4">

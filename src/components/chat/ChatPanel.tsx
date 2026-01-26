@@ -499,7 +499,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
           fallback={
             <div class="flex-1 flex flex-col items-center justify-center gap-6 p-10">
               <div class="text-center max-w-[360px]">
-                <h2 class="m-0 mb-2 text-lg font-semibold text-[#e6edf3]">Sign in to chat</h2>
+                <h2 class="m-0 mb-2 text-lg font-semibold text-[#e6edf3]">
+                  Sign in to chat
+                </h2>
                 <p class="m-0 text-sm text-[#8b949e] leading-normal">
                   Connect with Seren to access AI-powered conversations and code
                   assistance.
@@ -525,12 +527,17 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             </div>
           </header>
 
-          <div class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb:hover]:bg-[#484f58]" ref={messagesRef}>
+          <div
+            class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb:hover]:bg-[#484f58]"
+            ref={messagesRef}
+          >
             <Show
               when={chatStore.messages.length > 0}
               fallback={
                 <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
-                  <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">Start a conversation</h3>
+                  <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">
+                    Start a conversation
+                  </h3>
                   <p class="m-0 text-sm text-center max-w-[280px]">
                     Ask questions about code, get explanations, or request help
                     with programming tasks.
@@ -540,7 +547,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             >
               <For each={chatStore.messages}>
                 {(message) => (
-                  <article class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}>
+                  <article
+                    class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
+                  >
                     <div
                       class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
                       innerHTML={
@@ -629,7 +638,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                     ×
                   </button>
                 </div>
-                <pre class="m-0 p-3 max-h-[120px] overflow-y-auto text-xs leading-normal bg-transparent">{ctx().text}</pre>
+                <pre class="m-0 p-3 max-h-[120px] overflow-y-auto text-xs leading-normal bg-transparent">
+                  {ctx().text}
+                </pre>
               </div>
             )}
           </Show>

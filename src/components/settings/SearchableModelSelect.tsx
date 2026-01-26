@@ -118,8 +118,12 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
         }`}
         onClick={() => setIsOpen(!isOpen())}
       >
-        <span class="overflow-hidden text-ellipsis whitespace-nowrap">{selectedModelName()}</span>
-        <span class="text-[10px] text-[#8b949e] ml-2">{isOpen() ? "▲" : "▼"}</span>
+        <span class="overflow-hidden text-ellipsis whitespace-nowrap">
+          {selectedModelName()}
+        </span>
+        <span class="text-[10px] text-[#8b949e] ml-2">
+          {isOpen() ? "▲" : "▼"}
+        </span>
       </button>
 
       <Show when={isOpen()}>
@@ -166,7 +170,9 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
                 !isLoading() && !loadError() && filteredModels().length === 0
               }
             >
-              <div class="p-4 text-center text-[#8b949e] text-[13px]">No models match "{search()}"</div>
+              <div class="p-4 text-center text-[#8b949e] text-[13px]">
+                No models match "{search()}"
+              </div>
             </Show>
 
             <For each={filteredModels()}>
@@ -178,7 +184,9 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
                   }`}
                   onClick={() => handleSelect(model.id)}
                 >
-                  <span class={`font-medium ${model.id === props.value ? "text-[#58a6ff]" : ""}`}>
+                  <span
+                    class={`font-medium ${model.id === props.value ? "text-[#58a6ff]" : ""}`}
+                  >
                     {model.name}
                   </span>
                   <span class="text-xs text-[#8b949e]">{model.provider}</span>

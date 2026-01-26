@@ -75,10 +75,15 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (
   };
 
   return (
-    <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_0.15s_ease-out]" onClick={handleBackdropClick}>
+    <div
+      class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_0.15s_ease-out]"
+      onClick={handleBackdropClick}
+    >
       <div class="bg-popover border border-border rounded-lg w-[400px] max-w-[90vw] shadow-xl animate-[slideUp_0.2s_ease-out]">
         <div class="flex justify-between items-center py-4 px-5 border-b border-border">
-          <h2 class="m-0 text-base font-semibold text-foreground">Create Project</h2>
+          <h2 class="m-0 text-base font-semibold text-foreground">
+            Create Project
+          </h2>
           <button
             type="button"
             class="bg-transparent border-none text-muted-foreground text-2xl leading-none cursor-pointer py-1 px-2 rounded transition-all duration-150 hover:bg-muted hover:text-foreground"
@@ -91,15 +96,24 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (
 
         <div class="p-5">
           <Show when={error()}>
-            <div class="py-2.5 px-3 mb-4 bg-destructive/20 text-destructive rounded text-[13px]">{error()}</div>
+            <div class="py-2.5 px-3 mb-4 bg-destructive/20 text-destructive rounded text-[13px]">
+              {error()}
+            </div>
           </Show>
 
           <div class="mb-4">
-            <label for="organization" class="block mb-1.5 text-[13px] font-medium text-foreground">Organization</label>
+            <label
+              for="organization"
+              class="block mb-1.5 text-[13px] font-medium text-foreground"
+            >
+              Organization
+            </label>
             <Show
               when={!organizations.loading}
               fallback={
-                <div class="py-2.5 px-3 text-muted-foreground text-[13px] italic">Loading organizations...</div>
+                <div class="py-2.5 px-3 text-muted-foreground text-[13px] italic">
+                  Loading organizations...
+                </div>
               }
             >
               <select
@@ -120,7 +134,12 @@ export const CreateProjectModal: Component<CreateProjectModalProps> = (
           </div>
 
           <div class="mb-0">
-            <label for="project-name" class="block mb-1.5 text-[13px] font-medium text-foreground">Project Name</label>
+            <label
+              for="project-name"
+              class="block mb-1.5 text-[13px] font-medium text-foreground"
+            >
+              Project Name
+            </label>
             <input
               id="project-name"
               type="text"

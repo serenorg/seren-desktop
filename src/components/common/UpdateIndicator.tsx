@@ -5,14 +5,19 @@ export const UpdateIndicator = () => {
   const state = () => updaterStore.state;
 
   return (
-    <div class="update-indicator flex items-center gap-2 text-xs text-white" data-status={state().status}>
+    <div
+      class="update-indicator flex items-center gap-2 text-xs text-white"
+      data-status={state().status}
+    >
       <Switch
         fallback={
           <IdleIndicator onCheck={() => updaterStore.checkForUpdates(true)} />
         }
       >
         <Match when={state().status === "checking"}>
-          <span class="inline-flex items-center gap-1 bg-white/15 py-0.5 px-2 rounded-full">Checking for updates…</span>
+          <span class="inline-flex items-center gap-1 bg-white/15 py-0.5 px-2 rounded-full">
+            Checking for updates…
+          </span>
         </Match>
         <Match when={state().status === "up_to_date"}>
           <IdleIndicator onCheck={() => updaterStore.checkForUpdates(true)} />
@@ -35,7 +40,9 @@ export const UpdateIndicator = () => {
           </button>
         </Match>
         <Match when={state().status === "installing"}>
-          <span class="inline-flex items-center gap-1 bg-white/15 py-0.5 px-2 rounded-full">Installing update…</span>
+          <span class="inline-flex items-center gap-1 bg-white/15 py-0.5 px-2 rounded-full">
+            Installing update…
+          </span>
         </Match>
         <Match when={state().status === "error"}>
           <ErrorIndicator

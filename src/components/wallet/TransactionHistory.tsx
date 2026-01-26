@@ -142,7 +142,9 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
   return (
     <div class="flex flex-col h-full max-h-[500px]">
       <header class="flex items-center justify-between px-5 py-4 border-b border-[rgba(148,163,184,0.15)]">
-        <h3 class="text-[16px] font-semibold text-white m-0">Transaction History</h3>
+        <h3 class="text-[16px] font-semibold text-white m-0">
+          Transaction History
+        </h3>
         <Show when={props.onClose}>
           <button
             class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-none rounded text-[20px] text-[#94a3b8] cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.1)] hover:text-white"
@@ -252,7 +254,9 @@ const TransactionItem: Component<{ transaction: Transaction }> = (props) => {
 
   return (
     <div class="flex items-center gap-3 px-5 py-3 border-b border-[rgba(148,163,184,0.15)] transition-colors hover:bg-[rgba(148,163,184,0.05)] last:border-b-0">
-      <div class={`flex items-center justify-center w-9 h-9 rounded-full text-[16px] shrink-0 ${getIconClasses()}`}>
+      <div
+        class={`flex items-center justify-center w-9 h-9 rounded-full text-[16px] shrink-0 ${getIconClasses()}`}
+      >
         <span>{getTransactionIcon(props.transaction.source)}</span>
       </div>
       <div class="flex-1 min-w-0 flex flex-col gap-0.5">

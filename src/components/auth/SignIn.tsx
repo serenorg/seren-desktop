@@ -43,7 +43,9 @@ export const SignIn: Component<SignInProps> = (props) => {
   return (
     <div class="flex items-center justify-center p-5 w-full">
       <div class="w-full max-w-[360px] p-8 bg-[rgba(30,41,59,0.8)] rounded-xl border border-[rgba(148,163,184,0.15)] shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
-        <h1 class="text-[22px] font-semibold text-white text-center mb-6">Sign in to Seren</h1>
+        <h1 class="text-[22px] font-semibold text-white text-center mb-6">
+          Sign in to Seren
+        </h1>
 
         {error() && (
           <div class="mb-5 p-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[#f87171] text-[13px]">
@@ -53,7 +55,9 @@ export const SignIn: Component<SignInProps> = (props) => {
 
         <form class="flex flex-col gap-5" onSubmit={handleSubmit}>
           <div class="flex flex-col gap-2">
-            <label for="email" class="text-[13px] font-medium text-[#94a3b8]">Email</label>
+            <label for="email" class="text-[13px] font-medium text-[#94a3b8]">
+              Email
+            </label>
             <input
               id="email"
               type="email"
@@ -66,7 +70,12 @@ export const SignIn: Component<SignInProps> = (props) => {
           </div>
 
           <div class="flex flex-col gap-2">
-            <label for="password" class="text-[13px] font-medium text-[#94a3b8]">Password</label>
+            <label
+              for="password"
+              class="text-[13px] font-medium text-[#94a3b8]"
+            >
+              Password
+            </label>
             <input
               id="password"
               type="password"

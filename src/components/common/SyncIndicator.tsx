@@ -66,7 +66,9 @@ export const SyncIndicator: Component = () => {
       class={`flex items-center gap-1 py-0.5 px-2 rounded text-xs cursor-default transition-all duration-200 ${getStatusClasses(syncStore.status)}`}
       title={syncStore.message || getStatusLabel(syncStore.status)}
     >
-      <span class="sync-icon text-sm leading-none">{getStatusIcon(syncStore.status)}</span>
+      <span class="sync-icon text-sm leading-none">
+        {getStatusIcon(syncStore.status)}
+      </span>
       <span class="text-[11px]">{getStatusLabel(syncStore.status)}</span>
     </div>
   );

@@ -153,7 +153,12 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
         aria-labelledby="deposit-modal-title"
       >
         <header class="flex items-center justify-between px-6 py-5 border-b border-[rgba(148,163,184,0.15)]">
-          <h2 id="deposit-modal-title" class="text-[18px] font-semibold text-white m-0">Add SerenBucks</h2>
+          <h2
+            id="deposit-modal-title"
+            class="text-[18px] font-semibold text-white m-0"
+          >
+            Add SerenBucks
+          </h2>
           <button
             class="flex items-center justify-center w-8 h-8 p-0 bg-transparent border-none rounded-md text-[24px] text-[#94a3b8] cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.1)] hover:text-white"
             onClick={props.onClose}
@@ -165,7 +170,9 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
 
         <div class="p-6 flex flex-col gap-5">
           <div class="flex flex-col items-center gap-1 p-4 bg-[rgba(15,23,42,0.5)] rounded-lg">
-            <span class="text-[12px] text-[#64748b] uppercase tracking-wider">Current Balance</span>
+            <span class="text-[12px] text-[#64748b] uppercase tracking-wider">
+              Current Balance
+            </span>
             <span class="text-[28px] font-bold text-white tabular-nums">
               {walletStore.formattedBalance}
             </span>
@@ -173,7 +180,9 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
 
           <Show when={!cryptoDepositInfo()}>
             <div class="flex flex-col gap-2">
-              <label class="text-[14px] font-medium text-white">Payment Method</label>
+              <label class="text-[14px] font-medium text-white">
+                Payment Method
+              </label>
               <div class="grid grid-cols-2 gap-3">
                 <button
                   type="button"
@@ -185,7 +194,9 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   onClick={() => setPaymentMethod("stripe")}
                 >
                   <span class="text-[24px]">💳</span>
-                  <span class="text-[13px] font-medium text-white">Card (Stripe)</span>
+                  <span class="text-[13px] font-medium text-white">
+                    Card (Stripe)
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -203,13 +214,17 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   }
                 >
                   <span class="text-[24px]">🔐</span>
-                  <span class="text-[13px] font-medium text-white">USDC (Crypto)</span>
+                  <span class="text-[13px] font-medium text-white">
+                    USDC (Crypto)
+                  </span>
                 </button>
               </div>
             </div>
 
             <div class="flex flex-col gap-3">
-              <label class="text-[14px] font-medium text-white">Select Amount</label>
+              <label class="text-[14px] font-medium text-white">
+                Select Amount
+              </label>
               <div class="grid grid-cols-5 gap-2">
                 <For each={PRESET_AMOUNTS}>
                   {(amount) => (
@@ -251,7 +266,9 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                     class="flex-1 px-4 py-3 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-lg text-[18px] text-white outline-none transition-colors focus:border-[#6366f1] placeholder:text-[#64748b]"
                   />
                 </div>
-                <p class="text-[12px] text-[#64748b] mt-1 m-0">Minimum $5, maximum $500</p>
+                <p class="text-[12px] text-[#64748b] mt-1 m-0">
+                  Minimum $5, maximum $500
+                </p>
               </Show>
             </div>
 
@@ -270,20 +287,32 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
               <div class="flex flex-col gap-4">
                 <div class="flex items-center gap-3 pb-3 border-b border-[rgba(148,163,184,0.15)]">
                   <span class="text-[28px]">🔐</span>
-                  <h3 class="m-0 text-[16px] font-semibold text-white">Send USDC to Complete Deposit</h3>
+                  <h3 class="m-0 text-[16px] font-semibold text-white">
+                    Send USDC to Complete Deposit
+                  </h3>
                 </div>
 
                 <div class="flex flex-col gap-3">
                   <div class="flex flex-col gap-1">
-                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">Amount</span>
-                    <span class="text-[15px] font-medium text-white">{info().amount} USDC</span>
+                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">
+                      Amount
+                    </span>
+                    <span class="text-[15px] font-medium text-white">
+                      {info().amount} USDC
+                    </span>
                   </div>
                   <div class="flex flex-col gap-1">
-                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">Network</span>
-                    <span class="text-[15px] font-medium text-white">{info().network}</span>
+                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">
+                      Network
+                    </span>
+                    <span class="text-[15px] font-medium text-white">
+                      {info().network}
+                    </span>
                   </div>
                   <div class="flex flex-col gap-1">
-                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">Deposit Address</span>
+                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">
+                      Deposit Address
+                    </span>
                     <div class="flex items-center gap-2">
                       <code class="flex-1 px-3 py-2.5 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-md text-[12px] font-mono text-white break-all">
                         {info().depositAddress}
@@ -321,7 +350,10 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
           </Show>
 
           <Show when={error()}>
-            <div class="px-4 py-3 bg-[rgba(220,53,69,0.1)] border border-[#dc3545] rounded-lg text-[13px] text-[#dc3545]" role="alert">
+            <div
+              class="px-4 py-3 bg-[rgba(220,53,69,0.1)] border border-[#dc3545] rounded-lg text-[13px] text-[#dc3545]"
+              role="alert"
+            >
               {error()}
             </div>
           </Show>

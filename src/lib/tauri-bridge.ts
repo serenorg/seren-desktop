@@ -424,7 +424,10 @@ export async function storeCryptoPrivateKey(
     if (!result.success) {
       throw new Error(result.error || "Failed to store private key");
     }
-    return result.data!;
+    if (result.data === undefined) {
+      throw new Error(result.error || "Failed to store private key");
+    }
+    return result.data;
   }
   // Browser fallback - just store a placeholder (can't derive address without alloy)
   localStorage.setItem(CRYPTO_WALLET_ADDRESS_KEY, "browser-fallback");
@@ -491,7 +494,10 @@ export async function signX402Payment(
   if (!result.success) {
     throw new Error(result.error || "Failed to sign x402 payment");
   }
-  return result.data!;
+  if (result.data === undefined) {
+    throw new Error(result.error || "Failed to sign x402 payment");
+  }
+  return result.data;
 }
 
 /**
@@ -520,7 +526,10 @@ export async function getCryptoUsdcBalance(): Promise<UsdcBalanceResponse> {
   if (!result.success) {
     throw new Error(result.error || "Failed to get USDC balance");
   }
-  return result.data!;
+  if (result.data === undefined) {
+    throw new Error(result.error || "Failed to get USDC balance");
+  }
+  return result.data;
 }
 
 // ============================================================================

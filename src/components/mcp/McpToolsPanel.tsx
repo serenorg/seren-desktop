@@ -128,7 +128,9 @@ export const McpToolsPanel: Component = () => {
       <div class="w-[280px] border-r border-[rgba(148,163,184,0.25)] flex flex-col bg-popover">
         <div class="p-4 border-b border-[rgba(148,163,184,0.25)] flex justify-between items-center">
           <h3 class="m-0 text-sm font-semibold">Available Tools</h3>
-          <span class="px-2 py-0.5 bg-accent text-white rounded-xl text-xs font-medium">{tools().length}</span>
+          <span class="px-2 py-0.5 bg-accent text-white rounded-xl text-xs font-medium">
+            {tools().length}
+          </span>
         </div>
 
         <Show
@@ -160,7 +162,11 @@ export const McpToolsPanel: Component = () => {
                     onClick={() => selectTool(serverName, tool)}
                   >
                     <span class="text-[13px] font-medium">{tool.name}</span>
-                    <span class={`text-[11px] ${isSelected() ? "opacity-85" : "opacity-70"}`}>{serverName}</span>
+                    <span
+                      class={`text-[11px] ${isSelected() ? "opacity-85" : "opacity-70"}`}
+                    >
+                      {serverName}
+                    </span>
                   </button>
                 );
               }}
@@ -182,17 +188,23 @@ export const McpToolsPanel: Component = () => {
             <>
               <div class="flex items-center gap-3 mb-3">
                 <h2 class="m-0 text-xl font-semibold">{sel().tool.name}</h2>
-                <span class="px-2.5 py-1 bg-popover rounded-md text-xs text-muted">{sel().serverName}</span>
+                <span class="px-2.5 py-1 bg-popover rounded-md text-xs text-muted">
+                  {sel().serverName}
+                </span>
               </div>
 
-              <p class="text-muted mb-6 leading-normal">{sel().tool.description}</p>
+              <p class="text-muted mb-6 leading-normal">
+                {sel().tool.description}
+              </p>
 
               <div class="mb-6">
                 <h4 class="m-0 mb-3 text-sm font-semibold">Arguments</h4>
                 <Show
                   when={getArgProperties(sel().tool).length > 0}
                   fallback={
-                    <p class="text-muted text-[13px]">This tool takes no arguments.</p>
+                    <p class="text-muted text-[13px]">
+                      This tool takes no arguments.
+                    </p>
                   }
                 >
                   <For each={getArgProperties(sel().tool)}>
@@ -200,7 +212,9 @@ export const McpToolsPanel: Component = () => {
                       <div class="mb-4">
                         <label class="block text-[13px] font-medium mb-1">
                           {arg.name}
-                          {arg.required && <span class="text-[#dc2626] ml-0.5">*</span>}
+                          {arg.required && (
+                            <span class="text-[#dc2626] ml-0.5">*</span>
+                          )}
                         </label>
                         <Show when={arg.schema.description}>
                           <span class="block text-xs text-muted mb-1.5">
@@ -241,19 +255,29 @@ export const McpToolsPanel: Component = () => {
                   <div class="border-t border-[rgba(148,163,184,0.25)] pt-6">
                     <h4 class="m-0 mb-3 text-sm font-semibold">Result</h4>
                     <Show when={exec().isRunning}>
-                      <div class="text-muted text-[13px]">Executing tool...</div>
+                      <div class="text-muted text-[13px]">
+                        Executing tool...
+                      </div>
                     </Show>
                     <Show when={exec().error}>
-                      <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-[13px]">{exec().error}</div>
+                      <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-[13px]">
+                        {exec().error}
+                      </div>
                     </Show>
                     <Show when={exec().result}>
-                      <div
-                        class={`p-4 rounded-lg overflow-x-auto ${
-                          exec().result?.isError ? "bg-[rgba(239,68,68,0.1)]" : "bg-popover"
-                        }`}
-                      >
-                        <pre class="m-0 text-[13px] font-mono whitespace-pre-wrap break-words">{formatResult(exec().result!)}</pre>
-                      </div>
+                      {(toolResult) => (
+                        <div
+                          class={`p-4 rounded-lg overflow-x-auto ${
+                            toolResult().isError
+                              ? "bg-[rgba(239,68,68,0.1)]"
+                              : "bg-popover"
+                          }`}
+                        >
+                          <pre class="m-0 text-[13px] font-mono whitespace-pre-wrap break-words">
+                            {formatResult(toolResult())}
+                          </pre>
+                        </div>
+                      )}
                     </Show>
                   </div>
                 )}

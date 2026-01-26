@@ -145,13 +145,17 @@ export const McpServersPanel: Component = () => {
       </div>
 
       <Show when={error()}>
-        <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-sm">{error()}</div>
+        <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-sm">
+          {error()}
+        </div>
       </Show>
 
       <Show when={showAddForm()}>
         <div class="p-4 bg-popover rounded-lg flex flex-col gap-3">
           <div class="flex flex-col gap-1">
-            <label for="server-name" class="text-[13px] font-medium text-muted">Server Name</label>
+            <label for="server-name" class="text-[13px] font-medium text-muted">
+              Server Name
+            </label>
             <input
               id="server-name"
               type="text"
@@ -163,7 +167,12 @@ export const McpServersPanel: Component = () => {
           </div>
 
           <div class="flex flex-col gap-1">
-            <label for="server-command" class="text-[13px] font-medium text-muted">Command</label>
+            <label
+              for="server-command"
+              class="text-[13px] font-medium text-muted"
+            >
+              Command
+            </label>
             <input
               id="server-command"
               type="text"
@@ -175,7 +184,9 @@ export const McpServersPanel: Component = () => {
           </div>
 
           <div class="flex flex-col gap-1">
-            <label for="server-args" class="text-[13px] font-medium text-muted">Arguments (comma-separated)</label>
+            <label for="server-args" class="text-[13px] font-medium text-muted">
+              Arguments (comma-separated)
+            </label>
             <input
               id="server-args"
               type="text"
@@ -194,14 +205,25 @@ export const McpServersPanel: Component = () => {
               onChange={(e) => setNewServerAutoConnect(e.currentTarget.checked)}
               class="w-4 h-4"
             />
-            <label for="server-autoconnect" class="text-[13px] font-medium text-muted">Auto-connect on startup</label>
+            <label
+              for="server-autoconnect"
+              class="text-[13px] font-medium text-muted"
+            >
+              Auto-connect on startup
+            </label>
           </div>
 
           <div class="flex gap-2 mt-2">
-            <button class="px-4 py-2 bg-accent text-white border-none rounded-md cursor-pointer text-sm hover:bg-[#2563eb]" onClick={handleAddServer}>
+            <button
+              class="px-4 py-2 bg-accent text-white border-none rounded-md cursor-pointer text-sm hover:bg-[#2563eb]"
+              onClick={handleAddServer}
+            >
               Add Server
             </button>
-            <button class="px-4 py-2 bg-popover text-foreground border border-[rgba(148,163,184,0.25)] rounded-md cursor-pointer text-sm hover:bg-[rgba(148,163,184,0.15)]" onClick={resetForm}>
+            <button
+              class="px-4 py-2 bg-popover text-foreground border border-[rgba(148,163,184,0.25)] rounded-md cursor-pointer text-sm hover:bg-[rgba(148,163,184,0.15)]"
+              onClick={resetForm}
+            >
               Cancel
             </button>
           </div>
@@ -240,7 +262,9 @@ export const McpServersPanel: Component = () => {
                     <div class="flex items-center gap-2">
                       <span class="font-semibold text-sm">{server.name}</span>
                       <Show when={isBuiltin()}>
-                        <span class="px-2 py-0.5 rounded-xl text-[10px] font-semibold uppercase bg-accent text-white">Built-in</span>
+                        <span class="px-2 py-0.5 rounded-xl text-[10px] font-semibold uppercase bg-accent text-white">
+                          Built-in
+                        </span>
                       </Show>
                       <span
                         class={`px-2 py-0.5 rounded-xl text-[11px] font-medium uppercase ${

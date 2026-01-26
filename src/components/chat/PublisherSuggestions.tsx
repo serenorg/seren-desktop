@@ -54,11 +54,13 @@ export const PublisherSuggestions: Component<PublisherSuggestionsProps> = (
                         </div>
                       }
                     >
-                      <img
-                        src={publisher.logo_url!}
-                        alt={`${publisher.name} logo`}
-                        class="w-8 h-8 rounded-md object-cover shrink-0"
-                      />
+                      {(logoUrl) => (
+                        <img
+                          src={logoUrl()}
+                          alt={`${publisher.name} logo`}
+                          class="w-8 h-8 rounded-md object-cover shrink-0"
+                        />
+                      )}
                     </Show>
                     <div class="flex-1 min-w-0 flex flex-col gap-0.5">
                       <span class="flex items-center gap-1 text-sm font-medium text-foreground">

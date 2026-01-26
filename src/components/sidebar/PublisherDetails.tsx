@@ -61,11 +61,13 @@ export const PublisherDetails: Component<PublisherDetailsProps> = (props) => {
                     </div>
                   }
                 >
-                  <img
-                    src={pub().logo_url!}
-                    alt={pub().name}
-                    class="w-full h-full object-cover"
-                  />
+                  {(logoUrl) => (
+                    <img
+                      src={logoUrl()}
+                      alt={pub().name}
+                      class="w-full h-full object-cover"
+                    />
+                  )}
                 </Show>
               </div>
               <div class="flex-1">

@@ -154,7 +154,11 @@ function App() {
         />
         <main class="flex-1 overflow-hidden bg-transparent">
           <Switch
-            fallback={<div class="flex items-center justify-center h-full text-muted-foreground text-base">Select a panel</div>}
+            fallback={
+              <div class="flex items-center justify-center h-full text-muted-foreground text-base">
+                Select a panel
+              </div>
+            }
           >
             <Match when={activePanel() === "chat"}>
               <ChatPanel onSignInClick={handleSignInClick} />

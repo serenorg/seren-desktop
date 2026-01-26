@@ -198,9 +198,12 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
 
   const getRiskBadgeClasses = () => {
     const level = riskLevel();
-    const base = "mt-1 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full w-fit before:content-[''] before:w-1.5 before:h-1.5 before:rounded-full";
-    if (level === "low") return `${base} bg-[rgba(34,197,94,0.15)] text-[#15803d] before:bg-[#22c55e]`;
-    if (level === "medium") return `${base} bg-[rgba(251,191,36,0.2)] text-[#b45309] before:bg-[#f59e0b]`;
+    const base =
+      "mt-1 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full w-fit before:content-[''] before:w-1.5 before:h-1.5 before:rounded-full";
+    if (level === "low")
+      return `${base} bg-[rgba(34,197,94,0.15)] text-[#15803d] before:bg-[#22c55e]`;
+    if (level === "medium")
+      return `${base} bg-[rgba(251,191,36,0.2)] text-[#b45309] before:bg-[#f59e0b]`;
     return `${base} bg-[rgba(248,113,113,0.2)] text-[#b91c1c] before:bg-[#ef4444]`;
   };
 
@@ -209,24 +212,32 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
       <div class="flex items-center gap-2.5 mb-3">
         <span class="text-xl">🔧</span>
         <div class="flex-1 flex flex-col gap-0.5">
-          <span class="text-[11px] uppercase tracking-[0.5px] text-muted">Tool Call Request</span>
-          <span class="text-sm font-semibold font-mono">{props.request.call.name}</span>
-          <div class={getRiskBadgeClasses()}>
-            {getRiskLabel(riskLevel())}
-          </div>
+          <span class="text-[11px] uppercase tracking-[0.5px] text-muted">
+            Tool Call Request
+          </span>
+          <span class="text-sm font-semibold font-mono">
+            {props.request.call.name}
+          </span>
+          <div class={getRiskBadgeClasses()}>{getRiskLabel(riskLevel())}</div>
         </div>
-        <span class="px-2.5 py-1 bg-[#dbeafe] text-accent rounded-md text-[11px] font-medium">{props.request.serverName}</span>
+        <span class="px-2.5 py-1 bg-[#dbeafe] text-accent rounded-md text-[11px] font-medium">
+          {props.request.serverName}
+        </span>
       </div>
 
       <Show when={argEntries().length > 0}>
         <div class="mb-3">
-          <span class="block text-[11px] uppercase tracking-[0.5px] text-muted mb-1.5">Arguments:</span>
+          <span class="block text-[11px] uppercase tracking-[0.5px] text-muted mb-1.5">
+            Arguments:
+          </span>
           <div class="bg-card border border-[rgba(148,163,184,0.25)] rounded-md px-3 py-2">
             <For each={argEntries()}>
               {([key, value]) => (
                 <div class="flex gap-2 py-1 text-[13px] font-mono border-b border-[rgba(148,163,184,0.25)] last:border-b-0">
                   <span class="text-accent font-medium">{key}:</span>
-                  <span class="text-foreground break-all">{formatArgValue(value)}</span>
+                  <span class="text-foreground break-all">
+                    {formatArgValue(value)}
+                  </span>
                 </div>
               )}
             </For>
@@ -310,16 +321,20 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
       </Show>
 
       <Show when={result()}>
-        <div
-          class={`flex items-start gap-2 px-3 py-2.5 rounded-md mt-3 ${
-            result()?.isError ? "bg-[#fef9c3]" : "bg-[#dcfce7]"
-          }`}
-        >
-          <span class="shrink-0">{result()?.isError ? "⚠️" : "✅"}</span>
-          <div class="flex-1 overflow-auto">
-            <pre class="m-0 text-xs font-mono whitespace-pre-wrap break-words">{formatResult(result()!)}</pre>
+        {(toolResult) => (
+          <div
+            class={`flex items-start gap-2 px-3 py-2.5 rounded-md mt-3 ${
+              toolResult().isError ? "bg-[#fef9c3]" : "bg-[#dcfce7]"
+            }`}
+          >
+            <span class="shrink-0">{toolResult().isError ? "⚠️" : "✅"}</span>
+            <div class="flex-1 overflow-auto">
+              <pre class="m-0 text-xs font-mono whitespace-pre-wrap break-words">
+                {formatResult(toolResult())}
+              </pre>
+            </div>
           </div>
-        </div>
+        )}
       </Show>
     </div>
   );

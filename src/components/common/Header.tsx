@@ -39,7 +39,9 @@ export const Header: Component<HeaderProps> = (props) => {
   return (
     <header class="flex items-center justify-between h-10 px-3 bg-card border-b border-border [-webkit-app-region:drag]">
       <div class="flex items-center gap-4 [-webkit-app-region:no-drag]">
-        <h1 class="text-[13px] font-medium text-gray-400 m-0 tracking-tight">Seren</h1>
+        <h1 class="text-[13px] font-medium text-gray-400 m-0 tracking-tight">
+          Seren
+        </h1>
         <nav class="flex items-center gap-0.5">
           <For each={NAV_ITEMS}>
             {(item) => (

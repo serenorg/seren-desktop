@@ -172,7 +172,9 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
           when={fileTreeState.rootPath}
           fallback={
             <div class="flex flex-col items-center justify-center gap-4 px-4 py-12 text-center">
-              <p class="m-0 text-muted-foreground text-[13px]">No folder open</p>
+              <p class="m-0 text-muted-foreground text-[13px]">
+                No folder open
+              </p>
               <button
                 type="button"
                 class="px-4 py-2 bg-primary border-none rounded text-primary-foreground text-[13px] font-medium cursor-pointer transition-opacity hover:opacity-90"

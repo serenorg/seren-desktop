@@ -16,7 +16,9 @@ export const MarkdownPreview: Component<MarkdownPreviewProps> = (props) => {
   return (
     <div class="flex flex-col h-full bg-[rgba(15,23,42,0.85)] border-l border-[rgba(148,163,184,0.25)]">
       <div class="flex items-center px-4 py-2 border-b border-[rgba(148,163,184,0.15)] bg-popover">
-        <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Preview</span>
+        <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Preview
+        </span>
       </div>
       <div
         class="flex-1 p-6 overflow-y-auto text-foreground leading-relaxed

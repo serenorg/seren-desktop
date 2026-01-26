@@ -146,14 +146,16 @@ export const CatalogPanel: Component<CatalogPanelProps> = (props) => {
                     </div>
                   }
                 >
-                  <img
-                    src={publisher.logo_url!}
-                    alt={publisher.name}
-                    class="w-full h-full object-cover"
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                    }}
-                  />
+                  {(logoUrl) => (
+                    <img
+                      src={logoUrl()}
+                      alt={publisher.name}
+                      class="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
+                    />
+                  )}
                 </Show>
               </div>
               <div class="flex-1 min-w-0 flex flex-col gap-1">

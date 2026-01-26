@@ -105,7 +105,9 @@ export const ContextMenu: Component<ContextMenuProps> = (props) => {
         {(item) => (
           <Show
             when={!item.separator}
-            fallback={<div class="h-px bg-[#30363d] my-1 mx-2" role="separator" />}
+            fallback={
+              <div class="h-px bg-[#30363d] my-1 mx-2" role="separator" />
+            }
           >
             <button
               type="button"

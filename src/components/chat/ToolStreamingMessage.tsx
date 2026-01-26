@@ -130,22 +130,30 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
             {(exec) => (
               <div class={getStatusClasses(exec.status)}>
                 <div class="flex items-center gap-2 text-[13px]">
-                  <span class={`text-sm w-[18px] text-center ${exec.status === "pending" ? "animate-[pulse_1.5s_infinite]" : ""}`}>
+                  <span
+                    class={`text-sm w-[18px] text-center ${exec.status === "pending" ? "animate-[pulse_1.5s_infinite]" : ""}`}
+                  >
                     {exec.status === "pending"
                       ? "⏳"
                       : exec.status === "error"
                         ? "❌"
                         : "✓"}
                   </span>
-                  <span class="font-medium text-[#58a6ff]">{exec.call.function.name}</span>
+                  <span class="font-medium text-[#58a6ff]">
+                    {exec.call.function.name}
+                  </span>
                   <span class="text-[#8b949e] font-mono text-xs overflow-hidden text-ellipsis whitespace-nowrap max-w-[300px]">
                     {formatToolArgs(exec.call.function.arguments)}
                   </span>
                 </div>
                 <Show when={exec.result && exec.status !== "pending"}>
                   <details class="mt-1.5 text-xs">
-                    <summary class="cursor-pointer text-[#8b949e] select-none hover:text-[#c9d1d9]">Result</summary>
-                    <pre class="mt-1.5 mb-0 p-2 bg-[rgba(0,0,0,0.3)] rounded text-[11px] overflow-x-auto max-h-[200px] whitespace-pre-wrap break-words">{exec.result?.content}</pre>
+                    <summary class="cursor-pointer text-[#8b949e] select-none hover:text-[#c9d1d9]">
+                      Result
+                    </summary>
+                    <pre class="mt-1.5 mb-0 p-2 bg-[rgba(0,0,0,0.3)] rounded text-[11px] overflow-x-auto max-h-[200px] whitespace-pre-wrap break-words">
+                      {exec.result?.content}
+                    </pre>
                   </details>
                 </Show>
               </div>
@@ -159,7 +167,9 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
         class="text-sm leading-relaxed text-[#e6edf3] break-words"
         innerHTML={content() ? renderMarkdown(content()) : ""}
       />
-      {isStreaming() && <span class="inline-block w-0.5 h-[1em] bg-[#58a6ff] ml-0.5 align-text-bottom animate-[blink_1s_step-end_infinite]" />}
+      {isStreaming() && (
+        <span class="inline-block w-0.5 h-[1em] bg-[#58a6ff] ml-0.5 align-text-bottom animate-[blink_1s_step-end_infinite]" />
+      )}
     </article>
   );
 };

@@ -98,7 +98,9 @@ export const McpResourcesPanel: Component = () => {
       <div class="w-80 border-r border-[rgba(148,163,184,0.25)] flex flex-col bg-popover">
         <div class="p-4 border-b border-[rgba(148,163,184,0.25)] flex justify-between items-center">
           <h3 class="m-0 text-sm font-semibold">Resources</h3>
-          <span class="px-2 py-0.5 bg-accent text-white rounded-xl text-xs font-medium">{resources().length}</span>
+          <span class="px-2 py-0.5 bg-accent text-white rounded-xl text-xs font-medium">
+            {resources().length}
+          </span>
         </div>
 
         <div class="p-3 border-b border-[rgba(148,163,184,0.25)]">
@@ -145,10 +147,20 @@ export const McpResourcesPanel: Component = () => {
                       {getMimeIcon(resource.mimeType)}
                     </span>
                     <div class="flex-1 min-w-0 flex flex-col gap-0.5">
-                      <span class="text-[13px] font-medium whitespace-nowrap overflow-hidden text-ellipsis">{resource.name}</span>
-                      <span class={`text-[11px] whitespace-nowrap overflow-hidden text-ellipsis font-mono ${isSelected() ? "opacity-85" : "opacity-70"}`}>{resource.uri}</span>
+                      <span class="text-[13px] font-medium whitespace-nowrap overflow-hidden text-ellipsis">
+                        {resource.name}
+                      </span>
+                      <span
+                        class={`text-[11px] whitespace-nowrap overflow-hidden text-ellipsis font-mono ${isSelected() ? "opacity-85" : "opacity-70"}`}
+                      >
+                        {resource.uri}
+                      </span>
                     </div>
-                    <span class={`text-[10px] shrink-0 ${isSelected() ? "opacity-85" : "opacity-60"}`}>{serverName}</span>
+                    <span
+                      class={`text-[10px] shrink-0 ${isSelected() ? "opacity-85" : "opacity-60"}`}
+                    >
+                      {serverName}
+                    </span>
                   </button>
                 );
               }}
@@ -169,22 +181,34 @@ export const McpResourcesPanel: Component = () => {
           {(sel) => (
             <>
               <div class="flex items-start gap-3 mb-4">
-                <span class="text-[32px] shrink-0">{getMimeIcon(sel().resource.mimeType)}</span>
+                <span class="text-[32px] shrink-0">
+                  {getMimeIcon(sel().resource.mimeType)}
+                </span>
                 <div class="flex-1 min-w-0">
-                  <h2 class="m-0 text-xl font-semibold break-words">{sel().resource.name}</h2>
-                  <span class="block text-xs text-muted font-mono break-all mt-1">{sel().resource.uri}</span>
+                  <h2 class="m-0 text-xl font-semibold break-words">
+                    {sel().resource.name}
+                  </h2>
+                  <span class="block text-xs text-muted font-mono break-all mt-1">
+                    {sel().resource.uri}
+                  </span>
                 </div>
-                <span class="px-2.5 py-1 bg-popover rounded-md text-xs text-muted shrink-0">{sel().serverName}</span>
+                <span class="px-2.5 py-1 bg-popover rounded-md text-xs text-muted shrink-0">
+                  {sel().serverName}
+                </span>
               </div>
 
               <Show when={sel().resource.description}>
-                <p class="text-muted mb-4 leading-normal">{sel().resource.description}</p>
+                <p class="text-muted mb-4 leading-normal">
+                  {sel().resource.description}
+                </p>
               </Show>
 
               <Show when={sel().resource.mimeType}>
                 <div class="mb-4 text-[13px]">
                   <span class="text-muted mr-2">Type:</span>
-                  <span class="font-mono bg-popover px-2 py-0.5 rounded">{sel().resource.mimeType}</span>
+                  <span class="font-mono bg-popover px-2 py-0.5 rounded">
+                    {sel().resource.mimeType}
+                  </span>
                 </div>
               </Show>
 
@@ -207,16 +231,22 @@ export const McpResourcesPanel: Component = () => {
                 </div>
 
                 <Show when={resourceContent()?.isLoading}>
-                  <div class="text-muted text-[13px] p-4">Loading resource content...</div>
+                  <div class="text-muted text-[13px] p-4">
+                    Loading resource content...
+                  </div>
                 </Show>
 
                 <Show when={resourceContent()?.error}>
-                  <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-[13px]">{resourceContent()?.error}</div>
+                  <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-[13px]">
+                    {resourceContent()?.error}
+                  </div>
                 </Show>
 
                 <Show when={resourceContent()?.content}>
                   <div class="flex-1 bg-popover border border-[rgba(148,163,184,0.25)] rounded-lg overflow-auto min-h-[200px]">
-                    <pre class="m-0 p-4 text-[13px] font-mono whitespace-pre-wrap break-words">{formatContent(resourceContent()?.content)}</pre>
+                    <pre class="m-0 p-4 text-[13px] font-mono whitespace-pre-wrap break-words">
+                      {formatContent(resourceContent()?.content)}
+                    </pre>
                   </div>
                 </Show>
               </div>

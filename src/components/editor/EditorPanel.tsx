@@ -147,7 +147,9 @@ export const EditorPanel: Component = () => {
     <div class="flex h-full bg-card text-foreground" onKeyDown={handleKeyDown}>
       <aside class="w-60 min-w-[180px] max-w-[400px] flex flex-col bg-popover border-r border-[rgba(148,163,184,0.25)]">
         <div class="flex items-center justify-between px-4 py-3 border-b border-[rgba(148,163,184,0.15)]">
-          <span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Explorer</span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Explorer
+          </span>
           <button
             type="button"
             class="bg-transparent border-none px-2 py-1 cursor-pointer text-sm rounded transition-colors hover:bg-[rgba(148,163,184,0.15)] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -183,7 +185,9 @@ export const EditorPanel: Component = () => {
               <div class="h-full flex items-center justify-center p-6">
                 <div class="text-center max-w-[320px]">
                   <span class="text-5xl block mb-4 opacity-60">📝</span>
-                  <h2 class="m-0 mb-2 text-xl font-medium text-foreground">No file open</h2>
+                  <h2 class="m-0 mb-2 text-xl font-medium text-foreground">
+                    No file open
+                  </h2>
                   <p class="m-0 mb-5 text-muted-foreground leading-normal">
                     Open a folder to browse files, or use{" "}
                     <kbd class="bg-[rgba(148,163,184,0.2)] px-1.5 py-0.5 rounded font-inherit text-[0.9em]">
@@ -204,33 +208,35 @@ export const EditorPanel: Component = () => {
               </div>
             }
           >
-            <Show
-              when={isImageFile()}
-              fallback={
-                <Show
-                  when={isPdfFile()}
-                  fallback={
-                    <>
-                      <div class="flex-1 min-w-0 h-full">
-                        <MonacoEditor
-                          filePath={activeFilePath() ?? undefined}
-                          value={editorContent()}
-                          onChange={handleEditorChange}
-                          onDirtyChange={handleEditorDirtyChange}
-                        />
-                      </div>
-                      <Show when={showPreview() && isMarkdownFile()}>
-                        <MarkdownPreview content={editorContent()} />
-                      </Show>
-                    </>
-                  }
-                >
-                  <PdfViewer filePath={activeFilePath()!} />
-                </Show>
-              }
-            >
-              <ImageViewer filePath={activeFilePath()!} />
-            </Show>
+            {(filePath) => (
+              <Show
+                when={isImageFile()}
+                fallback={
+                  <Show
+                    when={isPdfFile()}
+                    fallback={
+                      <>
+                        <div class="flex-1 min-w-0 h-full">
+                          <MonacoEditor
+                            filePath={filePath()}
+                            value={editorContent()}
+                            onChange={handleEditorChange}
+                            onDirtyChange={handleEditorDirtyChange}
+                          />
+                        </div>
+                        <Show when={showPreview() && isMarkdownFile()}>
+                          <MarkdownPreview content={editorContent()} />
+                        </Show>
+                      </>
+                    }
+                  >
+                    <PdfViewer filePath={filePath()} />
+                  </Show>
+                }
+              >
+                <ImageViewer filePath={filePath()} />
+              </Show>
+            )}
           </Show>
         </div>
       </section>

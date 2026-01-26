@@ -105,7 +105,9 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
         <div class="flex flex-col items-center justify-center gap-8 p-8 min-h-[60vh]">
           <div class="flex flex-col items-center gap-3 text-center">
             <span class="text-[48px]">📚</span>
-            <h2 class="text-xl font-semibold text-white m-0">Sign in to explore the catalog</h2>
+            <h2 class="text-xl font-semibold text-white m-0">
+              Sign in to explore the catalog
+            </h2>
             <p class="text-[#94a3b8] m-0">
               Browse APIs, databases, and AI services available through Seren.
             </p>
@@ -117,7 +119,9 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
       <div class="flex flex-col h-full bg-transparent">
         <header class="p-6 pb-4 border-b border-[rgba(148,163,184,0.1)]">
           <div class="max-w-[1200px] mx-auto">
-            <h1 class="text-2xl font-semibold text-white m-0">Publisher Catalog</h1>
+            <h1 class="text-2xl font-semibold text-white m-0">
+              Publisher Catalog
+            </h1>
             <p class="text-[14px] text-[#94a3b8] mt-1 m-0">
               Discover APIs, databases, and AI services to power your workflows.
             </p>
@@ -182,7 +186,9 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                 fallback={
                   <div class="flex flex-col items-center justify-center gap-3 p-12 text-center">
                     <span class="text-[48px]">🔍</span>
-                    <p class="text-white text-[16px] m-0">No publishers found</p>
+                    <p class="text-white text-[16px] m-0">
+                      No publishers found
+                    </p>
                     <p class="text-[#64748b] text-[14px] m-0">
                       {searchQuery() || selectedType()
                         ? "Try adjusting your search or filters"
@@ -213,14 +219,18 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                               </div>
                             }
                           >
-                            <img
-                              src={publisher.logo_url!}
-                              alt={publisher.name}
-                              class="w-10 h-10 rounded-lg object-cover"
-                            />
+                            {(logoUrl) => (
+                              <img
+                                src={logoUrl()}
+                                alt={publisher.name}
+                                class="w-10 h-10 rounded-lg object-cover"
+                              />
+                            )}
                           </Show>
                           <div class="flex items-center gap-2 flex-1 min-w-0">
-                            <h3 class="text-[15px] font-semibold text-white m-0 truncate">{getDisplayName(publisher)}</h3>
+                            <h3 class="text-[15px] font-semibold text-white m-0 truncate">
+                              {getDisplayName(publisher)}
+                            </h3>
                             <Show when={publisher.is_verified}>
                               <span
                                 class="flex items-center justify-center w-4 h-4 bg-[#6366f1] rounded-full text-[10px] text-white shrink-0"
@@ -263,11 +273,17 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                         {/* Footer with stats and pricing */}
                         <div class="flex items-center justify-between mt-auto pt-3 border-t border-[rgba(148,163,184,0.1)]">
                           <div class="flex items-center gap-3">
-                            <span class="flex items-center gap-1 text-[12px] text-[#64748b]" title="Total transactions">
+                            <span
+                              class="flex items-center gap-1 text-[12px] text-[#64748b]"
+                              title="Total transactions"
+                            >
                               <span>📊</span>
                               {formatNumber(publisher.total_transactions)} txns
                             </span>
-                            <span class="flex items-center gap-1 text-[12px] text-[#64748b]" title="Agents served">
+                            <span
+                              class="flex items-center gap-1 text-[12px] text-[#64748b]"
+                              title="Agents served"
+                            >
                               <span>🤖</span>
                               {formatNumber(publisher.unique_agents_served)}{" "}
                               agents
@@ -285,108 +301,125 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
             </div>
 
             <Show when={selectedPublisher()}>
-              <aside class="w-[360px] border-l border-[rgba(148,163,184,0.1)] bg-[rgba(15,23,42,0.5)] flex flex-col overflow-hidden">
-                <div class="flex items-center justify-between p-4 border-b border-[rgba(148,163,184,0.1)]">
-                  <h2 class="text-[16px] font-semibold text-white m-0">{getDisplayName(selectedPublisher()!)}</h2>
-                  <button
-                    type="button"
-                    class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[20px] text-[#64748b] cursor-pointer hover:bg-[rgba(148,163,184,0.1)] hover:text-white"
-                    onClick={() => setSelectedPublisher(null)}
-                  >
-                    ×
-                  </button>
-                </div>
-                <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
-                  <Show when={selectedPublisher()?.logo_url}>
-                    <img
-                      src={selectedPublisher()?.logo_url ?? ""}
-                      alt={selectedPublisher()?.name}
-                      class="w-16 h-16 rounded-xl object-cover"
-                    />
-                  </Show>
-
-                  <Show when={getPublisherName(selectedPublisher()!)}>
-                    <p class="text-[13px] text-[#64748b] -mt-3 m-0">
-                      by {getPublisherName(selectedPublisher()!)}
-                    </p>
-                  </Show>
-
-                  <p class="text-[14px] text-[#94a3b8] leading-relaxed m-0">
-                    {selectedPublisher()?.description}
-                  </p>
-
-                  {/* Stats section */}
-                  <div class="flex flex-col gap-2">
-                    <h4 class="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide m-0">Usage</h4>
-                    <div class="grid grid-cols-2 gap-3">
-                      <div class="p-3 bg-[rgba(30,41,59,0.5)] rounded-lg text-center">
-                        <span class="block text-[18px] font-semibold text-white tabular-nums">
-                          {formatNumber(
-                            selectedPublisher()?.total_transactions ?? 0,
-                          )}
-                        </span>
-                        <span class="text-[11px] text-[#64748b]">Transactions</span>
-                      </div>
-                      <div class="p-3 bg-[rgba(30,41,59,0.5)] rounded-lg text-center">
-                        <span class="block text-[18px] font-semibold text-white tabular-nums">
-                          {formatNumber(
-                            selectedPublisher()?.unique_agents_served ?? 0,
-                          )}
-                        </span>
-                        <span class="text-[11px] text-[#64748b]">Agents</span>
-                      </div>
-                    </div>
+              {(publisher) => (
+                <aside class="w-[360px] border-l border-[rgba(148,163,184,0.1)] bg-[rgba(15,23,42,0.5)] flex flex-col overflow-hidden">
+                  <div class="flex items-center justify-between p-4 border-b border-[rgba(148,163,184,0.1)]">
+                    <h2 class="text-[16px] font-semibold text-white m-0">
+                      {getDisplayName(publisher())}
+                    </h2>
+                    <button
+                      type="button"
+                      class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[20px] text-[#64748b] cursor-pointer hover:bg-[rgba(148,163,184,0.1)] hover:text-white"
+                      onClick={() => setSelectedPublisher(null)}
+                    >
+                      ×
+                    </button>
                   </div>
+                  <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
+                    <Show when={publisher().logo_url}>
+                      {(logoUrl) => (
+                        <img
+                          src={logoUrl()}
+                          alt={publisher().name}
+                          class="w-16 h-16 rounded-xl object-cover"
+                        />
+                      )}
+                    </Show>
 
-                  {/* Pricing section */}
-                  <div class="flex flex-col gap-2">
-                    <h4 class="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide m-0">Pricing</h4>
+                    <Show when={getPublisherName(publisher())}>
+                      <p class="text-[13px] text-[#64748b] -mt-3 m-0">
+                        by {getPublisherName(publisher())}
+                      </p>
+                    </Show>
+
+                    <p class="text-[14px] text-[#94a3b8] leading-relaxed m-0">
+                      {publisher().description}
+                    </p>
+
+                    {/* Stats section */}
                     <div class="flex flex-col gap-2">
-                      <span class="inline-flex px-3 py-1.5 bg-[rgba(34,197,94,0.1)] rounded-lg text-[14px] font-medium text-[#22c55e] w-fit">
-                        {getPricingDisplay(selectedPublisher()!)}
-                      </span>
-                      <Show when={selectedPublisher()?.billing_model}>
-                        <p class="text-[13px] text-[#64748b] m-0">
-                          Model:{" "}
-                          {selectedPublisher()?.billing_model ===
-                          "prepaid_credits"
-                            ? "Prepaid Credits"
-                            : "Pay per Request"}
-                        </p>
-                      </Show>
-                    </div>
-                  </div>
-
-                  {/* Categories section */}
-                  <Show
-                    when={(selectedPublisher()?.categories?.length ?? 0) > 0}
-                  >
-                    <div class="flex flex-col gap-2">
-                      <h4 class="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide m-0">Categories</h4>
-                      <div class="flex flex-wrap gap-1.5">
-                        <For each={selectedPublisher()?.categories}>
-                          {(cat) => (
-                            <span class="px-2 py-0.5 bg-[rgba(148,163,184,0.1)] rounded text-[12px] text-[#94a3b8]">
-                              {cat}
-                            </span>
-                          )}
-                        </For>
+                      <h4 class="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide m-0">
+                        Usage
+                      </h4>
+                      <div class="grid grid-cols-2 gap-3">
+                        <div class="p-3 bg-[rgba(30,41,59,0.5)] rounded-lg text-center">
+                          <span class="block text-[18px] font-semibold text-white tabular-nums">
+                            {formatNumber(publisher().total_transactions ?? 0)}
+                          </span>
+                          <span class="text-[11px] text-[#64748b]">
+                            Transactions
+                          </span>
+                        </div>
+                        <div class="p-3 bg-[rgba(30,41,59,0.5)] rounded-lg text-center">
+                          <span class="block text-[18px] font-semibold text-white tabular-nums">
+                            {formatNumber(
+                              publisher().unique_agents_served ?? 0,
+                            )}
+                          </span>
+                          <span class="text-[11px] text-[#64748b]">Agents</span>
+                        </div>
                       </div>
                     </div>
-                  </Show>
 
-                  {/* Integration section */}
-                  <div class="flex flex-col gap-2">
-                    <h4 class="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide m-0">Integration</h4>
-                    <p class="text-[13px] text-[#94a3b8] m-0">
-                      Slug: <code class="px-1.5 py-0.5 bg-[rgba(15,23,42,0.8)] rounded text-[12px] text-[#818cf8] font-mono">{selectedPublisher()?.slug}</code>
-                    </p>
-                    <p class="text-[13px] text-[#94a3b8] m-0">
-                      Type: <code class="px-1.5 py-0.5 bg-[rgba(15,23,42,0.8)] rounded text-[12px] text-[#818cf8] font-mono">{selectedPublisher()?.publisher_type}</code>
-                    </p>
+                    {/* Pricing section */}
+                    <div class="flex flex-col gap-2">
+                      <h4 class="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide m-0">
+                        Pricing
+                      </h4>
+                      <div class="flex flex-col gap-2">
+                        <span class="inline-flex px-3 py-1.5 bg-[rgba(34,197,94,0.1)] rounded-lg text-[14px] font-medium text-[#22c55e] w-fit">
+                          {getPricingDisplay(publisher())}
+                        </span>
+                        <Show when={publisher().billing_model}>
+                          <p class="text-[13px] text-[#64748b] m-0">
+                            Model:{" "}
+                            {publisher().billing_model === "prepaid_credits"
+                              ? "Prepaid Credits"
+                              : "Pay per Request"}
+                          </p>
+                        </Show>
+                      </div>
+                    </div>
+
+                    {/* Categories section */}
+                    <Show when={(publisher().categories?.length ?? 0) > 0}>
+                      <div class="flex flex-col gap-2">
+                        <h4 class="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide m-0">
+                          Categories
+                        </h4>
+                        <div class="flex flex-wrap gap-1.5">
+                          <For each={publisher().categories}>
+                            {(cat) => (
+                              <span class="px-2 py-0.5 bg-[rgba(148,163,184,0.1)] rounded text-[12px] text-[#94a3b8]">
+                                {cat}
+                              </span>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    {/* Integration section */}
+                    <div class="flex flex-col gap-2">
+                      <h4 class="text-[12px] font-semibold text-[#64748b] uppercase tracking-wide m-0">
+                        Integration
+                      </h4>
+                      <p class="text-[13px] text-[#94a3b8] m-0">
+                        Slug:{" "}
+                        <code class="px-1.5 py-0.5 bg-[rgba(15,23,42,0.8)] rounded text-[12px] text-[#818cf8] font-mono">
+                          {publisher().slug}
+                        </code>
+                      </p>
+                      <p class="text-[13px] text-[#94a3b8] m-0">
+                        Type:{" "}
+                        <code class="px-1.5 py-0.5 bg-[rgba(15,23,42,0.8)] rounded text-[12px] text-[#818cf8] font-mono">
+                          {publisher().publisher_type}
+                        </code>
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </aside>
+                </aside>
+              )}
             </Show>
           </div>
         </Show>

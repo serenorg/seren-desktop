@@ -33,7 +33,9 @@ export const ChatTabBar: Component = () => {
               onClick={() => handleTabClick(conversation.id)}
               title={conversation.title}
             >
-              <span class="overflow-hidden text-ellipsis max-w-[140px]">{conversation.title}</span>
+              <span class="overflow-hidden text-ellipsis max-w-[140px]">
+                {conversation.title}
+              </span>
               <Show when={visibleConversations().length > 1}>
                 <button
                   type="button"

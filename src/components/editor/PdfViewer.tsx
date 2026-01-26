@@ -162,13 +162,16 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
     return parts[parts.length - 1];
   };
 
-  const btnClass = "bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-base cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)] disabled:opacity-40 disabled:cursor-not-allowed";
+  const btnClass =
+    "bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-base cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)] disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
     <div class="flex flex-col h-full bg-card">
       <div class="flex items-center justify-between px-4 py-2 bg-popover border-b border-[rgba(148,163,184,0.15)] shrink-0 gap-4">
         <div class="flex-1 min-w-0">
-          <span class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">{fileName()}</span>
+          <span class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+            {fileName()}
+          </span>
         </div>
 
         <div class="flex items-center gap-2">
@@ -212,7 +215,9 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
           >
             −
           </button>
-          <span class="min-w-[50px] text-center text-[13px] text-muted-foreground">{zoom()}%</span>
+          <span class="min-w-[50px] text-center text-[13px] text-muted-foreground">
+            {zoom()}%
+          </span>
           <button
             type="button"
             class={btnClass}
@@ -234,11 +239,18 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
 
       <div class="flex-1 overflow-auto flex justify-center p-5 bg-[#525659]">
         {isLoading() ? (
-          <div class="flex items-center justify-center h-full w-full text-muted-foreground text-sm">Loading PDF...</div>
+          <div class="flex items-center justify-center h-full w-full text-muted-foreground text-sm">
+            Loading PDF...
+          </div>
         ) : error() ? (
-          <div class="flex items-center justify-center h-full w-full text-destructive text-sm">{error()}</div>
+          <div class="flex items-center justify-center h-full w-full text-destructive text-sm">
+            {error()}
+          </div>
         ) : (
-          <canvas ref={canvasRef} class="shadow-[0_4px_20px_rgba(0,0,0,0.3)] bg-white" />
+          <canvas
+            ref={canvasRef}
+            class="shadow-[0_4px_20px_rgba(0,0,0,0.3)] bg-white"
+          />
         )}
       </div>
     </div>

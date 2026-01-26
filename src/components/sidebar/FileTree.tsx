@@ -171,12 +171,18 @@ export const FileTree: Component<FileTreeProps> = (props) => {
     >
       <Show when={folderName()}>
         <div class="py-2 px-3 font-semibold text-foreground uppercase text-base tracking-wider border-b border-border">
-          <span class="overflow-hidden text-ellipsis whitespace-nowrap block">{folderName()}</span>
+          <span class="overflow-hidden text-ellipsis whitespace-nowrap block">
+            {folderName()}
+          </span>
         </div>
       </Show>
       <Show
         when={fileTreeState.nodes.length > 0}
-        fallback={<div class="p-4 text-muted-foreground text-center italic">No folder open</div>}
+        fallback={
+          <div class="p-4 text-muted-foreground text-center italic">
+            No folder open
+          </div>
+        }
       >
         <For each={fileTreeState.nodes}>
           {(node) => (
@@ -289,9 +295,7 @@ const FileTreeNode: Component<FileTreeNodeProps> = (props) => {
     <div class="w-full">
       <div
         class={`flex items-center gap-1.5 py-1 px-2 cursor-pointer rounded mx-1 my-px transition-colors duration-100 ${
-          isSelected()
-            ? "bg-accent"
-            : "hover:bg-muted focus:bg-muted"
+          isSelected() ? "bg-accent" : "hover:bg-muted focus:bg-muted"
         } ${isRenaming() ? "bg-accent" : ""} ${props.node.isDirectory ? "font-medium" : ""}`}
         style={{ "padding-left": `${props.depth * 16 + 8}px` }}
         onClick={handleClick}
@@ -308,7 +312,11 @@ const FileTreeNode: Component<FileTreeNodeProps> = (props) => {
         <span class="shrink-0 w-4 text-center text-sm">{icon()}</span>
         <Show
           when={isRenaming()}
-          fallback={<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{props.node.name}</span>}
+          fallback={
+            <span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">
+              {props.node.name}
+            </span>
+          }
         >
           <input
             ref={renameInputRef}
