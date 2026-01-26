@@ -1,6 +1,6 @@
 import { createStore } from "solid-js/store";
-import { checkUpdate, installUpdate } from "@tauri-apps/api/updater";
-import { relaunch } from "@tauri-apps/api/process";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { telemetry } from "@/services/telemetry";
 
 export type UpdateStatus =
@@ -43,6 +43,9 @@ async function initUpdater(): Promise<void> {
   await checkForUpdates();
 }
 
+// Store the update object for later installation
+let pendingUpdate: Awaited<ReturnType<typeof check>> | null = null;
+
 async function checkForUpdates(manual = false): Promise<void> {
   if (!isTauriRuntime()) {
     setState({ status: "unsupported" });
@@ -52,17 +55,18 @@ async function checkForUpdates(manual = false): Promise<void> {
   setState({ status: "checking", error: null });
 
   try {
-    const result = await checkUpdate();
-    const version = result.manifest?.version;
+    const update = await check();
 
-    if (result.shouldUpdate) {
+    if (update) {
+      pendingUpdate = update;
       setState({
         status: "available",
-        availableVersion: version,
+        availableVersion: update.version,
         lastChecked: Date.now(),
         error: null,
       });
     } else {
+      pendingUpdate = null;
       setState({
         status: manual ? "up_to_date" : "up_to_date",
         availableVersion: undefined,
@@ -78,11 +82,11 @@ async function checkForUpdates(manual = false): Promise<void> {
 }
 
 async function installAvailableUpdate(): Promise<void> {
-  if (!isTauriRuntime()) return;
+  if (!isTauriRuntime() || !pendingUpdate) return;
   setState({ status: "installing" });
 
   try {
-    await installUpdate();
+    await pendingUpdate.downloadAndInstall();
     await relaunch();
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
