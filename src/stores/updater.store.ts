@@ -2,6 +2,7 @@ import { createStore } from "solid-js/store";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { telemetry } from "@/services/telemetry";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 export type UpdateStatus =
   | "idle"
@@ -26,10 +27,6 @@ const [state, setState] = createStore<UpdaterState>({
 });
 
 let initialized = false;
-
-function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && Boolean((window as Record<string, unknown>).__TAURI_IPC__);
-}
 
 async function initUpdater(): Promise<void> {
   if (initialized) return;
