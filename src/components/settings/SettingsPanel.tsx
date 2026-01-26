@@ -147,7 +147,7 @@ export const SettingsPanel: Component = () => {
 
       <main class="flex-1 px-8 py-6 overflow-y-auto">
         <Show when={activeSection() === "chat"}>
-          <section class="settings-section">
+          <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Chat Settings</h3>
             <p class="m-0 mb-6 text-muted leading-normal">
               Configure AI chat behavior and conversation history.
@@ -225,7 +225,7 @@ export const SettingsPanel: Component = () => {
         </Show>
 
         <Show when={activeSection() === "editor"}>
-          <section class="settings-section">
+          <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
               Editor Settings
             </h3>
@@ -394,7 +394,7 @@ export const SettingsPanel: Component = () => {
         </Show>
 
         <Show when={activeSection() === "wallet"}>
-          <section class="settings-section">
+          <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
               Wallet Settings
             </h3>
@@ -768,7 +768,7 @@ export const SettingsPanel: Component = () => {
         </Show>
 
         <Show when={activeSection() === "appearance"}>
-          <section class="settings-section">
+          <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Appearance</h3>
             <p class="m-0 mb-6 text-muted leading-normal">
               Customize how Seren Desktop looks.
@@ -816,7 +816,7 @@ export const SettingsPanel: Component = () => {
         </Show>
 
         <Show when={activeSection() === "general"}>
-          <section class="settings-section">
+          <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
               General Settings
             </h3>
@@ -851,7 +851,7 @@ export const SettingsPanel: Component = () => {
         </Show>
 
         <Show when={activeSection() === "mcp"}>
-          <section class="settings-section">
+          <section>
             <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">MCP Servers</h3>
             <p class="m-0 mb-6 text-muted leading-normal">
               Manage Model Context Protocol server connections for enhanced AI

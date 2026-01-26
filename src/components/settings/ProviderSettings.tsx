@@ -146,7 +146,9 @@ export const ProviderSettings: Component = () => {
 
   return (
     <section>
-      <h3 class="m-0 mb-2 text-[1.3rem] font-semibold text-foreground">AI Providers</h3>
+      <h3 class="m-0 mb-2 text-[1.3rem] font-semibold text-foreground">
+        AI Providers
+      </h3>
       <p class="m-0 mb-6 text-muted-foreground leading-normal">
         Connect your own account to use models directly from Anthropic, OpenAI,
         or Google. Seren Models is always available with your SerenBucks
@@ -266,7 +268,9 @@ export const ProviderSettings: Component = () => {
         <div class="mt-4">
           <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
             <label class="flex flex-col gap-0.5 flex-1">
-              <span class="text-[0.95rem] font-medium text-foreground">Provider</span>
+              <span class="text-[0.95rem] font-medium text-foreground">
+                Provider
+              </span>
               <span class="text-[0.8rem] text-muted-foreground">
                 Select a provider to configure with API key
               </span>
@@ -302,7 +306,9 @@ export const ProviderSettings: Component = () => {
                 <>
                   <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
                     <label class="flex flex-col gap-0.5 flex-1">
-                      <span class="text-[0.95rem] font-medium text-foreground">API Key</span>
+                      <span class="text-[0.95rem] font-medium text-foreground">
+                        API Key
+                      </span>
                       <span class="text-[0.8rem] text-muted-foreground">
                         Your {config().name} API key.{" "}
                         <a

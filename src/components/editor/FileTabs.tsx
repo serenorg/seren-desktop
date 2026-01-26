@@ -68,7 +68,7 @@ export const FileTabs: Component<FileTabsProps> = (props) => {
                     ●
                   </span>
                 </Show>
-                <span class="tab-name text-foreground max-w-[150px] overflow-hidden text-ellipsis">
+                <span class="text-foreground max-w-[150px] overflow-hidden text-ellipsis whitespace-nowrap">
                   {tab.fileName}
                 </span>
                 <button

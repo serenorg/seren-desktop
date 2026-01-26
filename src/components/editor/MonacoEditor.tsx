@@ -197,17 +197,7 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
   void _getModel;
   void _focus;
 
-  return (
-    <div
-      ref={containerRef}
-      class="monaco-editor-container"
-      style={{
-        width: "100%",
-        height: "100%",
-        "min-height": "200px",
-      }}
-    />
-  );
+  return <div ref={containerRef} class="w-full h-full min-h-[200px]" />;
 };
 
 export default MonacoEditor;
