@@ -13,7 +13,6 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
   const [zoom, setZoom] = createSignal(100);
   const [imageUrl, setImageUrl] = createSignal<string | null>(null);
   const [dimensions, setDimensions] = createSignal<{ width: number; height: number } | null>(null);
-  const [fileSize, setFileSize] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   const [isDragging, setIsDragging] = createSignal(false);
   const [position, setPosition] = createSignal({ x: 0, y: 0 });
