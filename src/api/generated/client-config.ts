@@ -3,7 +3,7 @@
 
 import type { Config, ClientOptions } from "./client";
 import { apiBase } from "@/lib/config";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
+import { getToken, isTauriRuntime } from "@/lib/tauri-bridge";
 
 type TauriFetch = typeof globalThis.fetch;
 let tauriFetch: TauriFetch | null = null;
@@ -30,12 +30,58 @@ async function getTauriFetch(): Promise<TauriFetch> {
   }
 }
 
+// Endpoints that should not trigger auto-refresh (to avoid loops)
+const NO_REFRESH_ENDPOINTS = ["/auth/login", "/auth/refresh", "/auth/signup"];
+
+/**
+ * Check if the request URL is an auth endpoint that should skip refresh.
+ */
+function shouldSkipRefresh(input: RequestInfo | URL): boolean {
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+  return NO_REFRESH_ENDPOINTS.some((endpoint) => url.includes(endpoint));
+}
+
 /**
  * Custom fetch that uses Tauri HTTP plugin when available.
  */
 const customFetch: typeof globalThis.fetch = async (input, init) => {
   const fetchFn = await getTauriFetch();
-  return fetchFn(input, init);
+
+  // Always create a Request so we can safely retry by cloning it
+  const request = new Request(input, init);
+  const retryRequest = request.clone();
+
+  const response = await fetchFn(request);
+
+  // Handle 401 with auto-refresh and retry once (skip auth endpoints to avoid loops)
+  if (response.status === 401 && !shouldSkipRefresh(request)) {
+    // Dynamic import to avoid circular dependency
+    const { refreshAccessToken } = await import("@/services/auth");
+    const refreshed = await refreshAccessToken();
+
+    if (refreshed) {
+      const token = await getToken();
+      if (token) {
+        retryRequest.headers.set("Authorization", `Bearer ${token}`);
+
+        // Close original response body before retrying (best-effort)
+        try {
+          await response.body?.cancel();
+        } catch {
+          // noop
+        }
+
+        return fetchFn(retryRequest);
+      }
+    }
+  }
+
+  return response;
 };
 
 /**
