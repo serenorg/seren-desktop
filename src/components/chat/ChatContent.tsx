@@ -179,6 +179,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   onMount(async () => {
     console.log("[ChatContent] Mounting, chatStore.isLoading:", chatStore.isLoading);
+
+    // Reset orphaned loading state from HMR interruption
+    if (chatStore.isLoading && !streamingSession()) {
+      console.log("[ChatContent] Resetting orphaned loading state from HMR");
+      chatStore.setLoading(false);
+    }
+
     document.addEventListener("keydown", handleKeyDown);
 
     // Register copy button handler (event delegation)
@@ -206,6 +213,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   onCleanup(() => {
     document.removeEventListener("keydown", handleKeyDown);
     messagesRef?.removeEventListener("click", handleCopyClick);
+
+    // Reset loading state if still active when unmounting (e.g., HMR)
+    if (chatStore.isLoading) {
+      console.log("[ChatContent] Cleaning up loading state on unmount");
+      chatStore.setLoading(false);
+    }
+
     if (suggestionDebounceTimer) {
       clearTimeout(suggestionDebounceTimer);
     }
