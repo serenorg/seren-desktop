@@ -373,6 +373,22 @@ export const SettingsPanel: Component = () => {
               Configure your crypto wallet for x402 USDC payments to MCP servers.
             </p>
 
+            <div class="settings-group">
+              <label class="settings-label">
+                <span class="label-text">Auto-Approve Limit</span>
+                <span class="label-hint">Auto-approve payments up to this amount (USD)</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="10"
+                step="0.01"
+                aria-label="Auto-approve limit in USD"
+                value={settingsState.app.cryptoAutoApproveLimit}
+                onInput={(e) => handleNumberChange("cryptoAutoApproveLimit", e.currentTarget.value)}
+              />
+            </div>
+
             <Show
               when={cryptoWalletStore.state().isConfigured}
               fallback={

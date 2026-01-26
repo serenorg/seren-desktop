@@ -10,6 +10,7 @@ import { EditorPanel } from "@/components/editor/EditorPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { CatalogPanel } from "@/components/catalog";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
+import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import {
   authStore,
@@ -152,6 +153,7 @@ function App() {
         </main>
         <StatusBar />
         <LowBalanceModal />
+        <X402PaymentApproval />
       </div>
     </Show>
   );
