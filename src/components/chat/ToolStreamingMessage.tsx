@@ -6,7 +6,7 @@ import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { renderMarkdown } from "@/lib/render-markdown";
-import type { ToolStreamEvent } from "@/services/chat";
+import type { ToolIterationState, ToolStreamEvent } from "@/services/chat";
 import { settingsStore } from "@/stores/settings.store";
 import { ThinkingBlock } from "./ThinkingBlock";
 
@@ -15,6 +15,7 @@ interface ToolStreamingMessageProps {
   onComplete: (fullContent: string, thinking?: string) => void;
   onError?: (error: Error) => void;
   onContentUpdate?: () => void;
+  onIterationLimit?: (state: ToolIterationState, iteration: number) => void;
 }
 
 interface ToolExecution {
@@ -94,6 +95,16 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
               setThinking(fullThinking);
             }
             break;
+
+          case "iteration_limit":
+            // Notify parent about the limit being reached
+            props.onIterationLimit?.(
+              event.continueState,
+              event.currentIteration,
+            );
+            // Don't call onComplete - let parent handle continuation
+            setIsStreaming(false);
+            return;
         }
       }
     } catch (error) {

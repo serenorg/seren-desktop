@@ -194,6 +194,33 @@ export const SettingsPanel: Component = () => {
               />
             </div>
 
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Max Tool Iterations
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  How many times the AI can use tools per message. Higher values
+                  allow more complex tasks but use more credits. Set to 0 for
+                  unlimited (use with caution).
+                </span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="50"
+                step="5"
+                value={settingsState.app.chatMaxToolIterations}
+                onInput={(e) =>
+                  handleNumberChange(
+                    "chatMaxToolIterations",
+                    e.currentTarget.value,
+                  )
+                }
+                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+              />
+            </div>
+
             <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
