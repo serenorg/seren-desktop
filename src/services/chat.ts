@@ -33,6 +33,7 @@ export interface Message {
   id: string;
   role: ChatRole;
   content: string;
+  thinking?: string;
   model?: string;
   timestamp: number;
   status?: "pending" | "streaming" | "complete" | "error";
@@ -139,9 +140,10 @@ const MAX_TOOL_ITERATIONS = 10;
  */
 export type ToolStreamEvent =
   | { type: "content"; content: string }
+  | { type: "thinking"; thinking: string }
   | { type: "tool_calls"; toolCalls: ToolCall[] }
   | { type: "tool_results"; results: ToolResult[] }
-  | { type: "complete"; finalContent: string };
+  | { type: "complete"; finalContent: string; finalThinking?: string };
 
 /**
  * Send a message with tool support enabled.
@@ -214,7 +216,10 @@ export async function* streamMessageWithTools(
 
     // Yield content if present
     if (response.content) {
-      console.log("[streamMessageWithTools] Yielding content:", response.content.substring(0, 100));
+      console.log(
+        "[streamMessageWithTools] Yielding content:",
+        response.content.substring(0, 100),
+      );
       fullContent += response.content;
       yield { type: "content", content: response.content };
     } else {
@@ -224,7 +229,10 @@ export async function* streamMessageWithTools(
     // Check if model wants to call tools
     if (!response.tool_calls || response.tool_calls.length === 0) {
       // No tool calls, we're done
-      console.log("[streamMessageWithTools] No tool_calls, completing with content length:", fullContent.length);
+      console.log(
+        "[streamMessageWithTools] No tool_calls, completing with content length:",
+        fullContent.length,
+      );
       yield { type: "complete", finalContent: fullContent };
       return;
     }
