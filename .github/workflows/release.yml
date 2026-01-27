@@ -129,8 +129,9 @@ jobs:
           [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE) | Set-Content -Path $certificatePath -AsByteStream
           Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
 
-      # Build the app
-      - name: Build Tauri app
+      # Build the app (with signing for macOS when certificates available)
+      - name: Build Tauri app (signed)
+        if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -138,6 +139,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm tauri build --target ${{ matrix.target }}
+
+      # Build the app (unsigned for macOS without certificates, or other platforms)
+      - name: Build Tauri app (unsigned)
+        if: matrix.os != 'macos-latest' || env.HAS_APPLE_SIGNING != 'true'
         run: pnpm tauri build --target ${{ matrix.target }}
 
       # macOS: Notarize the app (skip if no Apple ID configured)
