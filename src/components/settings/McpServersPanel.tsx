@@ -296,12 +296,21 @@ export const McpServersPanel: Component = () => {
                         </div>
                       }
                     >
-                      <div class="text-xs text-muted-foreground font-mono">
-                        {isLocalServer(server) &&
-                          `${server.command} ${server.args.join(" ")}`}
-                      </div>
+                      <Show
+                        when={server.name !== "Seren MCP"}
+                        fallback={
+                          <div class="text-xs text-muted-foreground italic">
+                            Connected to Seren MCP Gateway
+                          </div>
+                        }
+                      >
+                        <div class="text-xs text-muted-foreground font-mono">
+                          {isLocalServer(server) &&
+                            `${server.command} ${server.args.join(" ")}`}
+                        </div>
+                      </Show>
                     </Show>
-                    <Show when={server.autoConnect && isLocal()}>
+                    <Show when={server.autoConnect && server.name !== "Seren MCP"}>
                       <span class="text-[11px] text-accent">Auto-connect</span>
                     </Show>
                   </div>
