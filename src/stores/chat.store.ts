@@ -14,10 +14,25 @@ import {
   saveMessage as saveMessageDb,
   updateConversation as updateConversationDb,
 } from "@/lib/tauri-bridge";
+import {
+  estimateConversationTokens,
+  getModelContextLimit,
+  shouldTriggerCompaction,
+} from "@/lib/token-counter";
 import type { Message } from "@/services/chat";
+import { sendMessage } from "@/services/chat";
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4";
 const MAX_MESSAGES_PER_CONVERSATION = 100;
+
+/**
+ * A compacted summary of older messages.
+ */
+export interface CompactedSummary {
+  content: string;
+  originalMessageCount: number;
+  compactedAt: number;
+}
 
 /**
  * A chat conversation that groups messages together.
@@ -29,6 +44,7 @@ export interface Conversation {
   selectedModel: string;
   selectedProvider: ProviderId | null;
   isArchived: boolean;
+  compactedSummary?: CompactedSummary;
 }
 
 type MessagePatch = Partial<
@@ -55,6 +71,7 @@ interface ChatState {
   isLoading: boolean;
   error: string | null;
   retryingMessageId: string | null;
+  isCompacting: boolean;
 }
 
 const [state, setState] = createStore<ChatState>({
@@ -65,6 +82,7 @@ const [state, setState] = createStore<ChatState>({
   isLoading: false,
   error: null,
   retryingMessageId: null,
+  isCompacting: false,
 });
 
 /**
@@ -146,6 +164,41 @@ export const chatStore = {
 
   get retryingMessageId() {
     return state.retryingMessageId;
+  },
+
+  get isCompacting() {
+    return state.isCompacting;
+  },
+
+  /**
+   * Get the compacted summary for the active conversation.
+   */
+  get compactedSummary(): CompactedSummary | undefined {
+    const active = this.activeConversation;
+    return active?.compactedSummary;
+  },
+
+  /**
+   * Get estimated token count for the active conversation.
+   */
+  get estimatedTokens(): number {
+    return estimateConversationTokens(this.messages);
+  },
+
+  /**
+   * Get context limit for the active conversation's model.
+   */
+  get contextLimit(): number {
+    return getModelContextLimit(this.selectedModel);
+  },
+
+  /**
+   * Get context usage percentage.
+   */
+  get contextUsagePercent(): number {
+    const limit = this.contextLimit;
+    if (limit === 0) return 0;
+    return Math.min(100, Math.round((this.estimatedTokens / limit) * 100));
   },
 
   // ============================================================================
@@ -437,6 +490,117 @@ export const chatStore = {
 
     // Create a fresh conversation
     await this.createConversation();
+  },
+
+  // ============================================================================
+  // Auto-Compact
+  // ============================================================================
+
+  /**
+   * Check if compaction should be triggered for the active conversation.
+   */
+  shouldCompact(thresholdPercent: number): boolean {
+    return shouldTriggerCompaction(
+      this.messages,
+      this.selectedModel,
+      thresholdPercent,
+    );
+  },
+
+  /**
+   * Compact older messages into a summary.
+   * Preserves the most recent N messages and summarizes the rest.
+   */
+  async compactConversation(preserveCount: number): Promise<void> {
+    const conversationId = state.activeConversationId;
+    if (!conversationId) return;
+
+    const messages = this.messages;
+    if (messages.length <= preserveCount) {
+      // Nothing to compact
+      return;
+    }
+
+    setState("isCompacting", true);
+
+    try {
+      // Split messages into those to compact and those to preserve
+      const toCompact = messages.slice(0, messages.length - preserveCount);
+      const toPreserve = messages.slice(-preserveCount);
+
+      // Generate summary prompt
+      const summaryPrompt = `Please provide a concise summary of the following conversation. Focus on key topics discussed, decisions made, and important context that would be useful for continuing the conversation. Keep the summary under 500 words.
+
+Conversation to summarize:
+${toCompact.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}
+
+Summary:`;
+
+      // Use the current model to generate summary
+      const summary = await sendMessage(
+        summaryPrompt,
+        this.selectedModel,
+        undefined,
+      );
+
+      // Create the compacted summary
+      const compactedSummary: CompactedSummary = {
+        content: summary,
+        originalMessageCount: toCompact.length,
+        compactedAt: Date.now(),
+      };
+
+      // Update conversation with compacted summary
+      setState("conversations", (convos) =>
+        convos.map((c) =>
+          c.id === conversationId ? { ...c, compactedSummary } : c,
+        ),
+      );
+
+      // Replace messages with only the preserved ones
+      setState("messages", conversationId, toPreserve);
+
+      console.log(
+        `[chatStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}`,
+      );
+    } catch (error) {
+      console.error("[chatStore] Failed to compact conversation:", error);
+      setState("error", "Failed to compact conversation");
+    } finally {
+      setState("isCompacting", false);
+    }
+  },
+
+  /**
+   * Clear the compacted summary for the active conversation.
+   */
+  clearCompactedSummary() {
+    const conversationId = state.activeConversationId;
+    if (!conversationId) return;
+
+    setState("conversations", (convos) =>
+      convos.map((c) =>
+        c.id === conversationId ? { ...c, compactedSummary: undefined } : c,
+      ),
+    );
+  },
+
+  /**
+   * Check and trigger auto-compact if needed.
+   * Called after adding messages.
+   */
+  async checkAutoCompact(
+    enabled: boolean,
+    threshold: number,
+    preserveCount: number,
+  ): Promise<void> {
+    if (!enabled) return;
+    if (state.isCompacting) return;
+    if (state.isLoading) return;
+
+    if (this.shouldCompact(threshold)) {
+      await this.compactConversation(preserveCount);
+    }
   },
 };
 
