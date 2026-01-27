@@ -34,6 +34,11 @@ export interface Settings {
   chatEnterToSend: boolean;
   chatShowThinking: boolean;
 
+  // Auto-compact settings
+  autoCompactEnabled: boolean;
+  autoCompactThreshold: number;
+  autoCompactPreserveMessages: number;
+
   // Editor settings
   editorFontSize: number;
   editorTabSize: number;
@@ -78,6 +83,10 @@ const DEFAULT_SETTINGS: Settings = {
   chatMaxHistoryMessages: 50,
   chatEnterToSend: true,
   chatShowThinking: false,
+  // Auto-compact
+  autoCompactEnabled: true,
+  autoCompactThreshold: 80,
+  autoCompactPreserveMessages: 10,
   // Editor
   editorFontSize: 14,
   editorTabSize: 2,

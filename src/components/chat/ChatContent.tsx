@@ -31,6 +31,7 @@ import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
 import { settingsStore } from "@/stores/settings.store";
 import { ChatTabBar } from "./ChatTabBar";
+import { CompactedMessage } from "./CompactedMessage";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { StreamingMessage } from "./StreamingMessage";
@@ -180,7 +181,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   onMount(async () => {
-    console.log("[ChatContent] Mounting, chatStore.isLoading:", chatStore.isLoading);
+    console.log(
+      "[ChatContent] Mounting, chatStore.isLoading:",
+      chatStore.isLoading,
+    );
 
     // Reset orphaned loading state from HMR interruption
     if (chatStore.isLoading && !streamingSession()) {
@@ -202,7 +206,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Debug: log when loading state changes
   createEffect(() => {
-    console.log("[ChatContent] chatStore.isLoading changed to:", chatStore.isLoading);
+    console.log(
+      "[ChatContent] chatStore.isLoading changed to:",
+      chatStore.isLoading,
+    );
   });
 
   // Auto-scroll to bottom when messages change or streaming starts
@@ -373,7 +380,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
           prompt: messageContent,
           model: chatStore.selectedModel,
           context,
-          stream: streamMessage(messageContent, chatStore.selectedModel, context),
+          stream: streamMessage(
+            messageContent,
+            chatStore.selectedModel,
+            context,
+          ),
           toolsEnabled: false,
         };
 
@@ -403,6 +414,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     await chatStore.persistMessage(assistantMessage);
     setStreamingSession(null);
     chatStore.setLoading(false);
+
+    // Check if auto-compact should be triggered
+    await chatStore.checkAutoCompact(
+      settingsStore.get("autoCompactEnabled"),
+      settingsStore.get("autoCompactThreshold"),
+      settingsStore.get("autoCompactPreserveMessages"),
+    );
 
     // Process message queue if there are queued messages
     const queue = messageQueue();
@@ -516,22 +534,74 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       >
         <ChatTabBar />
         <header class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[#21262d] bg-[#161b22]">
-          <span class="text-xs font-medium text-[#8b949e]">Chat</span>
-          <button
-            type="button"
-            class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3]"
-            onClick={clearHistory}
-          >
-            Clear
-          </button>
+          <div class="flex items-center gap-3">
+            <span class="text-xs font-medium text-[#8b949e]">Chat</span>
+            <Show when={chatStore.messages.length > 0}>
+              <div class="flex items-center gap-1.5 text-[10px] text-[#484f58]">
+                <div
+                  class="w-12 h-1.5 bg-[#21262d] rounded-full overflow-hidden"
+                  title={`Context: ${chatStore.contextUsagePercent}% (${chatStore.estimatedTokens.toLocaleString()} tokens)`}
+                >
+                  <div
+                    class={`h-full rounded-full transition-all ${
+                      chatStore.contextUsagePercent >= 80
+                        ? "bg-[#f85149]"
+                        : chatStore.contextUsagePercent >= 50
+                          ? "bg-[#d29922]"
+                          : "bg-[#238636]"
+                    }`}
+                    style={{ width: `${chatStore.contextUsagePercent}%` }}
+                  />
+                </div>
+                <span>{chatStore.contextUsagePercent}%</span>
+              </div>
+            </Show>
+          </div>
+          <div class="flex items-center gap-2">
+            <Show
+              when={
+                chatStore.messages.length >
+                settingsStore.get("autoCompactPreserveMessages")
+              }
+            >
+              <button
+                type="button"
+                class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() =>
+                  chatStore.compactConversation(
+                    settingsStore.get("autoCompactPreserveMessages"),
+                  )
+                }
+                disabled={chatStore.isCompacting}
+              >
+                {chatStore.isCompacting ? "Compacting..." : "Compact"}
+              </button>
+            </Show>
+            <button
+              type="button"
+              class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3]"
+              onClick={clearHistory}
+            >
+              Clear
+            </button>
+          </div>
         </header>
 
         <div
           class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded"
           ref={messagesRef}
         >
+          <Show when={chatStore.compactedSummary}>
+            {(summary) => (
+              <CompactedMessage
+                summary={summary()}
+                onClear={() => chatStore.clearCompactedSummary()}
+              />
+            )}
+          </Show>
+
           <Show
-            when={chatStore.messages.length > 0}
+            when={chatStore.messages.length > 0 || chatStore.compactedSummary}
             fallback={
               <div class="flex-1 flex flex-col items-center justify-center p-6 text-[#8b949e]">
                 <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">
@@ -562,7 +632,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       <Show when={chatStore.retryingMessageId === message.id}>
                         <span>
                           Retrying (
-                          {Math.min(message.attemptCount ?? 1, CHAT_MAX_RETRIES)}
+                          {Math.min(
+                            message.attemptCount ?? 1,
+                            CHAT_MAX_RETRIES,
+                          )}
                           /{CHAT_MAX_RETRIES})…
                         </span>
                       </Show>
@@ -654,7 +727,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             <Show when={messageQueue().length > 0}>
               <div class="flex items-center gap-2 px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e]">
                 <span>
-                  {messageQueue().length} message{messageQueue().length > 1 ? "s" : ""} queued
+                  {messageQueue().length} message
+                  {messageQueue().length > 1 ? "s" : ""} queued
                 </span>
                 <button
                   type="button"
@@ -668,10 +742,19 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             <textarea
               ref={(el) => {
                 inputRef = el;
-                console.log("[ChatContent] Textarea ref set, disabled:", el.disabled, "isLoading:", chatStore.isLoading);
+                console.log(
+                  "[ChatContent] Textarea ref set, disabled:",
+                  el.disabled,
+                  "isLoading:",
+                  chatStore.isLoading,
+                );
               }}
               value={input()}
-              placeholder={chatStore.isLoading ? "Type to queue message..." : "Ask Seren anything…"}
+              placeholder={
+                chatStore.isLoading
+                  ? "Type to queue message..."
+                  : "Ask Seren anything…"
+              }
               class="w-full min-h-[60px] max-h-[150px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-2 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58]"
               onInput={(event) => {
                 setInput(event.currentTarget.value);
@@ -742,8 +825,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 <ModelSelector />
                 <span class="text-[10px] text-[#484f58]">
                   {settingsStore.get("chatEnterToSend")
-                    ? chatStore.isLoading ? "Enter to queue" : "Enter to send"
-                    : chatStore.isLoading ? "Ctrl+Enter to queue" : "Ctrl+Enter"}
+                    ? chatStore.isLoading
+                      ? "Enter to queue"
+                      : "Enter to send"
+                    : chatStore.isLoading
+                      ? "Ctrl+Enter to queue"
+                      : "Ctrl+Enter"}
                 </span>
               </div>
               <button

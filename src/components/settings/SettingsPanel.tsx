@@ -217,6 +217,93 @@ export const SettingsPanel: Component = () => {
                 </span>
               </label>
             </div>
+
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+              Auto-Compact
+            </h4>
+            <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
+              Automatically summarize older messages when approaching context
+              limits.
+            </p>
+
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.autoCompactEnabled}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "autoCompactEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
+                />
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable Auto-Compact
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Automatically summarize older messages to manage context
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <Show when={settingsState.app.autoCompactEnabled}>
+              <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                <label class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Compact Threshold
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Trigger compaction when context usage reaches this % of
+                    limit
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  min="50"
+                  max="95"
+                  step="5"
+                  aria-label="Compact threshold percentage"
+                  value={settingsState.app.autoCompactThreshold}
+                  onInput={(e) =>
+                    handleNumberChange(
+                      "autoCompactThreshold",
+                      e.currentTarget.value,
+                    )
+                  }
+                  class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                <label class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Preserve Messages
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Number of recent messages to keep (not compacted)
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  min="2"
+                  max="50"
+                  step="1"
+                  aria-label="Number of messages to preserve"
+                  value={settingsState.app.autoCompactPreserveMessages}
+                  onInput={(e) =>
+                    handleNumberChange(
+                      "autoCompactPreserveMessages",
+                      e.currentTarget.value,
+                    )
+                  }
+                  class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                />
+              </div>
+            </Show>
           </section>
         </Show>
 
@@ -884,7 +971,11 @@ export const SettingsPanel: Component = () => {
                           <span class="font-medium text-foreground">
                             {server.name}
                           </span>
-                          <Show when={server.autoConnect && server.name !== "Seren MCP"}>
+                          <Show
+                            when={
+                              server.autoConnect && server.name !== "Seren MCP"
+                            }
+                          >
                             <span class="px-1.5 py-0.5 bg-[rgba(99,102,241,0.2)] rounded text-[0.7rem] text-accent">
                               Auto-connect
                             </span>
