@@ -43,27 +43,24 @@ jobs:
             COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges)
           fi
 
-          # Create release body
-          cat > release_notes.md << 'NOTES_EOF'
-          ## What's New
-
-          $COMMITS
-
-          ## Installation
-
-          Download the appropriate installer for your platform:
-          - **macOS (Apple Silicon)**: `Seren-Desktop_*_aarch64.dmg`
-          - **macOS (Intel)**: `Seren-Desktop_*_x64.dmg`
-          - **Windows**: `Seren-Desktop_*_x64-setup.exe` or `.msi`
-          - **Linux**: `.AppImage` or `.deb`
-
-          ## Note
-
-          This is an alpha release. macOS and Windows builds are unsigned - you may need to bypass security warnings to run the app.
-          NOTES_EOF
-
-          # Replace placeholder with actual commits
-          sed -i "s|\$COMMITS|$COMMITS|g" release_notes.md
+          # Create release body by writing commits directly (avoid sed issues with special chars)
+          {
+            echo "## What's New"
+            echo ""
+            echo "$COMMITS"
+            echo ""
+            echo "## Installation"
+            echo ""
+            echo "Download the appropriate installer for your platform:"
+            echo "- **macOS (Apple Silicon)**: \`Seren-Desktop_*_aarch64.dmg\`"
+            echo "- **macOS (Intel)**: \`Seren-Desktop_*_x64.dmg\`"
+            echo "- **Windows**: \`Seren-Desktop_*_x64-setup.exe\` or \`.msi\`"
+            echo "- **Linux**: \`.AppImage\` or \`.deb\`"
+            echo ""
+            echo "## Note"
+            echo ""
+            echo "This is an alpha release. macOS and Windows builds are unsigned - you may need to bypass security warnings to run the app."
+          } > release_notes.md
 
           echo "Generated release notes:"
           cat release_notes.md
