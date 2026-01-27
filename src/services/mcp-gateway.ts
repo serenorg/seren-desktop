@@ -10,9 +10,9 @@ const API_BASE = "https://api.serendb.com";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 // Concurrency limit to avoid overwhelming the backend
-// Reduced to 1 (sequential) because backend returns 500 errors even with 2 concurrent requests
+// Set to 3 - loads in background so doesn't block user, but still gentle on backend
 // TODO: Increase when backend is fixed (see serenorg/seren#95)
-const MAX_CONCURRENT_REQUESTS = 1;
+const MAX_CONCURRENT_REQUESTS = 3;
 
 // Types matching the backend API responses
 export interface McpToolInfo {

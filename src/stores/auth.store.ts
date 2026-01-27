@@ -34,26 +34,30 @@ export async function checkAuth(): Promise<void> {
     const authenticated = await isLoggedIn();
     setState("isAuthenticated", authenticated);
 
-    // Initialize MCP Gateway for authenticated users
+    // Initialize MCP Gateway for authenticated users (non-blocking)
     if (authenticated) {
-      try {
-        console.log("[Auth Store] Adding Seren MCP server config...");
-        await addSerenDbServer();
+      // Fire and forget - don't block login while tools load
+      (async () => {
+        try {
+          console.log("[Auth Store] Adding Seren MCP server config...");
+          await addSerenDbServer();
 
-        console.log("[Auth Store] Initializing MCP Gateway...");
-        await initializeGateway();
-        console.log("[Auth Store] MCP Gateway initialized successfully");
+          console.log("[Auth Store] Initializing MCP Gateway (background)...");
+          initializeGateway().then(() => {
+            console.log("[Auth Store] MCP Gateway initialized successfully");
+          });
 
-        // Trigger auto-connect for local MCP servers
-        const { initMcpAutoConnect } = await import("@/lib/mcp/auto-connect");
-        console.log(
-          "[Auth Store] Triggering MCP auto-connect for local servers...",
-        );
-        const results = await initMcpAutoConnect();
-        console.log("[Auth Store] MCP auto-connect results:", results);
-      } catch (error) {
-        console.error("[Auth Store] Failed to initialize MCP:", error);
-      }
+          // Trigger auto-connect for local MCP servers
+          const { initMcpAutoConnect } = await import("@/lib/mcp/auto-connect");
+          console.log(
+            "[Auth Store] Triggering MCP auto-connect for local servers...",
+          );
+          const results = await initMcpAutoConnect();
+          console.log("[Auth Store] MCP auto-connect results:", results);
+        } catch (error) {
+          console.error("[Auth Store] Failed to initialize MCP:", error);
+        }
+      })();
     }
   } finally {
     setState("isLoading", false);
@@ -71,35 +75,41 @@ export async function setAuthenticated(user: User): Promise<void> {
     isLoading: false,
   });
 
-  // Initialize MCP Gateway on sign-in
-  try {
-    console.log(
-      "[Auth Store] setAuthenticated: Adding Seren MCP server config...",
-    );
-    await addSerenDbServer();
+  // Initialize MCP Gateway on sign-in (non-blocking)
+  // Fire and forget - don't block UI while tools load
+  (async () => {
+    try {
+      console.log(
+        "[Auth Store] setAuthenticated: Adding Seren MCP server config...",
+      );
+      await addSerenDbServer();
 
-    console.log("[Auth Store] setAuthenticated: Initializing MCP Gateway...");
-    await initializeGateway();
-    console.log(
-      "[Auth Store] setAuthenticated: MCP Gateway initialized successfully",
-    );
+      console.log(
+        "[Auth Store] setAuthenticated: Initializing MCP Gateway (background)...",
+      );
+      initializeGateway().then(() => {
+        console.log(
+          "[Auth Store] setAuthenticated: MCP Gateway initialized successfully",
+        );
+      });
 
-    // Trigger auto-connect for local MCP servers
-    const { initMcpAutoConnect } = await import("@/lib/mcp/auto-connect");
-    console.log(
-      "[Auth Store] setAuthenticated: Triggering MCP auto-connect...",
-    );
-    const results = await initMcpAutoConnect();
-    console.log(
-      "[Auth Store] setAuthenticated: MCP auto-connect results:",
-      results,
-    );
-  } catch (error) {
-    console.error(
-      "[Auth Store] setAuthenticated: Failed to initialize MCP:",
-      error,
-    );
-  }
+      // Trigger auto-connect for local MCP servers
+      const { initMcpAutoConnect } = await import("@/lib/mcp/auto-connect");
+      console.log(
+        "[Auth Store] setAuthenticated: Triggering MCP auto-connect...",
+      );
+      const results = await initMcpAutoConnect();
+      console.log(
+        "[Auth Store] setAuthenticated: MCP auto-connect results:",
+        results,
+      );
+    } catch (error) {
+      console.error(
+        "[Auth Store] setAuthenticated: Failed to initialize MCP:",
+        error,
+      );
+    }
+  })();
 }
 
 /**
