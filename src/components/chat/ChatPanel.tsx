@@ -495,8 +495,8 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     await attemptRetry(failedMessage, false);
   };
 
-  // Free model ID for balance fallback (Gemini Flash is free/cheap)
-  const FREE_MODEL_ID = "google/gemini-2.5-flash";
+  // Free model ID for balance fallback (Gemini 2.0 Flash Experimental is free)
+  const FREE_MODEL_ID = "google/gemini-2.0-flash-exp:free";
 
   /**
    * Switch to a free model and resend the pending request.
@@ -513,8 +513,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     setBalanceError(null);
     setPendingRequest(null);
 
-    // Resend with the new model
-    await handleSend(request.prompt, request.context);
+    // Restore the input and resend
+    setInput(request.prompt);
+    await sendMessage();
   };
 
   const attemptRetry = async (message: Message, isManual: boolean) => {

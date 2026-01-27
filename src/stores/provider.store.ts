@@ -110,6 +110,11 @@ const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
       name: "Gemini 3 Flash",
       contextWindow: 1000000,
     },
+    {
+      id: "google/gemini-2.0-flash-exp:free",
+      name: "Gemini 2.0 Flash (Free)",
+      contextWindow: 1000000,
+    },
   ],
   anthropic: [
     {
@@ -162,7 +167,7 @@ const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
 
 const DEFAULT_STATE: ProviderState = {
   activeProvider: "seren",
-  activeModel: "google/gemini-2.5-flash",
+  activeModel: "google/gemini-2.0-flash-exp:free",
   configuredProviders: ["seren"],
   oauthProviders: [],
   providerModels: { ...DEFAULT_MODELS },
