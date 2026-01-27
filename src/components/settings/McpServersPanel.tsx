@@ -310,7 +310,9 @@ export const McpServersPanel: Component = () => {
                         </div>
                       </Show>
                     </Show>
-                    <Show when={server.autoConnect && server.name !== "Seren MCP"}>
+                    <Show
+                      when={server.autoConnect && server.name !== "Seren MCP"}
+                    >
                       <span class="text-[11px] text-accent">Auto-connect</span>
                     </Show>
                   </div>

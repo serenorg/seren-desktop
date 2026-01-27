@@ -22,7 +22,12 @@ export const BalanceDisplay: Component = () => {
 
   // Debug: log whenever isLoading changes
   createEffect(() => {
-    console.log("[BalanceDisplay] isLoading:", walletState.isLoading, "balance_usd:", walletState.balance_usd);
+    console.log(
+      "[BalanceDisplay] isLoading:",
+      walletState.isLoading,
+      "balance_usd:",
+      walletState.balance_usd,
+    );
   });
 
   // Determine balance state for styling

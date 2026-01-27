@@ -8,6 +8,7 @@ import {
   createSignal,
   Show,
 } from "solid-js";
+import { saveTab } from "@/lib/files/service";
 import { setSelectedPath } from "@/stores/fileTree";
 import {
   getActiveTab,
@@ -15,7 +16,6 @@ import {
   tabsState,
   updateTabContent,
 } from "@/stores/tabs";
-import { saveTab } from "@/lib/files/service";
 import { FileTabs } from "./FileTabs";
 import { ImageViewer } from "./ImageViewer";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -105,7 +105,10 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
   }
 
   return (
-    <div class="flex flex-col h-full bg-card text-foreground" onKeyDown={handleKeyDown}>
+    <div
+      class="flex flex-col h-full bg-card text-foreground"
+      onKeyDown={handleKeyDown}
+    >
       <Show when={props.onClose}>
         <div class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[rgba(148,163,184,0.15)] bg-[#161b22]">
           <span class="text-xs font-medium text-[#8b949e]">Editor</span>

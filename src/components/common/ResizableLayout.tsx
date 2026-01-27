@@ -1,7 +1,13 @@
 // ABOUTME: Three-column resizable layout with draggable separators.
 // ABOUTME: Provides Cursor-style layout: FileTree | Editor | Chat.
 
-import { createSignal, onCleanup, onMount, Show, type ParentComponent } from "solid-js";
+import {
+  createSignal,
+  onCleanup,
+  onMount,
+  type ParentComponent,
+  Show,
+} from "solid-js";
 
 export interface ResizableLayoutProps {
   /** Initial width of the left panel in pixels */
@@ -51,10 +57,16 @@ function saveWidths(widths: StoredWidths): void {
   }
 }
 
-export const ResizableLayout: ParentComponent<ResizableLayoutProps> = (props) => {
+export const ResizableLayout: ParentComponent<ResizableLayoutProps> = (
+  props,
+) => {
   const stored = loadStoredWidths();
-  const [leftWidth, setLeftWidth] = createSignal(stored?.left ?? props.leftWidth ?? 240);
-  const [rightWidth, setRightWidth] = createSignal(stored?.right ?? props.rightWidth ?? 400);
+  const [leftWidth, setLeftWidth] = createSignal(
+    stored?.left ?? props.leftWidth ?? 240,
+  );
+  const [rightWidth, setRightWidth] = createSignal(
+    stored?.right ?? props.rightWidth ?? 400,
+  );
   const [isDraggingLeft, setIsDraggingLeft] = createSignal(false);
   const [isDraggingRight, setIsDraggingRight] = createSignal(false);
 
@@ -78,7 +90,10 @@ export const ResizableLayout: ParentComponent<ResizableLayoutProps> = (props) =>
 
     if (isDraggingRight()) {
       const newWidth = rect.right - e.clientX;
-      const clamped = Math.max(rightMinWidth, Math.min(rightMaxWidth, newWidth));
+      const clamped = Math.max(
+        rightMinWidth,
+        Math.min(rightMaxWidth, newWidth),
+      );
       setRightWidth(clamped);
     }
   };
@@ -111,10 +126,7 @@ export const ResizableLayout: ParentComponent<ResizableLayoutProps> = (props) =>
       }}
     >
       {/* Left Panel (FileTree) */}
-      <div
-        class="resizable-layout__left"
-        style={{ width: `${leftWidth()}px` }}
-      >
+      <div class="resizable-layout__left" style={{ width: `${leftWidth()}px` }}>
         {props.left}
       </div>
 
@@ -129,15 +141,15 @@ export const ResizableLayout: ParentComponent<ResizableLayoutProps> = (props) =>
       />
 
       {/* Center Panel (Chat) */}
-      <div class="resizable-layout__center">
-        {props.center}
-      </div>
+      <div class="resizable-layout__center">{props.center}</div>
 
       <Show when={props.right}>
         {/* Right Separator */}
         <div
           class="resizable-layout__separator"
-          classList={{ "resizable-layout__separator--active": isDraggingRight() }}
+          classList={{
+            "resizable-layout__separator--active": isDraggingRight(),
+          }}
           onMouseDown={(e) => {
             e.preventDefault();
             setIsDraggingRight(true);
