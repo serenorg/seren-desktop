@@ -1,6 +1,7 @@
 // ABOUTME: MCP Gateway service for fetching tools from Seren publishers via REST API.
 // ABOUTME: Replaces the Node.js bridge with direct HTTP calls to api.serendb.com.
 
+import { appFetch } from "@/lib/fetch";
 import { getApiKey } from "./auth";
 
 const API_BASE = "https://api.serendb.com";
@@ -118,7 +119,7 @@ async function gatewayFetch<T>(
   }
 
   const url = `${API_BASE}${endpoint}`;
-  const response = await fetch(url, {
+  const response = await appFetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
