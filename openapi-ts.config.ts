@@ -11,7 +11,7 @@ export default defineConfig({
     "@hey-api/sdk",
     {
       name: "@hey-api/client-fetch",
-      runtimeConfigPath: "./client-config",
+      runtimeConfigPath: "../client-config",
     },
   ],
 });

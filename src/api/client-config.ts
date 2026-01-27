@@ -1,7 +1,7 @@
 // ABOUTME: Hey-API client configuration for Tauri environment.
 // ABOUTME: Integrates with Tauri HTTP plugin and handles token refresh.
 
-import type { ClientOptions, Config } from "./client";
+import type { ClientOptions, Config } from "./generated/client";
 import { apiBase } from "@/lib/config";
 import { getToken, isTauriRuntime } from "@/lib/tauri-bridge";
 
