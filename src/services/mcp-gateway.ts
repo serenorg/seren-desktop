@@ -9,6 +9,9 @@ const API_BASE = "https://api.serendb.com";
 // Cache configuration
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
+// Concurrency limit to avoid overwhelming the backend
+const MAX_CONCURRENT_REQUESTS = 5;
+
 // Types matching the backend API responses
 export interface McpToolInfo {
   name: string;
@@ -53,6 +56,26 @@ export interface GatewayTool {
   publisher: string;
   publisherName: string;
   tool: McpToolInfo;
+}
+
+/**
+ * Process items with limited concurrency to avoid overwhelming the backend.
+ * Uses a simple chunking approach - process N items at a time.
+ */
+async function processInBatches<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  batchSize: number,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = [];
+
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.allSettled(batch.map(fn));
+    results.push(...batchResults);
+  }
+
+  return results;
 }
 
 /**
@@ -226,38 +249,40 @@ export async function fetchAllGatewayTools(): Promise<GatewayTool[]> {
     const allTools: GatewayTool[] = [];
     const errors: { publisher: string; status: number; message: string }[] = [];
 
-    // Fetch tools from each publisher in parallel
-    const results = await Promise.allSettled(
-      publishers.map(async (publisher) => {
-        try {
-          const tools = await fetchPublisherTools(publisher.slug, apiKey);
-          return tools.map((tool) => ({
-            publisher: publisher.slug,
-            publisherName: publisher.name,
-            tool,
-          }));
-        } catch (error) {
-          if (error instanceof McpGatewayError) {
-            errors.push({
-              publisher: publisher.slug,
-              status: error.status,
-              message: error.message,
-            });
-          } else {
-            errors.push({
-              publisher: publisher.slug,
-              status: 0,
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
-          return [];
-        }
-      }),
+    // Fetch tools in batches to avoid overwhelming the backend
+    const results = await processInBatches(
+      publishers,
+      async (publisher) => {
+        const tools = await fetchPublisherTools(publisher.slug, apiKey);
+        return tools.map((tool) => ({
+          publisher: publisher.slug,
+          publisherName: publisher.name,
+          tool,
+        }));
+      },
+      MAX_CONCURRENT_REQUESTS,
     );
 
-    for (const result of results) {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const publisher = publishers[i];
       if (result.status === "fulfilled") {
         allTools.push(...result.value);
+      } else {
+        const error = result.reason;
+        if (error instanceof McpGatewayError) {
+          errors.push({
+            publisher: publisher.slug,
+            status: error.status,
+            message: error.message,
+          });
+        } else {
+          errors.push({
+            publisher: publisher.slug,
+            status: 0,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     }
 
@@ -341,38 +366,40 @@ export async function initializeGateway(): Promise<void> {
     const allTools: GatewayTool[] = [];
     const errors: { publisher: string; status: number; message: string }[] = [];
 
-    // Fetch tools from each publisher in parallel
-    const results = await Promise.allSettled(
-      cachedPublishers.map(async (publisher) => {
-        try {
-          const tools = await fetchPublisherTools(publisher.slug, apiKey);
-          return tools.map((tool) => ({
-            publisher: publisher.slug,
-            publisherName: publisher.name,
-            tool,
-          }));
-        } catch (error) {
-          if (error instanceof McpGatewayError) {
-            errors.push({
-              publisher: publisher.slug,
-              status: error.status,
-              message: error.message,
-            });
-          } else {
-            errors.push({
-              publisher: publisher.slug,
-              status: 0,
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
-          return [];
-        }
-      }),
+    // Fetch tools in batches to avoid overwhelming the backend
+    const results = await processInBatches(
+      cachedPublishers,
+      async (publisher) => {
+        const tools = await fetchPublisherTools(publisher.slug, apiKey);
+        return tools.map((tool) => ({
+          publisher: publisher.slug,
+          publisherName: publisher.name,
+          tool,
+        }));
+      },
+      MAX_CONCURRENT_REQUESTS,
     );
 
-    for (const result of results) {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const publisher = cachedPublishers[i];
       if (result.status === "fulfilled") {
         allTools.push(...result.value);
+      } else {
+        const error = result.reason;
+        if (error instanceof McpGatewayError) {
+          errors.push({
+            publisher: publisher.slug,
+            status: error.status,
+            message: error.message,
+          });
+        } else {
+          errors.push({
+            publisher: publisher.slug,
+            status: 0,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     }
 
@@ -391,11 +418,11 @@ export async function initializeGateway(): Promise<void> {
           .map(([status, count]) => `${status}: ${count}`)
           .join(", "),
       );
-      errors.slice(0, 5).forEach((e) => {
+      errors.slice(0, 3).forEach((e) => {
         console.warn(`  - ${e.publisher}: ${e.status} ${e.message}`);
       });
-      if (errors.length > 5) {
-        console.warn(`  ... and ${errors.length - 5} more`);
+      if (errors.length > 3) {
+        console.warn(`  ... and ${errors.length - 3} more`);
       }
     }
 
