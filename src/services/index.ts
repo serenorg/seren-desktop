@@ -1,6 +1,7 @@
 // ABOUTME: Re-exports all services for convenient importing.
 // ABOUTME: Import from "@/services" instead of individual service files.
 
+export * as acp from "./acp";
 export * as auth from "./auth";
 export * as autoTopUp from "./autoTopUp";
 export * as catalog from "./catalog";
