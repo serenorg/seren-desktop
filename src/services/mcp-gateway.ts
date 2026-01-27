@@ -183,10 +183,8 @@ export async function fetchGatewayPublishers(
       offset += limit;
     }
 
-    // Filter to only active publishers with MCP endpoints
-    return allPublishers.filter(
-      (p) => p.is_active && (p.mcp_endpoint || p.slug),
-    );
+    // Filter to only active publishers with MCP endpoints configured
+    return allPublishers.filter((p) => p.is_active && p.mcp_endpoint);
   });
 }
 
