@@ -11,6 +11,9 @@ on:
 env:
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+  # Signing availability flags (for conditional steps)
+  HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
+  HAS_WINDOWS_SIGNING: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
 
 jobs:
   create-release:
@@ -86,9 +89,9 @@ jobs:
       - name: Prepare embedded runtime
         run: pnpm prepare:runtime
 
-      # macOS: Import certificates and setup keychain
+      # macOS: Import certificates and setup keychain (skip if no certificate)
       - name: Import macOS certificates
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -111,9 +114,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-      # Windows: Setup certificate for signing
+      # Windows: Setup certificate for signing (skip if no certificate)
       - name: Setup Windows signing
-        if: matrix.os == 'windows-latest' && secrets.WINDOWS_CERTIFICATE != ''
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -134,9 +137,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: pnpm tauri build --target ${{ matrix.target }}
 
-      # macOS: Notarize the app
+      # macOS: Notarize the app (skip if no Apple ID configured)
       - name: Notarize macOS app
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -193,9 +196,9 @@ jobs:
           name: Seren-Desktop-${{ matrix.name }}.AppImage
           path: src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
 
-      # Clean up macOS keychain
+      # Clean up macOS keychain (only if we created one)
       - name: Cleanup macOS keychain
-        if: matrix.os == 'macos-latest' && always()
+        if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true' && always()
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
 
