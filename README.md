@@ -10,8 +10,10 @@ A lightweight (~10MB) AI desktop client built with Tauri, SolidJS, and Monaco Ed
 ### AI Chat
 
 - **Multi-model support** - Claude, GPT-4, Gemini via Seren Gateway or direct API keys
+- **Free tier included** - Start chatting immediately with Gemini 2.0 Flash (Free) - no payment required
 - **Multi-tab conversations** - Work on multiple chats simultaneously with tabbed interface
 - **Streaming responses** - Real-time token-by-token output
+- **Smart balance warnings** - Friendly prompts to top up or switch to free model when low on credits
 - **Conversation persistence** - Chat history saved locally in SQLite
 - **Auto-refresh authentication** - Seamless token refresh on expiration
 
