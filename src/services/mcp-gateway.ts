@@ -6,6 +6,9 @@ import { getApiKey } from "./auth";
 
 const API_BASE = "https://api.serendb.com";
 
+// Cache configuration
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 // Types matching the backend API responses
 export interface McpToolInfo {
   name: string;
@@ -141,13 +144,42 @@ async function gatewayFetch<T>(
 }
 
 /**
- * Fetch all active publishers from the gateway.
+ * Response shape from /agent/publishers (paginated).
+ */
+interface PaginatedPublishersResponse {
+  data: Publisher[];
+  pagination: { offset: number; limit: number; total: number };
+}
+
+/**
+ * Fetch all active publishers from the gateway (handles pagination).
  */
 export async function fetchGatewayPublishers(): Promise<Publisher[]> {
   return withRetry(async () => {
-    const publishers = await gatewayFetch<Publisher[]>("/api/agent/publishers");
+    const allPublishers: Publisher[] = [];
+    let offset = 0;
+    const limit = 100; // Fetch in batches of 100
+
+    while (true) {
+      const response = await gatewayFetch<PaginatedPublishersResponse>(
+        `/agent/publishers?offset=${offset}&limit=${limit}`,
+      );
+      allPublishers.push(...response.data);
+
+      // Check if we've fetched all publishers
+      if (
+        response.data.length < limit ||
+        allPublishers.length >= response.pagination.total
+      ) {
+        break;
+      }
+      offset += limit;
+    }
+
     // Filter to only active publishers with MCP endpoints
-    return publishers.filter((p) => p.is_active && (p.mcp_endpoint || p.slug));
+    return allPublishers.filter(
+      (p) => p.is_active && (p.mcp_endpoint || p.slug),
+    );
   });
 }
 
@@ -236,21 +268,68 @@ export async function callGatewayTool(
 
 // Singleton state for caching tools
 let cachedTools: GatewayTool[] = [];
-let toolsLoaded = false;
+let cachedPublishers: Publisher[] = [];
+let lastFetchedAt: number | null = null;
 let loadingPromise: Promise<void> | null = null;
 
 /**
+ * Check if the cache is still valid (not expired).
+ */
+function isCacheValid(): boolean {
+  if (!lastFetchedAt || cachedTools.length === 0) return false;
+  return Date.now() - lastFetchedAt < CACHE_TTL_MS;
+}
+
+/**
  * Initialize the gateway by loading all tools.
- * Safe to call multiple times - will only load once.
+ * Safe to call multiple times - uses cached data if still valid.
  */
 export async function initializeGateway(): Promise<void> {
-  if (toolsLoaded) return;
+  // Return cached data if still valid
+  if (isCacheValid()) {
+    console.log("[MCP Gateway] Using cached tools (still valid)");
+    return;
+  }
+
   if (loadingPromise) return loadingPromise;
 
   loadingPromise = (async () => {
     console.log("[MCP Gateway] Initializing...");
-    cachedTools = await fetchAllGatewayTools();
-    toolsLoaded = true;
+    cachedPublishers = await fetchGatewayPublishers();
+    console.log(
+      `[MCP Gateway] Found ${cachedPublishers.length} active publishers`,
+    );
+
+    const allTools: GatewayTool[] = [];
+
+    // Fetch tools from each publisher in parallel
+    const results = await Promise.allSettled(
+      cachedPublishers.map(async (publisher) => {
+        try {
+          const tools = await fetchPublisherTools(publisher.slug);
+          return tools.map((tool) => ({
+            publisher: publisher.slug,
+            publisherName: publisher.name,
+            tool,
+          }));
+        } catch (error) {
+          console.warn(
+            `[MCP Gateway] Failed to fetch tools from ${publisher.slug}:`,
+            error,
+          );
+          return [];
+        }
+      }),
+    );
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        allTools.push(...result.value);
+      }
+    }
+
+    cachedTools = allTools;
+    lastFetchedAt = Date.now();
     console.log("[MCP Gateway] Initialized with", cachedTools.length, "tools");
   })();
 
@@ -267,10 +346,10 @@ export function getGatewayTools(): GatewayTool[] {
 }
 
 /**
- * Check if gateway is initialized.
+ * Check if gateway is initialized with valid cache.
  */
 export function isGatewayInitialized(): boolean {
-  return toolsLoaded;
+  return isCacheValid();
 }
 
 /**
@@ -278,15 +357,30 @@ export function isGatewayInitialized(): boolean {
  */
 export function resetGateway(): void {
   cachedTools = [];
-  toolsLoaded = false;
+  cachedPublishers = [];
+  lastFetchedAt = null;
   loadingPromise = null;
 }
 
 /**
- * Refresh tools from the gateway.
+ * Force refresh tools from the gateway (bypasses TTL).
  */
 export async function refreshGatewayTools(): Promise<GatewayTool[]> {
-  toolsLoaded = false;
+  lastFetchedAt = null; // Invalidate cache
   await initializeGateway();
   return cachedTools;
+}
+
+/**
+ * Get cached publishers (available after initialization).
+ */
+export function getGatewayPublishers(): Publisher[] {
+  return cachedPublishers;
+}
+
+/**
+ * Get cache age in milliseconds, or null if not cached.
+ */
+export function getCacheAge(): number | null {
+  return lastFetchedAt ? Date.now() - lastFetchedAt : null;
 }
