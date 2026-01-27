@@ -34,6 +34,12 @@ import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
 import { fileTreeState, setNodes } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
+import {
+  type BalanceInfo,
+  BalanceWarning,
+  isBalanceError,
+  parseBalanceError,
+} from "./BalanceWarning";
 import { ChatTabBar } from "./ChatTabBar";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
@@ -96,6 +102,10 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
+  // Balance error state for friendly warning display
+  const [balanceError, setBalanceError] = createSignal<BalanceInfo | null>(
+    null,
+  );
   // Input history navigation (terminal-style up/down arrow)
   const [historyIndex, setHistoryIndex] = createSignal(-1); // -1 = not browsing history
   const [savedInput, setSavedInput] = createSignal(""); // save current input before browsing
@@ -406,6 +416,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     chatStore.setLoading(true);
     setStreamingSession(session);
     chatStore.setError(null);
+    setBalanceError(null); // Clear any previous balance warning
     setInput("");
     // Reset history navigation state
     setHistoryIndex(-1);
@@ -440,6 +451,17 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   ) => {
     setStreamingSession(null);
     chatStore.setLoading(false);
+
+    // Check if this is a balance error - show friendly warning instead of ugly JSON
+    if (isBalanceError(error.message)) {
+      const balanceInfo = parseBalanceError(error.message);
+      setBalanceError(balanceInfo);
+      // Don't set the raw error message for balance errors
+      chatStore.setError(null);
+      // Don't add a failed message for balance errors - just show the warning
+      return;
+    }
+
     chatStore.setError(error.message);
 
     const failedMessage: Message = {
@@ -673,6 +695,16 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                   </Show>
                 );
               }}
+            </Show>
+
+            {/* Balance warning for insufficient funds */}
+            <Show when={balanceError()}>
+              {(info) => (
+                <BalanceWarning
+                  balanceInfo={info()}
+                  onDismiss={() => setBalanceError(null)}
+                />
+              )}
             </Show>
           </div>
 
