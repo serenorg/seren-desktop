@@ -94,6 +94,12 @@ const DEFAULT_MODELS: ProviderModel[] = [
     name: "Gemini 3 Flash",
     contextWindow: 1000000,
   },
+  // Zhipu AI
+  {
+    id: "thudm/glm-4",
+    name: "GLM-4",
+    contextWindow: 128000,
+  },
 ];
 
 async function requireToken(): Promise<string> {
@@ -286,6 +292,16 @@ export const serenProvider: ProviderAdapter = {
     }
 
     const data = await response.json();
+
+    // Check for wrapped error responses (HTTP 200 but error in body)
+    if (data.status && data.status >= 400 && data.body?.error) {
+      const error = data.body.error;
+      const metadata = error.metadata || {};
+      const providerName = metadata.provider_name || "Provider";
+      const rawError = metadata.raw || error.message || "Unknown error";
+      throw new Error(`${providerName} error (${data.status}): ${rawError}`);
+    }
+
     return extractContent(data);
   },
 
@@ -462,5 +478,18 @@ export async function sendMessageWithTools(
   }
 
   const data = await response.json();
-  return extractChatResponse(data);
+  console.log("[sendMessageWithTools] Raw API response:", JSON.stringify(data, null, 2));
+
+  // Check for wrapped error responses (HTTP 200 but error in body)
+  if (data.status && data.status >= 400 && data.body?.error) {
+    const error = data.body.error;
+    const metadata = error.metadata || {};
+    const providerName = metadata.provider_name || "Provider";
+    const rawError = metadata.raw || error.message || "Unknown error";
+    throw new Error(`${providerName} error (${data.status}): ${rawError}`);
+  }
+
+  const parsed = extractChatResponse(data);
+  console.log("[sendMessageWithTools] Parsed response:", parsed);
+  return parsed;
 }

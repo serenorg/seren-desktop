@@ -191,22 +191,26 @@ export async function fetchGatewayPublishers(
 /**
  * Fetch tools for a specific publisher.
  * Accepts optional apiKey to avoid redundant auth calls during batch operations.
+ *
+ * NOTE: Currently disabled - the /api/agent/mcp/tools endpoint returns 404.
+ * The endpoint is defined in the OpenAPI spec but not implemented on the backend.
+ * Once implemented, restore the original implementation below.
  */
 export async function fetchPublisherTools(
-  publisherSlug: string,
-  apiKey?: string,
+  _publisherSlug: string,
+  _apiKey?: string,
 ): Promise<McpToolInfo[]> {
-  return withRetry(async () => {
-    const response = await gatewayFetch<McpToolsResponse>(
-      "/api/agent/mcp/tools",
-      {
-        method: "POST",
-        body: JSON.stringify({ publisher: publisherSlug }),
-      },
-      apiKey,
-    );
-    return response.tools;
-  });
+  // TODO: Re-enable once backend implements /api/agent/mcp/tools
+  // Original implementation:
+  // return withRetry(async () => {
+  //   const response = await gatewayFetch<McpToolsResponse>(
+  //     "/api/agent/mcp/tools",
+  //     { method: "POST", body: JSON.stringify({ publisher: publisherSlug }) },
+  //     apiKey,
+  //   );
+  //   return response.tools;
+  // });
+  return [];
 }
 
 /**
@@ -341,72 +345,14 @@ export async function initializeGateway(): Promise<void> {
       `[MCP Gateway] Found ${cachedPublishers.length} active publishers`,
     );
 
-    const allTools: GatewayTool[] = [];
-    const errors: { publisher: string; status: number; message: string }[] = [];
-
-    // Fetch tools from each publisher in parallel
-    const results = await Promise.allSettled(
-      cachedPublishers.map(async (publisher) => {
-        try {
-          const tools = await fetchPublisherTools(publisher.slug, apiKey);
-          return tools.map((tool) => ({
-            publisher: publisher.slug,
-            publisherName: publisher.name,
-            tool,
-          }));
-        } catch (error) {
-          // Track error details for debugging
-          if (error instanceof McpGatewayError) {
-            errors.push({
-              publisher: publisher.slug,
-              status: error.status,
-              message: error.message,
-            });
-          } else {
-            errors.push({
-              publisher: publisher.slug,
-              status: 0,
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
-          return [];
-        }
-      }),
-    );
-
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        allTools.push(...result.value);
-      }
-    }
-
-    // Log error summary for debugging
-    if (errors.length > 0) {
-      const byStatus = errors.reduce(
-        (acc, e) => {
-          acc[e.status] = (acc[e.status] || 0) + 1;
-          return acc;
-        },
-        {} as Record<number, number>,
-      );
-      console.warn(
-        `[MCP Gateway] ${errors.length} publishers failed:`,
-        Object.entries(byStatus)
-          .map(([status, count]) => `${status}: ${count}`)
-          .join(", "),
-      );
-      // Log first few errors with details
-      errors.slice(0, 5).forEach((e) => {
-        console.warn(`  - ${e.publisher}: ${e.status} ${e.message}`);
-      });
-      if (errors.length > 5) {
-        console.warn(`  ... and ${errors.length - 5} more`);
-      }
-    }
-
-    cachedTools = allTools;
+    // NOTE: Tool fetching is disabled until backend implements /api/agent/mcp/tools
+    // The endpoint is defined in OpenAPI spec but returns 404 from the server.
+    // For now, we cache publishers but tools will be empty.
+    cachedTools = [];
     lastFetchedAt = Date.now();
-    console.log("[MCP Gateway] Initialized with", cachedTools.length, "tools");
+    console.log(
+      "[MCP Gateway] Initialized (tool discovery disabled - endpoint not implemented)",
+    );
   })();
 
   await loadingPromise;
