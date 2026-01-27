@@ -542,7 +542,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
           <div class="flex items-center gap-3">
             <AgentModeToggle />
             <Show when={!acpStore.agentModeEnabled}>
-              <span class="text-xs font-medium text-[#8b949e]">Chat</span>
               <Show when={chatStore.messages.length > 0}>
                 <div class="flex items-center gap-1.5 text-[10px] text-[#484f58]">
                   <div
