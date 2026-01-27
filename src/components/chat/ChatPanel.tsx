@@ -35,6 +35,7 @@ import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
 import { fileTreeState, setNodes } from "@/stores/fileTree";
+import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import {
   type BalanceInfo,
@@ -108,6 +109,11 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [balanceError, setBalanceError] = createSignal<BalanceInfo | null>(
     null,
   );
+  // Pending request that caused the balance error (for retry after model switch)
+  const [pendingRequest, setPendingRequest] = createSignal<{
+    prompt: string;
+    context?: ChatContext;
+  } | null>(null);
   // Tool iteration limit state for "Continue" functionality
   const [iterationLimitState, setIterationLimitState] = createSignal<{
     state: ToolIterationState;
@@ -464,6 +470,8 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     if (isBalanceError(error.message)) {
       const balanceInfo = parseBalanceError(error.message);
       setBalanceError(balanceInfo);
+      // Save the request for retry after model switch
+      setPendingRequest({ prompt: session.prompt, context: session.context });
       // Don't set the raw error message for balance errors
       chatStore.setError(null);
       // Don't add a failed message for balance errors - just show the warning
@@ -485,6 +493,28 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
 
     chatStore.addMessage(failedMessage);
     await attemptRetry(failedMessage, false);
+  };
+
+  // Free model ID for balance fallback (Gemini Flash is free/cheap)
+  const FREE_MODEL_ID = "google/gemini-2.5-flash";
+
+  /**
+   * Switch to a free model and resend the pending request.
+   * Called when user clicks "Switch to Free Model" in balance warning.
+   */
+  const handleSwitchToFreeModel = async () => {
+    const request = pendingRequest();
+    if (!request) return;
+
+    // Switch to free model
+    providerStore.setActiveModel(FREE_MODEL_ID);
+
+    // Clear error states
+    setBalanceError(null);
+    setPendingRequest(null);
+
+    // Resend with the new model
+    await handleSend(request.prompt, request.context);
   };
 
   const attemptRetry = async (message: Message, isManual: boolean) => {
@@ -719,7 +749,11 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
               {(info) => (
                 <BalanceWarning
                   balanceInfo={info()}
-                  onDismiss={() => setBalanceError(null)}
+                  onDismiss={() => {
+                    setBalanceError(null);
+                    setPendingRequest(null);
+                  }}
+                  onSwitchToFreeModel={handleSwitchToFreeModel}
                 />
               )}
             </Show>

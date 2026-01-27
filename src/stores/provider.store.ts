@@ -162,7 +162,7 @@ const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
 
 const DEFAULT_STATE: ProviderState = {
   activeProvider: "seren",
-  activeModel: "anthropic/claude-sonnet-4",
+  activeModel: "google/gemini-2.5-flash",
   configuredProviders: ["seren"],
   oauthProviders: [],
   providerModels: { ...DEFAULT_MODELS },
