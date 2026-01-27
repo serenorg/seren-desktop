@@ -74,7 +74,10 @@ async function refreshBalance(): Promise<void> {
       lastUpdated: new Date().toISOString(),
       isLoading: false,
     });
-    console.log("[Wallet Store] State updated, isLoading:", walletState.isLoading);
+    console.log(
+      "[Wallet Store] State updated, isLoading:",
+      walletState.isLoading,
+    );
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to fetch balance";

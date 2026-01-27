@@ -164,7 +164,8 @@ function App() {
   // Get the "active" panel for header highlighting
   // If an overlay is open, show that; if editor is visible, show "editor"; otherwise "chat"
   const activePanel = () => {
-    if (overlayPanel()) return overlayPanel()!;
+    const overlay = overlayPanel();
+    if (overlay) return overlay;
     return showEditor() ? "editor" : "chat";
   };
 
