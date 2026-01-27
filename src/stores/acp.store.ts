@@ -35,7 +35,6 @@ export interface ActiveSession {
   plan: PlanEntry[];
   pendingToolCalls: Map<string, ToolCallEvent>;
   streamingContent: string;
-  unsubscribe?: UnlistenFn;
 }
 
 interface AcpState {
@@ -64,6 +63,8 @@ const [state, setState] = createStore<AcpState>({
   isLoading: false,
   error: null,
 });
+
+let globalUnsubscribe: UnlistenFn | null = null;
 
 // ============================================================================
 // Store
@@ -197,13 +198,16 @@ export const acpStore = {
       setState("sessions", info.id, session);
       setState("activeSessionId", info.id);
 
-      // Subscribe to session events for future updates
-      const unsubscribe = await acpService.subscribeToSession(
-        info.id,
-        (event) => this.handleSessionEvent(info.id, event),
-      );
-
-      setState("sessions", info.id, "unsubscribe", unsubscribe);
+      // Subscribe once to all ACP events and route by sessionId.
+      // This avoids missing chunks due to filtering and scales better across sessions.
+      if (!globalUnsubscribe) {
+        globalUnsubscribe = await acpService.subscribeToAllEvents((event) => {
+          const eventSessionId = event.data.sessionId;
+          if (!eventSessionId) return;
+          if (!state.sessions[eventSessionId]) return;
+          this.handleSessionEvent(eventSessionId, event);
+        });
+      }
 
       // Wait for ready event with timeout (agent initialization can take a moment)
       const timeoutPromise = new Promise<string>((_, reject) => {
@@ -257,11 +261,6 @@ export const acpStore = {
     const session = state.sessions[sessionId];
     if (!session) return;
 
-    // Unsubscribe from events
-    if (session.unsubscribe) {
-      session.unsubscribe();
-    }
-
     try {
       await acpService.terminateSession(sessionId);
     } catch (error) {
@@ -282,6 +281,12 @@ export const acpStore = {
       );
       setState("activeSessionId", remainingIds[0] ?? null);
     }
+
+    // Stop global event subscription when no sessions remain.
+    if (Object.keys(state.sessions).length === 0 && globalUnsubscribe) {
+      globalUnsubscribe();
+      globalUnsubscribe = null;
+    }
   },
 
   /**
@@ -300,11 +305,24 @@ export const acpStore = {
    */
   async sendPrompt(prompt: string, context?: Array<{ text?: string }>) {
     const sessionId = state.activeSessionId;
-    console.log("[AcpStore] sendPrompt called:", { sessionId, prompt: prompt.slice(0, 50) });
+    console.log("[AcpStore] sendPrompt called:", {
+      sessionId,
+      prompt: prompt.slice(0, 50),
+    });
     if (!sessionId) {
       setState("error", "No active session");
       return;
     }
+
+    // Optimistically mark as prompting so the UI can show a loading state
+    // immediately, even before backend events arrive.
+    setState(
+      "sessions",
+      sessionId,
+      "info",
+      "status",
+      "prompting" as SessionStatus,
+    );
 
     // Add user message
     const userMessage: AgentMessage = {
@@ -441,7 +459,11 @@ export const acpStore = {
   },
 
   handleMessageChunk(sessionId: string, text: string, _isThought?: boolean) {
-    console.log("[AcpStore] handleMessageChunk:", { sessionId, text: text.slice(0, 50) + "...", isThought: _isThought });
+    console.log("[AcpStore] handleMessageChunk:", {
+      sessionId,
+      text: `${text.slice(0, 50)}...`,
+      isThought: _isThought,
+    });
     // Append to streaming content
     // Note: isThought could be used to style thought messages differently
     setState(

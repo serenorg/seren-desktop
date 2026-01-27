@@ -229,7 +229,9 @@ export async function subscribeToSession(
   sessionId: string,
   callback: (event: AcpEvent) => void,
 ): Promise<UnlistenFn> {
-  console.log(`[AcpService] subscribeToSession called for sessionId: ${sessionId}`);
+  console.log(
+    `[AcpService] subscribeToSession called for sessionId: ${sessionId}`,
+  );
   const unlisteners: UnlistenFn[] = [];
 
   // Helper to filter events by sessionId and create properly typed events
@@ -237,7 +239,9 @@ export async function subscribeToSession(
     type: E["type"],
   ): (data: E["data"]) => void {
     return (data) => {
-      console.log(`[AcpService] createHandler received ${type}: sessionId=${data.sessionId}, expected=${sessionId}, match=${data.sessionId === sessionId}`);
+      console.log(
+        `[AcpService] createHandler received ${type}: sessionId=${data.sessionId}, expected=${sessionId}, match=${data.sessionId === sessionId}`,
+      );
       if (data.sessionId === sessionId) {
         callback({ type, data } as E);
       }

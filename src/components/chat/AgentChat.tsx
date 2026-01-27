@@ -47,7 +47,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     console.log("[AgentChat] Effect triggered:", {
       messagesCount: messages.length,
       streamingLength: streaming.length,
-      streamingPreview: streaming.slice(0, 100)
+      streamingPreview: streaming.slice(0, 100),
     });
     requestAnimationFrame(scrollToBottom);
   });
@@ -224,6 +224,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             }
           >
             <For each={acpStore.messages}>{renderMessage}</For>
+
+            {/* Loading placeholder while waiting for first chunk */}
+            <Show when={isPrompting() && !acpStore.streamingContent}>
+              <article class="px-5 py-4 border-b border-[#21262d]">
+                <div class="flex items-center gap-2 text-sm text-[#8b949e]">
+                  <span class="inline-block w-2 h-2 rounded-full bg-[#58a6ff] animate-pulse" />
+                  <span>Waiting for agent response…</span>
+                </div>
+              </article>
+            </Show>
 
             {/* Streaming Content */}
             <Show when={acpStore.streamingContent}>

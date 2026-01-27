@@ -35,14 +35,14 @@ import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
 import { fileTreeState, setNodes } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
+import { AgentChat } from "./AgentChat";
+import { AgentModeToggle } from "./AgentModeToggle";
 import {
   type BalanceInfo,
   BalanceWarning,
   isBalanceError,
   parseBalanceError,
 } from "./BalanceWarning";
-import { AgentChat } from "./AgentChat";
-import { AgentModeToggle } from "./AgentModeToggle";
 import { ChatTabBar } from "./ChatTabBar";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
@@ -588,16 +588,14 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
             </div>
             <div class="flex gap-2 items-center">
               <Show when={!acpStore.agentModeEnabled}>
-                <>
-                  <ThinkingToggle />
-                  <button
-                    type="button"
-                    class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1 rounded-md text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] hover:border-[#484f58]"
-                    onClick={clearHistory}
-                  >
-                    Clear
-                  </button>
-                </>
+                <ThinkingToggle />
+                <button
+                  type="button"
+                  class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1 rounded-md text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] hover:border-[#484f58]"
+                  onClick={clearHistory}
+                >
+                  Clear
+                </button>
               </Show>
             </div>
           </header>
@@ -651,7 +649,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                             <div class="mt-3 px-3 py-2 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded-md flex items-center gap-3 text-[13px] text-[#f85149]">
                               <span>{message.error ?? "Message failed"}</span>
                               <Show
-                                when={chatStore.retryingMessageId === message.id}
+                                when={
+                                  chatStore.retryingMessageId === message.id
+                                }
                               >
                                 <span>
                                   Retrying (
@@ -701,7 +701,11 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                           <ToolStreamingMessage
                             stream={(session as ToolStreamingSession).stream}
                             onComplete={(content, thinking) =>
-                              handleStreamingComplete(session, content, thinking)
+                              handleStreamingComplete(
+                                session,
+                                content,
+                                thinking,
+                              )
                             }
                             onError={(error) =>
                               handleStreamingError(session, error)

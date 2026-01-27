@@ -541,58 +541,59 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         <header class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[#21262d] bg-[#161b22]">
           <div class="flex items-center gap-3">
             <AgentModeToggle />
-            <Show when={!acpStore.agentModeEnabled && chatStore.messages.length > 0}>
-              <div class="flex items-center gap-1.5 text-[10px] text-[#484f58]">
-                <div
-                  class="w-12 h-1.5 bg-[#21262d] rounded-full overflow-hidden"
-                  title={`Context: ${chatStore.contextUsagePercent}% (${chatStore.estimatedTokens.toLocaleString()} tokens)`}
-                >
+            <Show when={!acpStore.agentModeEnabled}>
+              <span class="text-xs font-medium text-[#8b949e]">Chat</span>
+              <Show when={chatStore.messages.length > 0}>
+                <div class="flex items-center gap-1.5 text-[10px] text-[#484f58]">
                   <div
-                    class={`h-full rounded-full transition-all ${
-                      chatStore.contextUsagePercent >= 80
-                        ? "bg-[#f85149]"
-                        : chatStore.contextUsagePercent >= 50
-                          ? "bg-[#d29922]"
-                          : "bg-[#238636]"
-                    }`}
-                    style={{ width: `${chatStore.contextUsagePercent}%` }}
-                  />
+                    class="w-12 h-1.5 bg-[#21262d] rounded-full overflow-hidden"
+                    title={`Context: ${chatStore.contextUsagePercent}% (${chatStore.estimatedTokens.toLocaleString()} tokens)`}
+                  >
+                    <div
+                      class={`h-full rounded-full transition-all ${
+                        chatStore.contextUsagePercent >= 80
+                          ? "bg-[#f85149]"
+                          : chatStore.contextUsagePercent >= 50
+                            ? "bg-[#d29922]"
+                            : "bg-[#238636]"
+                      }`}
+                      style={{ width: `${chatStore.contextUsagePercent}%` }}
+                    />
+                  </div>
+                  <span>{chatStore.contextUsagePercent}%</span>
                 </div>
-                <span>{chatStore.contextUsagePercent}%</span>
-              </div>
+              </Show>
             </Show>
           </div>
           <div class="flex items-center gap-2">
             <ThinkingToggle />
             <Show when={!acpStore.agentModeEnabled}>
-              <>
-                <Show
-                  when={
-                    chatStore.messages.length >
-                    settingsStore.get("autoCompactPreserveMessages")
-                  }
-                >
-                  <button
-                    type="button"
-                    class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() =>
-                      chatStore.compactConversation(
-                        settingsStore.get("autoCompactPreserveMessages"),
-                      )
-                    }
-                    disabled={chatStore.isCompacting}
-                  >
-                    {chatStore.isCompacting ? "Compacting..." : "Compact"}
-                  </button>
-                </Show>
+              <Show
+                when={
+                  chatStore.messages.length >
+                  settingsStore.get("autoCompactPreserveMessages")
+                }
+              >
                 <button
                   type="button"
-                  class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3]"
-                  onClick={clearHistory}
+                  class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() =>
+                    chatStore.compactConversation(
+                      settingsStore.get("autoCompactPreserveMessages"),
+                    )
+                  }
+                  disabled={chatStore.isCompacting}
                 >
-                  Clear
+                  {chatStore.isCompacting ? "Compacting..." : "Compact"}
                 </button>
-              </>
+              </Show>
+              <button
+                type="button"
+                class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3]"
+                onClick={clearHistory}
+              >
+                Clear
+              </button>
             </Show>
           </div>
         </header>

@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter, State};
+use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -380,6 +381,30 @@ fn handle_session_notification(
     }
 }
 
+fn normalize_cwd(cwd: &str) -> Result<String, String> {
+    let cwd_path = std::path::PathBuf::from(cwd);
+    let cwd_abs = if cwd_path.is_absolute() {
+        cwd_path
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("Failed to resolve current directory: {e}"))?
+            .join(cwd_path)
+    };
+
+    if !cwd_abs.is_dir() {
+        return Err(format!(
+            "Working directory does not exist: {}",
+            cwd_abs.display()
+        ));
+    }
+
+    Ok(cwd_abs
+        .canonicalize()
+        .unwrap_or(cwd_abs)
+        .to_string_lossy()
+        .to_string())
+}
+
 /// Spawn a new ACP agent session
 #[tauri::command]
 pub async fn acp_spawn(
@@ -388,6 +413,7 @@ pub async fn acp_spawn(
     agent_type: AgentType,
     cwd: String,
 ) -> Result<AcpSessionInfo, String> {
+    let cwd = normalize_cwd(&cwd)?;
     let session_id = Uuid::new_v4().to_string();
     let now = jiff::Timestamp::now();
 
@@ -497,19 +523,27 @@ async fn run_session_worker(
     eprintln!("[ACP] Spawning agent: {} {:?} in {}", command, args, cwd);
 
     // Spawn the agent process
-    let mut child = Command::new(&command)
-        .args(&args)
+    let mut cmd = Command::new(&command);
+    cmd.args(&args)
         .current_dir(&cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            format!(
-                "Failed to spawn {} {:?}: {}. Make sure seren-acp-agent is built and available.",
-                command, args, e
-            )
-        })?;
+        .stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true);
+
+    // Ensure the agent can find bundled Node/Git when running inside the app bundle.
+    // We intentionally avoid mutating the process-wide PATH; we only inject it into this child.
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    if !embedded_path.is_empty() {
+        cmd.env("PATH", embedded_path);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "Failed to spawn {} {:?}: {}. Make sure seren-acp-agent is built and available.",
+            command, args, e
+        )
+    })?;
 
     let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
@@ -517,7 +551,6 @@ async fn run_session_worker(
 
     // Spawn a task to log stderr from the agent
     tokio::task::spawn_local(async move {
-        use tokio::io::AsyncBufReadExt;
         let reader = tokio::io::BufReader::new(stderr);
         let mut lines = reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
