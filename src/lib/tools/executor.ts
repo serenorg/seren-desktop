@@ -1,10 +1,11 @@
-// ABOUTME: Tool executor that routes tool calls to file operations or MCP servers.
+// ABOUTME: Tool executor that routes tool calls to file operations, MCP servers, or gateway.
 // ABOUTME: Handles tool call parsing, execution, and result formatting.
 
 import { invoke } from "@tauri-apps/api/core";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
-import { parseMcpToolName } from "./definitions";
+import { callGatewayTool } from "@/services/mcp-gateway";
+import { parseGatewayToolName, parseMcpToolName } from "./definitions";
 
 /**
  * File entry returned by list_directory.
@@ -25,10 +26,26 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
   try {
     const args = JSON.parse(argsJson) as Record<string, unknown>;
 
-    // Check if this is an MCP tool call
+    // Check if this is a Seren Gateway tool call (gateway__publisher__toolName)
+    const gatewayInfo = parseGatewayToolName(name);
+    if (gatewayInfo) {
+      return await executeGatewayTool(
+        toolCall.id,
+        gatewayInfo.publisherSlug,
+        gatewayInfo.toolName,
+        args,
+      );
+    }
+
+    // Check if this is a local MCP tool call (mcp__server__toolName)
     const mcpInfo = parseMcpToolName(name);
     if (mcpInfo) {
-      return await executeMcpTool(toolCall.id, mcpInfo.serverName, mcpInfo.toolName, args);
+      return await executeMcpTool(
+        toolCall.id,
+        mcpInfo.serverName,
+        mcpInfo.toolName,
+        args,
+      );
     }
 
     // Otherwise, handle local file tools
@@ -98,7 +115,7 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
 }
 
 /**
- * Execute an MCP tool call via the MCP client.
+ * Execute an MCP tool call via the MCP client (local stdio servers).
  */
 async function executeMcpTool(
   toolCallId: string,
@@ -134,6 +151,39 @@ async function executeMcpTool(
     return {
       tool_call_id: toolCallId,
       content: `MCP tool error: ${message}`,
+      is_error: true,
+    };
+  }
+}
+
+/**
+ * Execute a gateway tool call via the REST API.
+ */
+async function executeGatewayTool(
+  toolCallId: string,
+  publisherSlug: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  try {
+    const response = await callGatewayTool(publisherSlug, toolName, args);
+
+    // Convert result to string content
+    const content =
+      typeof response.result === "string"
+        ? response.result
+        : JSON.stringify(response.result, null, 2);
+
+    return {
+      tool_call_id: toolCallId,
+      content: content || "Tool executed successfully",
+      is_error: response.is_error,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      tool_call_id: toolCallId,
+      content: `Gateway tool error: ${message}`,
       is_error: true,
     };
   }

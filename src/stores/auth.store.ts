@@ -3,7 +3,8 @@
 
 import { createStore } from "solid-js/store";
 import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
-import { logout as authLogout, isLoggedIn, getApiKey } from "@/services/auth";
+import { logout as authLogout, isLoggedIn } from "@/services/auth";
+import { initializeGateway, resetGateway } from "@/services/mcp-gateway";
 
 export interface User {
   id: string;
@@ -25,7 +26,7 @@ const [state, setState] = createStore<AuthState>({
 
 /**
  * Check authentication status on app startup.
- * If authenticated, ensures SerenDB MCP server is configured.
+ * If authenticated, initializes the MCP Gateway.
  */
 export async function checkAuth(): Promise<void> {
   setState("isLoading", true);
@@ -33,24 +34,25 @@ export async function checkAuth(): Promise<void> {
     const authenticated = await isLoggedIn();
     setState("isAuthenticated", authenticated);
 
-    // Ensure SerenDB is configured for authenticated users
+    // Initialize MCP Gateway for authenticated users
     if (authenticated) {
       try {
-        console.log("[Auth Store] Fetching API key for MCP...");
-        const apiKey = await getApiKey();
-        console.log("[Auth Store] API key fetched successfully");
+        console.log("[Auth Store] Adding Seren MCP server config...");
+        await addSerenDbServer();
 
-        console.log("[Auth Store] Adding SerenDB MCP server...");
-        await addSerenDbServer(apiKey);
-        console.log("[Auth Store] SerenDB MCP server added successfully");
+        console.log("[Auth Store] Initializing MCP Gateway...");
+        await initializeGateway();
+        console.log("[Auth Store] MCP Gateway initialized successfully");
 
-        // Trigger auto-connect after adding server
+        // Trigger auto-connect for local MCP servers
         const { initMcpAutoConnect } = await import("@/lib/mcp/auto-connect");
-        console.log("[Auth Store] Triggering MCP auto-connect...");
+        console.log(
+          "[Auth Store] Triggering MCP auto-connect for local servers...",
+        );
         const results = await initMcpAutoConnect();
         console.log("[Auth Store] MCP auto-connect results:", results);
       } catch (error) {
-        console.error("[Auth Store] Failed to add SerenDB MCP server:", error);
+        console.error("[Auth Store] Failed to initialize MCP:", error);
       }
     }
   } finally {
@@ -60,7 +62,7 @@ export async function checkAuth(): Promise<void> {
 
 /**
  * Set user as authenticated after successful login.
- * Also adds SerenDB as the default MCP server.
+ * Initializes the MCP Gateway.
  */
 export async function setAuthenticated(user: User): Promise<void> {
   setState({
@@ -69,36 +71,50 @@ export async function setAuthenticated(user: User): Promise<void> {
     isLoading: false,
   });
 
-  // Add SerenDB as default MCP server on sign-in
+  // Initialize MCP Gateway on sign-in
   try {
-    console.log("[Auth Store] setAuthenticated: Fetching API key for MCP...");
-    const apiKey = await getApiKey();
-    console.log("[Auth Store] setAuthenticated: API key fetched successfully");
+    console.log(
+      "[Auth Store] setAuthenticated: Adding Seren MCP server config...",
+    );
+    await addSerenDbServer();
 
-    console.log("[Auth Store] setAuthenticated: Adding SerenDB MCP server...");
-    await addSerenDbServer(apiKey);
-    console.log("[Auth Store] setAuthenticated: SerenDB MCP server added successfully");
+    console.log("[Auth Store] setAuthenticated: Initializing MCP Gateway...");
+    await initializeGateway();
+    console.log(
+      "[Auth Store] setAuthenticated: MCP Gateway initialized successfully",
+    );
 
-    // Trigger auto-connect after adding server
+    // Trigger auto-connect for local MCP servers
     const { initMcpAutoConnect } = await import("@/lib/mcp/auto-connect");
-    console.log("[Auth Store] setAuthenticated: Triggering MCP auto-connect...");
+    console.log(
+      "[Auth Store] setAuthenticated: Triggering MCP auto-connect...",
+    );
     const results = await initMcpAutoConnect();
-    console.log("[Auth Store] setAuthenticated: MCP auto-connect results:", results);
+    console.log(
+      "[Auth Store] setAuthenticated: MCP auto-connect results:",
+      results,
+    );
   } catch (error) {
-    console.error("[Auth Store] setAuthenticated: Failed to add SerenDB MCP server:", error);
+    console.error(
+      "[Auth Store] setAuthenticated: Failed to initialize MCP:",
+      error,
+    );
   }
 }
 
 /**
  * Log out and clear authentication state.
- * Also removes SerenDB MCP server.
+ * Cleans up MCP Gateway state.
  */
 export async function logout(): Promise<void> {
-  // Remove SerenDB MCP server on sign-out
+  // Reset MCP Gateway state
+  resetGateway();
+
+  // Remove Seren MCP server config
   try {
     await removeSerenDbServer();
   } catch (error) {
-    console.error("Failed to remove SerenDB MCP server:", error);
+    console.error("Failed to remove Seren MCP server:", error);
   }
 
   await authLogout();
