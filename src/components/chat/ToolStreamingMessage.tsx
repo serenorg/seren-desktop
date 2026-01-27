@@ -7,10 +7,12 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { renderMarkdown } from "@/lib/render-markdown";
 import type { ToolStreamEvent } from "@/services/chat";
+import { settingsStore } from "@/stores/settings.store";
+import { ThinkingBlock } from "./ThinkingBlock";
 
 interface ToolStreamingMessageProps {
   stream: AsyncGenerator<ToolStreamEvent>;
-  onComplete: (fullContent: string) => void;
+  onComplete: (fullContent: string, thinking?: string) => void;
   onError?: (error: Error) => void;
   onContentUpdate?: () => void;
 }
@@ -25,12 +27,14 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
   props,
 ) => {
   const [content, setContent] = createSignal("");
+  const [thinking, setThinking] = createSignal("");
   const [toolExecutions, setToolExecutions] = createSignal<ToolExecution[]>([]);
   const [isStreaming, setIsStreaming] = createSignal(true);
   let isCancelled = false;
 
   const consume = async () => {
     let fullContent = "";
+    let fullThinking = "";
     let hadError = false;
 
     try {
@@ -41,6 +45,12 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
           case "content":
             fullContent += event.content;
             setContent(fullContent);
+            props.onContentUpdate?.();
+            break;
+
+          case "thinking":
+            fullThinking += event.thinking;
+            setThinking(fullThinking);
             props.onContentUpdate?.();
             break;
 
@@ -79,6 +89,10 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
           case "complete":
             fullContent = event.finalContent;
             setContent(fullContent);
+            if (event.finalThinking) {
+              fullThinking = event.finalThinking;
+              setThinking(fullThinking);
+            }
             break;
         }
       }
@@ -88,7 +102,7 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
     } finally {
       setIsStreaming(false);
       if (!isCancelled && !hadError) {
-        props.onComplete(fullContent);
+        props.onComplete(fullContent, fullThinking || undefined);
       }
     }
   };
@@ -123,6 +137,11 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
 
   return (
     <article class="px-5 py-4 border-b border-[#21262d] bg-transparent">
+      {/* Thinking block */}
+      <Show when={thinking() && settingsStore.get("chatShowThinking")}>
+        <ThinkingBlock thinking={thinking()} isStreaming={isStreaming()} />
+      </Show>
+
       {/* Tool executions */}
       <Show when={toolExecutions().length > 0}>
         <div class="mb-3 p-2 bg-[rgba(88,166,255,0.05)] border border-[rgba(88,166,255,0.2)] rounded-md">

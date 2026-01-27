@@ -38,6 +38,8 @@ import { ChatTabBar } from "./ChatTabBar";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { StreamingMessage } from "./StreamingMessage";
+import { ThinkingBlock } from "./ThinkingBlock";
+import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolStreamingMessage } from "./ToolStreamingMessage";
 import "highlight.js/styles/github-dark.css";
 
@@ -413,11 +415,13 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const handleStreamingComplete = async (
     session: ActiveStreamingSession,
     content: string,
+    thinking?: string,
   ) => {
     const assistantMessage: Message = {
       id: session.id,
       role: "assistant",
       content,
+      thinking,
       timestamp: Date.now(),
       model: session.model,
       status: "complete",
@@ -558,6 +562,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
               {/* Model selector in input area, tab bar above */}
             </div>
             <div class="flex gap-2 items-center">
+              <ThinkingToggle />
               <button
                 type="button"
                 class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1 rounded-md text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] hover:border-[#484f58]"
@@ -591,6 +596,15 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                   <article
                     class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
                   >
+                    <Show
+                      when={
+                        message.role === "assistant" &&
+                        message.thinking &&
+                        settingsStore.get("chatShowThinking")
+                      }
+                    >
+                      <ThinkingBlock thinking={message.thinking ?? ""} />
+                    </Show>
                     <div
                       class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
                       innerHTML={
@@ -650,8 +664,8 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                   >
                     <ToolStreamingMessage
                       stream={(session as ToolStreamingSession).stream}
-                      onComplete={(content) =>
-                        handleStreamingComplete(session, content)
+                      onComplete={(content, thinking) =>
+                        handleStreamingComplete(session, content, thinking)
                       }
                       onError={(error) => handleStreamingError(session, error)}
                       onContentUpdate={scrollToBottom}

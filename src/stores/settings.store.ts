@@ -32,6 +32,7 @@ export interface Settings {
   chatDefaultModel: string;
   chatMaxHistoryMessages: number;
   chatEnterToSend: boolean;
+  chatShowThinking: boolean;
 
   // Editor settings
   editorFontSize: number;
@@ -76,6 +77,7 @@ const DEFAULT_SETTINGS: Settings = {
   chatDefaultModel: "anthropic/claude-sonnet-4",
   chatMaxHistoryMessages: 50,
   chatEnterToSend: true,
+  chatShowThinking: false,
   // Editor
   editorFontSize: 14,
   editorTabSize: 2,
