@@ -35,8 +35,8 @@ if (!token) {
   process.exit(1);
 }
 
-const MCP_URL = 'https://api.serendb.com/mcp';
-const GATEWAY_HOST = 'api.serendb.com';
+const MCP_URL = 'https://mcp.serendb.com/mcp';
+const GATEWAY_HOST = 'mcp.serendb.com';
 
 function sendToGateway(message) {
   const body = JSON.stringify(message);
