@@ -14,6 +14,7 @@ export interface BalanceInfo {
 interface BalanceWarningProps {
   balanceInfo?: BalanceInfo;
   onDismiss?: () => void;
+  onSwitchToFreeModel?: () => void;
 }
 
 /**
@@ -33,15 +34,26 @@ export function parseBalanceError(errorMessage: string): BalanceInfo | null {
 
     const errorData = JSON.parse(jsonMatch[0]);
 
-    // Extract balance info from the error payload
-    const availableBalance =
-      errorData.extra?.availableBalance ?? errorData.availableBalance ?? 0;
-    const requiredAmount =
-      errorData.extra?.requiredAmount ?? errorData.requiredAmount ?? 0;
-    const deficit =
-      errorData.extra?.deficit ??
-      errorData.deficit ??
-      requiredAmount - availableBalance;
+    // Extract balance info from x402 error payload
+    // The data can be in errorData.extra, errorData.accepts[0].extra, or top-level
+    const extra = errorData.accepts?.[0]?.extra ?? errorData.extra ?? errorData;
+
+    // Parse string values to numbers (x402 returns strings like "0.061300")
+    const parseAmount = (val: unknown): number => {
+      if (typeof val === "number") return val;
+      if (typeof val === "string") return Number.parseFloat(val) || 0;
+      return 0;
+    };
+
+    const availableBalance = parseAmount(
+      extra.availableBalance ?? errorData.availableBalance,
+    );
+    const requiredAmount = parseAmount(
+      extra.requiredAmount ?? errorData.requiredAmount,
+    );
+    const deficit = parseAmount(
+      extra.deficit ?? errorData.deficit ?? requiredAmount - availableBalance,
+    );
 
     return {
       currentBalance: availableBalance,
@@ -125,7 +137,7 @@ export const BalanceWarning: Component<BalanceWarningProps> = (props) => {
           </h4>
           <p class="m-0 mb-3 text-sm text-[#c9d1d9] leading-relaxed">
             Your SerenBucks balance is too low to complete this request. Top up
-            your wallet to continue chatting.
+            your wallet or switch to a free model to continue chatting.
           </p>
 
           <Show when={props.balanceInfo}>
@@ -172,6 +184,15 @@ export const BalanceWarning: Component<BalanceWarningProps> = (props) => {
             >
               {isTopUpLoading() ? "Loading..." : "Top Up Wallet"}
             </button>
+            <Show when={props.onSwitchToFreeModel}>
+              <button
+                type="button"
+                onClick={props.onSwitchToFreeModel}
+                class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors hover:bg-[#2ea043]"
+              >
+                Switch to Free Model
+              </button>
+            </Show>
             <Show when={props.onDismiss}>
               <button
                 type="button"
