@@ -33,6 +33,14 @@ export interface Settings {
   chatMaxHistoryMessages: number;
   chatEnterToSend: boolean;
   chatShowThinking: boolean;
+  /**
+   * Maximum tool call iterations per message.
+   * Controls how many times the AI can use tools in a single response.
+   * Higher values allow more complex multi-step tasks but use more credits.
+   * Set to 0 for unlimited (use with caution - may run up costs).
+   * Default: 10. Range: 0-50.
+   */
+  chatMaxToolIterations: number;
 
   // Auto-compact settings
   autoCompactEnabled: boolean;
@@ -83,6 +91,7 @@ const DEFAULT_SETTINGS: Settings = {
   chatMaxHistoryMessages: 50,
   chatEnterToSend: true,
   chatShowThinking: false,
+  chatMaxToolIterations: 10,
   // Auto-compact
   autoCompactEnabled: true,
   autoCompactThreshold: 80,

@@ -15,6 +15,7 @@ import type {
 } from "@/lib/providers/types";
 import { executeTools, getAllTools } from "@/lib/tools";
 import { providerStore } from "@/stores/provider.store";
+import { settingsStore } from "@/stores/settings.store";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -133,7 +134,16 @@ export function getActiveModel(): string {
 // Tool-aware Chat Functions
 // ============================================================================
 
-const MAX_TOOL_ITERATIONS = 10;
+/**
+ * State needed to continue a paused tool iteration loop.
+ */
+export interface ToolIterationState {
+  messages: ChatMessageWithTools[];
+  model: string;
+  tools: ReturnType<typeof getAllTools> | undefined;
+  fullContent: string;
+  iteration: number;
+}
 
 /**
  * Event types yielded during tool-aware message streaming.
@@ -143,7 +153,13 @@ export type ToolStreamEvent =
   | { type: "thinking"; thinking: string }
   | { type: "tool_calls"; toolCalls: ToolCall[] }
   | { type: "tool_results"; results: ToolResult[] }
-  | { type: "complete"; finalContent: string; finalThinking?: string };
+  | { type: "complete"; finalContent: string; finalThinking?: string }
+  | {
+      type: "iteration_limit";
+      currentIteration: number;
+      maxIterations: number;
+      continueState: ToolIterationState;
+    };
 
 /**
  * Send a message with tool support enabled.
@@ -200,10 +216,17 @@ export async function* streamMessageWithTools(
   // Get tools if enabled
   const tools = enableTools ? getAllTools() : undefined;
 
+  // Get max iterations from settings (0 = unlimited)
+  const maxIterations = settingsStore.get("chatMaxToolIterations");
+
   // Accumulated content across all iterations
   let fullContent = "";
 
-  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+  for (
+    let iteration = 0;
+    maxIterations === 0 || iteration < maxIterations;
+    iteration++
+  ) {
     console.log("[streamMessageWithTools] Iteration:", iteration);
     // Send request with tools
     const response: ChatResponse = await sendWithTools(
@@ -265,10 +288,87 @@ export async function* streamMessageWithTools(
     // Continue loop to get model's response to tool results
   }
 
-  // If we hit max iterations, yield what we have
+  // If we hit max iterations, yield an event that allows the user to continue
   yield {
-    type: "complete",
-    finalContent: `${fullContent}\n\n(Reached maximum tool iterations)`,
+    type: "iteration_limit",
+    currentIteration: maxIterations,
+    maxIterations,
+    continueState: {
+      messages,
+      model,
+      tools,
+      fullContent,
+      iteration: maxIterations,
+    },
+  };
+}
+
+/**
+ * Continue a tool iteration loop from a saved state.
+ * Called when user clicks "Continue" after hitting the iteration limit.
+ *
+ * @param state - The saved state from the iteration_limit event
+ * @param additionalIterations - How many more iterations to allow (default: 10)
+ */
+export async function* continueToolIteration(
+  state: ToolIterationState,
+  additionalIterations = 10,
+): AsyncGenerator<ToolStreamEvent> {
+  const { messages, model, tools, fullContent: existingContent } = state;
+  let fullContent = existingContent;
+
+  for (let i = 0; i < additionalIterations; i++) {
+    console.log("[continueToolIteration] Iteration:", i);
+
+    const response: ChatResponse = await sendWithTools(
+      messages,
+      model,
+      tools,
+      tools ? "auto" : undefined,
+    );
+
+    if (response.content) {
+      fullContent += response.content;
+      yield { type: "content", content: response.content };
+    }
+
+    if (!response.tool_calls || response.tool_calls.length === 0) {
+      yield { type: "complete", finalContent: fullContent };
+      return;
+    }
+
+    yield { type: "tool_calls", toolCalls: response.tool_calls };
+
+    messages.push({
+      role: "assistant",
+      content: response.content,
+      tool_calls: response.tool_calls,
+    });
+
+    const results = await executeTools(response.tool_calls);
+    yield { type: "tool_results", results };
+
+    for (const result of results) {
+      messages.push({
+        role: "tool",
+        content: result.content,
+        tool_call_id: result.tool_call_id,
+      });
+    }
+  }
+
+  // Hit the additional limit again
+  yield {
+    type: "iteration_limit",
+    currentIteration: state.iteration + additionalIterations,
+    maxIterations: additionalIterations,
+    continueState: {
+      messages,
+      model,
+      tools,
+      fullContent,
+      iteration: state.iteration + additionalIterations,
+    },
   };
 }
 

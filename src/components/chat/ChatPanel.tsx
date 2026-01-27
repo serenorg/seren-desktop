@@ -23,10 +23,12 @@ import {
   areToolsAvailable,
   CHAT_MAX_RETRIES,
   type ChatContext,
+  continueToolIteration,
   type Message,
   sendMessageWithRetry,
   streamMessage,
   streamMessageWithTools,
+  type ToolIterationState,
   type ToolStreamEvent,
 } from "@/services/chat";
 import { authStore, checkAuth } from "@/stores/auth.store";
@@ -106,6 +108,12 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [balanceError, setBalanceError] = createSignal<BalanceInfo | null>(
     null,
   );
+  // Tool iteration limit state for "Continue" functionality
+  const [iterationLimitState, setIterationLimitState] = createSignal<{
+    state: ToolIterationState;
+    iteration: number;
+    sessionId: string;
+  } | null>(null);
   // Input history navigation (terminal-style up/down arrow)
   const [historyIndex, setHistoryIndex] = createSignal(-1); // -1 = not browsing history
   const [savedInput, setSavedInput] = createSignal(""); // save current input before browsing
@@ -691,6 +699,15 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                       }
                       onError={(error) => handleStreamingError(session, error)}
                       onContentUpdate={scrollToBottom}
+                      onIterationLimit={(state, iteration) => {
+                        setIterationLimitState({
+                          state,
+                          iteration,
+                          sessionId: session.id,
+                        });
+                        setStreamingSession(null);
+                        chatStore.setLoading(false);
+                      }}
                     />
                   </Show>
                 );
@@ -704,6 +721,76 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                   balanceInfo={info()}
                   onDismiss={() => setBalanceError(null)}
                 />
+              )}
+            </Show>
+
+            {/* Tool iteration limit warning with Continue button */}
+            <Show when={iterationLimitState()}>
+              {(limitState) => (
+                <div class="mx-4 my-3 p-4 bg-[#2d333b] border border-[#f0883e] rounded-lg">
+                  <div class="flex items-start gap-3">
+                    <span class="text-xl text-[#f0883e]">⚠️</span>
+                    <div class="flex-1">
+                      <h4 class="m-0 mb-2 text-sm font-semibold text-[#f0883e]">
+                        Tool Iteration Limit Reached
+                      </h4>
+                      <p class="m-0 mb-3 text-sm text-[#adbac7]">
+                        The AI has used tools {limitState().iteration} times.
+                        This limit helps prevent runaway costs. You can continue
+                        if the task isn't complete, or adjust the limit in
+                        Settings → Chat → Max Tool Iterations.
+                      </p>
+                      <div class="flex gap-2">
+                        <button
+                          type="button"
+                          class="px-4 py-2 text-sm font-medium bg-[#238636] text-white border-none rounded-md cursor-pointer hover:bg-[#2ea043] transition-colors"
+                          onClick={() => {
+                            const state = limitState();
+                            // Start a new streaming session with the continue function
+                            const continueStream = continueToolIteration(
+                              state.state,
+                            );
+                            const newSession: ToolStreamingSession = {
+                              id: state.sessionId,
+                              userMessageId: `${state.sessionId}-continue`,
+                              prompt: "(continuing...)",
+                              model: state.state.model,
+                              stream: continueStream,
+                              toolsEnabled: true,
+                            };
+                            setStreamingSession(newSession);
+                            chatStore.setLoading(true);
+                            setIterationLimitState(null);
+                          }}
+                        >
+                          Continue
+                        </button>
+                        <button
+                          type="button"
+                          class="px-4 py-2 text-sm font-medium bg-transparent text-[#adbac7] border border-[#444c56] rounded-md cursor-pointer hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
+                          onClick={() => {
+                            // Finalize the message with what we have
+                            const state = limitState();
+                            const finalMessage: Message = {
+                              id: state.sessionId,
+                              role: "assistant",
+                              content:
+                                state.state.fullContent ||
+                                "(Task paused at iteration limit)",
+                              timestamp: Date.now(),
+                              model: state.state.model,
+                              status: "complete",
+                            };
+                            chatStore.addMessage(finalMessage);
+                            setIterationLimitState(null);
+                          }}
+                        >
+                          Stop Here
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
             </Show>
           </div>
