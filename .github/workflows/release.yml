@@ -24,6 +24,50 @@ jobs:
     outputs:
       release_id: ${{ steps.create_release.outputs.id }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            # First release - get all commits
+            COMMITS=$(git log --pretty=format:"- %s" --no-merges | head -20)
+          else
+            # Get commits since previous tag
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+          fi
+
+          # Create release body
+          cat > release_notes.md << 'NOTES_EOF'
+          ## What's New
+
+          $COMMITS
+
+          ## Installation
+
+          Download the appropriate installer for your platform:
+          - **macOS (Apple Silicon)**: `Seren-Desktop_*_aarch64.dmg`
+          - **macOS (Intel)**: `Seren-Desktop_*_x64.dmg`
+          - **Windows**: `Seren-Desktop_*_x64-setup.exe` or `.msi`
+          - **Linux**: `.AppImage` or `.deb`
+
+          ## Note
+
+          This is an alpha release. macOS and Windows builds are unsigned - you may need to bypass security warnings to run the app.
+          NOTES_EOF
+
+          # Replace placeholder with actual commits
+          sed -i "s|\$COMMITS|$COMMITS|g" release_notes.md
+
+          echo "Generated release notes:"
+          cat release_notes.md
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -32,8 +76,9 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           release_name: Seren Desktop ${{ github.ref_name }}
+          body_path: release_notes.md
           draft: true
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
 
   build:
     needs: create-release
