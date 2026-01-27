@@ -111,13 +111,15 @@ export class McpGatewayError extends Error {
 
 /**
  * Make an authenticated request to the MCP Gateway API.
+ * Accepts an optional pre-fetched apiKey to avoid redundant auth calls during batch operations.
  */
 async function gatewayFetch<T>(
   endpoint: string,
   options: RequestInit = {},
+  apiKey?: string,
 ): Promise<T> {
-  const apiKey = await getApiKey();
-  if (!apiKey) {
+  const key = apiKey ?? (await getApiKey());
+  if (!key) {
     throw new McpGatewayError("Not authenticated", 401, endpoint);
   }
 
@@ -126,7 +128,7 @@ async function gatewayFetch<T>(
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${key}`,
       ...options.headers,
     },
   });
@@ -153,8 +155,11 @@ interface PaginatedPublishersResponse {
 
 /**
  * Fetch all active publishers from the gateway (handles pagination).
+ * Accepts optional apiKey to avoid redundant auth calls during batch operations.
  */
-export async function fetchGatewayPublishers(): Promise<Publisher[]> {
+export async function fetchGatewayPublishers(
+  apiKey?: string,
+): Promise<Publisher[]> {
   return withRetry(async () => {
     const allPublishers: Publisher[] = [];
     let offset = 0;
@@ -163,6 +168,8 @@ export async function fetchGatewayPublishers(): Promise<Publisher[]> {
     while (true) {
       const response = await gatewayFetch<PaginatedPublishersResponse>(
         `/agent/publishers?offset=${offset}&limit=${limit}`,
+        {},
+        apiKey,
       );
       allPublishers.push(...response.data);
 
@@ -185,9 +192,11 @@ export async function fetchGatewayPublishers(): Promise<Publisher[]> {
 
 /**
  * Fetch tools for a specific publisher.
+ * Accepts optional apiKey to avoid redundant auth calls during batch operations.
  */
 export async function fetchPublisherTools(
   publisherSlug: string,
+  apiKey?: string,
 ): Promise<McpToolInfo[]> {
   return withRetry(async () => {
     const response = await gatewayFetch<McpToolsResponse>(
@@ -196,6 +205,7 @@ export async function fetchPublisherTools(
         method: "POST",
         body: JSON.stringify({ publisher: publisherSlug }),
       },
+      apiKey,
     );
     return response.tools;
   });
@@ -204,29 +214,47 @@ export async function fetchPublisherTools(
 /**
  * Fetch all tools from all active publishers.
  * Returns tools tagged with their publisher for routing during execution.
+ * Fetches the API key once and reuses it for all publisher requests.
  */
 export async function fetchAllGatewayTools(): Promise<GatewayTool[]> {
   try {
-    const publishers = await fetchGatewayPublishers();
+    // Fetch API key once and reuse for all requests
+    const apiKey = await getApiKey();
+    if (!apiKey) {
+      console.error("[MCP Gateway] Not authenticated - cannot fetch tools");
+      return [];
+    }
+
+    const publishers = await fetchGatewayPublishers(apiKey);
     console.log(`[MCP Gateway] Found ${publishers.length} active publishers`);
 
     const allTools: GatewayTool[] = [];
+    const errors: { publisher: string; status: number; message: string }[] = [];
 
     // Fetch tools from each publisher in parallel
     const results = await Promise.allSettled(
       publishers.map(async (publisher) => {
         try {
-          const tools = await fetchPublisherTools(publisher.slug);
+          const tools = await fetchPublisherTools(publisher.slug, apiKey);
           return tools.map((tool) => ({
             publisher: publisher.slug,
             publisherName: publisher.name,
             tool,
           }));
         } catch (error) {
-          console.warn(
-            `[MCP Gateway] Failed to fetch tools from ${publisher.slug}:`,
-            error,
-          );
+          if (error instanceof McpGatewayError) {
+            errors.push({
+              publisher: publisher.slug,
+              status: error.status,
+              message: error.message,
+            });
+          } else {
+            errors.push({
+              publisher: publisher.slug,
+              status: 0,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
           return [];
         }
       }),
@@ -236,6 +264,11 @@ export async function fetchAllGatewayTools(): Promise<GatewayTool[]> {
       if (result.status === "fulfilled") {
         allTools.push(...result.value);
       }
+    }
+
+    // Log error summary for debugging
+    if (errors.length > 0) {
+      console.warn(`[MCP Gateway] ${errors.length} publishers failed`);
     }
 
     console.log(`[MCP Gateway] Loaded ${allTools.length} tools total`);
@@ -283,6 +316,7 @@ function isCacheValid(): boolean {
 /**
  * Initialize the gateway by loading all tools.
  * Safe to call multiple times - uses cached data if still valid.
+ * Fetches the API key once and reuses it for all publisher requests.
  */
 export async function initializeGateway(): Promise<void> {
   // Return cached data if still valid
@@ -295,28 +329,48 @@ export async function initializeGateway(): Promise<void> {
 
   loadingPromise = (async () => {
     console.log("[MCP Gateway] Initializing...");
-    cachedPublishers = await fetchGatewayPublishers();
+
+    // Fetch API key once and reuse for all requests
+    const apiKey = await getApiKey();
+    if (!apiKey) {
+      console.error("[MCP Gateway] Not authenticated - cannot initialize");
+      return;
+    }
+    console.log("[MCP Gateway] API key cached for batch requests");
+
+    cachedPublishers = await fetchGatewayPublishers(apiKey);
     console.log(
       `[MCP Gateway] Found ${cachedPublishers.length} active publishers`,
     );
 
     const allTools: GatewayTool[] = [];
+    const errors: { publisher: string; status: number; message: string }[] = [];
 
     // Fetch tools from each publisher in parallel
     const results = await Promise.allSettled(
       cachedPublishers.map(async (publisher) => {
         try {
-          const tools = await fetchPublisherTools(publisher.slug);
+          const tools = await fetchPublisherTools(publisher.slug, apiKey);
           return tools.map((tool) => ({
             publisher: publisher.slug,
             publisherName: publisher.name,
             tool,
           }));
         } catch (error) {
-          console.warn(
-            `[MCP Gateway] Failed to fetch tools from ${publisher.slug}:`,
-            error,
-          );
+          // Track error details for debugging
+          if (error instanceof McpGatewayError) {
+            errors.push({
+              publisher: publisher.slug,
+              status: error.status,
+              message: error.message,
+            });
+          } else {
+            errors.push({
+              publisher: publisher.slug,
+              status: 0,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
           return [];
         }
       }),
@@ -325,6 +379,30 @@ export async function initializeGateway(): Promise<void> {
     for (const result of results) {
       if (result.status === "fulfilled") {
         allTools.push(...result.value);
+      }
+    }
+
+    // Log error summary for debugging
+    if (errors.length > 0) {
+      const byStatus = errors.reduce(
+        (acc, e) => {
+          acc[e.status] = (acc[e.status] || 0) + 1;
+          return acc;
+        },
+        {} as Record<number, number>,
+      );
+      console.warn(
+        `[MCP Gateway] ${errors.length} publishers failed:`,
+        Object.entries(byStatus)
+          .map(([status, count]) => `${status}: ${count}`)
+          .join(", "),
+      );
+      // Log first few errors with details
+      errors.slice(0, 5).forEach((e) => {
+        console.warn(`  - ${e.publisher}: ${e.status} ${e.message}`);
+      });
+      if (errors.length > 5) {
+        console.warn(`  ... and ${errors.length - 5} more`);
       }
     }
 
