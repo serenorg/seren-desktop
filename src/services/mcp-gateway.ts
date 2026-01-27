@@ -183,8 +183,8 @@ export async function fetchGatewayPublishers(
       offset += limit;
     }
 
-    // Filter to only active publishers with MCP endpoints configured
-    return allPublishers.filter((p) => p.is_active && p.mcp_endpoint);
+    // Return all active publishers - backend handles routing to databases, APIs, services, and MCP servers
+    return allPublishers.filter((p) => p.is_active);
   });
 }
 
