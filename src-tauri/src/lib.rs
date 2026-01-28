@@ -16,6 +16,7 @@ pub mod services {
     pub mod vector_store;
 }
 
+#[cfg(feature = "acp")]
 mod acp;
 mod embedded_runtime;
 mod files;
@@ -271,7 +272,7 @@ fn get_oauth_callback_port() -> Result<u16, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -280,8 +281,29 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
         .manage(mcp::McpState::new())
-        .manage(mcp::HttpMcpState::new())
-        .manage(acp::AcpState::new())
+        .manage(mcp::HttpMcpState::new());
+
+    #[cfg(feature = "acp")]
+    {
+        builder = builder.manage(acp::AcpState::new());
+    }
+
+    // Conditionally add ACP invoke handlers before setup (which consumes self)
+    #[cfg(feature = "acp")]
+    {
+        builder = builder.invoke_handler(tauri::generate_handler![
+            acp::acp_spawn,
+            acp::acp_prompt,
+            acp::acp_cancel,
+            acp::acp_terminate,
+            acp::acp_list_sessions,
+            acp::acp_set_permission_mode,
+            acp::acp_get_available_agents,
+            acp::acp_check_agent_available,
+        ]);
+    }
+
+    builder
         .setup(|app| {
             // Configure embedded runtime early in startup
             // This prepends bundled Node.js and Git to PATH
@@ -379,15 +401,6 @@ pub fn run() {
             // OAuth browser flow commands
             start_oauth_browser_flow,
             get_oauth_callback_port,
-            // ACP commands
-            acp::acp_spawn,
-            acp::acp_prompt,
-            acp::acp_cancel,
-            acp::acp_terminate,
-            acp::acp_list_sessions,
-            acp::acp_set_permission_mode,
-            acp::acp_get_available_agents,
-            acp::acp_check_agent_available,
             // Semantic indexing commands
             commands::indexing::init_project_index,
             commands::indexing::get_index_status,

@@ -15,6 +15,8 @@ path = "src/main.rs"
 [[bin]]
 name = "seren-acp-agent"
 path = "src/bin/acp_agent.rs"
+# Temporarily disabled on Windows due to claude-code-acp-rs build issues
+required-features = ["acp"]
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -63,9 +65,14 @@ urlencoding = "2"
 regex = "1"
 
 # ACP (Agent Client Protocol) support
-agent-client-protocol = { version = "=0.9.3", features = ["unstable"] }
-claude-code-acp-rs = "0.1"
+# Note: Windows builds temporarily disable ACP due to claude-code-acp-rs build issues
+agent-client-protocol = { version = "=0.9.3", features = ["unstable"], optional = true }
+claude-code-acp-rs = { version = "0.1", optional = true }
 anyhow = "1"
 # Note: codex-acp has unresolved dependency issues (ssh auth for tungstenite fork)
 # Will add Codex support when upstream issues are resolved
 # codex-acp = { git = "https://github.com/zed-industries/codex-acp" }
+
+[features]
+default = ["acp"]
+acp = ["agent-client-protocol", "claude-code-acp-rs"]
