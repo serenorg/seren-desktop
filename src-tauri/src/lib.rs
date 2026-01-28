@@ -279,8 +279,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_shell::init());
+
+    // Note: deep-link plugin disabled on Windows due to WiX bundler ICE03 registry errors
+    // See: https://github.com/tauri-apps/tauri/issues/10453
+    #[cfg(not(target_os = "windows"))]
+    {
+        builder = builder.plugin(tauri_plugin_deep_link::init());
+    }
+
+    builder = builder
         .manage(mcp::McpState::new())
         .manage(mcp::HttpMcpState::new());
 
@@ -303,7 +311,8 @@ pub fn run() {
             }
 
             // Register deep link handler for OAuth callbacks
-            #[cfg(desktop)]
+            // Note: Disabled on Windows due to WiX bundler ICE03 registry errors
+            #[cfg(all(desktop, not(target_os = "windows")))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let handle = app.handle().clone();
