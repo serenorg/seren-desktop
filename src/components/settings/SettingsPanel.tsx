@@ -14,6 +14,10 @@ import {
   settingsStore,
   toggleMcpServer,
 } from "@/stores/settings.store";
+import {
+  claimDaily,
+  walletState,
+} from "@/stores/wallet.store";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
@@ -524,6 +528,8 @@ export const SettingsPanel: Component = () => {
             <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Configure your SerenBucks balance display and auto top-up.
             </p>
+
+            <DailyClaimBanner />
 
             <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex items-start gap-3 cursor-pointer">
@@ -1182,6 +1188,60 @@ export const SettingsPanel: Component = () => {
         </div>
       </Show>
     </div>
+  );
+};
+
+/**
+ * Banner shown in wallet settings when daily claim was dismissed but is still available.
+ */
+const DailyClaimBanner: Component = () => {
+  const [claiming, setClaiming] = createSignal(false);
+  const [claimedAmount, setClaimedAmount] = createSignal<string | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
+
+  const canClaim = () => {
+    const claim = walletState.dailyClaim;
+    return claim !== null && claim.can_claim;
+  };
+
+  const handleClaim = async () => {
+    setClaiming(true);
+    setError(null);
+    try {
+      const result = await claimDaily();
+      setClaimedAmount(result.amount_usd);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to claim daily credits",
+      );
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  return (
+    <Show when={canClaim() && !claimedAmount()}>
+      <div class="flex items-center justify-between gap-4 py-3 px-4 mb-4 rounded-lg border border-[rgba(99,102,241,0.3)] bg-[rgba(99,102,241,0.08)]">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[0.95rem] font-medium text-foreground">
+            Daily SerenBucks Available
+          </span>
+          <span class="text-[0.8rem] text-muted-foreground">
+            Claim your free daily credits
+          </span>
+          <Show when={error()}>
+            <span class="text-[0.75rem] text-[#ef4444]">{error()}</span>
+          </Show>
+        </div>
+        <button
+          class="py-1.5 px-4 text-[0.8125rem] font-medium rounded-md cursor-pointer bg-[#6366f1] text-white border-none hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-150"
+          onClick={handleClaim}
+          disabled={claiming()}
+        >
+          {claiming() ? "Claiming..." : "Claim Now"}
+        </button>
+      </div>
+    </Show>
   );
 };
 

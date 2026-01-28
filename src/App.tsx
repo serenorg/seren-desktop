@@ -21,6 +21,7 @@ import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
 // MCP OAuth dialog removed - now using API key auth flow
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
+import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { FileExplorer } from "@/components/sidebar/FileExplorer";
@@ -40,6 +41,7 @@ import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
 import { updaterStore } from "@/stores/updater.store";
 import {
+  checkDailyClaim,
   resetWalletState,
   startAutoRefresh,
   stopAutoRefresh,
@@ -117,6 +119,7 @@ function App() {
         autocompleteStore.enable();
         // Store cleanup to prevent effect accumulation
         cleanupAutoTopUp = initAutoTopUp();
+        checkDailyClaim();
       });
     } else {
       console.log("[App] User logged out, stopping services...");
@@ -227,6 +230,7 @@ function App() {
         </main>
         <StatusBar />
         <LowBalanceModal />
+        <DailyClaimPopup />
         <X402PaymentApproval />
       </div>
     </Show>
