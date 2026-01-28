@@ -770,7 +770,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                       ref={inputRef}
                       value={input()}
                       placeholder="Ask Seren anything…"
-                      class="w-full min-h-[80px] max-h-[200px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
+                      class="w-full min-h-[80px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
                       onInput={(event) => {
                         setInput(event.currentTarget.value);
                         // Reset history browsing when user types manually
