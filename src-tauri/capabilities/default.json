@@ -21,7 +21,12 @@
       "identifier": "http:default",
       "allow": [
         { "url": "https://api.serendb.com/**" },
-        { "url": "https://mcp.serendb.com/**" }
+        { "url": "https://mcp.serendb.com/**" },
+        { "url": "https://openrouter.ai/**" },
+        { "url": "https://api.anthropic.com/**" },
+        { "url": "https://api.openai.com/**" },
+        { "url": "https://generativelanguage.googleapis.com/**" },
+        { "url": "https://oauth2.googleapis.com/**" }
       ]
     }
   ]
