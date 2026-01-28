@@ -14,12 +14,14 @@ import {
   settingsStore,
   toggleMcpServer,
 } from "@/stores/settings.store";
+import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
 
 type SettingsSection =
   | "chat"
   | "providers"
+  | "logins"
   | "editor"
   | "wallet"
   | "indexing"
@@ -104,6 +106,7 @@ export const SettingsPanel: Component = () => {
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
     { id: "chat", label: "Chat", icon: "💬" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
+    { id: "logins", label: "Logins", icon: "🔐" },
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },
     { id: "indexing", label: "Code Indexing", icon: "🔍" },
@@ -338,6 +341,10 @@ export const SettingsPanel: Component = () => {
 
         <Show when={activeSection() === "providers"}>
           <ProviderSettings />
+        </Show>
+
+        <Show when={activeSection() === "logins"}>
+          <OAuthLogins />
         </Show>
 
         <Show when={activeSection() === "editor"}>
