@@ -1,6 +1,8 @@
 // ABOUTME: Models service for fetching available AI models from OpenRouter.
 // ABOUTME: Fetches the full list of models directly from OpenRouter's public API.
 
+import { appFetch } from "@/lib/fetch";
+
 export interface Model {
   id: string;
   name: string;
@@ -37,7 +39,7 @@ export const modelsService = {
     }
 
     try {
-      const response = await fetch(OPENROUTER_MODELS_URL);
+      const response = await appFetch(OPENROUTER_MODELS_URL);
 
       if (!response.ok) {
         console.warn("Failed to fetch models from OpenRouter, using defaults");

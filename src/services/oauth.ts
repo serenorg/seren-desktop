@@ -1,6 +1,7 @@
 // ABOUTME: OAuth service for provider authentication flows.
 // ABOUTME: Handles PKCE-based OAuth 2.0 for OpenAI and Google Gemini.
 
+import { appFetch } from "@/lib/fetch";
 import type { OAuthCredentials, ProviderId } from "@/lib/providers/types";
 import { PROVIDER_CONFIGS, supportsOAuth } from "@/lib/providers/types";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
@@ -143,7 +144,7 @@ export async function handleOAuthCallback(
     code_verifier: codeVerifier,
   });
 
-  const response = await fetch(oauthConfig.tokenUrl, {
+  const response = await appFetch(oauthConfig.tokenUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -195,7 +196,7 @@ export async function refreshOAuthToken(
     client_id: oauthConfig.clientId,
   });
 
-  const response = await fetch(oauthConfig.tokenUrl, {
+  const response = await appFetch(oauthConfig.tokenUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",

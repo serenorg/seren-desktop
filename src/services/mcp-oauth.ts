@@ -2,6 +2,7 @@
 // ABOUTME: Implements Dynamic Client Registration and Authorization Code flow with PKCE (S256).
 
 import { invoke } from "@tauri-apps/api/core";
+import { appFetch } from "@/lib/fetch";
 
 const MCP_OAUTH_BASE = "https://mcp.serendb.com";
 // MCP server uses dynamic client registration
@@ -119,7 +120,7 @@ async function getOrRegisterClient(): Promise<string> {
 
   // Register new client
   console.log("[MCP OAuth] Registering new OAuth client...");
-  const response = await fetch(`${MCP_OAUTH_BASE}/register`, {
+  const response = await appFetch(`${MCP_OAUTH_BASE}/register`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -153,7 +154,7 @@ async function getOrRegisterClient(): Promise<string> {
  * Fetch OAuth server metadata from well-known endpoint.
  */
 export async function fetchOAuthMetadata(): Promise<OAuthMetadata> {
-  const response = await fetch(
+  const response = await appFetch(
     `${MCP_OAUTH_BASE}/.well-known/oauth-authorization-server`,
   );
   if (!response.ok) {
@@ -266,7 +267,7 @@ async function exchangeCodeForTokens(
 ): Promise<TokenResponse> {
   const clientId = await getOrRegisterClient();
 
-  const response = await fetch(`${MCP_OAUTH_BASE}/token`, {
+  const response = await appFetch(`${MCP_OAUTH_BASE}/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -300,7 +301,7 @@ export async function refreshAccessToken(): Promise<TokenResponse | null> {
   const clientId = await getOrRegisterClient();
 
   try {
-    const response = await fetch(`${MCP_OAUTH_BASE}/token`, {
+    const response = await appFetch(`${MCP_OAUTH_BASE}/token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -553,7 +554,7 @@ export async function startOAuthBrowserFlow(): Promise<TokenResponse> {
 
   // Register client with the actual redirect URI we'll use
   console.log("[MCP OAuth] Registering OAuth client...");
-  const registerResponse = await fetch(`${MCP_OAUTH_BASE}/register`, {
+  const registerResponse = await appFetch(`${MCP_OAUTH_BASE}/register`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -621,7 +622,7 @@ export async function startOAuthBrowserFlow(): Promise<TokenResponse> {
 
   // Exchange code for tokens
   console.log("[MCP OAuth] Exchanging code for tokens...");
-  const tokenResponse = await fetch(`${MCP_OAUTH_BASE}/token`, {
+  const tokenResponse = await appFetch(`${MCP_OAUTH_BASE}/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",

@@ -1,6 +1,7 @@
 // ABOUTME: OpenAI API provider adapter.
 // ABOUTME: Direct integration with api.openai.com for users with OpenAI subscriptions.
 
+import { appFetch } from "@/lib/fetch";
 import type {
   AuthOptions,
   ChatRequest,
@@ -118,7 +119,7 @@ export const openaiProvider: ProviderAdapter = {
     auth: string | AuthOptions,
   ): Promise<string> {
     const token = getToken(auth);
-    const response = await fetch(`${OPENAI_API_URL}/chat/completions`, {
+    const response = await appFetch(`${OPENAI_API_URL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -147,7 +148,7 @@ export const openaiProvider: ProviderAdapter = {
     auth: string | AuthOptions,
   ): AsyncGenerator<string, void, unknown> {
     const token = getToken(auth);
-    const response = await fetch(`${OPENAI_API_URL}/chat/completions`, {
+    const response = await appFetch(`${OPENAI_API_URL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -173,7 +174,7 @@ export const openaiProvider: ProviderAdapter = {
 
   async validateKey(apiKey: string): Promise<boolean> {
     try {
-      const response = await fetch(`${OPENAI_API_URL}/models`, {
+      const response = await appFetch(`${OPENAI_API_URL}/models`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
       return response.ok;
@@ -184,7 +185,7 @@ export const openaiProvider: ProviderAdapter = {
 
   async getModels(apiKey: string): Promise<ProviderModel[]> {
     try {
-      const response = await fetch(`${OPENAI_API_URL}/models`, {
+      const response = await appFetch(`${OPENAI_API_URL}/models`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
 

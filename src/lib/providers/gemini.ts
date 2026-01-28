@@ -1,6 +1,7 @@
 // ABOUTME: Google Gemini API provider adapter.
 // ABOUTME: Direct integration with Google AI for users with Gemini API access.
 
+import { appFetch } from "@/lib/fetch";
 import type {
   AuthOptions,
   ChatMessage,
@@ -139,7 +140,7 @@ export const geminiProvider: ProviderAdapter = {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(url, {
+    const response = await appFetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -190,7 +191,7 @@ export const geminiProvider: ProviderAdapter = {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(url, {
+    const response = await appFetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -210,7 +211,7 @@ export const geminiProvider: ProviderAdapter = {
     try {
       // Make a minimal request to validate the key
       const url = `${GEMINI_API_URL}/models?key=${apiKey}`;
-      const response = await fetch(url);
+      const response = await appFetch(url);
       return response.ok;
     } catch {
       return false;
@@ -220,7 +221,7 @@ export const geminiProvider: ProviderAdapter = {
   async getModels(apiKey: string): Promise<ProviderModel[]> {
     try {
       const url = `${GEMINI_API_URL}/models?key=${apiKey}`;
-      const response = await fetch(url);
+      const response = await appFetch(url);
 
       if (!response.ok) {
         return DEFAULT_MODELS;

@@ -1,6 +1,7 @@
 // ABOUTME: Anthropic Claude API provider adapter.
 // ABOUTME: Direct integration with api.anthropic.com for users with Anthropic subscriptions.
 
+import { appFetch } from "@/lib/fetch";
 import type {
   AuthOptions,
   ChatMessage,
@@ -146,7 +147,7 @@ export const anthropicProvider: ProviderAdapter = {
       body.system = system;
     }
 
-    const response = await fetch(`${ANTHROPIC_API_URL}/messages`, {
+    const response = await appFetch(`${ANTHROPIC_API_URL}/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -193,7 +194,7 @@ export const anthropicProvider: ProviderAdapter = {
       body.system = system;
     }
 
-    const response = await fetch(`${ANTHROPIC_API_URL}/messages`, {
+    const response = await appFetch(`${ANTHROPIC_API_URL}/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -218,7 +219,7 @@ export const anthropicProvider: ProviderAdapter = {
   async validateKey(apiKey: string): Promise<boolean> {
     try {
       // Make a minimal request to validate the key
-      const response = await fetch(`${ANTHROPIC_API_URL}/messages`, {
+      const response = await appFetch(`${ANTHROPIC_API_URL}/messages`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
