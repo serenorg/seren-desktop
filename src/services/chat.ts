@@ -185,7 +185,10 @@ export async function* streamMessageWithTools(
 
   // Build system message
   let systemContent =
-    "You are a helpful coding assistant with access to the user's local files.";
+    "You are a helpful coding assistant running inside a desktop application with full access to the user's local filesystem. " +
+    "You can read, write, and create files and directories on the user's computer using the available tools. " +
+    "When the user asks you to save, export, or write content to a file, use the write_file tool to save it to their filesystem. " +
+    "Always ask for the desired file path if the user doesn't specify one.";
 
   // Add user-provided context if available
   if (context) {
@@ -198,9 +201,6 @@ export async function* streamMessageWithTools(
     } else {
       systemContent += `\n\nThe user has selected this code:\n\n\`\`\`\n${context.content}\n\`\`\``;
     }
-  } else {
-    systemContent +=
-      " Use the available tools to read, list, and write files when needed to help the user.";
   }
 
   // Retrieve and inject semantic code context if available
