@@ -202,7 +202,10 @@ export const catalog = {
    */
   async list(): Promise<Publisher[]> {
     console.log("[Catalog] Fetching publishers");
-    const { data, error } = await listStorePublishers({ throwOnError: false });
+    const { data, error } = await listStorePublishers({
+      query: { limit: 100 },
+      throwOnError: false,
+    });
     if (error) {
       console.error("[Catalog] Error fetching publishers:", error);
       throw new Error("Failed to list publishers");
