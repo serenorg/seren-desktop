@@ -53,6 +53,8 @@ interface AcpState {
   isLoading: boolean;
   /** Error message */
   error: string | null;
+  /** CLI install progress message */
+  installStatus: string | null;
 }
 
 const [state, setState] = createStore<AcpState>({
@@ -63,6 +65,7 @@ const [state, setState] = createStore<AcpState>({
   selectedAgentType: "claude-code",
   isLoading: false,
   error: null,
+  installStatus: null,
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
@@ -107,6 +110,10 @@ export const acpStore = {
 
   get error() {
     return state.error;
+  },
+
+  get installStatus() {
+    return state.installStatus;
   },
 
   /**
@@ -192,6 +199,34 @@ export const acpStore = {
     });
 
     try {
+      // Ensure Claude CLI is installed before spawning
+      if (state.selectedAgentType === "claude-code") {
+        const { listen } = await import("@tauri-apps/api/event");
+        const progressUnsub = await listen<{ stage: string; message: string }>(
+          "acp://cli-install-progress",
+          (event) => {
+            setState("installStatus", event.payload.message);
+          },
+        );
+
+        try {
+          await acpService.ensureClaudeCli();
+        } catch (error) {
+          progressUnsub();
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Failed to install Claude Code CLI";
+          setState("error", message);
+          setState("isLoading", false);
+          setState("installStatus", null);
+          return null;
+        }
+
+        progressUnsub();
+        setState("installStatus", null);
+      }
+
       const info = await acpService.spawnAgent(state.selectedAgentType, cwd);
       console.log("[AcpStore] Spawn result:", info);
 
