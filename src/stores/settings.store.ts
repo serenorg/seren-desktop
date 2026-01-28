@@ -78,6 +78,9 @@ export interface Settings {
   // Theme settings
   theme: "dark" | "light" | "system";
 
+  // Semantic indexing settings
+  semanticIndexingEnabled: boolean;
+
   // General settings
   telemetryEnabled: boolean;
 }
@@ -120,6 +123,8 @@ const DEFAULT_SETTINGS: Settings = {
   enablePaymentFallback: true,
   // Theme
   theme: "dark",
+  // Semantic indexing
+  semanticIndexingEnabled: false,
   // General
   telemetryEnabled: true,
 };
