@@ -35,6 +35,7 @@ import { CompactedMessage } from "./CompactedMessage";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { StreamingMessage } from "./StreamingMessage";
+import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolStreamingMessage } from "./ToolStreamingMessage";
 import "highlight.js/styles/github-dark.css";
 
@@ -558,6 +559,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             </Show>
           </div>
           <div class="flex items-center gap-2">
+            <ThinkingToggle />
             <Show
               when={
                 chatStore.messages.length >

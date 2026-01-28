@@ -15,6 +15,7 @@ pub mod services {
 mod embedded_runtime;
 mod files;
 mod mcp;
+mod oauth;
 mod sync;
 mod wallet;
 
@@ -189,6 +190,80 @@ fn get_oauth_providers(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(providers)
 }
 
+/// Start OAuth flow with browser and loopback server.
+/// Opens the auth URL in the default browser and starts a local server to receive the callback.
+/// The auth_url must already contain a redirect_uri with the port to listen on.
+/// Returns the authorization code and state from the callback.
+#[tauri::command]
+async fn start_oauth_browser_flow(
+    app: tauri::AppHandle,
+    auth_url: String,
+    timeout_secs: Option<u64>,
+) -> Result<oauth::OAuthCallbackResult, String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let timeout = timeout_secs.unwrap_or(300); // 5 minute default timeout
+
+    // Extract the port from the redirect_uri in the auth URL
+    // The frontend already registered the client with this redirect_uri, so we must use the same port
+    let port = extract_port_from_redirect_uri(&auth_url)?;
+
+    println!("[OAuth] Starting browser flow on port: {}", port);
+    println!("[OAuth] Auth URL: {}", auth_url);
+
+    // Open the browser with the original auth URL (don't modify it)
+    app.opener()
+        .open_url(&auth_url, None::<&str>)
+        .map_err(|e| format!("Failed to open browser: {}", e))?;
+
+    // Wait for the callback on the specified port
+    let result =
+        tokio::task::spawn_blocking(move || oauth::wait_for_oauth_callback_on_port(port, timeout))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))??;
+
+    match result {
+        Ok(callback) => Ok(callback),
+        Err(oauth_error) => Err(format!(
+            "OAuth error: {} - {}",
+            oauth_error.error,
+            oauth_error.error_description.unwrap_or_default()
+        )),
+    }
+}
+
+/// Extract the port number from the redirect_uri parameter in an OAuth URL.
+fn extract_port_from_redirect_uri(auth_url: &str) -> Result<u16, String> {
+    // Find redirect_uri parameter
+    let re = regex::Regex::new(r"redirect_uri=([^&]+)").map_err(|e| e.to_string())?;
+
+    let captures = re
+        .captures(auth_url)
+        .ok_or("No redirect_uri found in auth URL")?;
+
+    let encoded_uri = captures.get(1).ok_or("No redirect_uri value")?.as_str();
+    let decoded_uri = urlencoding::decode(encoded_uri).map_err(|e| e.to_string())?;
+
+    // Extract port from URI like http://127.0.0.1:58688/oauth/callback
+    let port_re =
+        regex::Regex::new(r"127\.0\.0\.1:(\d+)").map_err(|e| format!("Regex error: {}", e))?;
+
+    let port_captures = port_re
+        .captures(&decoded_uri)
+        .ok_or("No port found in redirect_uri")?;
+
+    let port_str = port_captures.get(1).ok_or("No port value")?.as_str();
+    port_str
+        .parse::<u16>()
+        .map_err(|e| format!("Invalid port: {}", e))
+}
+
+/// Get an available port for OAuth callback server.
+#[tauri::command]
+fn get_oauth_callback_port() -> Result<u16, String> {
+    oauth::get_available_port()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -200,6 +275,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
         .manage(mcp::McpState::new())
+        .manage(mcp::HttpMcpState::new())
         .setup(|app| {
             // Configure embedded runtime early in startup
             // This prepends bundled Node.js and Git to PATH
@@ -277,6 +353,13 @@ pub fn run() {
             mcp::mcp_read_resource,
             mcp::mcp_is_connected,
             mcp::mcp_list_connected,
+            // HTTP MCP commands (for mcp.serendb.com)
+            mcp::mcp_connect_http,
+            mcp::mcp_disconnect_http,
+            mcp::mcp_list_tools_http,
+            mcp::mcp_call_tool_http,
+            mcp::mcp_is_connected_http,
+            mcp::mcp_list_connected_http,
             wallet::commands::store_crypto_private_key,
             wallet::commands::get_crypto_wallet_address,
             wallet::commands::clear_crypto_wallet,
@@ -287,6 +370,9 @@ pub fn run() {
             get_oauth_credentials,
             clear_oauth_credentials,
             get_oauth_providers,
+            // OAuth browser flow commands
+            start_oauth_browser_flow,
+            get_oauth_callback_port,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
