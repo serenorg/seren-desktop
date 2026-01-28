@@ -13,18 +13,40 @@ A lightweight (~10MB) AI desktop client built with Tauri, SolidJS, and Monaco Ed
 - **Free tier included** - Start chatting immediately with Gemini 2.0 Flash (Free) - no payment required
 - **Multi-tab conversations** - Work on multiple chats simultaneously with tabbed interface
 - **Streaming responses** - Real-time token-by-token output
+- **Semantic code context** - AI automatically retrieves relevant code chunks from your indexed codebase
 - **Smart balance warnings** - Friendly prompts to top up or switch to free model when low on credits
 - **Conversation persistence** - Chat history saved locally in SQLite
 - **Auto-refresh authentication** - Seamless token refresh on expiration
+
+### Semantic Codebase Indexing
+
+- **AI-powered embeddings** - Index your entire codebase with SerenEmbed
+- **Instant vector search** - Local sqlite-vec storage for zero-latency retrieval
+- **Automatic context injection** - AI gets relevant code context during conversations
+- **Language-aware chunking** - Smart code splitting for Rust, TypeScript/JavaScript, Python
+- **File watcher integration** - Automatic re-indexing on save
+- **Manual controls** - Start/stop indexing from sidebar with real-time progress
+- **Index statistics** - View chunks indexed, files processed, last update time
+- **Hash-based change detection** - Only re-index modified files for efficiency
 
 ### Code Editor
 
 - **Monaco Editor** - Full VS Code editing experience
 - **Syntax highlighting** - 100+ languages supported
 - **Multi-file tabs** - Open and edit multiple files
+- **Cmd+K inline editing** - AI-powered code modification at cursor position
+- **Context menu actions** - Right-click to add code to chat, explain, or improve
 - **Markdown preview** - Live preview for `.md` files
 - **Image viewer** - View images inline
 - **PDF viewer** - Read PDF documents
+
+### Agent Client Protocol (ACP)
+
+- **AI coding agents** - Run Claude Code and compatible agents directly in Seren
+- **Chain of thought display** - See agent reasoning in real-time
+- **Tool execution** - Agents can read files, execute commands, make edits
+- **Permission system** - User approval for sensitive operations
+- **Session management** - Track and manage active agent sessions
 
 ### File Explorer
 
@@ -132,11 +154,16 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
 │  │  AI Chat    │  │   Editor    │  │  Database   │  │
 │  │  Multi-tab  │  │   Monaco    │  │   Panel     │  │
+│  │  + Context  │  │  + Cmd+K    │  │   SerenDB   │  │
 │  └─────────────┘  └─────────────┘  └─────────────┘  │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
 │  │    MCP      │  │   Wallet    │  │  Catalog    │  │
 │  │   Tools     │  │  Payments   │  │  Browser    │  │
 │  └─────────────┘  └─────────────┘  └─────────────┘  │
+│  ┌─────────────┐  ┌─────────────┐                   │
+│  │   Indexing  │  │     ACP     │                   │
+│  │  sqlite-vec │  │   Agents    │                   │
+│  └─────────────┘  └─────────────┘                   │
 │                                                      │
 │  Backend: Rust/Tauri  │  Frontend: SolidJS/TS       │
 └──────────────────────┬───────────────────────────────┘
@@ -150,6 +177,7 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  • Publisher ecosystem (50+ services)               │
 │  • MCP server hosting                               │
 │  • SerenDB serverless PostgreSQL                    │
+│  • SerenEmbed API (embeddings)                      │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -162,18 +190,28 @@ seren-desktop/
 │   │   ├── auth/          # SignIn
 │   │   ├── chat/          # ChatPanel, ChatTabBar, ModelSelector
 │   │   ├── editor/        # MonacoEditor, FileTabs, MarkdownPreview
-│   │   ├── sidebar/       # FileTree, DatabasePanel, CatalogPanel
+│   │   ├── sidebar/       # FileTree, DatabasePanel, IndexingStatus
 │   │   ├── mcp/           # McpToolsPanel, McpToolCallApproval
 │   │   ├── wallet/        # DepositModal, TransactionHistory
 │   │   ├── settings/      # ProviderSettings, McpServersPanel
 │   │   └── common/        # Header, Sidebar, StatusBar
-│   ├── services/          # API clients
-│   ├── stores/            # SolidJS reactive stores
-│   └── lib/               # Utilities
+│   ├── services/
+│   │   ├── chat.ts        # AI chat with semantic context injection
+│   │   ├── indexing.ts    # Codebase indexing operations
+│   │   └── seren-embed.ts # SerenEmbed API client
+│   ├── stores/
+│   │   └── indexing.store.ts  # Indexing state management
+│   └── lib/
+│       └── indexing/      # Orchestrator, context retrieval, file watcher
 ├── src-tauri/             # Rust backend
 │   ├── src/
-│   │   ├── commands/      # Tauri IPC handlers
-│   │   ├── services/      # Database, file watching
+│   │   ├── commands/
+│   │   │   └── indexing.rs   # Indexing Tauri commands
+│   │   ├── services/
+│   │   │   ├── vector_store.rs  # sqlite-vec integration
+│   │   │   ├── chunker.rs       # Language-aware code chunking
+│   │   │   └── indexer.rs       # File discovery
+│   │   ├── acp/           # Agent Client Protocol
 │   │   ├── mcp/           # MCP protocol client
 │   │   └── wallet/        # x402 crypto signing
 │   └── Cargo.toml
@@ -188,10 +226,12 @@ seren-desktop/
 | Backend | Rust, Tauri 2.0 |
 | Editor | Monaco Editor 0.52+ |
 | Database | SQLite (local chat history) |
+| Vector Store | sqlite-vec (semantic search) |
 | State | SolidJS stores |
 | Styling | Plain CSS |
 | Storage | tauri-plugin-store (encrypted) |
 | Crypto | alloy-rs (Ethereum signing) |
+| ACP | agent-client-protocol, claude-code-acp-rs |
 
 ## Configuration
 
