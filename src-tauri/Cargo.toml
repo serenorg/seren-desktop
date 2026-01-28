@@ -69,9 +69,8 @@ html2md = "0.2"
 url = "2"
 
 # ACP (Agent Client Protocol) support
-# Note: Windows builds temporarily disable ACP due to claude-code-acp-rs build issues
-agent-client-protocol = { version = "=0.9.3", features = ["unstable"], optional = true }
-claude-code-acp-rs = { version = "0.1", optional = true }
+agent-client-protocol = { version = "0.9", features = ["unstable"], optional = true }
+claude-code-acp-rs = { git = "https://github.com/serenorg/claude-code-acp-rs", optional = true }
 anyhow = "1"
 # Note: codex-acp has unresolved dependency issues (ssh auth for tungstenite fork)
 # Will add Codex support when upstream issues are resolved
