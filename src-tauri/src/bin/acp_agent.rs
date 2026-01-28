@@ -1,4 +1,4 @@
-//! Seren ACP Agent binary
+//! ACP Agent binary (acp_agent)
 //!
 //! This binary wraps claude-code-acp-rs to provide an ACP-compatible agent
 //! that can be spawned by the Seren desktop app.

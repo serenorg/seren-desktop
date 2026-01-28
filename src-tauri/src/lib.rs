@@ -272,6 +272,7 @@ fn get_oauth_callback_port() -> Result<u16, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -286,21 +287,6 @@ pub fn run() {
     #[cfg(feature = "acp")]
     {
         builder = builder.manage(acp::AcpState::new());
-    }
-
-    // Conditionally add ACP invoke handlers before setup (which consumes self)
-    #[cfg(feature = "acp")]
-    {
-        builder = builder.invoke_handler(tauri::generate_handler![
-            acp::acp_spawn,
-            acp::acp_prompt,
-            acp::acp_cancel,
-            acp::acp_terminate,
-            acp::acp_list_sessions,
-            acp::acp_set_permission_mode,
-            acp::acp_get_available_agents,
-            acp::acp_check_agent_available,
-        ]);
     }
 
     builder
@@ -415,6 +401,23 @@ pub fn run() {
             commands::indexing::chunk_file,
             commands::indexing::estimate_indexing,
             commands::indexing::compute_file_hash,
+            // ACP commands (conditionally included when acp feature is enabled)
+            #[cfg(feature = "acp")]
+            acp::acp_spawn,
+            #[cfg(feature = "acp")]
+            acp::acp_prompt,
+            #[cfg(feature = "acp")]
+            acp::acp_cancel,
+            #[cfg(feature = "acp")]
+            acp::acp_terminate,
+            #[cfg(feature = "acp")]
+            acp::acp_list_sessions,
+            #[cfg(feature = "acp")]
+            acp::acp_set_permission_mode,
+            #[cfg(feature = "acp")]
+            acp::acp_get_available_agents,
+            #[cfg(feature = "acp")]
+            acp::acp_check_agent_available,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

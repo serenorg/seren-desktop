@@ -35,25 +35,25 @@ pub enum AgentType {
 impl AgentType {
     /// Get the command to spawn this agent
     ///
-    /// For ClaudeCode, we use the bundled seren-acp-agent binary which wraps
+    /// For ClaudeCode, we use the bundled acp_agent binary which wraps
     /// claude-code-acp-rs. This binary is built alongside the main Seren app
     /// and provides ACP protocol support over stdio.
     fn command(&self) -> String {
         match self {
             AgentType::ClaudeCode => {
-                // Get the path to the bundled seren-acp-agent binary
+                // Get the path to the bundled acp_agent binary
                 // In development, it's in the target directory
                 // In production, it's bundled with the app
                 if let Ok(exe_path) = std::env::current_exe() {
                     if let Some(exe_dir) = exe_path.parent() {
-                        let agent_path = exe_dir.join("seren-acp-agent");
+                        let agent_path = exe_dir.join("acp_agent");
                         if agent_path.exists() {
                             return agent_path.to_string_lossy().to_string();
                         }
                     }
                 }
                 // Fallback to assuming it's in PATH
-                "seren-acp-agent".to_string()
+                "acp_agent".to_string()
             }
             AgentType::Codex => "codex".to_string(),
         }
@@ -540,7 +540,7 @@ async fn run_session_worker(
 
     let mut child = cmd.spawn().map_err(|e| {
         format!(
-            "Failed to spawn {} {:?}: {}. Make sure seren-acp-agent is built and available.",
+            "Failed to spawn {} {:?}: {}. Make sure acp_agent is built and available.",
             command, args, e
         )
     })?;

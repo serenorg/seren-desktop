@@ -13,7 +13,7 @@ name = "Seren"
 path = "src/main.rs"
 
 [[bin]]
-name = "seren-acp-agent"
+name = "acp_agent"
 path = "src/bin/acp_agent.rs"
 # Temporarily disabled on Windows due to claude-code-acp-rs build issues
 required-features = ["acp"]
