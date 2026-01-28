@@ -14,8 +14,10 @@ import type {
   ToolResult,
 } from "@/lib/providers/types";
 import { executeTools, getAllTools } from "@/lib/tools";
+import { retrieveCodeContext } from "@/lib/indexing/context-retrieval";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
+import { fileTreeState } from "@/stores/fileTree";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -181,10 +183,12 @@ export async function* streamMessageWithTools(
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
 
-  // Add system message with context if provided
+  // Build system message
+  let systemContent =
+    "You are a helpful coding assistant with access to the user's local files.";
+
+  // Add user-provided context if available
   if (context) {
-    let systemContent =
-      "You are a helpful coding assistant with access to the user's local files.";
     if (context.file) {
       systemContent += `\n\nThe user has selected code from ${context.file}`;
       if (context.range) {
@@ -194,14 +198,25 @@ export async function* streamMessageWithTools(
     } else {
       systemContent += `\n\nThe user has selected this code:\n\n\`\`\`\n${context.content}\n\`\`\``;
     }
-    messages.push({ role: "system", content: systemContent });
   } else {
-    messages.push({
-      role: "system",
-      content:
-        "You are a helpful coding assistant with access to the user's local files. Use the available tools to read, list, and write files when needed to help the user.",
-    });
+    systemContent +=
+      " Use the available tools to read, list, and write files when needed to help the user.";
   }
+
+  // Retrieve and inject semantic code context if available
+  try {
+    const projectPath = fileTreeState.rootPath;
+    const semanticContext = await retrieveCodeContext(projectPath, content);
+    if (semanticContext) {
+      systemContent += semanticContext;
+    }
+  } catch (error) {
+    // Silently fail - semantic context is optional
+    console.warn("[Chat] Failed to retrieve semantic context:", error);
+  }
+
+  // Add system message to messages array
+  messages.push({ role: "system", content: systemContent });
 
   // Add conversation history (user and assistant messages only)
   for (const msg of history) {
