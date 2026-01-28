@@ -1,7 +1,7 @@
 // ABOUTME: Publisher OAuth service for gateway-managed OAuth flows.
 // ABOUTME: Handles connecting/disconnecting OAuth providers for MCP publishers.
 
-import { open } from "@tauri-apps/plugin-shell";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   listConnections,
   revokeConnection,
@@ -23,7 +23,7 @@ export async function connectPublisher(providerSlug: string): Promise<void> {
   const authUrl = `${apiBase}/api/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
 
   console.log(`[PublisherOAuth] Opening authorization URL: ${authUrl}`);
-  await open(authUrl);
+  await openUrl(authUrl);
 }
 
 /**
