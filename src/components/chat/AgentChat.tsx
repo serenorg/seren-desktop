@@ -194,7 +194,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                           />
                         </svg>
                         <span>
-                          <strong>Claude Code Required:</strong> Make sure Claude Code CLI is running on your machine.
+                          <strong>Claude Code Required:</strong> Make sure Claude Code CLI is installed on your computer.
                         </span>
                       </div>
                     </div>
