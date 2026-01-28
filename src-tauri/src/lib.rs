@@ -1,6 +1,8 @@
 // ABOUTME: Core library for the Seren Desktop Tauri application.
 // ABOUTME: Contains Tauri commands and the application run function.
 
+#[cfg(not(target_os = "windows"))]
+use tauri::Emitter;
 use tauri_plugin_store::StoreExt;
 
 pub mod commands {
