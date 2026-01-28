@@ -10,6 +10,43 @@ import type {
 import { type GatewayTool, getGatewayTools } from "@/services/mcp-gateway";
 
 /**
+ * Maximum number of tools by model family.
+ * OpenAI has a hard limit of 128, others are more generous.
+ */
+export const MODEL_TOOL_LIMITS: Record<string, number> = {
+  // OpenAI models - hard limit of 128
+  "gpt-3.5": 128,
+  "gpt-4": 128,
+  o1: 128,
+  o3: 128,
+
+  // Anthropic models - effectively unlimited
+  claude: 4096,
+
+  // Google models
+  gemini: 256,
+
+  // Default for unknown models - be conservative
+  default: 128,
+};
+
+/**
+ * Get the tool limit for a specific model.
+ * Matches by model ID prefix (e.g., "claude-3.5-sonnet" matches "claude").
+ */
+export function getToolLimitForModel(modelId: string): number {
+  const lowerModel = modelId.toLowerCase();
+
+  for (const [prefix, limit] of Object.entries(MODEL_TOOL_LIMITS)) {
+    if (prefix !== "default" && lowerModel.startsWith(prefix)) {
+      return limit;
+    }
+  }
+
+  return MODEL_TOOL_LIMITS.default;
+}
+
+/**
  * Prefix for gateway tools to identify publisher during execution.
  * Format: gateway__{publisherSlug}__{toolName}
  */
@@ -235,23 +272,38 @@ export const FILE_TOOLS: ToolDefinition[] = [
 
 /**
  * Get all available tools, including file tools, local MCP tools, and Seren Gateway tools.
- * - File tools: Local file operations via Tauri
- * - Local MCP tools: User-added MCP servers via stdio
- * - Seren Gateway tools: Tools from publishers via MCP protocol
+ * - File tools: Local file operations via Tauri (highest priority)
+ * - Local MCP tools: User-added MCP servers via stdio (high priority)
+ * - Seren Gateway tools: Tools from publishers via MCP protocol (fill remaining)
+ *
+ * Tool count is limited based on the model being used (e.g., OpenAI caps at 128).
+ *
+ * @param modelId - Model ID to determine tool limit (e.g., "gpt-4", "claude-3.5-sonnet")
  */
-export function getAllTools(): ToolDefinition[] {
+export function getAllTools(modelId?: string): ToolDefinition[] {
+  const limit = getToolLimitForModel(modelId ?? "");
   const tools: ToolDefinition[] = [...FILE_TOOLS];
 
-  // Add tools from connected local MCP servers (user-added)
+  // Add tools from connected local MCP servers (user-added) - high priority
   const mcpTools = mcpClient.getAllTools();
   for (const { serverName, tool } of mcpTools) {
+    if (tools.length >= limit) break;
     tools.push(convertMcpToolToDefinition(serverName, tool));
   }
 
-  // Add tools from Seren Gateway publishers (via MCP protocol)
+  // Add tools from Seren Gateway publishers - fill remaining slots
   const gatewayTools = getGatewayTools();
   for (const gatewayTool of gatewayTools) {
+    if (tools.length >= limit) break;
     tools.push(convertGatewayToolToDefinition(gatewayTool));
+  }
+
+  const totalAvailable =
+    FILE_TOOLS.length + mcpTools.length + gatewayTools.length;
+  if (tools.length < totalAvailable) {
+    console.warn(
+      `[Tools] Limited to ${limit} tools for model "${modelId ?? "unknown"}" (had ${totalAvailable} available)`,
+    );
   }
 
   return tools;

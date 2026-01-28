@@ -213,8 +213,8 @@ export async function* streamMessageWithTools(
   // Add current user message
   messages.push({ role: "user", content });
 
-  // Get tools if enabled
-  const tools = enableTools ? getAllTools() : undefined;
+  // Get tools if enabled, with model-specific limits
+  const tools = enableTools ? getAllTools(model) : undefined;
 
   // Get max iterations from settings (0 = unlimited)
   const maxIterations = settingsStore.get("chatMaxToolIterations");
