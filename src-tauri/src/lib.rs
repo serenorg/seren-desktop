@@ -6,10 +6,14 @@ use tauri_plugin_store::StoreExt;
 
 pub mod commands {
     pub mod chat;
+    pub mod indexing;
 }
 
 pub mod services {
+    pub mod chunker;
     pub mod database;
+    pub mod indexer;
+    pub mod vector_store;
 }
 
 mod acp;
@@ -384,6 +388,20 @@ pub fn run() {
             acp::acp_set_permission_mode,
             acp::acp_get_available_agents,
             acp::acp_check_agent_available,
+            // Semantic indexing commands
+            commands::indexing::init_project_index,
+            commands::indexing::get_index_status,
+            commands::indexing::has_project_index,
+            commands::indexing::index_chunk,
+            commands::indexing::index_chunks,
+            commands::indexing::delete_file_index,
+            commands::indexing::file_needs_reindex,
+            commands::indexing::search_codebase,
+            commands::indexing::get_embedding_dimension,
+            commands::indexing::discover_project_files,
+            commands::indexing::chunk_file,
+            commands::indexing::estimate_indexing,
+            commands::indexing::compute_file_hash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
