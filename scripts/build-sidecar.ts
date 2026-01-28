@@ -139,6 +139,9 @@ function main(): void {
   if (profile === "release") cargoArgs.push("--release");
   if (targetTriple !== hostTriple) cargoArgs.push("--target", targetTriple);
 
+  // Set SKIP_TAURI_BUILD to prevent build.rs from running tauri_build::build(),
+  // which validates that the sidecar binary exists — creating a circular dependency.
+  process.env.SKIP_TAURI_BUILD = "1";
   run("cargo", cargoArgs, srcTauriDir);
 
   const cargoTargetDir =
