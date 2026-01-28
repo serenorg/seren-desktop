@@ -147,7 +147,7 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
   };
 
   return (
-    <article class="px-5 py-4 border-b border-[#21262d] bg-transparent">
+    <article class="px-4 py-4 border-b border-[#21262d] bg-transparent">
       {/* Thinking block */}
       <Show when={thinking() && settingsStore.get("chatShowThinking")}>
         <ThinkingBlock thinking={thinking()} isStreaming={isStreaming()} />
@@ -194,7 +194,7 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
 
       {/* Message content */}
       <div
-        class="text-sm leading-relaxed text-[#e6edf3] break-words"
+        class="text-[15px] leading-[1.7] text-[#e6edf3] break-words"
         innerHTML={content() ? renderMarkdown(content()) : ""}
       />
       {isStreaming() && (

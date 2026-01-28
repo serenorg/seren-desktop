@@ -44,8 +44,8 @@ export const StreamingMessage: Component<StreamingMessageProps> = (props) => {
   });
 
   return (
-    <article class="px-5 py-4 border-b border-[#21262d] bg-transparent">
-      <div class="text-sm leading-relaxed text-[#e6edf3] break-words">
+    <article class="px-4 py-4 border-b border-[#21262d] bg-transparent">
+      <div class="text-[15px] leading-[1.7] text-[#e6edf3] break-words">
         {content()}
         {isStreaming() && (
           <span class="inline-block w-0.5 h-[1em] bg-[#58a6ff] ml-0.5 align-text-bottom animate-[blink_1s_step-end_infinite]" />

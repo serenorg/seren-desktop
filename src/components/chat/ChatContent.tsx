@@ -613,10 +613,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
           <For each={chatStore.messages}>
             {(message) => (
               <article
-                class={`px-4 py-3 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
+                class={`px-4 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
               >
                 <div
-                  class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-2 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_a]:text-[#58a6ff]"
+                  class="text-[15px] leading-[1.7] text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[14px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_a]:text-[#58a6ff]"
                   innerHTML={
                     message.role === "assistant"
                       ? renderMarkdown(message.content)
@@ -786,7 +786,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 ? "Type to queue message..."
                 : "Ask Seren anything…"
             }
-            class="w-full min-h-[60px] max-h-[150px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-2 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58]"
+            class="w-full min-h-[80px] max-h-[200px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-[15px] leading-[1.6] transition-colors focus:outline-none focus:border-[#58a6ff] focus:ring-1 focus:ring-[#58a6ff] placeholder:text-[#484f58]"
             onInput={(event) => {
               setInput(event.currentTarget.value);
               if (historyIndex() !== -1) {

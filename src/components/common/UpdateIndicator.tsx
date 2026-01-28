@@ -95,15 +95,32 @@ const AvailableIndicator = (props: {
   </div>
 );
 
-const ErrorIndicator = (props: { message: string; onRetry: () => void }) => (
-  <div class="flex items-center gap-2">
-    <span class="text-red-200 text-[11px]">{props.message}</span>
-    <button
-      class="bg-transparent text-white/85 border border-white/35 rounded-md text-xs py-1 px-2 cursor-pointer hover:text-white hover:border-white"
-      type="button"
-      onClick={() => props.onRetry()}
-    >
-      Retry
-    </button>
-  </div>
-);
+const ErrorIndicator = (props: { message: string; onRetry: () => void }) => {
+  // Truncate long error messages for status bar display
+  const shortMessage = () => {
+    const msg = props.message;
+    if (msg.length <= 40) return msg;
+    // Try to extract meaningful part
+    if (msg.includes("error sending request")) return "Update check failed";
+    if (msg.includes("network")) return "Network error";
+    return msg.slice(0, 37) + "...";
+  };
+
+  return (
+    <div class="flex items-center gap-2">
+      <span
+        class="text-red-200 text-[11px] max-w-[180px] truncate"
+        title={props.message}
+      >
+        {shortMessage()}
+      </span>
+      <button
+        class="bg-transparent text-white/85 border border-white/35 rounded-md text-xs py-1 px-2 cursor-pointer hover:text-white hover:border-white"
+        type="button"
+        onClick={() => props.onRetry()}
+      >
+        Retry
+      </button>
+    </div>
+  );
+};
