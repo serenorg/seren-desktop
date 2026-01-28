@@ -31,6 +31,30 @@ export interface SearchResult {
   distance: number;
 }
 
+/** Discovered file from backend */
+export interface DiscoveredFile {
+  path: string;
+  relative_path: string;
+  language: string;
+  size: number;
+  hash: string;
+}
+
+/** File chunk from backend */
+export interface FileChunk {
+  start_line: number;
+  end_line: number;
+  content: string;
+  chunk_type: string;
+  symbol_name: string | null;
+}
+
+/** Chunked file from backend */
+export interface ChunkedFile {
+  file: DiscoveredFile;
+  chunks: FileChunk[];
+}
+
 /** Chunk input for indexing */
 interface ChunkInput {
   file_path: string;

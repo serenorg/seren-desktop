@@ -11,6 +11,7 @@ import {
   Show,
 } from "solid-js";
 import { FileTree } from "@/components/sidebar/FileTree";
+import { IndexingStatus } from "@/components/sidebar/IndexingStatus";
 import {
   setAddToChatHandler,
   setExplainCodeHandler,
@@ -266,6 +267,7 @@ export const EditorPanel: Component = () => {
             onDirectoryToggle={handleDirectoryToggle}
           />
         </div>
+        <IndexingStatus />
       </aside>
 
       <section class="flex-1 flex flex-col min-w-0">
