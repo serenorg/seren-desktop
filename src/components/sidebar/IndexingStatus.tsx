@@ -1,14 +1,17 @@
 // ABOUTME: Indexing status component for sidebar display.
 // ABOUTME: Shows indexing progress, statistics, and controls.
 
-import { Show, createEffect } from "solid-js";
+import { Show, createEffect, createSignal } from "solid-js";
 import { indexingStore } from "@/stores/indexing.store";
 import { settingsStore } from "@/stores/settings.store";
+import { fileTreeState } from "@/stores/fileTree";
+import { runIndexing } from "@/lib/indexing/orchestrator";
 import "./IndexingStatus.css";
 
 export function IndexingStatus() {
   // Check if indexing is enabled
   const indexingEnabled = () => settingsStore.get("semanticIndexingEnabled");
+  const [isIndexing, setIsIndexing] = createSignal(false);
 
   // Check for index on mount and when project changes
   createEffect(() => {
@@ -21,6 +24,28 @@ export function IndexingStatus() {
   if (!indexingEnabled()) {
     return null;
   }
+
+  const handleStartIndexing = async () => {
+    const projectPath = fileTreeState.rootPath;
+    if (!projectPath) {
+      alert("No project open. Please open a folder first.");
+      return;
+    }
+
+    setIsIndexing(true);
+    indexingStore.reset();
+
+    try {
+      const result = await runIndexing(projectPath);
+      console.log("[Indexing] Complete:", result);
+    } catch (error) {
+      console.error("[Indexing] Failed:", error);
+      const message = error instanceof Error ? error.message : "Indexing failed";
+      alert(`Indexing failed: ${message}`);
+    } finally {
+      setIsIndexing(false);
+    }
+  };
 
   const formatNumber = (num: number) => {
     return num.toLocaleString();
@@ -75,8 +100,15 @@ export function IndexingStatus() {
               <div class="indexing-status-empty">
                 <p>No index available</p>
                 <p class="indexing-status-hint">
-                  Enable semantic search in settings to index your codebase
+                  Index your codebase to enable semantic code search
                 </p>
+                <button
+                  class="indexing-start-button"
+                  onClick={handleStartIndexing}
+                  disabled={isIndexing() || !fileTreeState.rootPath}
+                >
+                  {isIndexing() ? "Indexing..." : "Start Indexing"}
+                </button>
               </div>
             }
           >
@@ -100,6 +132,13 @@ export function IndexingStatus() {
                 </span>
               </div>
             </div>
+            <button
+              class="indexing-reindex-button"
+              onClick={handleStartIndexing}
+              disabled={isIndexing()}
+            >
+              {isIndexing() ? "Re-indexing..." : "Re-index Project"}
+            </button>
           </Show>
         }
       >
