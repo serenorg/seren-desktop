@@ -157,7 +157,7 @@ async function executeMcpTool(
 }
 
 /**
- * Execute a gateway tool call via the REST API.
+ * Execute a gateway tool call via the MCP Gateway.
  */
 async function executeGatewayTool(
   toolCallId: string,

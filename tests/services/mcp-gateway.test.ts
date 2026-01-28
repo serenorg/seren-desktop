@@ -3,13 +3,32 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock dependencies before importing the module
-vi.mock("@/lib/fetch", () => ({
-  appFetch: vi.fn(),
+// Mock MCP OAuth
+vi.mock("@/services/mcp-oauth", () => ({
+  getValidAccessToken: vi.fn().mockResolvedValue("test-mcp-token"),
+  isMcpAuthenticated: vi.fn().mockResolvedValue(true),
+  clearStoredTokens: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/services/auth", () => ({
-  getApiKey: vi.fn().mockResolvedValue("test-api-key"),
+// Mock MCP client
+vi.mock("@/lib/mcp/client", () => ({
+  mcpClient: {
+    connectHttp: vi.fn().mockResolvedValue(undefined),
+    disconnectHttp: vi.fn().mockResolvedValue(undefined),
+    getConnection: vi.fn().mockReturnValue({
+      tools: [
+        {
+          name: "mcp__test__test-tool",
+          description: "Test tool",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+    }),
+    callToolHttp: vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "result" }],
+      isError: false,
+    }),
+  },
 }));
 
 describe("MCP Gateway Caching", () => {
@@ -20,144 +39,44 @@ describe("MCP Gateway Caching", () => {
   });
 
   it("should use cached data when cache is valid", async () => {
-    const { appFetch } = await import("@/lib/fetch");
-    const fetchMock = vi.mocked(appFetch);
-
-    // Mock publisher response
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          data: [{ id: "1", slug: "test", name: "Test", is_active: true }],
-          pagination: { offset: 0, limit: 100, total: 1 },
-        }),
-    } as Response);
-
-    // Mock tools response
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          tools: [
-            {
-              name: "test-tool",
-              description: "Test",
-              inputSchema: { type: "object", properties: {} },
-            },
-          ],
-          execution_time_ms: 100,
-        }),
-    } as Response);
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const connectMock = vi.mocked(mcpClient.connectHttp);
 
     const { initializeGateway, getGatewayTools, isGatewayInitialized } =
       await import("@/services/mcp-gateway");
 
-    // First init - should fetch
+    // First init - should connect
     await initializeGateway();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(connectMock).toHaveBeenCalledTimes(1);
     expect(getGatewayTools()).toHaveLength(1);
     expect(isGatewayInitialized()).toBe(true);
 
     // Second init within TTL - should use cache
     await initializeGateway();
-    expect(fetchMock).toHaveBeenCalledTimes(2); // No additional calls
+    expect(connectMock).toHaveBeenCalledTimes(1); // No additional calls
   });
 
   it("should refetch when cache expires", async () => {
-    const { appFetch } = await import("@/lib/fetch");
-    const fetchMock = vi.mocked(appFetch);
-
-    // Mock responses for first fetch
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          data: [{ id: "1", slug: "test", name: "Test", is_active: true }],
-          pagination: { offset: 0, limit: 100, total: 1 },
-        }),
-    } as Response);
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          tools: [
-            {
-              name: "tool-v1",
-              description: "Test",
-              inputSchema: { type: "object", properties: {} },
-            },
-          ],
-          execution_time_ms: 100,
-        }),
-    } as Response);
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const connectMock = vi.mocked(mcpClient.connectHttp);
 
     const { initializeGateway, isGatewayInitialized } = await import(
       "@/services/mcp-gateway"
     );
 
     await initializeGateway();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(connectMock).toHaveBeenCalledTimes(1);
 
     // Advance time past TTL (10 minutes + 1 second)
     vi.advanceTimersByTime(10 * 60 * 1000 + 1000);
     expect(isGatewayInitialized()).toBe(false);
 
-    // Mock responses for second fetch
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          data: [{ id: "1", slug: "test", name: "Test", is_active: true }],
-          pagination: { offset: 0, limit: 100, total: 1 },
-        }),
-    } as Response);
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          tools: [
-            {
-              name: "tool-v2",
-              description: "Updated",
-              inputSchema: { type: "object", properties: {} },
-            },
-          ],
-          execution_time_ms: 100,
-        }),
-    } as Response);
-
-    // Third init after TTL expired - should refetch
+    // Third init after TTL expired - should reconnect
     await initializeGateway();
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(connectMock).toHaveBeenCalledTimes(2);
   });
 
   it("should clear cache on reset", async () => {
-    const { appFetch } = await import("@/lib/fetch");
-    const fetchMock = vi.mocked(appFetch);
-
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          data: [{ id: "1", slug: "test", name: "Test", is_active: true }],
-          pagination: { offset: 0, limit: 100, total: 1 },
-        }),
-    } as Response);
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          tools: [
-            {
-              name: "test-tool",
-              description: "Test",
-              inputSchema: { type: "object", properties: {} },
-            },
-          ],
-          execution_time_ms: 100,
-        }),
-    } as Response);
-
     const {
       initializeGateway,
       resetGateway,
@@ -168,7 +87,7 @@ describe("MCP Gateway Caching", () => {
     await initializeGateway();
     expect(getGatewayTools()).toHaveLength(1);
 
-    resetGateway();
+    await resetGateway();
     expect(getGatewayTools()).toHaveLength(0);
     expect(isGatewayInitialized()).toBe(false);
   });

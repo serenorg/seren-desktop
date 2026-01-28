@@ -237,7 +237,7 @@ export const FILE_TOOLS: ToolDefinition[] = [
  * Get all available tools, including file tools, local MCP tools, and Seren Gateway tools.
  * - File tools: Local file operations via Tauri
  * - Local MCP tools: User-added MCP servers via stdio
- * - Seren Gateway tools: Tools from publishers via REST API
+ * - Seren Gateway tools: Tools from publishers via MCP protocol
  */
 export function getAllTools(): ToolDefinition[] {
   const tools: ToolDefinition[] = [...FILE_TOOLS];
@@ -248,7 +248,7 @@ export function getAllTools(): ToolDefinition[] {
     tools.push(convertMcpToolToDefinition(serverName, tool));
   }
 
-  // Add tools from Seren Gateway publishers (via REST API)
+  // Add tools from Seren Gateway publishers (via MCP protocol)
   const gatewayTools = getGatewayTools();
   for (const gatewayTool of gatewayTools) {
     tools.push(convertGatewayToolToDefinition(gatewayTool));

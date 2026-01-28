@@ -1,5 +1,5 @@
 // ABOUTME: Model selector dropdown for choosing AI models in chat.
-// ABOUTME: Shows searchable model list with provider filtering.
+// ABOUTME: Shows searchable model list from OpenRouter with provider filtering.
 
 import type { Component } from "solid-js";
 import {
@@ -16,24 +16,62 @@ import {
   PROVIDER_CONFIGS,
   type ProviderId,
 } from "@/lib/providers";
+import { type Model, modelsService } from "@/services/models";
 import { chatStore } from "@/stores/chat.store";
 import { providerStore } from "@/stores/provider.store";
 
 export const ModelSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
+  const [openRouterModels, setOpenRouterModels] = createSignal<Model[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = createSignal(false);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
 
   const currentProvider = () => providerStore.activeProvider;
-  const availableModels = () => providerStore.getModels(currentProvider());
 
-  // Filter models based on search query
+  // Default models from provider store (curated list)
+  const defaultModels = () => providerStore.getModels(currentProvider());
+
+  // Load full model list from OpenRouter on mount (for search)
+  onMount(async () => {
+    setIsLoadingModels(true);
+    try {
+      const models = await modelsService.getAvailable();
+      setOpenRouterModels(models);
+    } catch (err) {
+      console.error("Failed to load models from OpenRouter:", err);
+    } finally {
+      setIsLoadingModels(false);
+    }
+  });
+
+  // Filter models: show defaults when no search, search full catalog when typing
   const filteredModels = createMemo(() => {
     const query = searchQuery().toLowerCase().trim();
-    const models = availableModels();
-    if (!query) return models;
-    return models.filter(
+
+    // No search query - show curated defaults
+    if (!query) {
+      return defaultModels();
+    }
+
+    // Searching - use full OpenRouter catalog for Seren provider
+    if (currentProvider() === "seren" && openRouterModels().length > 0) {
+      const allModels = openRouterModels().map((m) => ({
+        id: m.id,
+        name: m.name,
+        contextWindow: m.contextWindow,
+        description: m.provider,
+      }));
+      return allModels.filter(
+        (model) =>
+          model.name.toLowerCase().includes(query) ||
+          model.id.toLowerCase().includes(query),
+      );
+    }
+
+    // For other providers, search within their models
+    return defaultModels().filter(
       (model) =>
         model.name.toLowerCase().includes(query) ||
         model.id.toLowerCase().includes(query),
@@ -41,9 +79,26 @@ export const ModelSelector: Component = () => {
   });
 
   const currentModel = () => {
-    const models = availableModels();
+    const models = defaultModels();
     const activeModel = providerStore.activeModel;
-    return models.find((model) => model.id === activeModel) || models[0];
+    // First check defaults, then check full OpenRouter list for Seren
+    const found = models.find((model) => model.id === activeModel);
+    if (found) return found;
+
+    // Check full catalog for Seren provider (user may have selected a non-default model)
+    if (currentProvider() === "seren") {
+      const orModel = openRouterModels().find((m) => m.id === activeModel);
+      if (orModel) {
+        return {
+          id: orModel.id,
+          name: orModel.name,
+          contextWindow: orModel.contextWindow,
+          description: orModel.provider,
+        };
+      }
+    }
+
+    return models[0];
   };
 
   const selectModel = (modelId: string) => {
@@ -184,9 +239,11 @@ export const ModelSelector: Component = () => {
               when={filteredModels().length > 0}
               fallback={
                 <div class="p-4 text-center text-muted-foreground text-[13px]">
-                  {searchQuery()
-                    ? `No models matching "${searchQuery()}"`
-                    : `No models available for ${PROVIDER_CONFIGS[currentProvider()].name}`}
+                  {isLoadingModels()
+                    ? "Loading models..."
+                    : searchQuery()
+                      ? `No models matching "${searchQuery()}"`
+                      : `No models available for ${PROVIDER_CONFIGS[currentProvider()].name}`}
                 </div>
               }
             >
