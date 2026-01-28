@@ -4,6 +4,7 @@
 const TOKEN_STORAGE_KEY = "seren_token";
 const REFRESH_TOKEN_STORAGE_KEY = "seren_refresh_token";
 const API_KEY_STORAGE_KEY = "seren_api_key";
+const DEFAULT_ORG_ID_STORAGE_KEY = "seren_default_org_id";
 
 /**
  * Check if running in Tauri runtime (vs browser).
@@ -162,6 +163,62 @@ export async function clearSerenApiKey(): Promise<void> {
   } else {
     // Browser fallback for testing
     localStorage.removeItem(API_KEY_STORAGE_KEY);
+  }
+}
+
+// ============================================================================
+// Default Organization ID (for API key creation)
+// ============================================================================
+
+/**
+ * Store the user's default organization ID.
+ * This is returned from login and used for API key creation.
+ */
+export async function storeDefaultOrganizationId(orgId: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("set_setting", {
+      store: "auth.json",
+      key: "default_organization_id",
+      value: orgId,
+    });
+  } else {
+    // Browser fallback for testing
+    localStorage.setItem(DEFAULT_ORG_ID_STORAGE_KEY, orgId);
+  }
+}
+
+/**
+ * Retrieve stored default organization ID.
+ * Returns null if not stored.
+ */
+export async function getDefaultOrganizationId(): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    const result = await invoke<string | null>("get_setting", {
+      store: "auth.json",
+      key: "default_organization_id",
+    });
+    return result && result.length > 0 ? result : null;
+  }
+  // Browser fallback for testing
+  return localStorage.getItem(DEFAULT_ORG_ID_STORAGE_KEY);
+}
+
+/**
+ * Clear stored default organization ID (logout).
+ */
+export async function clearDefaultOrganizationId(): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("set_setting", {
+      store: "auth.json",
+      key: "default_organization_id",
+      value: "",
+    });
+  } else {
+    // Browser fallback for testing
+    localStorage.removeItem(DEFAULT_ORG_ID_STORAGE_KEY);
   }
 }
 

@@ -1,14 +1,17 @@
 // ABOUTME: Authentication service for login, logout, and token management.
 // ABOUTME: Uses manual fetch for login/refresh (not in OpenAPI spec) and SDK for user info.
 
-import { getCurrentUser, listOrganizations } from "@/api";
+import { getCurrentUser } from "@/api";
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import {
+  clearDefaultOrganizationId,
   clearRefreshToken,
   clearToken,
+  getDefaultOrganizationId,
   getRefreshToken,
   getToken,
+  storeDefaultOrganizationId,
   storeRefreshToken,
   storeToken,
 } from "@/lib/tauri-bridge";
@@ -22,8 +25,8 @@ export interface LoginResponse {
       id: string;
       email: string;
       name?: string;
-      organization_id?: string;
     };
+    default_organization_id: string;
   };
 }
 
@@ -63,6 +66,7 @@ export async function login(
   const data: LoginResponse = await response.json();
   await storeToken(data.data.access_token);
   await storeRefreshToken(data.data.refresh_token);
+  await storeDefaultOrganizationId(data.data.default_organization_id);
   return data;
 }
 
@@ -72,6 +76,7 @@ export async function login(
 export async function logout(): Promise<void> {
   await clearToken();
   await clearRefreshToken();
+  await clearDefaultOrganizationId();
 }
 
 /**
@@ -172,20 +177,6 @@ interface ApiKeyCreateResponse {
 }
 
 /**
- * Get the user's organization ID by listing their organizations.
- */
-async function getOrganizationId(): Promise<string> {
-  const { data, error } = await listOrganizations({ throwOnError: false });
-
-  if (error || !data?.data || data.data.length === 0) {
-    throw new Error("Failed to get user organizations");
-  }
-
-  // Use the first organization (users typically have one)
-  return data.data[0].id;
-}
-
-/**
  * Create a new API key for MCP authentication.
  * Uses the proper REST endpoint: POST /organizations/{org_id}/api-keys
  * @returns API key (seren_xxx_yyy format)
@@ -197,7 +188,10 @@ export async function createApiKey(): Promise<string> {
     throw new Error("Not authenticated");
   }
 
-  const orgId = await getOrganizationId();
+  const orgId = await getDefaultOrganizationId();
+  if (!orgId) {
+    throw new Error("No default organization ID stored. Please log in again.");
+  }
 
   const response = await appFetch(
     `${apiBase}/organizations/${orgId}/api-keys`,
