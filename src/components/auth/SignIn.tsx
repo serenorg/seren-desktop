@@ -1,13 +1,11 @@
 // ABOUTME: Sign-in form component for user authentication.
-// ABOUTME: Handles email/password login with integrated MCP OAuth flow.
+// ABOUTME: Handles email/password login.
 
 import { type Component, createSignal, Show } from "solid-js";
 import { openExternalLink } from "@/lib/external-link";
 import { login } from "@/services/auth";
-import { needsMcpAuth } from "@/services/mcp-gateway";
-import { startOAuthBrowserFlow } from "@/services/mcp-oauth";
 
-type LoginPhase = "credentials" | "signing-in" | "mcp-oauth" | "completing";
+type LoginPhase = "credentials" | "signing-in" | "completing";
 
 interface SignInProps {
   onSuccess: () => void;
@@ -20,20 +18,6 @@ export const SignIn: Component<SignInProps> = (props) => {
   const [phase, setPhase] = createSignal<LoginPhase>("credentials");
 
   const isLoading = () => phase() !== "credentials";
-
-  const startMcpOAuth = async (): Promise<boolean> => {
-    setPhase("mcp-oauth");
-
-    try {
-      console.log("[SignIn] Starting browser-based MCP OAuth flow...");
-      await startOAuthBrowserFlow();
-      console.log("[SignIn] MCP OAuth completed successfully");
-      return true;
-    } catch (err) {
-      console.error("[SignIn] MCP OAuth failed:", err);
-      return false;
-    }
-  };
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
@@ -59,21 +43,7 @@ export const SignIn: Component<SignInProps> = (props) => {
       return;
     }
 
-    // Phase 2: Check if MCP OAuth is needed
-    const mcpAuthNeeded = await needsMcpAuth();
-
-    if (mcpAuthNeeded) {
-      // Phase 3: Do MCP OAuth
-      const oauthSuccess = await startMcpOAuth();
-
-      if (!oauthSuccess) {
-        // User cancelled or OAuth failed - still logged in to SerenDB
-        // but without MCP. Let them proceed, they can retry later.
-        console.log("[SignIn] MCP OAuth skipped or failed, proceeding anyway");
-      }
-    }
-
-    // Phase 4: Complete
+    // Phase 2: Complete
     setPhase("completing");
     props.onSuccess();
   };
@@ -82,8 +52,6 @@ export const SignIn: Component<SignInProps> = (props) => {
     switch (phase()) {
       case "signing-in":
         return "Signing in...";
-      case "mcp-oauth":
-        return "Connecting to MCP...";
       case "completing":
         return "Completing...";
       default:
@@ -101,12 +69,6 @@ export const SignIn: Component<SignInProps> = (props) => {
         <Show when={error()}>
           <div class="mb-5 p-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[#f87171] text-[13px]">
             {error()}
-          </div>
-        </Show>
-
-        <Show when={phase() === "mcp-oauth"}>
-          <div class="mb-5 p-3 bg-[rgba(99,102,241,0.1)] border border-[rgba(99,102,241,0.3)] rounded-lg text-[#a5b4fc] text-[13px] text-center">
-            Complete authorization in your browser
           </div>
         </Show>
 

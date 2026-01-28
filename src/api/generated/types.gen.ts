@@ -272,10 +272,13 @@ export type AnalyticsQueryParams = {
  * Response struct for API key creation (includes the full key ONCE)
  */
 export type ApiKeyCreated = {
+    /**
+     * The full API key (seren_<key_id>_<secret>) - shown ONCE.
+     */
+    api_key: string;
     created_at: string;
     expires_at?: string | null;
     id: string;
-    key: string;
     key_id: string;
     name: string;
     organization_id: string;
@@ -349,15 +352,6 @@ export type ApiKeyCreated = {
 export type ApiKeyCreatedResponse = {
     data: ApiKeyCreated;
     pagination?: PaginationMeta | null;
-};
-
-/**
- * Response for GET /auth/api-key (token exchange).
- *
- * Returns the full API key (including secret). Do not cache.
- */
-export type ApiKeyExchangeResponse = {
-    api_key: string;
 };
 
 /**
@@ -2264,6 +2258,11 @@ export type CreatePublisherRequest = {
      * Upstream static API key (will be encrypted)
      */
     upstream_api_key?: string | null;
+    /**
+     * Dot-separated path to upstream cost in response body (for prepaid passthrough billing).
+     * Example: "usage.cost"
+     */
+    upstream_cost_response_path?: string | null;
     /**
      * Non-sensitive headers to send to upstream API (e.g., User-Agent)
      */
@@ -5158,6 +5157,11 @@ export type LogicalReplicationSettingsResponse = {
 
 export type LoginResult = {
     access_token: string;
+    /**
+     * The user's default organization ID for API calls requiring an organization context.
+     * This is typically the first organization the user joined (their personal org).
+     */
+    default_organization_id: string;
     expires_in: number;
     refresh_token: string;
     user: UserInfo;
@@ -9140,6 +9144,11 @@ export type PublisherResponse = {
     unique_agents_served: number;
     updated_at: string;
     /**
+     * Dot-separated path to upstream cost in response body (for prepaid passthrough billing).
+     * Example: "usage.cost"
+     */
+    upstream_cost_response_path?: string | null;
+    /**
      * Non-sensitive headers to send to upstream API
      */
     upstream_headers: unknown;
@@ -11635,6 +11644,11 @@ export type UpdatePublisherRequest = {
      */
     upstream_api_key?: string | null;
     /**
+     * Dot-separated path to upstream cost in response body (for prepaid passthrough billing).
+     * Example: "usage.cost"
+     */
+    upstream_cost_response_path?: string | null;
+    /**
      * Non-sensitive headers to send to upstream API (e.g., User-Agent)
      */
     upstream_headers?: unknown;
@@ -12506,6 +12520,181 @@ export type EstimateQueryResponses = {
 
 export type EstimateQueryResponse = EstimateQueryResponses[keyof EstimateQueryResponses];
 
+export type CallMcpToolData = {
+    body: CallMcpToolRequest;
+    path?: never;
+    query?: never;
+    url: '/agent/mcp/call';
+};
+
+export type CallMcpToolErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * OAuth connection required for BYOC publisher
+     */
+    403: unknown;
+    /**
+     * Publisher or tool not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type CallMcpToolResponses = {
+    /**
+     * Tool called successfully
+     */
+    200: McpToolCallResponse;
+};
+
+export type CallMcpToolResponse = CallMcpToolResponses[keyof CallMcpToolResponses];
+
+export type DiscoverMcpCapabilitiesData = {
+    body: DiscoverMcpCapabilitiesRequest;
+    path?: never;
+    query?: never;
+    url: '/agent/mcp/capabilities';
+};
+
+export type DiscoverMcpCapabilitiesErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * OAuth connection required for BYOC publisher
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type DiscoverMcpCapabilitiesResponses = {
+    /**
+     * Capabilities discovered successfully
+     */
+    200: McpCapabilitiesResponse;
+};
+
+export type DiscoverMcpCapabilitiesResponse = DiscoverMcpCapabilitiesResponses[keyof DiscoverMcpCapabilitiesResponses];
+
+export type ReadMcpResourceData = {
+    body: ReadMcpResourceRequest;
+    path?: never;
+    query?: never;
+    url: '/agent/mcp/resource';
+};
+
+export type ReadMcpResourceErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * OAuth connection required for BYOC publisher
+     */
+    403: unknown;
+    /**
+     * Publisher or resource not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ReadMcpResourceResponses = {
+    /**
+     * Resource read successfully
+     */
+    200: McpResourceReadResponse;
+};
+
+export type ReadMcpResourceResponse = ReadMcpResourceResponses[keyof ReadMcpResourceResponses];
+
+export type ListMcpResourcesData = {
+    body: ListMcpResourcesRequest;
+    path?: never;
+    query?: never;
+    url: '/agent/mcp/resources';
+};
+
+export type ListMcpResourcesErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * OAuth connection required for BYOC publisher
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ListMcpResourcesResponses = {
+    /**
+     * Resources listed successfully
+     */
+    200: McpResourcesResponse;
+};
+
+export type ListMcpResourcesResponse = ListMcpResourcesResponses[keyof ListMcpResourcesResponses];
+
+export type ListMcpToolsData = {
+    body: ListMcpToolsRequest;
+    path?: never;
+    query?: never;
+    url: '/agent/mcp/tools';
+};
+
+export type ListMcpToolsErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * OAuth connection required for BYOC publisher
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ListMcpToolsResponses = {
+    /**
+     * Tools listed successfully
+     */
+    200: McpToolsResponse;
+};
+
+export type ListMcpToolsResponse = ListMcpToolsResponses[keyof ListMcpToolsResponses];
+
 export type ListStorePublishersData = {
     body?: never;
     path?: never;
@@ -13212,181 +13401,6 @@ export type GetTransactionsResponses = {
 
 export type GetTransactionsResponse = GetTransactionsResponses[keyof GetTransactionsResponses];
 
-export type CallMcpToolData = {
-    body: CallMcpToolRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/call';
-};
-
-export type CallMcpToolErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher or tool not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type CallMcpToolResponses = {
-    /**
-     * Tool called successfully
-     */
-    200: McpToolCallResponse;
-};
-
-export type CallMcpToolResponse = CallMcpToolResponses[keyof CallMcpToolResponses];
-
-export type DiscoverMcpCapabilitiesData = {
-    body: DiscoverMcpCapabilitiesRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/capabilities';
-};
-
-export type DiscoverMcpCapabilitiesErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type DiscoverMcpCapabilitiesResponses = {
-    /**
-     * Capabilities discovered successfully
-     */
-    200: McpCapabilitiesResponse;
-};
-
-export type DiscoverMcpCapabilitiesResponse = DiscoverMcpCapabilitiesResponses[keyof DiscoverMcpCapabilitiesResponses];
-
-export type ReadMcpResourceData = {
-    body: ReadMcpResourceRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/resource';
-};
-
-export type ReadMcpResourceErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher or resource not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ReadMcpResourceResponses = {
-    /**
-     * Resource read successfully
-     */
-    200: McpResourceReadResponse;
-};
-
-export type ReadMcpResourceResponse = ReadMcpResourceResponses[keyof ReadMcpResourceResponses];
-
-export type ListMcpResourcesData = {
-    body: ListMcpResourcesRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/resources';
-};
-
-export type ListMcpResourcesErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ListMcpResourcesResponses = {
-    /**
-     * Resources listed successfully
-     */
-    200: McpResourcesResponse;
-};
-
-export type ListMcpResourcesResponse = ListMcpResourcesResponses[keyof ListMcpResourcesResponses];
-
-export type ListMcpToolsData = {
-    body: ListMcpToolsRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/tools';
-};
-
-export type ListMcpToolsErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ListMcpToolsResponses = {
-    /**
-     * Tools listed successfully
-     */
-    200: McpToolsResponse;
-};
-
-export type ListMcpToolsResponse = ListMcpToolsResponses[keyof ListMcpToolsResponses];
-
 export type ListConnectionsData = {
     body?: never;
     path?: never;
@@ -13582,33 +13596,6 @@ export type OauthCallbackErrors = {
      */
     400: unknown;
 };
-
-export type GetApiKeyData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/auth/api-key';
-};
-
-export type GetApiKeyErrors = {
-    /**
-     * Bad request
-     */
-    400: unknown;
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type GetApiKeyResponses = {
-    /**
-     * User API key
-     */
-    200: ApiKeyExchangeResponse;
-};
-
-export type GetApiKeyResponse = GetApiKeyResponses[keyof GetApiKeyResponses];
 
 export type ForgotPasswordData = {
     body: ForgotPasswordRequest;
@@ -14125,7 +14112,7 @@ export type ListOrgApiKeysData = {
         organization_id: string;
     };
     query?: never;
-    url: '/organizations/{organization_id}/api_keys';
+    url: '/organizations/{organization_id}/api-keys';
 };
 
 export type ListOrgApiKeysErrors = {
@@ -14157,7 +14144,7 @@ export type CreateOrgApiKeyData = {
         organization_id: string;
     };
     query?: never;
-    url: '/organizations/{organization_id}/api_keys';
+    url: '/organizations/{organization_id}/api-keys';
 };
 
 export type CreateOrgApiKeyErrors = {
@@ -14193,7 +14180,7 @@ export type RevokeOrgApiKeyData = {
         key_id: string;
     };
     query?: never;
-    url: '/organizations/{organization_id}/api_keys/{key_id}';
+    url: '/organizations/{organization_id}/api-keys/{key_id}';
 };
 
 export type RevokeOrgApiKeyErrors = {

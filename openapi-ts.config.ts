@@ -1,7 +1,7 @@
 import { defineConfig } from "@hey-api/openapi-ts";
 
 export default defineConfig({
-  input: "../serencore/seren-core/openapi.json",
+  input: "openapi.json",
   output: {
     path: "src/api/generated",
     format: "prettier",
