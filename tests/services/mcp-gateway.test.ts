@@ -3,6 +3,13 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// Mock tauri-bridge to avoid localStorage dependency in Node
+vi.mock("@/lib/tauri-bridge", () => ({
+  getSerenApiKey: vi.fn().mockResolvedValue("test-api-key"),
+  clearSerenApiKey: vi.fn().mockResolvedValue(undefined),
+  isTauri: vi.fn().mockReturnValue(false),
+}));
+
 // Mock MCP OAuth
 vi.mock("@/services/mcp-oauth", () => ({
   getValidAccessToken: vi.fn().mockResolvedValue("test-mcp-token"),
