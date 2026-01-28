@@ -370,3 +370,194 @@ pub fn mcp_list_connected(state: State<'_, McpState>) -> Result<Vec<String>, Str
     let processes = state.processes.lock().map_err(|e| e.to_string())?;
     Ok(processes.keys().cloned().collect())
 }
+
+// ============================================================================
+// HTTP Streaming MCP Client (for mcp.serendb.com)
+// ============================================================================
+
+use rmcp::ServiceExt;
+use rmcp::transport::streamable_http_client::{StreamableHttpClientTransport, StreamableHttpClientTransportConfig};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// HTTP MCP client for remote servers like mcp.serendb.com
+/// The second type parameter is the handler - we use () which implements ClientHandler
+type HttpMcpClient = rmcp::service::RunningService<rmcp::RoleClient, ()>;
+
+/// State for HTTP MCP connections
+pub struct HttpMcpState {
+    clients: RwLock<HashMap<String, Arc<HttpMcpClient>>>,
+}
+
+impl HttpMcpState {
+    pub fn new() -> Self {
+        Self {
+            clients: RwLock::new(HashMap::new()),
+        }
+    }
+}
+
+impl Default for HttpMcpState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Connect to a remote MCP server via HTTP streaming
+#[tauri::command]
+pub async fn mcp_connect_http(
+    state: State<'_, HttpMcpState>,
+    server_name: String,
+    url: String,
+    auth_token: Option<String>,
+) -> Result<McpInitializeResult, String> {
+    // Build reqwest client with auth header if token provided
+    let client = if let Some(token) = auth_token {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))
+                .map_err(|e| format!("Invalid auth token: {}", e))?,
+        );
+        reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {}", e))?
+    } else {
+        reqwest::Client::new()
+    };
+
+    // Build transport config with URL
+    let config = StreamableHttpClientTransportConfig {
+        uri: url.into(),
+        ..Default::default()
+    };
+
+    // Build transport with custom client and config
+    let transport = StreamableHttpClientTransport::with_client(client, config);
+
+    // Connect using rmcp - () implements ClientHandler
+    let client = ().serve(transport)
+        .await
+        .map_err(|e| format!("Failed to connect to MCP server: {}", e))?;
+
+    // Get server info from the client (peer_info returns Option<&InitializeResult>)
+    let init_result = if let Some(peer_info) = client.peer_info() {
+        McpInitializeResult {
+            protocol_version: peer_info.protocol_version.to_string(),
+            capabilities: serde_json::to_value(&peer_info.capabilities).unwrap_or_default(),
+            server_info: ServerInfo {
+                // server_info is Implementation struct with name and version fields
+                name: peer_info.server_info.name.to_string(),
+                version: peer_info.server_info.version.to_string(),
+            },
+        }
+    } else {
+        McpInitializeResult {
+            protocol_version: "unknown".to_string(),
+            capabilities: serde_json::json!({}),
+            server_info: ServerInfo {
+                name: "unknown".to_string(),
+                version: "unknown".to_string(),
+            },
+        }
+    };
+
+    // Store the client
+    let mut clients = state.clients.write().await;
+    clients.insert(server_name, Arc::new(client));
+
+    Ok(init_result)
+}
+
+/// Disconnect from an HTTP MCP server
+#[tauri::command]
+pub async fn mcp_disconnect_http(
+    state: State<'_, HttpMcpState>,
+    server_name: String,
+) -> Result<(), String> {
+    let mut clients = state.clients.write().await;
+    if let Some(client) = clients.remove(&server_name) {
+        // Client will be dropped and connection closed
+        drop(client);
+    }
+    Ok(())
+}
+
+/// List tools from an HTTP MCP server
+#[tauri::command]
+pub async fn mcp_list_tools_http(
+    state: State<'_, HttpMcpState>,
+    server_name: String,
+) -> Result<Vec<McpTool>, String> {
+    let clients = state.clients.read().await;
+    let client = clients
+        .get(&server_name)
+        .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
+
+    let tools_result = client
+        .list_tools(None)
+        .await
+        .map_err(|e| format!("Failed to list tools: {}", e))?;
+
+    // Convert rmcp tools to our McpTool format
+    let tools: Vec<McpTool> = tools_result
+        .tools
+        .into_iter()
+        .map(|t| McpTool {
+            name: t.name.to_string(),
+            description: t.description.map(|d| d.to_string()).unwrap_or_default(),
+            input_schema: serde_json::to_value(&t.input_schema).unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(tools)
+}
+
+/// Call a tool on an HTTP MCP server
+#[tauri::command]
+pub async fn mcp_call_tool_http(
+    state: State<'_, HttpMcpState>,
+    server_name: String,
+    tool_name: String,
+    arguments: serde_json::Value,
+) -> Result<McpToolResult, String> {
+    let clients = state.clients.read().await;
+    let client = clients
+        .get(&server_name)
+        .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
+
+    let result = client
+        .call_tool(rmcp::model::CallToolRequestParams {
+            name: tool_name.into(),
+            arguments: Some(serde_json::from_value(arguments).unwrap_or_default()),
+            meta: None,
+            task: None,
+        })
+        .await
+        .map_err(|e| format!("Failed to call tool: {}", e))?;
+
+    Ok(McpToolResult {
+        content: result.content.into_iter().map(|c| serde_json::to_value(&c).unwrap_or_default()).collect(),
+        is_error: result.is_error.unwrap_or(false),
+    })
+}
+
+/// Check if an HTTP MCP server is connected
+#[tauri::command]
+pub async fn mcp_is_connected_http(
+    state: State<'_, HttpMcpState>,
+    server_name: String,
+) -> Result<bool, String> {
+    let clients = state.clients.read().await;
+    Ok(clients.contains_key(&server_name))
+}
+
+/// List connected HTTP MCP servers
+#[tauri::command]
+pub async fn mcp_list_connected_http(
+    state: State<'_, HttpMcpState>,
+) -> Result<Vec<String>, String> {
+    let clients = state.clients.read().await;
+    Ok(clients.keys().cloned().collect())
+}

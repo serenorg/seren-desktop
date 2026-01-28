@@ -43,3 +43,11 @@ hex = "0.4"
 rand = "0.9"
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }
+rmcp = { version = "0.14", features = [
+    "client",
+    "transport-io",                           # stdio for local MCP servers
+    "transport-child-process",                # spawn local MCP processes
+    "transport-streamable-http-client-reqwest" # SSE for mcp.serendb.com
+] }
+urlencoding = "2"
+regex = "1"

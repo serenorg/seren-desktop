@@ -478,7 +478,10 @@ export async function sendMessageWithTools(
   }
 
   const data = await response.json();
-  console.log("[sendMessageWithTools] Raw API response:", JSON.stringify(data, null, 2));
+  console.log(
+    "[sendMessageWithTools] Raw API response:",
+    JSON.stringify(data, null, 2),
+  );
 
   // Check for wrapped error responses (HTTP 200 but error in body)
   if (data.status && data.status >= 400 && data.body?.error) {

@@ -346,6 +346,120 @@ function createMcpClient() {
     return result;
   }
 
+  // ============================================================================
+  // HTTP MCP Client (for remote servers like mcp.serendb.com)
+  // ============================================================================
+
+  /**
+   * Connect to a remote MCP server via HTTP streaming transport.
+   * This is for servers like mcp.serendb.com that use MCP over HTTP.
+   */
+  async function connectHttp(
+    serverName: string,
+    url: string,
+    authToken?: string,
+  ): Promise<void> {
+    // Initialize connection state
+    setConnections((prev) => {
+      const next = new Map(prev);
+      next.set(serverName, {
+        serverName,
+        status: "connecting",
+        capabilities: null,
+        tools: [],
+        resources: [],
+      });
+      return next;
+    });
+
+    try {
+      // Connect via Tauri HTTP MCP command
+      const result = await invoke<McpInitializeResult>("mcp_connect_http", {
+        serverName,
+        url,
+        authToken: authToken || null,
+      });
+
+      // Fetch tools from HTTP MCP server
+      const tools = await listToolsHttp(serverName);
+
+      // Update connection state
+      setConnections((prev) => {
+        const next = new Map(prev);
+        next.set(serverName, {
+          serverName,
+          status: "connected",
+          capabilities: result,
+          tools,
+          resources: [], // HTTP MCP doesn't have resources typically
+        });
+        return next;
+      });
+    } catch (error) {
+      setConnectionStatus(
+        serverName,
+        "error",
+        error instanceof Error ? error.message : String(error),
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Disconnect from an HTTP MCP server.
+   */
+  async function disconnectHttp(serverName: string): Promise<void> {
+    try {
+      await invoke("mcp_disconnect_http", { serverName });
+    } finally {
+      setConnections((prev) => {
+        const next = new Map(prev);
+        next.delete(serverName);
+        return next;
+      });
+    }
+  }
+
+  /**
+   * List tools from an HTTP MCP server.
+   */
+  async function listToolsHttp(serverName: string): Promise<McpTool[]> {
+    return invoke<McpTool[]>("mcp_list_tools_http", { serverName });
+  }
+
+  /**
+   * Call a tool on an HTTP MCP server.
+   */
+  async function callToolHttp(
+    serverName: string,
+    call: McpToolCall,
+    options?: CallToolOptions,
+  ): Promise<McpToolResult> {
+    const invocation = invoke<McpToolResult>("mcp_call_tool_http", {
+      serverName,
+      toolName: call.name,
+      arguments: call.arguments,
+    }).catch((error) => {
+      throw parseMcpError(error, serverName);
+    });
+
+    return withAbort(invocation, options?.signal);
+  }
+
+  /**
+   * Check if an HTTP MCP server is connected.
+   */
+  async function isConnectedHttp(serverName: string): Promise<boolean> {
+    return invoke<boolean>("mcp_is_connected_http", { serverName });
+  }
+
+  /**
+   * List connected HTTP MCP servers.
+   */
+  async function listConnectedHttp(): Promise<string[]> {
+    return invoke<string[]>("mcp_list_connected_http");
+  }
+
   return {
     connections,
     getConnection,
@@ -362,6 +476,13 @@ function createMcpClient() {
     refreshResources,
     getAllTools,
     getAllResources,
+    // HTTP MCP methods (for remote servers like mcp.serendb.com)
+    connectHttp,
+    disconnectHttp,
+    listToolsHttp,
+    callToolHttp,
+    isConnectedHttp,
+    listConnectedHttp,
   };
 }
 

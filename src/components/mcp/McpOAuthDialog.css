@@ -1,0 +1,159 @@
+/* ABOUTME: Styles for MCP OAuth dialog component. */
+/* ABOUTME: Modal overlay with status indicators for OAuth flow. */
+
+.mcp-oauth-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.mcp-oauth-dialog {
+  background: var(--bg-primary, #1a1a1a);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.mcp-oauth-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color, #333);
+}
+
+.mcp-oauth-dialog-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+
+.mcp-oauth-dialog-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #888);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.mcp-oauth-dialog-close:hover {
+  color: var(--text-primary, #fff);
+}
+
+.mcp-oauth-dialog-content {
+  padding: 32px 20px;
+  min-height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mcp-oauth-status {
+  text-align: center;
+}
+
+.mcp-oauth-status p {
+  margin: 8px 0;
+  color: var(--text-primary, #fff);
+}
+
+.mcp-oauth-hint {
+  font-size: 14px;
+  color: var(--text-secondary, #888) !important;
+}
+
+.mcp-oauth-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-color, #333);
+  border-top-color: var(--accent-color, #3b82f6);
+  border-radius: 50%;
+  animation: mcp-oauth-spin 0.8s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes mcp-oauth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mcp-oauth-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  margin: 0 auto 16px;
+}
+
+.mcp-oauth-success .mcp-oauth-icon {
+  background: var(--success-bg, #22c55e20);
+  color: var(--success-color, #22c55e);
+}
+
+.mcp-oauth-error .mcp-oauth-icon {
+  background: var(--error-bg, #ef444420);
+  color: var(--error-color, #ef4444);
+}
+
+.mcp-oauth-error-message {
+  font-size: 14px;
+  color: var(--error-color, #ef4444) !important;
+  max-width: 300px;
+  word-break: break-word;
+}
+
+.mcp-oauth-retry {
+  margin-top: 16px;
+  padding: 8px 16px;
+  background: var(--accent-color, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.mcp-oauth-retry:hover {
+  background: var(--accent-hover, #2563eb);
+}
+
+.mcp-oauth-dialog-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color, #333);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mcp-oauth-cancel {
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--text-secondary, #888);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.mcp-oauth-cancel:hover {
+  color: var(--text-primary, #fff);
+  border-color: var(--text-secondary, #888);
+}
