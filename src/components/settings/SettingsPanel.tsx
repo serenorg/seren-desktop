@@ -22,6 +22,7 @@ type SettingsSection =
   | "providers"
   | "editor"
   | "wallet"
+  | "indexing"
   | "appearance"
   | "general"
   | "mcp";
@@ -105,6 +106,7 @@ export const SettingsPanel: Component = () => {
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },
+    { id: "indexing", label: "Code Indexing", icon: "🔍" },
     { id: "appearance", label: "Appearance", icon: "🎨" },
     { id: "general", label: "General", icon: "⚙️" },
     { id: "mcp", label: "MCP Servers", icon: "🔌" },
@@ -925,6 +927,62 @@ export const SettingsPanel: Component = () => {
                   )}
                 </For>
               </div>
+            </div>
+          </section>
+        </Show>
+
+        <Show when={activeSection() === "indexing"}>
+          <section>
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
+              Semantic Code Indexing
+            </h3>
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
+              Enable semantic search across your codebase. Powered by SerenEmbed.
+            </p>
+
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.semanticIndexingEnabled}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "semanticIndexingEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
+                />
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable Semantic Indexing
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Index your codebase for AI-powered semantic code search. Embeddings are generated via SerenEmbed (paid via SerenBucks) and stored locally for instant retrieval.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div class="mt-6 p-4 bg-[rgba(99,102,241,0.1)] border border-[rgba(99,102,241,0.3)] rounded">
+              <h4 class="m-0 mb-2 text-sm font-semibold text-foreground">
+                How It Works
+              </h4>
+              <ul class="m-0 pl-4 text-[0.8rem] text-muted-foreground space-y-2">
+                <li>Your code is chunked at function/class boundaries</li>
+                <li>SerenEmbed generates embeddings (charged via SerenBucks)</li>
+                <li>Embeddings are stored locally in sqlite-vec for instant search</li>
+                <li>AI automatically retrieves relevant code when you ask questions</li>
+              </ul>
+            </div>
+
+            <div class="mt-6 p-4 bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded">
+              <h4 class="m-0 mb-2 text-sm font-semibold text-foreground">
+                Cost Estimate
+              </h4>
+              <p class="m-0 text-[0.8rem] text-muted-foreground">
+                Indexing cost depends on your codebase size. A typical project with 100 files (~50k lines) costs approximately 100-200k tokens. Use the "Start Indexing" button in the editor sidebar to see the exact estimate before proceeding.
+              </p>
             </div>
           </section>
         </Show>
