@@ -160,7 +160,7 @@ export const OAuthLogins: Component = () => {
       </Show>
 
       {/* Not Signed In */}
-      <Show when={!authStore.state().isAuthenticated}>
+      <Show when={!authStore.isAuthenticated}>
         <div class="text-center py-10 px-6 text-muted-foreground">
           <span class="text-[2.5rem] block mb-3 opacity-60">🔐</span>
           <p class="m-0">Sign in to connect accounts</p>
@@ -174,7 +174,7 @@ export const OAuthLogins: Component = () => {
       {/* No Providers Available (when signed in) */}
       <Show
         when={
-          authStore.state().isAuthenticated &&
+          authStore.isAuthenticated &&
           !providers.loading &&
           providers()?.length === 0
         }
