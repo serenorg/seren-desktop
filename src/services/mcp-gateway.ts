@@ -47,19 +47,10 @@ export interface McpToolCallResponse {
   response_bytes: number;
 }
 
-export interface Publisher {
-  id: string;
-  slug: string;
-  name: string;
-  description?: string;
-  is_active: boolean;
-  mcp_endpoint?: string;
-}
-
 /**
  * Custom error for MCP Gateway failures.
  */
-export class McpGatewayError extends Error {
+class McpGatewayError extends Error {
   constructor(
     message: string,
     public status: number,
@@ -72,7 +63,6 @@ export class McpGatewayError extends Error {
 
 // Singleton state for caching tools
 let cachedTools: GatewayTool[] = [];
-let cachedPublishers: Publisher[] = [];
 let lastFetchedAt: number | null = null;
 let loadingPromise: Promise<void> | null = null;
 let isConnected = false;
@@ -221,35 +211,9 @@ export async function resetGateway(): Promise<void> {
   await clearStoredTokens();
 
   cachedTools = [];
-  cachedPublishers = [];
   lastFetchedAt = null;
   loadingPromise = null;
   isConnected = false;
-}
-
-/**
- * Force refresh tools from the gateway (bypasses TTL).
- */
-export async function refreshGatewayTools(): Promise<GatewayTool[]> {
-  lastFetchedAt = null; // Invalidate cache
-  isConnected = false; // Force reconnect
-  await initializeGateway();
-  return cachedTools;
-}
-
-/**
- * Get cached publishers (available after initialization).
- * Note: With MCP protocol, publishers are inferred from tool names.
- */
-export function getGatewayPublishers(): Publisher[] {
-  return cachedPublishers;
-}
-
-/**
- * Get cache age in milliseconds, or null if not cached.
- */
-export function getCacheAge(): number | null {
-  return lastFetchedAt ? Date.now() - lastFetchedAt : null;
 }
 
 /**
@@ -295,16 +259,4 @@ export async function callGatewayTool(
       response_bytes: 0,
     };
   }
-}
-
-// Legacy exports for backward compatibility
-export async function fetchGatewayPublishers(): Promise<Publisher[]> {
-  // With MCP protocol, we don't fetch publishers separately
-  // Publishers are inferred from tool names
-  return cachedPublishers;
-}
-
-export async function fetchAllGatewayTools(): Promise<GatewayTool[]> {
-  await initializeGateway();
-  return cachedTools;
 }
