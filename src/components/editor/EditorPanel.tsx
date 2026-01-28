@@ -1,14 +1,17 @@
 // ABOUTME: Main editor panel with file tree, tabs, and Monaco editor.
 // ABOUTME: Provides full-featured code editing with file system integration.
 
+import type * as Monaco from "monaco-editor";
 import {
   type Component,
   createEffect,
   createMemo,
   createSignal,
+  onMount,
   Show,
 } from "solid-js";
 import { FileTree } from "@/components/sidebar/FileTree";
+import { setInlineEditHandler } from "@/lib/editor";
 import {
   loadDirectoryChildren,
   openFileInTab,
@@ -24,15 +27,34 @@ import {
 } from "@/stores/tabs";
 import { FileTabs } from "./FileTabs";
 import { ImageViewer } from "./ImageViewer";
+import { InlineEditWidget } from "./InlineEditWidget";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MonacoEditor } from "./MonacoEditor";
 import { PdfViewer } from "./PdfViewer";
+
+// State for inline edit widget
+interface InlineEditState {
+  editor: Monaco.editor.IStandaloneCodeEditor;
+  selection: Monaco.Selection;
+  originalCode: string;
+  language: string;
+  filePath: string;
+}
 
 export const EditorPanel: Component = () => {
   const [editorContent, setEditorContent] = createSignal("");
   const [activeFilePath, setActiveFilePath] = createSignal<string | null>(null);
   const [isLoading, setIsLoading] = createSignal(false);
   const [showPreview, setShowPreview] = createSignal(false);
+  const [inlineEditState, setInlineEditState] =
+    createSignal<InlineEditState | null>(null);
+
+  // Register inline edit handler (Cmd+K)
+  onMount(() => {
+    setInlineEditHandler((code, language, filePath, selection, editor) => {
+      setInlineEditState({ editor, selection, originalCode: code, language, filePath });
+    });
+  });
 
   // Check if current file is markdown
   const isMarkdownFile = createMemo(() => {
@@ -143,6 +165,35 @@ export const EditorPanel: Component = () => {
     }
   }
 
+  // Handle inline edit accept - apply the new code
+  function handleInlineEditAccept(newCode: string) {
+    const state = inlineEditState();
+    if (!state) return;
+
+    // Apply the edit via Monaco's executeEdits
+    state.editor.executeEdits("seren.inlineEdit", [
+      {
+        range: state.selection,
+        text: newCode,
+      },
+    ]);
+
+    // Close the widget
+    setInlineEditState(null);
+
+    // Focus back on editor
+    state.editor.focus();
+  }
+
+  // Handle inline edit reject - just close the widget
+  function handleInlineEditReject() {
+    const state = inlineEditState();
+    setInlineEditState(null);
+
+    // Focus back on editor if we have a reference
+    state?.editor.focus();
+  }
+
   return (
     <div class="flex h-full bg-card text-foreground" onKeyDown={handleKeyDown}>
       <aside class="w-60 min-w-[180px] max-w-[400px] flex flex-col bg-popover border-r border-[rgba(148,163,184,0.25)]">
@@ -240,6 +291,21 @@ export const EditorPanel: Component = () => {
           </Show>
         </div>
       </section>
+
+      {/* Inline Edit Widget (Cmd+K) */}
+      <Show when={inlineEditState()}>
+        {(state) => (
+          <InlineEditWidget
+            editor={state().editor}
+            selection={state().selection}
+            originalCode={state().originalCode}
+            language={state().language}
+            filePath={state().filePath}
+            onAccept={handleInlineEditAccept}
+            onReject={handleInlineEditReject}
+          />
+        )}
+      </Show>
     </div>
   );
 };

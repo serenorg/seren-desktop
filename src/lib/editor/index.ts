@@ -3,9 +3,11 @@ export {
   registerAllCodeActions,
   registerExplainCodeAction,
   registerImproveCodeAction,
+  registerInlineEditAction,
   setAddToChatHandler,
   setExplainCodeHandler,
   setImproveCodeHandler,
+  setInlineEditHandler,
 } from "./actions";
 export {
   defaultEditorOptions,

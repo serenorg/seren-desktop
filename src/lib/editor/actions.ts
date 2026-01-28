@@ -108,6 +108,59 @@ export function registerImproveCodeAction(): Monaco.IDisposable {
 }
 
 /**
+ * Register the "Inline Edit" action (Cmd+K).
+ * Triggers inline code modification with AI.
+ */
+type InlineEditHandler = (
+  code: string,
+  language: string,
+  filePath: string,
+  selection: Monaco.Selection,
+  editor: Monaco.editor.IStandaloneCodeEditor,
+) => void;
+let inlineEditHandler: InlineEditHandler | null = null;
+
+export function setInlineEditHandler(handler: InlineEditHandler): void {
+  inlineEditHandler = handler;
+}
+
+export function registerInlineEditAction(): Monaco.IDisposable {
+  const monaco = getMonaco();
+
+  return monaco.editor.addEditorAction({
+    id: "seren.inlineEdit",
+    label: "Edit with AI",
+    contextMenuGroupId: "navigation",
+    contextMenuOrder: 1.4,
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK],
+    precondition: "editorHasSelection",
+    run: (editor) => {
+      const selection = editor.getSelection();
+      if (!selection) return;
+
+      const model = editor.getModel();
+      if (!model) return;
+
+      const selectedText = model.getValueInRange(selection);
+      if (!selectedText.trim()) return;
+
+      const language = model.getLanguageId();
+      const filePath = model.uri.path || model.uri.toString();
+
+      if (inlineEditHandler) {
+        inlineEditHandler(
+          selectedText,
+          language,
+          filePath,
+          selection,
+          editor as Monaco.editor.IStandaloneCodeEditor,
+        );
+      }
+    },
+  });
+}
+
+/**
  * Register the "Add to Chat" context menu action.
  */
 type AddToChatHandler = (
@@ -159,6 +212,7 @@ export function registerAddToChatAction(): Monaco.IDisposable {
  */
 export function registerAllCodeActions(): Monaco.IDisposable {
   const disposables = [
+    registerInlineEditAction(),
     registerExplainCodeAction(),
     registerImproveCodeAction(),
     registerAddToChatAction(),

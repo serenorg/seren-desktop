@@ -10,7 +10,11 @@ import {
   defaultEditorOptions,
   getLanguageFromPath,
   initMonaco,
+  registerAllCodeActions,
 } from "@/lib/editor";
+
+// Track if global actions have been registered (Monaco actions are global, not per-editor)
+let actionsRegistered = false;
 
 export interface MonacoEditorProps {
   /** File path for language detection and display */
@@ -86,6 +90,12 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
 
     // Signal that Monaco is ready - this triggers effects that depend on model
     setIsMonacoReady(true);
+
+    // Register global code actions once (Cmd+K, context menu items, etc.)
+    if (!actionsRegistered) {
+      registerAllCodeActions();
+      actionsRegistered = true;
+    }
 
     // Listen for content changes
     const disposable = model.onDidChangeContent(() => {
