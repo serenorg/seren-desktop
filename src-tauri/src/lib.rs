@@ -12,6 +12,7 @@ pub mod services {
     pub mod database;
 }
 
+mod acp;
 mod embedded_runtime;
 mod files;
 mod mcp;
@@ -276,6 +277,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .manage(mcp::McpState::new())
         .manage(mcp::HttpMcpState::new())
+        .manage(acp::AcpState::new())
         .setup(|app| {
             // Configure embedded runtime early in startup
             // This prepends bundled Node.js and Git to PATH
@@ -373,6 +375,15 @@ pub fn run() {
             // OAuth browser flow commands
             start_oauth_browser_flow,
             get_oauth_callback_port,
+            // ACP commands
+            acp::acp_spawn,
+            acp::acp_prompt,
+            acp::acp_cancel,
+            acp::acp_terminate,
+            acp::acp_list_sessions,
+            acp::acp_set_permission_mode,
+            acp::acp_get_available_agents,
+            acp::acp_check_agent_available,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

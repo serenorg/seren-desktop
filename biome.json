@@ -12,7 +12,8 @@
       "**/.vscode/**/*",
       "**/index.html",
       "**/vite.config.ts",
-      "!**/src/api/generated/**/*"
+      "!**/src/api/generated/**/*",
+      "!**/src-tauri/target/**/*"
     ]
   },
   "formatter": {

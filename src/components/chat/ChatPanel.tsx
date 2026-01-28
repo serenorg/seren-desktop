@@ -23,20 +23,20 @@ import {
   areToolsAvailable,
   CHAT_MAX_RETRIES,
   type ChatContext,
-  continueToolIteration,
   type Message,
   sendMessageWithRetry,
   streamMessage,
   streamMessageWithTools,
-  type ToolIterationState,
   type ToolStreamEvent,
 } from "@/services/chat";
+import { acpStore } from "@/stores/acp.store";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { editorStore } from "@/stores/editor.store";
 import { fileTreeState, setNodes } from "@/stores/fileTree";
-import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
+import { AgentChat } from "./AgentChat";
+import { AgentModeToggle } from "./AgentModeToggle";
 import {
   type BalanceInfo,
   BalanceWarning,
@@ -109,17 +109,6 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   const [balanceError, setBalanceError] = createSignal<BalanceInfo | null>(
     null,
   );
-  // Pending request that caused the balance error (for retry after model switch)
-  const [pendingRequest, setPendingRequest] = createSignal<{
-    prompt: string;
-    context?: ChatContext;
-  } | null>(null);
-  // Tool iteration limit state for "Continue" functionality
-  const [iterationLimitState, setIterationLimitState] = createSignal<{
-    state: ToolIterationState;
-    iteration: number;
-    sessionId: string;
-  } | null>(null);
   // Input history navigation (terminal-style up/down arrow)
   const [historyIndex, setHistoryIndex] = createSignal(-1); // -1 = not browsing history
   const [savedInput, setSavedInput] = createSignal(""); // save current input before browsing
@@ -437,77 +426,6 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     setSavedInput("");
   };
 
-  /**
-   * Send a message with a specific prompt (for context menu actions).
-   */
-  const sendMessageWithPrompt = async (prompt: string) => {
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: prompt,
-      timestamp: Date.now(),
-      model: chatStore.selectedModel,
-      status: "complete",
-    };
-
-    chatStore.addMessage(userMessage);
-    await chatStore.persistMessage(userMessage);
-
-    const context = buildContext();
-    const assistantId = crypto.randomUUID();
-
-    const useTools = areToolsAvailable();
-    const session: ActiveStreamingSession = useTools
-      ? {
-          id: assistantId,
-          userMessageId: userMessage.id,
-          prompt,
-          model: chatStore.selectedModel,
-          context,
-          stream: streamMessageWithTools(
-            prompt,
-            chatStore.selectedModel,
-            context,
-            true,
-            chatStore.messages,
-          ),
-          toolsEnabled: true,
-        }
-      : {
-          id: assistantId,
-          userMessageId: userMessage.id,
-          prompt,
-          model: chatStore.selectedModel,
-          context,
-          stream: streamMessage(prompt, chatStore.selectedModel, context),
-          toolsEnabled: false,
-        };
-
-    chatStore.setLoading(true);
-    setStreamingSession(session);
-    chatStore.setError(null);
-    setBalanceError(null);
-  };
-
-  // Watch for pending actions from editor context menu
-  createEffect(() => {
-    const action = editorStore.pendingAction;
-    if (!action || !editorStore.selectedText) return;
-
-    // Clear the pending action immediately to prevent re-triggering
-    editorStore.clearPendingAction();
-
-    // Handle the action
-    if (action === "add-to-chat") {
-      // Just focus the input - context is already set via editorStore.selectedText
-      inputRef?.focus();
-    } else if (action === "explain") {
-      sendMessageWithPrompt("Please explain this code:");
-    } else if (action === "improve") {
-      sendMessageWithPrompt("Please suggest improvements for this code:");
-    }
-  });
-
   const handleStreamingComplete = async (
     session: ActiveStreamingSession,
     content: string,
@@ -541,8 +459,6 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     if (isBalanceError(error.message)) {
       const balanceInfo = parseBalanceError(error.message);
       setBalanceError(balanceInfo);
-      // Save the request for retry after model switch
-      setPendingRequest({ prompt: session.prompt, context: session.context });
       // Don't set the raw error message for balance errors
       chatStore.setError(null);
       // Don't add a failed message for balance errors - just show the warning
@@ -564,29 +480,6 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
 
     chatStore.addMessage(failedMessage);
     await attemptRetry(failedMessage, false);
-  };
-
-  // Free model ID for balance fallback (Gemini 2.0 Flash Experimental is free)
-  const FREE_MODEL_ID = "google/gemini-2.0-flash-exp:free";
-
-  /**
-   * Switch to a free model and resend the pending request.
-   * Called when user clicks "Switch to Free Model" in balance warning.
-   */
-  const handleSwitchToFreeModel = async () => {
-    const request = pendingRequest();
-    if (!request) return;
-
-    // Switch to free model
-    providerStore.setActiveModel(FREE_MODEL_ID);
-
-    // Clear error states
-    setBalanceError(null);
-    setPendingRequest(null);
-
-    // Restore the input and resend
-    setInput(request.prompt);
-    await sendMessage();
   };
 
   const attemptRetry = async (message: Message, isManual: boolean) => {
@@ -691,350 +584,292 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
           <ChatTabBar />
           <header class="shrink-0 flex justify-between items-center px-4 py-3 border-b border-[#21262d] bg-[#161b22]">
             <div class="flex items-center gap-3">
-              {/* Model selector in input area, tab bar above */}
+              <AgentModeToggle />
             </div>
             <div class="flex gap-2 items-center">
-              <ThinkingToggle />
-              <button
-                type="button"
-                class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1 rounded-md text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] hover:border-[#484f58]"
-                onClick={clearHistory}
-              >
-                Clear
-              </button>
+              <Show when={!acpStore.agentModeEnabled}>
+                <ThinkingToggle />
+                <button
+                  type="button"
+                  class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1 rounded-md text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] hover:border-[#484f58]"
+                  onClick={clearHistory}
+                >
+                  Clear
+                </button>
+              </Show>
             </div>
           </header>
 
-          <div
-            class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb:hover]:bg-[#484f58]"
-            ref={messagesRef}
-          >
-            <Show
-              when={chatStore.messages.length > 0}
-              fallback={
-                <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
-                  <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">
-                    Start a conversation
-                  </h3>
-                  <p class="m-0 text-sm text-center max-w-[280px]">
-                    Ask questions about code, get explanations, or request help
-                    with programming tasks.
-                  </p>
-                </div>
-              }
-            >
-              <For each={chatStore.messages}>
-                {(message) => (
-                  <article
-                    class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
-                  >
-                    <Show
-                      when={
-                        message.role === "assistant" &&
-                        message.thinking &&
-                        settingsStore.get("chatShowThinking")
-                      }
-                    >
-                      <ThinkingBlock thinking={message.thinking ?? ""} />
-                    </Show>
-                    <div
-                      class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
-                      innerHTML={
-                        message.role === "assistant"
-                          ? renderMarkdown(message.content)
-                          : escapeHtml(message.content)
-                      }
-                    />
-                    <Show when={message.status === "error"}>
-                      <div class="mt-3 px-3 py-2 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded-md flex items-center gap-3 text-[13px] text-[#f85149]">
-                        <span>{message.error ?? "Message failed"}</span>
-                        <Show when={chatStore.retryingMessageId === message.id}>
-                          <span>
-                            Retrying (
-                            {Math.min(
-                              message.attemptCount ?? 1,
-                              CHAT_MAX_RETRIES,
-                            )}
-                            /{CHAT_MAX_RETRIES})…
-                          </span>
-                        </Show>
-                        <Show when={message.request}>
-                          <button
-                            type="button"
-                            class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2.5 py-1 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
-                            onClick={() => handleManualRetry(message)}
-                          >
-                            Retry
-                          </button>
-                        </Show>
-                      </div>
-                    </Show>
-                  </article>
-                )}
-              </For>
-            </Show>
-
-            <Show when={streamingSession()}>
-              {(sessionAccessor) => {
-                // Capture session immediately to avoid stale accessor in callbacks
-                const session = sessionAccessor();
-                return (
-                  <Show
-                    when={session.toolsEnabled}
-                    fallback={
-                      <StreamingMessage
-                        stream={(session as StreamingSession).stream}
-                        onComplete={(content) =>
-                          handleStreamingComplete(session, content)
-                        }
-                        onError={(error) =>
-                          handleStreamingError(session, error)
-                        }
-                        onContentUpdate={scrollToBottom}
-                      />
-                    }
-                  >
-                    <ToolStreamingMessage
-                      stream={(session as ToolStreamingSession).stream}
-                      onComplete={(content, thinking) =>
-                        handleStreamingComplete(session, content, thinking)
-                      }
-                      onError={(error) => handleStreamingError(session, error)}
-                      onContentUpdate={scrollToBottom}
-                      onIterationLimit={(state, iteration) => {
-                        setIterationLimitState({
-                          state,
-                          iteration,
-                          sessionId: session.id,
-                        });
-                        setStreamingSession(null);
-                        chatStore.setLoading(false);
-                      }}
-                    />
-                  </Show>
-                );
-              }}
-            </Show>
-
-            {/* Balance warning for insufficient funds */}
-            <Show when={balanceError()}>
-              {(info) => (
-                <BalanceWarning
-                  balanceInfo={info()}
-                  onDismiss={() => {
-                    setBalanceError(null);
-                    setPendingRequest(null);
-                  }}
-                  onSwitchToFreeModel={handleSwitchToFreeModel}
-                />
-              )}
-            </Show>
-
-            {/* Tool iteration limit warning with Continue button */}
-            <Show when={iterationLimitState()}>
-              {(limitState) => (
-                <div class="mx-4 my-3 p-4 bg-[#2d333b] border border-[#f0883e] rounded-lg">
-                  <div class="flex items-start gap-3">
-                    <span class="text-xl text-[#f0883e]">⚠️</span>
-                    <div class="flex-1">
-                      <h4 class="m-0 mb-2 text-sm font-semibold text-[#f0883e]">
-                        Tool Iteration Limit Reached
-                      </h4>
-                      <p class="m-0 mb-3 text-sm text-[#adbac7]">
-                        The AI has used tools {limitState().iteration} times.
-                        This limit helps prevent runaway costs. You can continue
-                        if the task isn't complete, or adjust the limit in
-                        Settings → Chat → Max Tool Iterations.
-                      </p>
-                      <div class="flex gap-2">
-                        <button
-                          type="button"
-                          class="px-4 py-2 text-sm font-medium bg-[#238636] text-white border-none rounded-md cursor-pointer hover:bg-[#2ea043] transition-colors"
-                          onClick={() => {
-                            const state = limitState();
-                            // Start a new streaming session with the continue function
-                            const continueStream = continueToolIteration(
-                              state.state,
-                            );
-                            const newSession: ToolStreamingSession = {
-                              id: state.sessionId,
-                              userMessageId: `${state.sessionId}-continue`,
-                              prompt: "(continuing...)",
-                              model: state.state.model,
-                              stream: continueStream,
-                              toolsEnabled: true,
-                            };
-                            setStreamingSession(newSession);
-                            chatStore.setLoading(true);
-                            setIterationLimitState(null);
-                          }}
-                        >
-                          Continue
-                        </button>
-                        <button
-                          type="button"
-                          class="px-4 py-2 text-sm font-medium bg-transparent text-[#adbac7] border border-[#444c56] rounded-md cursor-pointer hover:bg-[#373e47] hover:text-[#e6edf3] transition-colors"
-                          onClick={() => {
-                            // Finalize the message with what we have
-                            const state = limitState();
-                            const finalMessage: Message = {
-                              id: state.sessionId,
-                              role: "assistant",
-                              content:
-                                state.state.fullContent ||
-                                "(Task paused at iteration limit)",
-                              timestamp: Date.now(),
-                              model: state.state.model,
-                              status: "complete",
-                            };
-                            chatStore.addMessage(finalMessage);
-                            setIterationLimitState(null);
-                          }}
-                        >
-                          Stop Here
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </Show>
-          </div>
-
-          <Show when={contextPreview()}>
-            {(ctx) => (
-              <div class="mx-4 my-3 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
-                <div class="flex justify-between items-center px-3 py-2 bg-[#21262d] text-xs text-[#8b949e]">
-                  <span>
-                    Context from {ctx().file ?? "selection"}
-                    {ctx().range &&
-                      ` (${ctx().range?.startLine}-${ctx().range?.endLine})`}
-                  </span>
-                  <button
-                    type="button"
-                    class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-[#e6edf3]"
-                    onClick={() => editorStore.clearSelection()}
-                  >
-                    ×
-                  </button>
-                </div>
-                <pre class="m-0 p-3 max-h-[120px] overflow-y-auto text-xs leading-normal bg-transparent">
-                  {ctx().text}
-                </pre>
-              </div>
-            )}
-          </Show>
-
-          <div class="shrink-0 p-4 border-t border-[#21262d] bg-[#161b22]">
-            <form
-              class="flex flex-col gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                sendMessage();
-              }}
-            >
-              <PublisherSuggestions
-                suggestions={suggestions()}
-                isLoading={suggestionsLoading()}
-                onSelect={handlePublisherSelect}
-                onDismiss={dismissSuggestions}
-              />
-              <textarea
-                ref={inputRef}
-                value={input()}
-                placeholder="Ask Seren anything…"
-                class="w-full min-h-[80px] max-h-[200px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
-                onInput={(event) => {
-                  setInput(event.currentTarget.value);
-                  // Reset history browsing when user types manually
-                  if (historyIndex() !== -1) {
-                    setHistoryIndex(-1);
-                    setSavedInput("");
-                  }
-                }}
-                onKeyDown={(event) => {
-                  const history = userMessageHistory();
-
-                  // Up arrow: navigate to older message
-                  if (event.key === "ArrowUp" && history.length > 0) {
-                    const textarea = event.currentTarget;
-                    // Only trigger if cursor at start or input empty
-                    if (textarea.selectionStart === 0 || input() === "") {
-                      event.preventDefault();
-
-                      if (historyIndex() === -1) {
-                        // Starting to browse - save current input
-                        setSavedInput(input());
-                      }
-
-                      const newIndex = Math.min(
-                        historyIndex() + 1,
-                        history.length - 1,
-                      );
-                      setHistoryIndex(newIndex);
-                      setInput(history[newIndex]);
-                    }
-                  }
-
-                  // Down arrow: navigate to newer message
-                  if (event.key === "ArrowDown" && historyIndex() >= 0) {
-                    const textarea = event.currentTarget;
-                    // Only trigger if cursor at end
-                    if (textarea.selectionStart === textarea.value.length) {
-                      event.preventDefault();
-
-                      const newIndex = historyIndex() - 1;
-                      setHistoryIndex(newIndex);
-
-                      if (newIndex < 0) {
-                        // Back to current input
-                        setInput(savedInput());
-                        setSavedInput("");
-                      } else {
-                        setInput(history[newIndex]);
-                      }
-                    }
-                  }
-
-                  // Enter key handling
-                  if (event.key === "Enter") {
-                    const enterToSend = settingsStore.get("chatEnterToSend");
-                    if (enterToSend) {
-                      // Enter sends, Shift+Enter for newline
-                      if (!event.shiftKey) {
-                        event.preventDefault();
-                        sendMessage();
-                      }
-                    } else {
-                      // Ctrl/Cmd+Enter sends
-                      if (event.metaKey || event.ctrlKey) {
-                        event.preventDefault();
-                        sendMessage();
-                      }
-                    }
-                  }
-                }}
-                disabled={chatStore.isLoading}
-              />
-              <div class="flex justify-between items-center">
-                <div class="flex items-center gap-3">
-                  <ModelSelector />
-                  <span class="text-xs text-[#484f58]">
-                    {settingsStore.get("chatEnterToSend")
-                      ? "Enter to send"
-                      : "Ctrl+Enter to send"}
-                  </span>
-                </div>
-                <button
-                  type="submit"
-                  class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-md text-[13px] font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
-                  disabled={chatStore.isLoading}
+          {/* Conditional rendering: Agent mode vs Chat mode */}
+          <Show
+            when={acpStore.agentModeEnabled}
+            fallback={
+              <>
+                <div
+                  class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-thumb:hover]:bg-[#484f58]"
+                  ref={messagesRef}
                 >
-                  Send
-                </button>
-              </div>
-            </form>
-          </div>
+                  <Show
+                    when={chatStore.messages.length > 0}
+                    fallback={
+                      <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
+                        <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">
+                          Start a conversation
+                        </h3>
+                        <p class="m-0 text-sm text-center max-w-[280px]">
+                          Ask questions about code, get explanations, or request
+                          help with programming tasks.
+                        </p>
+                      </div>
+                    }
+                  >
+                    <For each={chatStore.messages}>
+                      {(message) => (
+                        <article
+                          class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
+                        >
+                          <Show
+                            when={
+                              message.role === "assistant" &&
+                              message.thinking &&
+                              settingsStore.get("chatShowThinking")
+                            }
+                          >
+                            <ThinkingBlock thinking={message.thinking ?? ""} />
+                          </Show>
+                          <div
+                            class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
+                            innerHTML={
+                              message.role === "assistant"
+                                ? renderMarkdown(message.content)
+                                : escapeHtml(message.content)
+                            }
+                          />
+                          <Show when={message.status === "error"}>
+                            <div class="mt-3 px-3 py-2 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded-md flex items-center gap-3 text-[13px] text-[#f85149]">
+                              <span>{message.error ?? "Message failed"}</span>
+                              <Show
+                                when={
+                                  chatStore.retryingMessageId === message.id
+                                }
+                              >
+                                <span>
+                                  Retrying (
+                                  {Math.min(
+                                    message.attemptCount ?? 1,
+                                    CHAT_MAX_RETRIES,
+                                  )}
+                                  /{CHAT_MAX_RETRIES})…
+                                </span>
+                              </Show>
+                              <Show when={message.request}>
+                                <button
+                                  type="button"
+                                  class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2.5 py-1 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                                  onClick={() => handleManualRetry(message)}
+                                >
+                                  Retry
+                                </button>
+                              </Show>
+                            </div>
+                          </Show>
+                        </article>
+                      )}
+                    </For>
+                  </Show>
+
+                  <Show when={streamingSession()}>
+                    {(sessionAccessor) => {
+                      // Capture session immediately to avoid stale accessor in callbacks
+                      const session = sessionAccessor();
+                      return (
+                        <Show
+                          when={session.toolsEnabled}
+                          fallback={
+                            <StreamingMessage
+                              stream={(session as StreamingSession).stream}
+                              onComplete={(content) =>
+                                handleStreamingComplete(session, content)
+                              }
+                              onError={(error) =>
+                                handleStreamingError(session, error)
+                              }
+                              onContentUpdate={scrollToBottom}
+                            />
+                          }
+                        >
+                          <ToolStreamingMessage
+                            stream={(session as ToolStreamingSession).stream}
+                            onComplete={(content, thinking) =>
+                              handleStreamingComplete(
+                                session,
+                                content,
+                                thinking,
+                              )
+                            }
+                            onError={(error) =>
+                              handleStreamingError(session, error)
+                            }
+                            onContentUpdate={scrollToBottom}
+                          />
+                        </Show>
+                      );
+                    }}
+                  </Show>
+
+                  {/* Balance warning for insufficient funds */}
+                  <Show when={balanceError()}>
+                    {(info) => (
+                      <BalanceWarning
+                        balanceInfo={info()}
+                        onDismiss={() => setBalanceError(null)}
+                      />
+                    )}
+                  </Show>
+                </div>
+
+                <Show when={contextPreview()}>
+                  {(ctx) => (
+                    <div class="mx-4 my-3 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
+                      <div class="flex justify-between items-center px-3 py-2 bg-[#21262d] text-xs text-[#8b949e]">
+                        <span>
+                          Context from {ctx().file ?? "selection"}
+                          {ctx().range &&
+                            ` (${ctx().range?.startLine}-${ctx().range?.endLine})`}
+                        </span>
+                        <button
+                          type="button"
+                          class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-[#e6edf3]"
+                          onClick={() => editorStore.clearSelection()}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <pre class="m-0 p-3 max-h-[120px] overflow-y-auto text-xs leading-normal bg-transparent">
+                        {ctx().text}
+                      </pre>
+                    </div>
+                  )}
+                </Show>
+
+                <div class="shrink-0 p-4 border-t border-[#21262d] bg-[#161b22]">
+                  <form
+                    class="flex flex-col gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      sendMessage();
+                    }}
+                  >
+                    <PublisherSuggestions
+                      suggestions={suggestions()}
+                      isLoading={suggestionsLoading()}
+                      onSelect={handlePublisherSelect}
+                      onDismiss={dismissSuggestions}
+                    />
+                    <textarea
+                      ref={inputRef}
+                      value={input()}
+                      placeholder="Ask Seren anything…"
+                      class="w-full min-h-[80px] max-h-[200px] resize-none bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
+                      onInput={(event) => {
+                        setInput(event.currentTarget.value);
+                        // Reset history browsing when user types manually
+                        if (historyIndex() !== -1) {
+                          setHistoryIndex(-1);
+                          setSavedInput("");
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        const history = userMessageHistory();
+
+                        // Up arrow: navigate to older message
+                        if (event.key === "ArrowUp" && history.length > 0) {
+                          const textarea = event.currentTarget;
+                          // Only trigger if cursor at start or input empty
+                          if (textarea.selectionStart === 0 || input() === "") {
+                            event.preventDefault();
+
+                            if (historyIndex() === -1) {
+                              // Starting to browse - save current input
+                              setSavedInput(input());
+                            }
+
+                            const newIndex = Math.min(
+                              historyIndex() + 1,
+                              history.length - 1,
+                            );
+                            setHistoryIndex(newIndex);
+                            setInput(history[newIndex]);
+                          }
+                        }
+
+                        // Down arrow: navigate to newer message
+                        if (event.key === "ArrowDown" && historyIndex() >= 0) {
+                          const textarea = event.currentTarget;
+                          // Only trigger if cursor at end
+                          if (
+                            textarea.selectionStart === textarea.value.length
+                          ) {
+                            event.preventDefault();
+
+                            const newIndex = historyIndex() - 1;
+                            setHistoryIndex(newIndex);
+
+                            if (newIndex < 0) {
+                              // Back to current input
+                              setInput(savedInput());
+                              setSavedInput("");
+                            } else {
+                              setInput(history[newIndex]);
+                            }
+                          }
+                        }
+
+                        // Enter key handling
+                        if (event.key === "Enter") {
+                          const enterToSend =
+                            settingsStore.get("chatEnterToSend");
+                          if (enterToSend) {
+                            // Enter sends, Shift+Enter for newline
+                            if (!event.shiftKey) {
+                              event.preventDefault();
+                              sendMessage();
+                            }
+                          } else {
+                            // Ctrl/Cmd+Enter sends
+                            if (event.metaKey || event.ctrlKey) {
+                              event.preventDefault();
+                              sendMessage();
+                            }
+                          }
+                        }
+                      }}
+                      disabled={chatStore.isLoading}
+                    />
+                    <div class="flex justify-between items-center">
+                      <div class="flex items-center gap-3">
+                        <ModelSelector />
+                        <span class="text-xs text-[#484f58]">
+                          {settingsStore.get("chatEnterToSend")
+                            ? "Enter to send"
+                            : "Ctrl+Enter to send"}
+                        </span>
+                      </div>
+                      <button
+                        type="submit"
+                        class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-md text-[13px] font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
+                        disabled={chatStore.isLoading}
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </>
+            }
+          >
+            <AgentChat />
+          </Show>
         </Show>
       </div>
     </section>
