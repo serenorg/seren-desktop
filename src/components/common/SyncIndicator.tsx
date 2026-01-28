@@ -3,6 +3,10 @@
 
 import { type Component, onCleanup, onMount } from "solid-js";
 import { type SyncStatus, syncStore } from "@/stores/sync.store";
+import {
+  startFileWatcherForIndexing,
+  stopFileWatcherForIndexing,
+} from "@/lib/indexing/file-watcher";
 
 /**
  * Get icon for sync status.
@@ -55,10 +59,14 @@ function getStatusClasses(status: SyncStatus): string {
 export const SyncIndicator: Component = () => {
   onMount(() => {
     syncStore.init();
+    // Start file watcher for semantic indexing
+    startFileWatcherForIndexing();
   });
 
   onCleanup(() => {
     syncStore.cleanup();
+    // Stop file watcher for semantic indexing
+    stopFileWatcherForIndexing();
   });
 
   return (
