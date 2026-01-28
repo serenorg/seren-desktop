@@ -31,6 +31,34 @@ vi.mock("@/lib/mcp/client", () => ({
   },
 }));
 
+// Mock MCP OAuth - required for gateway initialization
+vi.mock("@/services/mcp-oauth", () => ({
+  getValidAccessToken: vi.fn().mockResolvedValue("mock-mcp-token"),
+  isMcpAuthenticated: vi.fn().mockResolvedValue(true),
+  clearStoredTokens: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock MCP client
+vi.mock("@/lib/mcp/client", () => ({
+  mcpClient: {
+    connectHttp: vi.fn().mockResolvedValue(undefined),
+    disconnectHttp: vi.fn().mockResolvedValue(undefined),
+    getConnection: vi.fn().mockReturnValue({
+      tools: [
+        {
+          name: "mcp__test__test-tool",
+          description: "Test tool",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+    }),
+    callToolHttp: vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "result" }],
+      isError: false,
+    }),
+  },
+}));
+
 describe("MCP Gateway Caching", () => {
   beforeEach(async () => {
     vi.resetModules();

@@ -22,7 +22,7 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     outputs:
-      release_id: ${{ steps.create_release.outputs.id }}
+      release_id: ${{ steps.set_release_id.outputs.id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,8 +65,31 @@ jobs:
           echo "Generated release notes:"
           cat release_notes.md
 
+      - name: Check for existing release
+        id: check_release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tagName = '${{ github.ref_name }}';
+            try {
+              const release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tagName
+              });
+              console.log(`Found existing release: ${release.data.id} (draft: ${release.data.draft})`);
+              return { exists: true, id: release.data.id, draft: release.data.draft };
+            } catch (error) {
+              if (error.status === 404) {
+                console.log('No existing release found');
+                return { exists: false };
+              }
+              throw error;
+            }
+
       - name: Create Release
         id: create_release
+        if: fromJSON(steps.check_release.outputs.result).exists == false
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,6 +99,15 @@ jobs:
           body_path: release_notes.md
           draft: true
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+
+      - name: Set release ID output
+        id: set_release_id
+        run: |
+          if [ "${{ fromJSON(steps.check_release.outputs.result).exists }}" == "true" ]; then
+            echo "id=${{ fromJSON(steps.check_release.outputs.result).id }}" >> $GITHUB_OUTPUT
+          else
+            echo "id=${{ steps.create_release.outputs.id }}" >> $GITHUB_OUTPUT
+          fi
 
   build:
     needs: create-release
@@ -275,8 +307,26 @@ jobs:
             const releaseId = '${{ needs.create-release.outputs.release_id }}';
             const artifactsDir = 'artifacts';
 
+            if (!releaseId) {
+              throw new Error('No release ID available - create-release job may have failed');
+            }
+
+            console.log(`Publishing to release ID: ${releaseId}`);
+
+            // Get existing assets to avoid duplicates
+            const existingAssets = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId
+            });
+            const existingNames = new Set(existingAssets.data.map(a => a.name));
+
             // Upload all artifact files
             const uploadAsset = async (filePath, fileName) => {
+              if (existingNames.has(fileName)) {
+                console.log(`Skipping ${fileName} - already exists`);
+                return;
+              }
               const content = fs.readFileSync(filePath);
               await github.rest.repos.uploadReleaseAsset({
                 owner: context.repo.owner,
@@ -288,26 +338,29 @@ jobs:
             };
 
             // Walk through artifacts directory
-            const walkDir = (dir) => {
+            const walkDir = async (dir) => {
               const files = fs.readdirSync(dir);
               for (const file of files) {
                 const filePath = path.join(dir, file);
                 const stat = fs.statSync(filePath);
                 if (stat.isDirectory()) {
-                  walkDir(filePath);
+                  await walkDir(filePath);
                 } else {
                   console.log(`Uploading: ${filePath}`);
-                  uploadAsset(filePath, file);
+                  await uploadAsset(filePath, file);
                 }
               }
             };
 
-            walkDir(artifactsDir);
+            await walkDir(artifactsDir);
 
             // Undraft the release
+            console.log('Setting release to published (non-draft)');
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: releaseId,
               draft: false
             });
+
+            console.log('Release published successfully!');
