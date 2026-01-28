@@ -30,21 +30,10 @@ export const ModelSelector: Component = () => {
 
   const currentProvider = () => providerStore.activeProvider;
 
-  // For Seren provider, use full OpenRouter model list; otherwise use provider store
-  const availableModels = () => {
-    if (currentProvider() === "seren" && openRouterModels().length > 0) {
-      // Convert Model to ProviderModel format
-      return openRouterModels().map((m) => ({
-        id: m.id,
-        name: m.name,
-        contextWindow: m.contextWindow,
-        description: m.provider,
-      }));
-    }
-    return providerStore.getModels(currentProvider());
-  };
+  // Default models from provider store (curated list)
+  const defaultModels = () => providerStore.getModels(currentProvider());
 
-  // Load full model list from OpenRouter on mount
+  // Load full model list from OpenRouter on mount (for search)
   onMount(async () => {
     setIsLoadingModels(true);
     try {
@@ -57,12 +46,32 @@ export const ModelSelector: Component = () => {
     }
   });
 
-  // Filter models based on search query
+  // Filter models: show defaults when no search, search full catalog when typing
   const filteredModels = createMemo(() => {
     const query = searchQuery().toLowerCase().trim();
-    const models = availableModels();
-    if (!query) return models;
-    return models.filter(
+
+    // No search query - show curated defaults
+    if (!query) {
+      return defaultModels();
+    }
+
+    // Searching - use full OpenRouter catalog for Seren provider
+    if (currentProvider() === "seren" && openRouterModels().length > 0) {
+      const allModels = openRouterModels().map((m) => ({
+        id: m.id,
+        name: m.name,
+        contextWindow: m.contextWindow,
+        description: m.provider,
+      }));
+      return allModels.filter(
+        (model) =>
+          model.name.toLowerCase().includes(query) ||
+          model.id.toLowerCase().includes(query),
+      );
+    }
+
+    // For other providers, search within their models
+    return defaultModels().filter(
       (model) =>
         model.name.toLowerCase().includes(query) ||
         model.id.toLowerCase().includes(query),
@@ -70,9 +79,26 @@ export const ModelSelector: Component = () => {
   });
 
   const currentModel = () => {
-    const models = availableModels();
+    const models = defaultModels();
     const activeModel = providerStore.activeModel;
-    return models.find((model) => model.id === activeModel) || models[0];
+    // First check defaults, then check full OpenRouter list for Seren
+    const found = models.find((model) => model.id === activeModel);
+    if (found) return found;
+
+    // Check full catalog for Seren provider (user may have selected a non-default model)
+    if (currentProvider() === "seren") {
+      const orModel = openRouterModels().find((m) => m.id === activeModel);
+      if (orModel) {
+        return {
+          id: orModel.id,
+          name: orModel.name,
+          contextWindow: orModel.contextWindow,
+          description: orModel.provider,
+        };
+      }
+    }
+
+    return models[0];
   };
 
   const selectModel = (modelId: string) => {
