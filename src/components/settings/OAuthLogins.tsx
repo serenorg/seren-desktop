@@ -21,6 +21,7 @@ import {
   connectPublisher,
   disconnectPublisher,
 } from "@/services/publisher-oauth";
+import { authStore } from "@/stores/auth.store";
 
 export const OAuthLogins: Component = () => {
   const [connectingProvider, setConnectingProvider] = createSignal<
@@ -158,8 +159,26 @@ export const OAuthLogins: Component = () => {
         </div>
       </Show>
 
-      {/* No Providers Available */}
-      <Show when={!providers.loading && providers()?.length === 0}>
+      {/* Not Signed In */}
+      <Show when={!authStore.state().isAuthenticated}>
+        <div class="text-center py-10 px-6 text-muted-foreground">
+          <span class="text-[2.5rem] block mb-3 opacity-60">🔐</span>
+          <p class="m-0">Sign in to connect accounts</p>
+          <p class="m-0 mt-2 text-[0.85rem] text-muted-foreground">
+            Sign in to Seren to see available OAuth providers and connect your
+            accounts.
+          </p>
+        </div>
+      </Show>
+
+      {/* No Providers Available (when signed in) */}
+      <Show
+        when={
+          authStore.state().isAuthenticated &&
+          !providers.loading &&
+          providers()?.length === 0
+        }
+      >
         <div class="text-center py-10 px-6 text-muted-foreground">
           <span class="text-[2.5rem] block mb-3 opacity-60">🔐</span>
           <p class="m-0">No OAuth providers available</p>
