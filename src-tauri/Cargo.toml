@@ -65,6 +65,8 @@ rmcp = { version = "0.14", features = [
 ] }
 urlencoding = "2"
 regex = "1"
+html2md = "0.2"
+url = "2"
 
 # ACP (Agent Client Protocol) support
 # Note: Windows builds temporarily disable ACP due to claude-code-acp-rs build issues

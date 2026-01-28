@@ -97,6 +97,25 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         break;
       }
 
+      case "seren_web_fetch": {
+        const url = args.url as string;
+        const timeoutMs = args.timeout_ms as number | undefined;
+        const response = await invoke<{
+          content: string;
+          content_type: string;
+          url: string;
+          status: number;
+          truncated: boolean;
+        }>("web_fetch", { url, timeoutMs });
+
+        if (response.status >= 400) {
+          result = `Error: HTTP ${response.status} for ${response.url}`;
+        } else {
+          result = response.content;
+        }
+        break;
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }

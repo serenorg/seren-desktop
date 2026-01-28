@@ -7,6 +7,7 @@ use tauri_plugin_store::StoreExt;
 pub mod commands {
     pub mod chat;
     pub mod indexing;
+    pub mod web;
 }
 
 pub mod services {
@@ -353,6 +354,8 @@ pub fn run() {
             files::delete_path,
             files::rename_path,
             files::reveal_in_file_manager,
+            // Web fetch command
+            commands::web::web_fetch,
             // Conversation commands
             commands::chat::create_conversation,
             commands::chat::get_conversations,
