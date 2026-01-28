@@ -21,15 +21,6 @@ pub struct OAuthError {
     pub error_description: Option<String>,
 }
 
-/// Start OAuth flow result
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthFlowResult {
-    /// The port the callback server is listening on
-    pub port: u16,
-    /// The full redirect URI to use
-    pub redirect_uri: String,
-}
-
 /// HTML page shown after successful OAuth
 const SUCCESS_HTML: &str = r#"<!DOCTYPE html>
 <html>
@@ -124,99 +115,6 @@ const ERROR_HTML: &str = r#"<!DOCTYPE html>
     </div>
 </body>
 </html>"#;
-
-/// Start a loopback server and wait for the OAuth callback.
-/// Returns the authorization code and state, or an error.
-pub fn wait_for_oauth_callback(
-    timeout_secs: u64,
-) -> Result<Result<OAuthCallbackResult, OAuthError>, String> {
-    // Bind to a random available port on localhost
-    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("Failed to bind: {}", e))?;
-
-    let port = listener
-        .local_addr()
-        .map_err(|e| format!("Failed to get local addr: {}", e))?
-        .port();
-
-    println!("[OAuth] Callback server listening on port {}", port);
-
-    // Set a timeout on the listener
-    listener
-        .set_nonblocking(false)
-        .map_err(|e| format!("Failed to set blocking: {}", e))?;
-
-    // Use a channel to receive the result with timeout
-    let (tx, rx) = mpsc::channel();
-
-    // Accept one connection
-    std::thread::spawn(move || {
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let mut buffer = [0; 4096];
-                let bytes_read = stream.read(&mut buffer).unwrap_or(0);
-                let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-
-                // Parse the HTTP request to extract the path
-                let first_line = request.lines().next().unwrap_or("");
-                let path = first_line.split_whitespace().nth(1).unwrap_or("/");
-
-                // Parse query parameters
-                let result = if let Some(query_start) = path.find('?') {
-                    let query = &path[query_start + 1..];
-                    parse_oauth_callback(query)
-                } else {
-                    Err(OAuthError {
-                        error: "invalid_request".to_string(),
-                        error_description: Some("No query parameters in callback".to_string()),
-                    })
-                };
-
-                // Send appropriate response
-                let (status, body) = match &result {
-                    Ok(_) => ("200 OK", SUCCESS_HTML.to_string()),
-                    Err(e) => {
-                        let error_msg = if let Some(desc) = &e.error_description {
-                            format!("{}: {}", e.error, desc)
-                        } else {
-                            e.error.clone()
-                        };
-                        (
-                            "400 Bad Request",
-                            ERROR_HTML.replace("{{ERROR}}", &error_msg),
-                        )
-                    }
-                };
-
-                let response = format!(
-                    "HTTP/1.1 {}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    status,
-                    body.len(),
-                    body
-                );
-
-                let _ = stream.write_all(response.as_bytes());
-                let _ = stream.flush();
-
-                let _ = tx.send(result);
-            }
-            Err(e) => {
-                let _ = tx.send(Err(OAuthError {
-                    error: "server_error".to_string(),
-                    error_description: Some(format!("Failed to accept connection: {}", e)),
-                }));
-            }
-        }
-    });
-
-    // Wait for result with timeout
-    match rx.recv_timeout(Duration::from_secs(timeout_secs)) {
-        Ok(result) => Ok(result),
-        Err(mpsc::RecvTimeoutError::Timeout) => Err("OAuth callback timed out".to_string()),
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            Err("OAuth callback server disconnected".to_string())
-        }
-    }
-}
 
 /// Parse OAuth callback query parameters
 fn parse_oauth_callback(query: &str) -> Result<OAuthCallbackResult, OAuthError> {
