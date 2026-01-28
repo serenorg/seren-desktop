@@ -2,6 +2,12 @@
 // ABOUTME: Provides reactive balance updates with automatic refresh.
 
 import { createStore } from "solid-js/store";
+import {
+  claimDailyCredits,
+  fetchDailyEligibility,
+  type DailyClaimEligibilityResponse,
+  type DailyClaimResponse,
+} from "@/services/dailyClaim";
 import { fetchBalance, type WalletBalance } from "@/services/wallet";
 
 /**
@@ -23,6 +29,12 @@ interface WalletState {
   lastDismissedBalanceAtomic: number | null;
   /** Track if auto-refresh is active (HMR-resistant) */
   autoRefreshActive: boolean;
+  /** Daily claim eligibility data */
+  dailyClaim: DailyClaimEligibilityResponse | null;
+  /** Whether user dismissed the daily claim popup this session */
+  dailyClaimDismissed: boolean;
+  /** Whether daily claim check is in progress */
+  dailyClaimLoading: boolean;
 }
 
 /**
@@ -37,6 +49,9 @@ const initialState: WalletState = {
   error: null,
   lastDismissedBalanceAtomic: null,
   autoRefreshActive: false,
+  dailyClaim: null,
+  dailyClaimDismissed: false,
+  dailyClaimLoading: false,
 };
 
 const [walletState, setWalletState] = createStore<WalletState>(initialState);
@@ -185,6 +200,52 @@ function setTopUpInProgress(inProgress: boolean): void {
 }
 
 /**
+ * Check if the user is eligible to claim daily credits.
+ * Called after login to determine if popup should show.
+ */
+async function checkDailyClaim(): Promise<void> {
+  setWalletState("dailyClaimLoading", true);
+  try {
+    const eligibility = await fetchDailyEligibility();
+    setWalletState("dailyClaim", eligibility);
+  } catch (err) {
+    console.error("[Wallet Store] Failed to check daily claim:", err);
+    setWalletState("dailyClaim", null);
+  } finally {
+    setWalletState("dailyClaimLoading", false);
+  }
+}
+
+/**
+ * Claim daily credits and refresh balance.
+ */
+async function claimDaily(): Promise<DailyClaimResponse> {
+  const result = await claimDailyCredits();
+  // Update wallet balance from claim response
+  setWalletState({
+    balance: result.balance_atomic / 1_000_000,
+    balance_atomic: result.balance_atomic,
+    balance_usd: result.balance_usd,
+    lastUpdated: new Date().toISOString(),
+  });
+  // Update eligibility — user just claimed
+  setWalletState("dailyClaim", {
+    can_claim: false,
+    claims_remaining_this_month: result.claims_remaining_this_month,
+    reason: "Already claimed today",
+    resets_in_seconds: null,
+  });
+  return result;
+}
+
+/**
+ * Dismiss the daily claim popup for this session.
+ */
+function dismissDailyClaim(): void {
+  setWalletState("dailyClaimDismissed", true);
+}
+
+/**
  * Reset wallet state (e.g., on logout).
  */
 function resetWalletState(): void {
@@ -254,4 +315,7 @@ export {
   isTopUpInProgress,
   setTopUpInProgress,
   resetWalletState,
+  checkDailyClaim,
+  claimDaily,
+  dismissDailyClaim,
 };

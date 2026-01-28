@@ -1,0 +1,134 @@
+/* ABOUTME: Styles for the daily SerenBucks claim popup modal. */
+/* ABOUTME: Uses same animation and theme patterns as LowBalanceWarning. */
+
+.daily-claim-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.daily-claim-dialog {
+  background: var(--color-card, #1e293b);
+  border: 1px solid var(--color-border, rgba(148, 163, 184, 0.15));
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: slideUp 0.2s ease-out;
+}
+
+.daily-claim-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.daily-claim-icon {
+  font-size: 1.5rem;
+}
+
+.daily-claim-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-foreground, #fff);
+  margin: 0;
+}
+
+.daily-claim-body {
+  margin-bottom: 20px;
+}
+
+.daily-claim-message {
+  font-size: 0.875rem;
+  color: var(--color-muted-foreground, #94a3b8);
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
+.daily-claim-remaining {
+  font-size: 0.8rem;
+  color: var(--color-muted-foreground, #64748b);
+  margin: 0;
+}
+
+.daily-claim-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 12px 0;
+}
+
+.daily-claim-success-icon {
+  font-size: 2rem;
+  color: #22c55e;
+}
+
+.daily-claim-success-amount {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-foreground, #fff);
+}
+
+.daily-claim-success-balance {
+  font-size: 0.8rem;
+  color: var(--color-muted-foreground, #94a3b8);
+}
+
+.daily-claim-error {
+  font-size: 0.8rem;
+  color: var(--color-destructive, #ef4444);
+  background: rgba(239, 68, 68, 0.1);
+  padding: 8px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.daily-claim-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.daily-claim-btn {
+  padding: 6px 14px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+}
+
+.daily-claim-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.daily-claim-btn-dismiss {
+  background: transparent;
+  color: var(--color-muted-foreground, #94a3b8);
+  border: 1px solid var(--color-border, rgba(148, 163, 184, 0.2));
+}
+
+.daily-claim-btn-dismiss:hover:not(:disabled) {
+  background: var(--color-secondary, rgba(148, 163, 184, 0.1));
+  color: var(--color-foreground, #fff);
+}
+
+.daily-claim-btn-claim {
+  background: var(--color-primary, #6366f1);
+  color: var(--color-primary-foreground, #fff);
+}
+
+.daily-claim-btn-claim:hover:not(:disabled) {
+  opacity: 0.9;
+}
