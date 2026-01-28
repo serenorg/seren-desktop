@@ -33,29 +33,71 @@ pub enum AgentType {
 }
 
 impl AgentType {
+    /// Get the sidecar name for this agent (used with Tauri's externalBin)
+    fn sidecar_name(&self) -> &'static str {
+        match self {
+            AgentType::ClaudeCode => "acp_agent",
+            AgentType::Codex => "codex",
+        }
+    }
+
     /// Get the command to spawn this agent
     ///
     /// For ClaudeCode, we use the bundled acp_agent binary which wraps
-    /// claude-code-acp-rs. This binary is built alongside the main Seren app
-    /// and provides ACP protocol support over stdio.
-    fn command(&self) -> String {
+    /// claude-code-acp-rs. This binary is configured as a Tauri sidecar
+    /// via externalBin in tauri.conf.json.
+    ///
+    /// The binary is located at:
+    /// - Development: src-tauri/binaries/acp_agent-{target_triple}
+    /// - Production: bundled with app via Tauri's sidecar mechanism
+    fn command(&self) -> Result<std::path::PathBuf, String> {
         match self {
             AgentType::ClaudeCode => {
-                // Get the path to the bundled acp_agent binary
-                // In development, it's in the target directory
-                // In production, it's bundled with the app
-                if let Ok(exe_path) = std::env::current_exe() {
-                    if let Some(exe_dir) = exe_path.parent() {
-                        let agent_path = exe_dir.join("acp_agent");
-                        if agent_path.exists() {
-                            return agent_path.to_string_lossy().to_string();
-                        }
+                let sidecar_name = self.sidecar_name();
+
+                // Get target triple for sidecar naming convention
+                let target_triple = get_target_triple();
+
+                // Check various locations for the sidecar binary
+                let exe_path = std::env::current_exe()
+                    .map_err(|e| format!("Failed to get current exe path: {}", e))?;
+                let exe_dir = exe_path
+                    .parent()
+                    .ok_or_else(|| "Failed to get exe directory".to_string())?;
+
+                // Platform-specific extension
+                let ext = if cfg!(windows) { ".exe" } else { "" };
+
+                // Locations to check (in order of priority):
+                let candidates = [
+                    // 1. Production: Next to the main executable (Tauri bundles sidecars here)
+                    exe_dir.join(format!("{}{}", sidecar_name, ext)),
+                    // 2. Production macOS: In Resources directory
+                    exe_dir.join("../Resources").join(format!("{}{}", sidecar_name, ext)),
+                    // 3. Development: In binaries/ with target triple suffix
+                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("binaries")
+                        .join(format!("{}-{}{}", sidecar_name, target_triple, ext)),
+                ];
+
+                for candidate in &candidates {
+                    if candidate.exists() {
+                        eprintln!("[ACP] Found sidecar at: {:?}", candidate);
+                        return Ok(candidate.clone());
                     }
                 }
-                // Fallback to assuming it's in PATH
-                "acp_agent".to_string()
+
+                Err(format!(
+                    "Sidecar binary '{}' not found. Checked locations:\n{}",
+                    sidecar_name,
+                    candidates
+                        .iter()
+                        .map(|p| format!("  - {:?}", p))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ))
             }
-            AgentType::Codex => "codex".to_string(),
+            AgentType::Codex => Err("Codex agent not yet supported".to_string()),
         }
     }
 
@@ -66,6 +108,12 @@ impl AgentType {
             AgentType::Codex => vec![],
         }
     }
+}
+
+/// Get the current target triple (e.g., "aarch64-apple-darwin")
+fn get_target_triple() -> &'static str {
+    // This is set at compile time
+    env!("TARGET")
 }
 
 /// Information about an ACP session
@@ -517,10 +565,10 @@ async fn run_session_worker(
     cwd: String,
     mut command_rx: mpsc::Receiver<AcpCommand>,
 ) -> Result<(), String> {
-    let command = agent_type.command();
+    let command = agent_type.command()?;
     let args = agent_type.args();
 
-    eprintln!("[ACP] Spawning agent: {} {:?} in {}", command, args, cwd);
+    eprintln!("[ACP] Spawning agent: {:?} {:?} in {}", command, args, cwd);
 
     // Spawn the agent process
     let mut cmd = Command::new(&command);
@@ -552,7 +600,7 @@ async fn run_session_worker(
 
     let mut child = cmd.spawn().map_err(|e| {
         format!(
-            "Failed to spawn {} {:?}: {}. Make sure acp_agent is built and available.",
+            "Failed to spawn {:?} {:?}: {}. Run 'pnpm build:sidecar' to build the acp_agent binary.",
             command, args, e
         )
     })?;
@@ -928,20 +976,8 @@ pub async fn acp_get_available_agents(app: AppHandle) -> Vec<serde_json::Value> 
 /// Check if an agent binary is available
 #[tauri::command]
 pub async fn acp_check_agent_available(agent_type: AgentType) -> Result<bool, String> {
-    let command = agent_type.command();
-
-    // For bundled agents, check if the file exists directly
-    if std::path::Path::new(&command).exists() {
-        return Ok(true);
-    }
-
-    // Otherwise, check if it's in PATH
-    match tokio::process::Command::new("which")
-        .arg(&command)
-        .output()
-        .await
-    {
-        Ok(output) => Ok(output.status.success()),
+    match agent_type.command() {
+        Ok(path) => Ok(path.exists()),
         Err(_) => Ok(false),
     }
 }

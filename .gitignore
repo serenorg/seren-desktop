@@ -31,6 +31,7 @@ coverage/
 # Tauri
 src-tauri/WixTools/
 src-tauri/gen/schemas/
+src-tauri/binaries/
 
 # Embedded runtime binaries (downloaded, not committed)
 # Keep .gitkeep placeholder for CI
