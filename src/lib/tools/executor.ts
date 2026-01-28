@@ -71,6 +71,9 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         const path = args.path as string;
         const content = args.content as string;
         validatePath(path);
+        if (content == null) {
+          throw new Error("Invalid content: content must be provided");
+        }
         await invoke("write_file", { path, content });
         result = `Successfully wrote ${content.length} characters to ${path}`;
         break;
