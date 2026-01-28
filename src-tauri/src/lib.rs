@@ -431,6 +431,8 @@ pub fn run() {
             acp::acp_get_available_agents,
             #[cfg(feature = "acp")]
             acp::acp_check_agent_available,
+            #[cfg(feature = "acp")]
+            acp::acp_ensure_claude_cli,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

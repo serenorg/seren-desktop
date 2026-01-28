@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
@@ -531,11 +531,23 @@ async fn run_session_worker(
         .stderr(std::process::Stdio::piped());
     cmd.kill_on_drop(true);
 
-    // Ensure the agent can find bundled Node/Git when running inside the app bundle.
+    // Ensure the agent can find bundled Node/Git and installed CLI tools.
     // We intentionally avoid mutating the process-wide PATH; we only inject it into this child.
     let embedded_path = crate::embedded_runtime::get_embedded_path();
-    if !embedded_path.is_empty() {
-        cmd.env("PATH", embedded_path);
+    let cli_tools_bin = get_cli_tools_bin_dir(&app);
+
+    let full_path = match (&cli_tools_bin, embedded_path.is_empty()) {
+        (Some(bin), false) => {
+            let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+            format!("{}{}{}", bin.display(), sep, embedded_path)
+        }
+        (Some(bin), true) => bin.to_string_lossy().to_string(),
+        (None, false) => embedded_path.to_string(),
+        (None, true) => String::new(),
+    };
+
+    if !full_path.is_empty() {
+        cmd.env("PATH", &full_path);
     }
 
     let mut child = cmd.spawn().map_err(|e| {
@@ -878,16 +890,29 @@ pub async fn acp_set_permission_mode(
         .map_err(|_| "Worker thread dropped".to_string())?
 }
 
-/// Get available agents
+/// Get available agents with actual availability checks.
 #[tauri::command]
-pub fn acp_get_available_agents() -> Vec<serde_json::Value> {
+pub async fn acp_get_available_agents(app: AppHandle) -> Vec<serde_json::Value> {
+    let agent_available =
+        acp_check_agent_available(AgentType::ClaudeCode).await.unwrap_or(false);
+    let cli_tools_available = get_cli_tools_bin_dir(&app)
+        .map(|bin| {
+            let claude = if cfg!(target_os = "windows") {
+                bin.join("claude.cmd")
+            } else {
+                bin.join("claude")
+            };
+            claude.exists()
+        })
+        .unwrap_or(false);
+
     vec![
         serde_json::json!({
             "type": "claude-code",
             "name": "Claude Code",
             "description": "AI coding assistant powered by Claude",
             "command": "claude-code-acp-rs",
-            "available": true
+            "available": agent_available || cli_tools_available
         }),
         serde_json::json!({
             "type": "codex",
@@ -918,5 +943,108 @@ pub async fn acp_check_agent_available(agent_type: AgentType) -> Result<bool, St
     {
         Ok(output) => Ok(output.status.success()),
         Err(_) => Ok(false),
+    }
+}
+
+/// Ensure Claude Code CLI is installed, auto-installing via npm if needed.
+/// Returns the bin directory path containing the claude binary.
+#[tauri::command]
+pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
+    let cli_tools_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No app data dir: {e}"))?
+        .join("cli-tools");
+
+    let bin_dir = cli_tools_dir.join("node_modules").join(".bin");
+    let claude_bin = if cfg!(target_os = "windows") {
+        bin_dir.join("claude.cmd")
+    } else {
+        bin_dir.join("claude")
+    };
+
+    // Already installed?
+    if claude_bin.exists() {
+        eprintln!("[ACP] Claude CLI already installed at: {}", claude_bin.display());
+        return Ok(bin_dir.to_string_lossy().to_string());
+    }
+
+    eprintln!("[ACP] Claude CLI not found, installing via npm...");
+
+    let _ = app.emit(
+        "acp://cli-install-progress",
+        serde_json::json!({
+            "stage": "installing",
+            "message": "Installing Claude Code CLI..."
+        }),
+    );
+
+    // Create directory
+    std::fs::create_dir_all(&cli_tools_dir)
+        .map_err(|e| format!("Failed to create cli-tools dir: {e}"))?;
+
+    // Run npm install using embedded Node PATH
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    let npm_cmd = if cfg!(target_os = "windows") {
+        "npm.cmd"
+    } else {
+        "npm"
+    };
+
+    let output = tokio::process::Command::new(npm_cmd)
+        .args([
+            "install",
+            "--prefix",
+            &cli_tools_dir.to_string_lossy(),
+            "@anthropic-ai/claude-code",
+        ])
+        .env("PATH", embedded_path)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run npm install: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = app.emit(
+            "acp://cli-install-progress",
+            serde_json::json!({
+                "stage": "error",
+                "message": format!("Install failed: {stderr}")
+            }),
+        );
+        return Err(format!("npm install failed: {stderr}"));
+    }
+
+    // Verify the binary exists
+    if !claude_bin.exists() {
+        return Err("Install completed but claude binary not found".to_string());
+    }
+
+    eprintln!("[ACP] Claude CLI installed successfully at: {}", claude_bin.display());
+
+    let _ = app.emit(
+        "acp://cli-install-progress",
+        serde_json::json!({
+            "stage": "complete",
+            "message": "Claude Code CLI installed successfully"
+        }),
+    );
+
+    Ok(bin_dir.to_string_lossy().to_string())
+}
+
+/// Get the cli-tools bin directory if it exists.
+fn get_cli_tools_bin_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let bin_dir = app
+        .path()
+        .app_data_dir()
+        .ok()?
+        .join("cli-tools")
+        .join("node_modules")
+        .join(".bin");
+    if bin_dir.exists() {
+        Some(bin_dir)
+    } else {
+        None
     }
 }

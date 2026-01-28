@@ -205,7 +205,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     onClick={startSession}
                     disabled={acpStore.isLoading}
                   >
-                    {acpStore.isLoading ? "Starting..." : "Start Agent"}
+                    {acpStore.isLoading
+                      ? (acpStore.installStatus ?? "Starting...")
+                      : "Start Agent"}
                   </button>
                 </div>
               </div>

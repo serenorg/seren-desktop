@@ -177,6 +177,14 @@ export async function getAvailableAgents(): Promise<AgentInfo[]> {
 }
 
 /**
+ * Ensure Claude Code CLI is installed, auto-installing via npm if needed.
+ * Returns the bin directory path containing the claude binary.
+ */
+export async function ensureClaudeCli(): Promise<string> {
+  return invoke<string>("acp_ensure_claude_cli");
+}
+
+/**
  * Check if a specific agent binary is available in PATH.
  */
 export async function checkAgentAvailable(
