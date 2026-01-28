@@ -624,25 +624,44 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   }
                 />
                 <Show when={message.status === "error"}>
-                  <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
-                    <span>{message.error ?? "Message failed"}</span>
-                    <Show when={chatStore.retryingMessageId === message.id}>
-                      <span>
-                        Retrying (
-                        {Math.min(message.attemptCount ?? 1, CHAT_MAX_RETRIES)}/
-                        {CHAT_MAX_RETRIES})…
-                      </span>
-                    </Show>
-                    <Show when={message.request}>
+                  <Show
+                    when={message.error === "Not authenticated with Seren"}
+                    fallback={
+                      <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
+                        <span>{message.error ?? "Message failed"}</span>
+                        <Show when={chatStore.retryingMessageId === message.id}>
+                          <span>
+                            Retrying (
+                            {Math.min(
+                              message.attemptCount ?? 1,
+                              CHAT_MAX_RETRIES,
+                            )}
+                            /{CHAT_MAX_RETRIES})…
+                          </span>
+                        </Show>
+                        <Show when={message.request}>
+                          <button
+                            type="button"
+                            class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                            onClick={() => handleManualRetry(message)}
+                          >
+                            Retry
+                          </button>
+                        </Show>
+                      </div>
+                    }
+                  >
+                    <div class="mt-2 px-3 py-2 bg-[#21262d] border border-[#30363d] rounded flex items-center gap-3 text-xs text-[#8b949e]">
+                      <span>Feature requires login to Seren</span>
                       <button
                         type="button"
-                        class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
-                        onClick={() => handleManualRetry(message)}
+                        class="ml-auto bg-[#238636] text-white border-none px-3 py-1 rounded text-xs cursor-pointer hover:bg-[#2ea043]"
+                        onClick={() => _props.onSignInClick?.()}
                       >
-                        Retry
+                        Login
                       </button>
-                    </Show>
-                  </div>
+                    </div>
+                  </Show>
                 </Show>
               </article>
             )}
