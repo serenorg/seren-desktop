@@ -1,5 +1,5 @@
 // ABOUTME: Model selector dropdown for choosing AI models in chat.
-// ABOUTME: Shows searchable model list with provider filtering.
+// ABOUTME: Shows searchable model list from OpenRouter with provider filtering.
 
 import type { Component } from "solid-js";
 import {
@@ -16,17 +16,46 @@ import {
   PROVIDER_CONFIGS,
   type ProviderId,
 } from "@/lib/providers";
+import { type Model, modelsService } from "@/services/models";
 import { chatStore } from "@/stores/chat.store";
 import { providerStore } from "@/stores/provider.store";
 
 export const ModelSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
+  const [openRouterModels, setOpenRouterModels] = createSignal<Model[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = createSignal(false);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
 
   const currentProvider = () => providerStore.activeProvider;
-  const availableModels = () => providerStore.getModels(currentProvider());
+
+  // For Seren provider, use full OpenRouter model list; otherwise use provider store
+  const availableModels = () => {
+    if (currentProvider() === "seren" && openRouterModels().length > 0) {
+      // Convert Model to ProviderModel format
+      return openRouterModels().map((m) => ({
+        id: m.id,
+        name: m.name,
+        contextWindow: m.contextWindow,
+        description: m.provider,
+      }));
+    }
+    return providerStore.getModels(currentProvider());
+  };
+
+  // Load full model list from OpenRouter on mount
+  onMount(async () => {
+    setIsLoadingModels(true);
+    try {
+      const models = await modelsService.getAvailable();
+      setOpenRouterModels(models);
+    } catch (err) {
+      console.error("Failed to load models from OpenRouter:", err);
+    } finally {
+      setIsLoadingModels(false);
+    }
+  });
 
   // Filter models based on search query
   const filteredModels = createMemo(() => {
@@ -184,9 +213,11 @@ export const ModelSelector: Component = () => {
               when={filteredModels().length > 0}
               fallback={
                 <div class="p-4 text-center text-muted-foreground text-[13px]">
-                  {searchQuery()
-                    ? `No models matching "${searchQuery()}"`
-                    : `No models available for ${PROVIDER_CONFIGS[currentProvider()].name}`}
+                  {isLoadingModels()
+                    ? "Loading models..."
+                    : searchQuery()
+                      ? `No models matching "${searchQuery()}"`
+                      : `No models available for ${PROVIDER_CONFIGS[currentProvider()].name}`}
                 </div>
               }
             >
