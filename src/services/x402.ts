@@ -44,6 +44,20 @@ export interface X402PaymentResult {
   error?: string;
 }
 
+interface ExtractedRequirements {
+  requirements: PaymentRequirements;
+  requirementsJson: string;
+}
+
+function decodeBase64Utf8(value: string): string {
+  if (typeof atob === "function") {
+    return atob(value);
+  }
+  // Node/test fallback
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  return Buffer.from(value, "base64").toString("utf8");
+}
+
 /**
  * Create the x402 payment service.
  */
@@ -68,7 +82,7 @@ function createX402Service() {
   /**
    * Extract payment requirements from an error.
    */
-  function extractRequirements(error: unknown): PaymentRequirements | null {
+  function extractRequirements(error: unknown): ExtractedRequirements | null {
     if (!(error instanceof Error)) return null;
 
     // Try to parse the error message as JSON (might be the full 402 response body)
@@ -76,7 +90,51 @@ function createX402Service() {
       // Look for JSON in the error message
       const jsonMatch = error.message.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        return parsePaymentRequirements(jsonMatch[0]);
+        const jsonStr = jsonMatch[0].trim();
+
+        // Case 1: error message is the raw 402 response body
+        try {
+          return {
+            requirements: parsePaymentRequirements(jsonStr),
+            requirementsJson: jsonStr,
+          };
+        } catch {
+          // Fall through - might be a wrapper type (e.g., MCP payment proxy)
+        }
+
+        // Case 2: MCP payment proxy wrapper { payment_requirements, payment_required_header }
+        const wrapper: unknown = JSON.parse(jsonStr);
+        if (wrapper && typeof wrapper === "object") {
+          const w = wrapper as Record<string, unknown>;
+
+          const paymentRequirements =
+            w.payment_requirements ?? w.paymentRequirements;
+          if (paymentRequirements) {
+            try {
+              const requirementsJson = JSON.stringify(paymentRequirements);
+              return {
+                requirements: parsePaymentRequirements(requirementsJson),
+                requirementsJson,
+              };
+            } catch {
+              // Fall through to header parsing
+            }
+          }
+
+          const paymentRequiredHeader =
+            w.payment_required_header ?? w.paymentRequiredHeader;
+          if (typeof paymentRequiredHeader === "string") {
+            try {
+              const requirementsJson = decodeBase64Utf8(paymentRequiredHeader);
+              return {
+                requirements: parsePaymentRequirements(requirementsJson),
+                requirementsJson,
+              };
+            } catch {
+              // Not valid base64/JSON
+            }
+          }
+        }
       }
     } catch {
       // Not a JSON error
@@ -135,7 +193,7 @@ function createX402Service() {
    * Sign an x402 payment and get the payment header.
    */
   async function signPayment(
-    requirements: PaymentRequirements,
+    requirementsJson: string,
   ): Promise<X402PaymentResult> {
     setIsProcessing(true);
 
@@ -151,7 +209,6 @@ function createX402Service() {
       }
 
       // Sign the payment via Tauri IPC
-      const requirementsJson = JSON.stringify(requirements);
       const result = await signX402Payment(requirementsJson);
 
       return {
@@ -200,11 +257,12 @@ function createX402Service() {
     error: unknown,
   ): Promise<X402PaymentResult | null> {
     // Extract payment requirements from the error
-    const requirements = extractRequirements(error);
-    if (!requirements) {
+    const extracted = extractRequirements(error);
+    if (!extracted) {
       console.error("Could not parse payment requirements from error:", error);
       return null;
     }
+    const { requirements, requirementsJson } = extracted;
 
     const x402Option = getX402Option(requirements);
     const hasPrepaid = requirements.accepts.some((a) => a.type === "prepaid");
@@ -224,7 +282,7 @@ function createX402Service() {
     ) {
       const amount = x402Option.amount;
       if (shouldAutoApprove(amount)) {
-        return await signPayment(requirements);
+        return await signPayment(requirementsJson);
       }
     }
 
@@ -236,7 +294,7 @@ function createX402Service() {
 
     // Process payment based on selected method
     if (result.method === "crypto") {
-      return await signPayment(requirements);
+      return await signPayment(requirementsJson);
     } else if (result.method === "serenbucks") {
       return await handleSerenBucksPayment();
     }
