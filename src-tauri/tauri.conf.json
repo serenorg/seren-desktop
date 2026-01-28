@@ -46,7 +46,6 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "dmg", "deb", "appimage"],
-    "externalBin": ["binaries/acp_agent"],
     "icon": [
       "icons/icon.png",
       "icons/32x32.png",
