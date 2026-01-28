@@ -39,7 +39,6 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-http = "2"
 tauri-plugin-shell = "2"
-tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.33", features = ["bundled"] }
@@ -75,6 +74,12 @@ anyhow = "1"
 # Note: codex-acp has unresolved dependency issues (ssh auth for tungstenite fork)
 # Will add Codex support when upstream issues are resolved
 # codex-acp = { git = "https://github.com/zed-industries/codex-acp" }
+
+# Platform-specific dependencies
+# Deep-link plugin excluded on Windows due to WiX bundler ICE03 registry errors
+# See: https://github.com/tauri-apps/tauri/issues/10453
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+tauri-plugin-deep-link = "2"
 
 [features]
 default = ["acp"]

@@ -39,11 +39,6 @@
       "pubkey": "SEREN_RELEASES_PUBLIC_KEY_PLACEHOLDER",
       "dialog": false
     },
-    "deep-link": {
-      "desktop": {
-        "schemes": ["seren"]
-      }
-    },
     "shell": {
       "open": true
     }
