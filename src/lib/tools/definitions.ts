@@ -33,12 +33,18 @@ export const MODEL_TOOL_LIMITS: Record<string, number> = {
 /**
  * Get the tool limit for a specific model.
  * Matches by model ID prefix (e.g., "claude-3.5-sonnet" matches "claude").
+ * Handles provider-prefixed IDs like "anthropic/claude-opus" by checking after the slash.
  */
 export function getToolLimitForModel(modelId: string): number {
   const lowerModel = modelId.toLowerCase();
 
+  // Extract model name after provider prefix (e.g., "anthropic/claude-opus" -> "claude-opus")
+  const modelName = lowerModel.includes("/")
+    ? lowerModel.split("/")[1]
+    : lowerModel;
+
   for (const [prefix, limit] of Object.entries(MODEL_TOOL_LIMITS)) {
-    if (prefix !== "default" && lowerModel.startsWith(prefix)) {
+    if (prefix !== "default" && modelName.startsWith(prefix)) {
       return limit;
     }
   }
@@ -283,23 +289,51 @@ export const FILE_TOOLS: ToolDefinition[] = [
 export function getAllTools(modelId?: string): ToolDefinition[] {
   const limit = getToolLimitForModel(modelId ?? "");
   const tools: ToolDefinition[] = [...FILE_TOOLS];
+  const seenNames = new Set<string>(FILE_TOOLS.map((t) => t.function.name));
 
   // Add tools from connected local MCP servers (user-added) - high priority
+  // IMPORTANT: Exclude "seren-gateway" server as those tools are handled by getGatewayTools()
   const mcpTools = mcpClient.getAllTools();
   for (const { serverName, tool } of mcpTools) {
+    // Skip seren-gateway tools - they're added via getGatewayTools() below
+    if (serverName === "seren-gateway") continue;
+
     if (tools.length >= limit) break;
-    tools.push(convertMcpToolToDefinition(serverName, tool));
+    const toolDef = convertMcpToolToDefinition(serverName, tool);
+    const toolName = toolDef.function.name;
+
+    // Deduplicate: skip if already added
+    if (seenNames.has(toolName)) {
+      console.warn(`[Tools] Skipping duplicate tool: ${toolName}`);
+      continue;
+    }
+
+    tools.push(toolDef);
+    seenNames.add(toolName);
   }
 
   // Add tools from Seren Gateway publishers - fill remaining slots
   const gatewayTools = getGatewayTools();
   for (const gatewayTool of gatewayTools) {
     if (tools.length >= limit) break;
-    tools.push(convertGatewayToolToDefinition(gatewayTool));
+    const toolDef = convertGatewayToolToDefinition(gatewayTool);
+    const toolName = toolDef.function.name;
+
+    // Deduplicate: skip if already added
+    if (seenNames.has(toolName)) {
+      console.warn(`[Tools] Skipping duplicate tool: ${toolName}`);
+      continue;
+    }
+
+    tools.push(toolDef);
+    seenNames.add(toolName);
   }
 
+  const mcpToolsFiltered = mcpTools.filter(
+    ({ serverName }) => serverName !== "seren-gateway",
+  ).length;
   const totalAvailable =
-    FILE_TOOLS.length + mcpTools.length + gatewayTools.length;
+    FILE_TOOLS.length + mcpToolsFiltered + gatewayTools.length;
   if (tools.length < totalAvailable) {
     console.warn(
       `[Tools] Limited to ${limit} tools for model "${modelId ?? "unknown"}" (had ${totalAvailable} available)`,
