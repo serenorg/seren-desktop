@@ -97,6 +97,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [savedInput, setSavedInput] = createSignal("");
   // Message queue for sending messages while streaming
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
+  const [showSignInPrompt, setShowSignInPrompt] = createSignal(false);
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -332,6 +333,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     const trimmed = input().trim();
     if (!trimmed) return;
 
+    // If using Seren provider and not authenticated, prompt sign-in
+    if (providerStore.activeProvider === "seren" && !authStore.isAuthenticated) {
+      setShowSignInPrompt(true);
+      return;
+    }
+
     // If currently streaming, queue the message instead
     if (chatStore.isLoading) {
       setMessageQueue((queue) => [...queue, trimmed]);
@@ -521,22 +528,27 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   return (
     <section class="flex flex-col h-full bg-[#0d1117] text-[#e6edf3] border-l border-[#21262d]">
-      <Show
-        when={authStore.isAuthenticated}
-        fallback={
-          <div class="flex-1 flex flex-col items-center justify-center gap-6 p-6">
-            <div class="text-center max-w-[280px]">
-              <h2 class="m-0 mb-2 text-lg font-semibold text-[#e6edf3]">
-                Sign in to chat
-              </h2>
-              <p class="m-0 text-sm text-[#8b949e] leading-normal">
-                Connect with Seren to access AI-powered conversations.
-              </p>
-            </div>
-            <SignIn onSuccess={() => checkAuth()} />
+      <Show when={showSignInPrompt()}>
+        <div class="flex-1 flex flex-col items-center justify-center gap-6 p-6">
+          <div class="text-center max-w-[280px]">
+            <h2 class="m-0 mb-2 text-lg font-semibold text-[#e6edf3]">
+              Sign in to use Seren
+            </h2>
+            <p class="m-0 text-sm text-[#8b949e] leading-normal">
+              Sign in to chat with Seren, or add your own API key in Settings.
+            </p>
           </div>
-        }
-      >
+          <SignIn onSuccess={() => { setShowSignInPrompt(false); checkAuth(); }} />
+          <button
+            type="button"
+            class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1.5 rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3]"
+            onClick={() => setShowSignInPrompt(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      </Show>
+      <Show when={!showSignInPrompt()}>
         <ChatTabBar />
         <header class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[#21262d] bg-[#161b22]">
           <div class="flex items-center gap-3">
