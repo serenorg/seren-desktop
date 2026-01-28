@@ -6,6 +6,9 @@ authors = ["SerenAI <hello@serendb.com>"]
 edition = "2024"
 default-run = "Seren"
 
+# Note: default-run tells Tauri's bundler which binary is the main application.
+# This prevents WiX from trying to bundle acp_agent (which isn't built on Windows).
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
