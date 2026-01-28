@@ -10,8 +10,14 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { setInlineEditHandler } from "@/lib/editor";
+import {
+  setAddToChatHandler,
+  setExplainCodeHandler,
+  setImproveCodeHandler,
+  setInlineEditHandler,
+} from "@/lib/editor";
 import { saveTab } from "@/lib/files/service";
+import { editorStore } from "@/stores/editor.store";
 import { setSelectedPath } from "@/stores/fileTree";
 import {
   getActiveTab,
@@ -46,10 +52,53 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
   const [inlineEditState, setInlineEditState] =
     createSignal<InlineEditState | null>(null);
 
-  // Register inline edit handler (Cmd+K)
+  // Register all context menu handlers
   onMount(() => {
+    // Cmd+K: Inline edit with AI
     setInlineEditHandler((code, language, filePath, selection, editor) => {
-      setInlineEditState({ editor, selection, originalCode: code, language, filePath });
+      setInlineEditState({
+        editor,
+        selection,
+        originalCode: code,
+        language,
+        filePath,
+      });
+    });
+
+    // Add to Chat: Set selection as context (no auto-send)
+    setAddToChatHandler((code, language, filePath) => {
+      const lines = code.split("\n");
+      editorStore.setSelectionWithAction(
+        code,
+        filePath,
+        { startLine: 1, endLine: lines.length },
+        language,
+        "add-to-chat",
+      );
+    });
+
+    // Explain Code: Set selection and trigger explain prompt
+    setExplainCodeHandler((code, language, filePath) => {
+      const lines = code.split("\n");
+      editorStore.setSelectionWithAction(
+        code,
+        filePath,
+        { startLine: 1, endLine: lines.length },
+        language,
+        "explain",
+      );
+    });
+
+    // Improve Code: Set selection and trigger improve prompt
+    setImproveCodeHandler((code, language, filePath) => {
+      const lines = code.split("\n");
+      editorStore.setSelectionWithAction(
+        code,
+        filePath,
+        { startLine: 1, endLine: lines.length },
+        language,
+        "improve",
+      );
     });
   });
 
