@@ -3,6 +3,7 @@
 
 const TOKEN_STORAGE_KEY = "seren_token";
 const REFRESH_TOKEN_STORAGE_KEY = "seren_refresh_token";
+const API_KEY_STORAGE_KEY = "seren_api_key";
 
 /**
  * Check if running in Tauri runtime (vs browser).
@@ -105,6 +106,62 @@ export async function clearRefreshToken(): Promise<void> {
   } else {
     // Browser fallback for testing
     localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  }
+}
+
+// ============================================================================
+// Seren API Key Management (for MCP authentication)
+// ============================================================================
+
+/**
+ * Store Seren API key securely.
+ * This key is used to authenticate with seren-mcp.
+ */
+export async function storeSerenApiKey(apiKey: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("set_setting", {
+      store: "auth.json",
+      key: "seren_api_key",
+      value: apiKey,
+    });
+  } else {
+    // Browser fallback for testing
+    localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+  }
+}
+
+/**
+ * Retrieve stored Seren API key.
+ * Returns null if no key is stored.
+ */
+export async function getSerenApiKey(): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    const result = await invoke<string | null>("get_setting", {
+      store: "auth.json",
+      key: "seren_api_key",
+    });
+    return result && result.length > 0 ? result : null;
+  }
+  // Browser fallback for testing
+  return localStorage.getItem(API_KEY_STORAGE_KEY);
+}
+
+/**
+ * Clear stored Seren API key (logout).
+ */
+export async function clearSerenApiKey(): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("set_setting", {
+      store: "auth.json",
+      key: "seren_api_key",
+      value: "",
+    });
+  } else {
+    // Browser fallback for testing
+    localStorage.removeItem(API_KEY_STORAGE_KEY);
   }
 }
 

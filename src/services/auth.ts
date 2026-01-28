@@ -1,7 +1,7 @@
 // ABOUTME: Authentication service for login, logout, and token management.
 // ABOUTME: Uses manual fetch for login/refresh (not in OpenAPI spec) and SDK for user info.
 
-import { getCurrentUser } from "@/api";
+import { getCurrentUser, listOrganizations } from "@/api";
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import {
@@ -163,32 +163,61 @@ export async function isLoggedIn(): Promise<boolean> {
  */
 export { getToken };
 
+const DESKTOP_API_KEY_NAME = "Seren Desktop";
+
+interface ApiKeyCreateResponse {
+  data: {
+    api_key: string;
+  };
+}
+
 /**
- * Get or create an API key for MCP authentication.
- * If no API key exists, the endpoint auto-creates one named "MCP Auto-Generated".
+ * Get the user's organization ID by listing their organizations.
+ */
+async function getOrganizationId(): Promise<string> {
+  const { data, error } = await listOrganizations({ throwOnError: false });
+
+  if (error || !data?.data || data.data.length === 0) {
+    throw new Error("Failed to get user organizations");
+  }
+
+  // Use the first organization (users typically have one)
+  return data.data[0].id;
+}
+
+/**
+ * Create a new API key for MCP authentication.
+ * Uses the proper REST endpoint: POST /organizations/{org_id}/api-keys
  * @returns API key (seren_xxx_yyy format)
  * @throws Error if not authenticated or request fails
  */
-export async function getApiKey(): Promise<string> {
+export async function createApiKey(): Promise<string> {
   const token = await getToken();
   if (!token) {
     throw new Error("Not authenticated");
   }
 
-  const response = await appFetch(`${apiBase}/auth/api-key`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
+  const orgId = await getOrganizationId();
+
+  const response = await appFetch(
+    `${apiBase}/organizations/${orgId}/api-keys`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: DESKTOP_API_KEY_NAME }),
     },
-  });
+  );
 
   if (!response.ok) {
     const error: AuthError = await response.json().catch(() => ({
-      message: "Failed to get API key",
+      message: "Failed to create API key",
     }));
     throw new Error(error.message);
   }
 
-  const data = await response.json();
-  return data.api_key;
+  const data: ApiKeyCreateResponse = await response.json();
+  return data.data.api_key;
 }

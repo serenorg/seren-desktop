@@ -4,8 +4,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
-import { callGatewayTool } from "@/services/mcp-gateway";
+import {
+  callGatewayTool,
+  type PaymentProxyInfo,
+} from "@/services/mcp-gateway";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
+import { parsePaymentRequirements, type PaymentRequirements } from "@/lib/x402";
+import { x402Service } from "@/services/x402";
 
 /**
  * File entry returned by list_directory.
@@ -179,7 +184,39 @@ async function executeMcpTool(
 }
 
 /**
+ * Extract PaymentRequirements from proxy payment info.
+ */
+function extractPaymentRequirements(
+  proxyInfo: PaymentProxyInfo,
+): PaymentRequirements | null {
+  // Try parsing from payment_requirements first (the body JSON)
+  if (proxyInfo.payment_requirements) {
+    try {
+      return parsePaymentRequirements(
+        JSON.stringify(proxyInfo.payment_requirements),
+      );
+    } catch {
+      // Fall through to try header
+    }
+  }
+
+  // Try parsing from the PAYMENT-REQUIRED header (base64-encoded)
+  if (proxyInfo.payment_required_header) {
+    try {
+      const decoded = atob(proxyInfo.payment_required_header);
+      return parsePaymentRequirements(decoded);
+    } catch {
+      // Failed to decode/parse header
+    }
+  }
+
+  return null;
+}
+
+/**
  * Execute a gateway tool call via the MCP Gateway.
+ * Handles x402 payment proxy flow: if server returns payment requirements,
+ * signs the payment locally and retries with _x402_payment parameter.
  */
 async function executeGatewayTool(
   toolCallId: string,
@@ -189,6 +226,90 @@ async function executeGatewayTool(
 ): Promise<ToolResult> {
   try {
     const response = await callGatewayTool(publisherSlug, toolName, args);
+
+    // Check if this is a payment proxy response (requires client-side signing)
+    if (response.is_error && response.payment_proxy) {
+      console.log(
+        "[Tool Executor] Payment proxy detected, attempting local signing...",
+      );
+
+      const requirements = extractPaymentRequirements(response.payment_proxy);
+      if (!requirements) {
+        return {
+          tool_call_id: toolCallId,
+          content:
+            "Payment required but could not parse payment requirements from server response",
+          is_error: true,
+        };
+      }
+
+      // Use the x402 service to handle payment (shows UI, signs, etc.)
+      const paymentResult = await x402Service.handlePaymentRequired(
+        `seren-gateway/${publisherSlug}`,
+        toolName,
+        new Error(JSON.stringify(response.payment_proxy)),
+      );
+
+      if (!paymentResult || !paymentResult.success) {
+        return {
+          tool_call_id: toolCallId,
+          content: paymentResult?.error || "Payment was cancelled or failed",
+          is_error: true,
+        };
+      }
+
+      // If crypto payment was signed, retry with the payment header
+      if (paymentResult.paymentHeader) {
+        console.log(
+          "[Tool Executor] Retrying with signed payment...",
+        );
+
+        const retryArgs = {
+          ...args,
+          _x402_payment: paymentResult.paymentHeader,
+        };
+
+        const retryResponse = await callGatewayTool(
+          publisherSlug,
+          toolName,
+          retryArgs,
+        );
+
+        const retryContent =
+          typeof retryResponse.result === "string"
+            ? retryResponse.result
+            : JSON.stringify(retryResponse.result, null, 2);
+
+        return {
+          tool_call_id: toolCallId,
+          content: retryContent || "Tool executed successfully with payment",
+          is_error: retryResponse.is_error,
+        };
+      }
+
+      // SerenBucks payment - server handles it via auth token
+      // Just retry the original call (auth token is always sent)
+      if (paymentResult.method === "serenbucks") {
+        console.log(
+          "[Tool Executor] SerenBucks selected, retrying (server uses auth token)...",
+        );
+
+        // For SerenBucks, we might need to add a flag to indicate user confirmed
+        // For now, just retry - the server should accept prepaid if available
+        const retryResponse = await callGatewayTool(publisherSlug, toolName, args);
+
+        const retryContent =
+          typeof retryResponse.result === "string"
+            ? retryResponse.result
+            : JSON.stringify(retryResponse.result, null, 2);
+
+        return {
+          tool_call_id: toolCallId,
+          content: retryContent || "Tool executed successfully",
+          is_error: retryResponse.is_error,
+        };
+      }
+    }
 
     // Convert result to string content
     const content =

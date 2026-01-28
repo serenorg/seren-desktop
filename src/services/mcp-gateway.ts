@@ -3,11 +3,7 @@
 
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool, McpToolResult } from "@/lib/mcp/types";
-import {
-  clearStoredTokens,
-  getValidAccessToken,
-  isMcpAuthenticated,
-} from "./mcp-oauth";
+import { getSerenApiKey } from "@/lib/tauri-bridge";
 
 const MCP_GATEWAY_URL = "https://mcp.serendb.com/mcp";
 const SEREN_MCP_SERVER_NAME = "seren-gateway";
@@ -45,6 +41,18 @@ export interface McpToolCallResponse {
   is_error: boolean;
   execution_time_ms: number;
   response_bytes: number;
+  /** Payment proxy info - present when tool requires x402 payment and needs client-side signing */
+  payment_proxy?: PaymentProxyInfo;
+}
+
+/**
+ * Payment proxy error from MCP gateway.
+ * Returned when a tool requires x402 payment and the server doesn't have a local wallet.
+ * Client should sign the payment locally and retry with _x402_payment parameter.
+ */
+export interface PaymentProxyInfo {
+  payment_required_header?: string;
+  payment_requirements?: unknown;
 }
 
 /**
@@ -108,17 +116,19 @@ function convertToGatewayTool(tool: McpTool): GatewayTool {
 }
 
 /**
- * Check if MCP OAuth authentication is required.
- * Returns true if user needs to complete OAuth flow.
+ * Check if MCP authentication is available.
+ * With API key auth, this just checks if we have an API key stored.
+ * Returns true if user needs to authenticate (no API key).
  */
 export async function needsMcpAuth(): Promise<boolean> {
-  return !(await isMcpAuthenticated());
+  const apiKey = await getSerenApiKey();
+  return !apiKey;
 }
 
 /**
  * Initialize the gateway by connecting to mcp.serendb.com/mcp.
  * Safe to call multiple times - uses cached data if still valid.
- * Requires MCP OAuth token - call needsMcpAuth() first to check.
+ * Uses the stored Seren API key for authentication.
  */
 export async function initializeGateway(): Promise<void> {
   // Return cached data if still valid
@@ -132,14 +142,14 @@ export async function initializeGateway(): Promise<void> {
   loadingPromise = (async () => {
     console.log("[MCP Gateway] Initializing via MCP protocol...");
 
-    // Get MCP OAuth token (not the SerenDB API key)
-    const mcpToken = await getValidAccessToken();
-    if (!mcpToken) {
+    // Get Seren API key (auto-created after OAuth login)
+    const apiKey = await getSerenApiKey();
+    if (!apiKey) {
       console.error(
-        "[MCP Gateway] No MCP OAuth token - user needs to authenticate",
+        "[MCP Gateway] No Seren API key - user needs to complete login",
       );
       throw new McpGatewayError(
-        "MCP authentication required",
+        "Seren API key required - please log in",
         401,
         MCP_GATEWAY_URL,
       );
@@ -147,11 +157,12 @@ export async function initializeGateway(): Promise<void> {
 
     try {
       // Connect to Seren MCP Gateway via HTTP streaming transport
+      // The API key is passed as the bearer token
       console.log(`[MCP Gateway] Connecting to ${MCP_GATEWAY_URL}...`);
       await mcpClient.connectHttp(
         SEREN_MCP_SERVER_NAME,
         MCP_GATEWAY_URL,
-        mcpToken,
+        apiKey,
       );
       isConnected = true;
       console.log("[MCP Gateway] Connected successfully");
@@ -197,7 +208,7 @@ export function isGatewayInitialized(): boolean {
 
 /**
  * Reset gateway state (for logout).
- * Clears MCP OAuth tokens and disconnects.
+ * Disconnects from MCP server. API key is cleared separately in auth flow.
  */
 export async function resetGateway(): Promise<void> {
   // Disconnect from MCP server if connected
@@ -207,13 +218,44 @@ export async function resetGateway(): Promise<void> {
     });
   }
 
-  // Clear MCP OAuth tokens
-  await clearStoredTokens();
-
   cachedTools = [];
   lastFetchedAt = null;
   loadingPromise = null;
   isConnected = false;
+}
+
+/**
+ * Check if a result contains a payment proxy error.
+ * The MCP server returns this JSON structure when x402 payment is needed
+ * but the server doesn't have a local wallet to sign.
+ */
+function parsePaymentProxyError(
+  content: unknown,
+): PaymentProxyInfo | null {
+  // The error comes as text content with JSON inside
+  if (!Array.isArray(content)) return null;
+
+  for (const item of content) {
+    if (typeof item === "object" && item !== null && "text" in item) {
+      try {
+        const parsed = JSON.parse((item as { text: string }).text);
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          parsed.error === "payment_required" &&
+          parsed.proxy_payment === true
+        ) {
+          return {
+            payment_required_header: parsed.payment_required_header,
+            payment_requirements: parsed.payment_requirements,
+          };
+        }
+      } catch {
+        // Not JSON or doesn't match expected format
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -241,6 +283,20 @@ export async function callGatewayTool(
     );
 
     const executionTime = Date.now() - startTime;
+
+    // Check if this is a payment proxy error (x402 required, needs client signing)
+    if (result.isError) {
+      const paymentProxy = parsePaymentProxyError(result.content);
+      if (paymentProxy) {
+        return {
+          result: result.content,
+          is_error: true,
+          execution_time_ms: executionTime,
+          response_bytes: JSON.stringify(result).length,
+          payment_proxy: paymentProxy,
+        };
+      }
+    }
 
     return {
       result: result.content,

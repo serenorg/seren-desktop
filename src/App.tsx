@@ -19,7 +19,7 @@ import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { ResizableLayout } from "@/components/common/ResizableLayout";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
-import { McpOAuthDialog } from "@/components/mcp/McpOAuthDialog";
+// MCP OAuth dialog removed - now using API key auth flow
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
@@ -31,9 +31,7 @@ import { telemetry } from "@/services/telemetry";
 import {
   authStore,
   checkAuth,
-  dismissMcpOAuth,
   logout,
-  onMcpOAuthComplete,
   setAuthenticated,
 } from "@/stores/auth.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
@@ -230,16 +228,6 @@ function App() {
         <StatusBar />
         <LowBalanceModal />
         <X402PaymentApproval />
-        {/* MCP OAuth dialog for returning users who need to (re)authenticate */}
-        <McpOAuthDialog
-          isOpen={authStore.isAuthenticated && authStore.needsMcpOAuth}
-          onClose={dismissMcpOAuth}
-          onSuccess={onMcpOAuthComplete}
-          onError={(error) => {
-            console.error("[App] MCP OAuth error:", error);
-            dismissMcpOAuth();
-          }}
-        />
       </div>
     </Show>
   );
