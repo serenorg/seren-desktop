@@ -35,6 +35,7 @@ export interface ActiveSession {
   plan: PlanEntry[];
   pendingToolCalls: Map<string, ToolCallEvent>;
   streamingContent: string;
+  streamingThinking: string;
 }
 
 interface AcpState {
@@ -132,6 +133,14 @@ export const acpStore = {
     return session?.streamingContent ?? "";
   },
 
+  /**
+   * Get the current streaming thinking content for the active session.
+   */
+  get streamingThinking(): string {
+    const session = this.activeSession;
+    return session?.streamingThinking ?? "";
+  },
+
   // ============================================================================
   // Initialization
   // ============================================================================
@@ -193,6 +202,7 @@ export const acpStore = {
         plan: [],
         pendingToolCalls: new Map(),
         streamingContent: "",
+        streamingThinking: "",
       };
 
       setState("sessions", info.id, session);
@@ -337,6 +347,7 @@ export const acpStore = {
       userMessage,
     ]);
     setState("sessions", sessionId, "streamingContent", "");
+    setState("sessions", sessionId, "streamingThinking", "");
 
     console.log("[AcpStore] Calling acpService.sendPrompt...");
     try {
@@ -458,20 +469,30 @@ export const acpStore = {
     }
   },
 
-  handleMessageChunk(sessionId: string, text: string, _isThought?: boolean) {
+  handleMessageChunk(sessionId: string, text: string, isThought?: boolean) {
     console.log("[AcpStore] handleMessageChunk:", {
       sessionId,
       text: `${text.slice(0, 50)}...`,
-      isThought: _isThought,
+      isThought,
     });
-    // Append to streaming content
-    // Note: isThought could be used to style thought messages differently
-    setState(
-      "sessions",
-      sessionId,
-      "streamingContent",
-      (current) => current + text,
-    );
+
+    if (isThought) {
+      // Append to streaming thinking content
+      setState(
+        "sessions",
+        sessionId,
+        "streamingThinking",
+        (current) => current + text,
+      );
+    } else {
+      // Append to streaming assistant content
+      setState(
+        "sessions",
+        sessionId,
+        "streamingContent",
+        (current) => current + text,
+      );
+    }
   },
 
   handleToolCall(sessionId: string, toolCall: ToolCallEvent) {
@@ -534,18 +555,37 @@ export const acpStore = {
 
   finalizeStreamingContent(sessionId: string) {
     const session = state.sessions[sessionId];
-    if (!session || !session.streamingContent) return;
+    if (!session) return;
 
-    // Convert accumulated streaming content to a message
-    const message: AgentMessage = {
-      id: crypto.randomUUID(),
-      type: "assistant",
-      content: session.streamingContent,
-      timestamp: Date.now(),
-    };
+    // Finalize thinking content if any
+    if (session.streamingThinking) {
+      const thinkingMessage: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "thought",
+        content: session.streamingThinking,
+        timestamp: Date.now(),
+      };
+      setState("sessions", sessionId, "messages", (msgs) => [
+        ...msgs,
+        thinkingMessage,
+      ]);
+      setState("sessions", sessionId, "streamingThinking", "");
+    }
 
-    setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
-    setState("sessions", sessionId, "streamingContent", "");
+    // Finalize assistant content if any
+    if (session.streamingContent) {
+      const message: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "assistant",
+        content: session.streamingContent,
+        timestamp: Date.now(),
+      };
+      setState("sessions", sessionId, "messages", (msgs) => [
+        ...msgs,
+        message,
+      ]);
+      setState("sessions", sessionId, "streamingContent", "");
+    }
   },
 
   addErrorMessage(sessionId: string, error: string) {

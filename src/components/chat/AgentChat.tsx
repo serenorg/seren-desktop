@@ -9,6 +9,7 @@ import { fileTreeState } from "@/stores/fileTree";
 import { AgentSelector } from "./AgentSelector";
 import { DiffCard } from "./DiffCard";
 import { PlanHeader } from "./PlanHeader";
+import { ThinkingBlock } from "./ThinkingBlock";
 import { ToolCallCard } from "./ToolCallCard";
 
 interface AgentChatProps {
@@ -104,27 +105,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       case "thought":
         return (
-          <article class="px-5 py-3 border-b border-[#21262d] bg-[#0d1117]">
-            <div class="flex items-start gap-2">
-              <svg
-                class="w-4 h-4 mt-0.5 text-[#8b949e] flex-shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                role="img"
-                aria-label="Thinking"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                />
-              </svg>
-              <div class="text-sm text-[#8b949e] italic whitespace-pre-wrap">
-                {message.content}
-              </div>
-            </div>
+          <article class="px-5 py-3 border-b border-[#21262d]">
+            <ThinkingBlock thinking={message.content} />
           </article>
         );
 
@@ -193,8 +175,30 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   Spawn an AI coding agent to help with complex tasks like
                   refactoring, debugging, or implementing features.
                 </p>
-                <div class="flex flex-col items-center gap-3">
+                <div class="flex flex-col items-center gap-3 w-full max-w-md">
                   <AgentSelector />
+                  <Show when={acpStore.selectedAgentType === "claude-code"}>
+                    <div class="w-full px-3 py-2 bg-[#1f6feb]/10 border border-[#1f6feb]/30 rounded-md text-xs text-[#58a6ff]">
+                      <div class="flex items-start gap-2">
+                        <svg
+                          class="w-4 h-4 mt-0.5 flex-shrink-0"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                          role="img"
+                          aria-label="Info"
+                        >
+                          <path
+                            fill-rule="evenodd"
+                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                            clip-rule="evenodd"
+                          />
+                        </svg>
+                        <span>
+                          <strong>Claude Code Required:</strong> Make sure Claude Code CLI is running on your machine.
+                        </span>
+                      </div>
+                    </div>
+                  </Show>
                   <button
                     type="button"
                     class="px-4 py-2 bg-[#238636] text-white rounded-md text-sm font-medium hover:bg-[#2ea043] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -226,12 +230,19 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <For each={acpStore.messages}>{renderMessage}</For>
 
             {/* Loading placeholder while waiting for first chunk */}
-            <Show when={isPrompting() && !acpStore.streamingContent}>
+            <Show when={isPrompting() && !acpStore.streamingContent && !acpStore.streamingThinking}>
               <article class="px-5 py-4 border-b border-[#21262d]">
                 <div class="flex items-center gap-2 text-sm text-[#8b949e]">
                   <span class="inline-block w-2 h-2 rounded-full bg-[#58a6ff] animate-pulse" />
                   <span>Waiting for agent response…</span>
                 </div>
+              </article>
+            </Show>
+
+            {/* Streaming Thinking */}
+            <Show when={acpStore.streamingThinking}>
+              <article class="px-5 py-3 border-b border-[#21262d]">
+                <ThinkingBlock thinking={acpStore.streamingThinking} isStreaming={true} />
               </article>
             </Show>
 
