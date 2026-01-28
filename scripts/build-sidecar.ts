@@ -139,9 +139,6 @@ function main(): void {
   if (profile === "release") cargoArgs.push("--release");
   if (targetTriple !== hostTriple) cargoArgs.push("--target", targetTriple);
 
-  // Set SKIP_TAURI_BUILD to prevent build.rs from running tauri_build::build(),
-  // which validates that the sidecar binary exists — creating a circular dependency.
-  process.env.SKIP_TAURI_BUILD = "1";
   run("cargo", cargoArgs, srcTauriDir);
 
   const cargoTargetDir =
@@ -154,10 +151,10 @@ function main(): void {
     throw new Error(`Built binary not found at: ${srcBin}`);
   }
 
-  const binDir = path.join(srcTauriDir, "binaries");
+  const binDir = path.join(srcTauriDir, "embedded-runtime", "bin");
   mkdirSync(binDir, { recursive: true });
 
-  const destBin = path.join(binDir, `acp_agent-${targetTriple}${ext}`);
+  const destBin = path.join(binDir, `acp_agent${ext}`);
   copyFileSync(srcBin, destBin);
 
   try {

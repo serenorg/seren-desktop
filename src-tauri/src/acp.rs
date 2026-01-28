@@ -44,21 +44,18 @@ impl AgentType {
     /// Get the command to spawn this agent
     ///
     /// For ClaudeCode, we use the bundled acp_agent binary which wraps
-    /// claude-code-acp-rs. This binary is configured as a Tauri sidecar
-    /// via externalBin in tauri.conf.json.
+    /// claude-code-acp-rs. The binary is bundled as a resource in
+    /// embedded-runtime/bin/ (not as a Tauri externalBin sidecar).
     ///
     /// The binary is located at:
-    /// - Development: src-tauri/binaries/acp_agent-{target_triple}
-    /// - Production: bundled with app via Tauri's sidecar mechanism
+    /// - Development: src-tauri/embedded-runtime/bin/acp_agent
+    /// - Production: bundled in the app's resource directory
     fn command(&self) -> Result<std::path::PathBuf, String> {
         match self {
             AgentType::ClaudeCode => {
-                let sidecar_name = self.sidecar_name();
+                let bin_name = self.sidecar_name();
 
-                // Get target triple for sidecar naming convention
-                let target_triple = get_target_triple();
-
-                // Check various locations for the sidecar binary
+                // Check various locations for the binary
                 let exe_path = std::env::current_exe()
                     .map_err(|e| format!("Failed to get current exe path: {}", e))?;
                 let exe_dir = exe_path
@@ -67,29 +64,31 @@ impl AgentType {
 
                 // Platform-specific extension
                 let ext = if cfg!(windows) { ".exe" } else { "" };
+                let bin_filename = format!("{}{}", bin_name, ext);
 
                 // Locations to check (in order of priority):
                 let candidates = [
-                    // 1. Production: Next to the main executable (Tauri bundles sidecars here)
-                    exe_dir.join(format!("{}{}", sidecar_name, ext)),
-                    // 2. Production macOS: In Resources directory
-                    exe_dir.join("../Resources").join(format!("{}{}", sidecar_name, ext)),
-                    // 3. Development: In binaries/ with target triple suffix
+                    // 1. Production macOS: In Resources/embedded-runtime/bin/
+                    exe_dir.join("../Resources/embedded-runtime/bin").join(&bin_filename),
+                    // 2. Production Linux/Windows: In resource dir next to exe
+                    exe_dir.join("embedded-runtime/bin").join(&bin_filename),
+                    // 3. Development: In src-tauri/embedded-runtime/bin/
                     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("binaries")
-                        .join(format!("{}-{}{}", sidecar_name, target_triple, ext)),
+                        .join("embedded-runtime")
+                        .join("bin")
+                        .join(&bin_filename),
                 ];
 
                 for candidate in &candidates {
                     if candidate.exists() {
-                        eprintln!("[ACP] Found sidecar at: {:?}", candidate);
+                        eprintln!("[ACP] Found agent binary at: {:?}", candidate);
                         return Ok(candidate.clone());
                     }
                 }
 
                 Err(format!(
-                    "Sidecar binary '{}' not found. Checked locations:\n{}",
-                    sidecar_name,
+                    "Agent binary '{}' not found. Checked locations:\n{}",
+                    bin_name,
                     candidates
                         .iter()
                         .map(|p| format!("  - {:?}", p))
@@ -108,12 +107,6 @@ impl AgentType {
             AgentType::Codex => vec![],
         }
     }
-}
-
-/// Get the current target triple (e.g., "aarch64-apple-darwin")
-fn get_target_triple() -> &'static str {
-    // This is set at compile time
-    env!("TARGET")
 }
 
 /// Information about an ACP session
@@ -999,10 +992,23 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         bin_dir.join("claude")
     };
 
-    // Already installed?
+    // Already installed locally?
     if claude_bin.exists() {
         eprintln!("[ACP] Claude CLI already installed at: {}", claude_bin.display());
         return Ok(bin_dir.to_string_lossy().to_string());
+    }
+
+    // Check if claude is available on the system PATH
+    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let which_arg = if cfg!(target_os = "windows") { "claude.cmd" } else { "claude" };
+    if let Ok(output) = std::process::Command::new(which_cmd).arg(which_arg).output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                eprintln!("[ACP] Found claude on system PATH: {}", path);
+                return Ok(parent.to_string_lossy().to_string());
+            }
+        }
     }
 
     eprintln!("[ACP] Claude CLI not found, installing via npm...");
