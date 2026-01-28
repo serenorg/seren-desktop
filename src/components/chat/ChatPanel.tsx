@@ -437,6 +437,77 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     setSavedInput("");
   };
 
+  /**
+   * Send a message with a specific prompt (for context menu actions).
+   */
+  const sendMessageWithPrompt = async (prompt: string) => {
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: prompt,
+      timestamp: Date.now(),
+      model: chatStore.selectedModel,
+      status: "complete",
+    };
+
+    chatStore.addMessage(userMessage);
+    await chatStore.persistMessage(userMessage);
+
+    const context = buildContext();
+    const assistantId = crypto.randomUUID();
+
+    const useTools = areToolsAvailable();
+    const session: ActiveStreamingSession = useTools
+      ? {
+          id: assistantId,
+          userMessageId: userMessage.id,
+          prompt,
+          model: chatStore.selectedModel,
+          context,
+          stream: streamMessageWithTools(
+            prompt,
+            chatStore.selectedModel,
+            context,
+            true,
+            chatStore.messages,
+          ),
+          toolsEnabled: true,
+        }
+      : {
+          id: assistantId,
+          userMessageId: userMessage.id,
+          prompt,
+          model: chatStore.selectedModel,
+          context,
+          stream: streamMessage(prompt, chatStore.selectedModel, context),
+          toolsEnabled: false,
+        };
+
+    chatStore.setLoading(true);
+    setStreamingSession(session);
+    chatStore.setError(null);
+    setBalanceError(null);
+  };
+
+  // Watch for pending actions from editor context menu
+  createEffect(() => {
+    const action = editorStore.pendingAction;
+    if (!action || !editorStore.selectedText) return;
+
+    // Clear the pending action immediately to prevent re-triggering
+    editorStore.clearPendingAction();
+
+    // Handle the action
+    if (action === "add-to-chat") {
+      // Just focus the input - context is already set via editorStore.selectedText
+      inputRef?.focus();
+    } else if (action === "explain") {
+      sendMessageWithPrompt("Please explain this code:");
+    } else if (action === "improve") {
+      sendMessageWithPrompt("Please suggest improvements for this code:");
+    }
+  });
+
   const handleStreamingComplete = async (
     session: ActiveStreamingSession,
     content: string,

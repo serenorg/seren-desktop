@@ -12,13 +12,13 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { streamMessage } from "@/lib/providers";
-import { providerStore } from "@/stores/provider.store";
 import {
   computeSimpleDiff,
   type DiffLine,
   extractCodeFromResponse,
 } from "@/lib/editor/diff-utils";
+import { streamMessage } from "@/lib/providers";
+import { providerStore } from "@/stores/provider.store";
 
 export interface InlineEditWidgetProps {
   editor: Monaco.editor.IStandaloneCodeEditor;
