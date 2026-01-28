@@ -50,6 +50,56 @@ export interface Message {
 
 export const CHAT_MAX_RETRIES = 3;
 const INITIAL_DELAY = 1000;
+const TRANSIENT_STATUS_CODES = ["408", "429", "500", "502", "503", "504"];
+
+/**
+ * Check if an error is transient and should be retried.
+ */
+function isTransientError(message: string): boolean {
+  if (
+    message.includes("401") ||
+    message.includes("403") ||
+    message.includes("API key")
+  ) {
+    return false;
+  }
+  return TRANSIENT_STATUS_CODES.some((code) => message.includes(code));
+}
+
+/**
+ * Call sendWithTools with retry on transient failures (408, 429, 5xx).
+ */
+async function sendWithToolsRetry(
+  messages: ChatMessageWithTools[],
+  model: string,
+  tools: ReturnType<typeof getAllTools> | undefined,
+  toolChoice: "auto" | undefined,
+): Promise<ChatResponse> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= CHAT_MAX_RETRIES; attempt++) {
+    try {
+      return await sendWithTools(messages, model, tools, toolChoice);
+    } catch (error) {
+      lastError = error as Error;
+      const msg = lastError.message || "";
+
+      if (!isTransientError(msg)) {
+        throw lastError;
+      }
+
+      if (attempt < CHAT_MAX_RETRIES) {
+        const delay = INITIAL_DELAY * 2 ** (attempt - 1);
+        console.warn(
+          `[sendWithToolsRetry] Attempt ${attempt} failed (${msg}), retrying in ${delay}ms...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Tool-use request failed after retries");
+}
 
 /**
  * Send a non-streaming message using the active provider.
@@ -98,12 +148,7 @@ export async function sendMessageWithRetry(
       lastError = error as Error;
 
       const message = lastError.message || "";
-      // Don't retry auth errors
-      if (
-        message.includes("401") ||
-        message.includes("403") ||
-        message.includes("API key")
-      ) {
+      if (!isTransientError(message)) {
         throw lastError;
       }
 
@@ -243,8 +288,8 @@ export async function* streamMessageWithTools(
     iteration++
   ) {
     console.log("[streamMessageWithTools] Iteration:", iteration);
-    // Send request with tools
-    const response: ChatResponse = await sendWithTools(
+    // Send request with tools (retries on transient errors like 408 timeout)
+    const response: ChatResponse = await sendWithToolsRetry(
       messages,
       model,
       tools,
@@ -335,7 +380,7 @@ export async function* continueToolIteration(
   for (let i = 0; i < additionalIterations; i++) {
     console.log("[continueToolIteration] Iteration:", i);
 
-    const response: ChatResponse = await sendWithTools(
+    const response: ChatResponse = await sendWithToolsRetry(
       messages,
       model,
       tools,
