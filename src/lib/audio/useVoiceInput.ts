@@ -24,13 +24,14 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
   let activeMimeType = "";
 
   async function startRecording() {
+    let stream: MediaStream | null = null;
     try {
       setError(null);
       activeMimeType = getSupportedMimeType();
       const options: MediaRecorderOptions = activeMimeType
         ? { mimeType: activeMimeType }
         : {};
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recorder = new MediaRecorder(stream, options);
       chunks = [];
 
@@ -65,6 +66,7 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
       recorder.start();
       setVoiceState("recording");
     } catch (err) {
+      stream?.getTracks().forEach((t) => t.stop());
       const message =
         err instanceof DOMException && err.name === "NotAllowedError"
           ? "Microphone access denied. Please allow microphone access in your browser settings."
