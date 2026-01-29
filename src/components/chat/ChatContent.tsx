@@ -13,6 +13,7 @@ import {
   Show,
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
+import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { escapeHtml } from "@/lib/escape-html";
@@ -1022,15 +1023,23 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                             : "Ctrl+Enter"}
                       </span>
                     </div>
-                    <button
-                      type="submit"
-                      class="bg-[#238636] text-white border-none px-3 py-1 rounded text-xs font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58]"
-                      disabled={
-                        !input().trim() && attachedImages().length === 0
-                      }
-                    >
-                      {chatStore.isLoading ? "Queue" : "Send"}
-                    </button>
+                    <div class="flex items-center gap-2">
+                      <VoiceInputButton
+                        onTranscript={(text) => {
+                          setInput((prev) => (prev ? `${prev} ${text}` : text));
+                          inputRef?.focus();
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        class="bg-[#238636] text-white border-none px-3 py-1 rounded text-xs font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58]"
+                        disabled={
+                          !input().trim() && attachedImages().length === 0
+                        }
+                      >
+                        {chatStore.isLoading ? "Queue" : "Send"}
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>
