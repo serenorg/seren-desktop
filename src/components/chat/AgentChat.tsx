@@ -7,6 +7,7 @@ import type { DiffEvent } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { AgentSelector } from "./AgentSelector";
+import { AgentTabBar } from "./AgentTabBar";
 import { DiffCard } from "./DiffCard";
 import { PlanHeader } from "./PlanHeader";
 import { ThinkingBlock } from "./ThinkingBlock";
@@ -140,6 +141,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
+      {/* Agent Tab Bar */}
+      <Show when={hasSession()}>
+        <AgentTabBar onNewSession={startSession} />
+      </Show>
+
       {/* Plan Header */}
       <PlanHeader />
 
@@ -194,7 +200,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                           />
                         </svg>
                         <span>
-                          <strong>Claude Code Required:</strong> Make sure Claude Code CLI is installed on your computer.
+                          <strong>Claude Code Required:</strong> Make sure
+                          Claude Code CLI is installed on your computer.
                         </span>
                       </div>
                     </div>
@@ -232,7 +239,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <For each={acpStore.messages}>{renderMessage}</For>
 
             {/* Loading placeholder while waiting for first chunk */}
-            <Show when={isPrompting() && !acpStore.streamingContent && !acpStore.streamingThinking}>
+            <Show
+              when={
+                isPrompting() &&
+                !acpStore.streamingContent &&
+                !acpStore.streamingThinking
+              }
+            >
               <article class="px-5 py-4 border-b border-[#21262d]">
                 <div class="flex items-center gap-2 text-sm text-[#8b949e]">
                   <span class="inline-block w-2 h-2 rounded-full bg-[#58a6ff] animate-pulse" />
@@ -244,7 +257,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             {/* Streaming Thinking */}
             <Show when={acpStore.streamingThinking}>
               <article class="px-5 py-3 border-b border-[#21262d]">
-                <ThinkingBlock thinking={acpStore.streamingThinking} isStreaming={true} />
+                <ThinkingBlock
+                  thinking={acpStore.streamingThinking}
+                  isStreaming={true}
+                />
               </article>
             </Show>
 
