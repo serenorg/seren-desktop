@@ -3,12 +3,15 @@
 
 import type { Component } from "solid-js";
 import { createEffect, createSignal, For, on, Show } from "solid-js";
+import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
+import type { ImageAttachment } from "@/lib/providers/types";
 import type { DiffEvent } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { AgentSelector } from "./AgentSelector";
 import { AgentTabBar } from "./AgentTabBar";
 import { DiffCard } from "./DiffCard";
+import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
@@ -21,6 +24,9 @@ interface AgentChatProps {
 export const AgentChat: Component<AgentChatProps> = (props) => {
   const [input, setInput] = createSignal("");
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
+  const [attachedImages, setAttachedImages] = createSignal<ImageAttachment[]>(
+    [],
+  );
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
 
@@ -82,9 +88,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
   };
 
+  const handleAttachImages = async () => {
+    const images = await pickAndReadImages();
+    if (images.length > 0) {
+      setAttachedImages((prev) => [...prev, ...images]);
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const sendMessage = async () => {
     const trimmed = input().trim();
-    if (!trimmed || !hasSession()) return;
+    const images = attachedImages();
+    if ((!trimmed && images.length === 0) || !hasSession()) return;
 
     // If agent is prompting, queue the message instead
     if (isPrompting()) {
@@ -94,8 +112,17 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
 
+    // Build context with images as data URLs
+    const context: Array<{ text?: string }> | undefined =
+      images.length > 0
+        ? images.map((img) => ({
+            text: `[Attached image: ${img.name}]\n${toDataUrl(img)}`,
+          }))
+        : undefined;
+
     setInput("");
-    await acpStore.sendPrompt(trimmed);
+    setAttachedImages([]);
+    await acpStore.sendPrompt(trimmed, context);
   };
 
   // Process queued messages when agent becomes ready
@@ -333,10 +360,24 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       {/* Agent CWD Display */}
       <Show when={hasSession() && acpStore.cwd}>
         <div class="shrink-0 px-4 py-1.5 border-t border-[#21262d] bg-[#0d1117] flex items-center gap-2 text-xs text-[#8b949e]">
-          <svg class="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" role="img" aria-label="Folder">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          <svg
+            class="w-3 h-3 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            role="img"
+            aria-label="Folder"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+            />
           </svg>
-          <span class="truncate" title={acpStore.cwd!}>{acpStore.cwd}</span>
+          <span class="truncate" title={acpStore.cwd!}>
+            {acpStore.cwd}
+          </span>
         </div>
       </Show>
 
@@ -350,6 +391,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               sendMessage();
             }}
           >
+            <ImageAttachmentBar
+              images={attachedImages()}
+              onAttach={handleAttachImages}
+              onRemove={handleRemoveImage}
+            />
             <textarea
               ref={inputRef}
               value={input()}
@@ -396,7 +442,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <button
                   type="submit"
                   class="px-4 py-1.5 bg-[#238636] text-white rounded-md text-[13px] font-medium hover:bg-[#2ea043] transition-colors disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
-                  disabled={!hasSession() || !input().trim()}
+                  disabled={
+                    !hasSession() ||
+                    (!input().trim() && attachedImages().length === 0)
+                  }
                 >
                   {isPrompting() ? "Queue" : "Send"}
                 </button>
