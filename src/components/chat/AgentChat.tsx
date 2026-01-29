@@ -18,6 +18,7 @@ interface AgentChatProps {
 
 export const AgentChat: Component<AgentChatProps> = (props) => {
   const [input, setInput] = createSignal("");
+  const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
 
@@ -66,11 +67,31 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const sendMessage = async () => {
     const trimmed = input().trim();
-    if (!trimmed || !hasSession() || !isReady()) return;
+    if (!trimmed || !hasSession()) return;
+
+    // If agent is prompting, queue the message instead
+    if (isPrompting()) {
+      setMessageQueue((queue) => [...queue, trimmed]);
+      setInput("");
+      console.log("[AgentChat] Message queued:", trimmed);
+      return;
+    }
 
     setInput("");
     await acpStore.sendPrompt(trimmed);
   };
+
+  // Process queued messages when agent becomes ready
+  createEffect(() => {
+    if (isReady() && messageQueue().length > 0) {
+      const [nextMessage, ...remaining] = messageQueue();
+      setMessageQueue(remaining);
+      console.log("[AgentChat] Processing queued message:", nextMessage);
+      setTimeout(() => {
+        acpStore.sendPrompt(nextMessage);
+      }, 100);
+    }
+  });
 
   const handleCancel = async () => {
     await acpStore.cancelPrompt();
@@ -194,7 +215,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                           />
                         </svg>
                         <span>
-                          <strong>Claude Code Required:</strong> Make sure Claude Code CLI is installed on your computer.
+                          <strong>Claude Code Required:</strong> Make sure
+                          Claude Code CLI is installed on your computer.
                         </span>
                       </div>
                     </div>
@@ -232,7 +254,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <For each={acpStore.messages}>{renderMessage}</For>
 
             {/* Loading placeholder while waiting for first chunk */}
-            <Show when={isPrompting() && !acpStore.streamingContent && !acpStore.streamingThinking}>
+            <Show
+              when={
+                isPrompting() &&
+                !acpStore.streamingContent &&
+                !acpStore.streamingThinking
+              }
+            >
               <article class="px-5 py-4 border-b border-[#21262d]">
                 <div class="flex items-center gap-2 text-sm text-[#8b949e]">
                   <span class="inline-block w-2 h-2 rounded-full bg-[#58a6ff] animate-pulse" />
@@ -244,7 +272,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             {/* Streaming Thinking */}
             <Show when={acpStore.streamingThinking}>
               <article class="px-5 py-3 border-b border-[#21262d]">
-                <ThinkingBlock thinking={acpStore.streamingThinking} isStreaming={true} />
+                <ThinkingBlock
+                  thinking={acpStore.streamingThinking}
+                  isStreaming={true}
+                />
               </article>
             </Show>
 
@@ -288,11 +319,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <textarea
               ref={inputRef}
               value={input()}
-              placeholder="Tell the agent what to do..."
+              placeholder={
+                isPrompting()
+                  ? "Type to queue message..."
+                  : "Tell the agent what to do..."
+              }
               class="w-full min-h-[80px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
               onInput={(e) => setInput(e.currentTarget.value)}
               onKeyDown={handleKeyDown}
-              disabled={!isReady()}
+              disabled={!hasSession()}
             />
             <div class="flex justify-between items-center">
               <div class="flex items-center gap-3">
@@ -300,6 +335,19 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <Show when={isPrompting()}>
                   <span class="text-xs text-[#8b949e]">
                     Agent is working...
+                  </span>
+                </Show>
+                <Show when={messageQueue().length > 0}>
+                  <span class="flex items-center gap-2 px-2 py-1 bg-[#21262d] border border-[#30363d] rounded text-xs text-[#8b949e]">
+                    {messageQueue().length} message
+                    {messageQueue().length > 1 ? "s" : ""} queued
+                    <button
+                      type="button"
+                      class="text-[#f85149] hover:underline"
+                      onClick={() => setMessageQueue([])}
+                    >
+                      Clear
+                    </button>
                   </span>
                 </Show>
               </div>
@@ -316,9 +364,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <button
                   type="submit"
                   class="px-4 py-1.5 bg-[#238636] text-white rounded-md text-[13px] font-medium hover:bg-[#2ea043] transition-colors disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
-                  disabled={!isReady() || !input().trim()}
+                  disabled={!hasSession() || !input().trim()}
                 >
-                  Send
+                  {isPrompting() ? "Queue" : "Send"}
                 </button>
               </div>
             </div>
