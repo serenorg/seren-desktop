@@ -20,6 +20,7 @@ import { ResizableLayout } from "@/components/common/ResizableLayout";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
 // MCP OAuth dialog removed - now using API key auth flow
+import { AboutDialog } from "@/components/common/AboutDialog";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -232,6 +233,7 @@ function App() {
         <LowBalanceModal />
         <DailyClaimPopup />
         <X402PaymentApproval />
+        <AboutDialog />
       </div>
     </Show>
   );
