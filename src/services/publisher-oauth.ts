@@ -8,22 +8,60 @@ import {
   type UserOAuthConnectionResponse,
 } from "@/api";
 import { apiBase } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
+import { getToken } from "@/lib/tauri-bridge";
 
 /**
  * Start OAuth flow for a publisher provider.
- * Opens authorization URL in user's browser, which will redirect back to seren://oauth/callback.
+ * Makes an authenticated request to get the provider's redirect URL,
+ * then opens it in the user's browser.
  */
 export async function connectPublisher(providerSlug: string): Promise<void> {
   console.log(`[PublisherOAuth] Starting OAuth flow for ${providerSlug}`);
 
-  // The Gateway will redirect to this URL after OAuth completes
   const redirectUri = "seren://oauth/callback";
-
-  // Initiate OAuth flow - Gateway will redirect to provider's auth page
   const authUrl = `${apiBase}/api/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
 
-  console.log(`[PublisherOAuth] Opening authorization URL: ${authUrl}`);
-  await openUrl(authUrl);
+  const token = await getToken();
+  if (!token) {
+    throw new Error("Not authenticated. Please log in first.");
+  }
+
+  // Fetch with redirect: "manual" to capture the Location header
+  // instead of following the redirect (which would fail in fetch context)
+  const response = await appFetch(authUrl, {
+    redirect: "manual",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  // Gateway returns 302 with Location pointing to the provider's OAuth page
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get("Location");
+    if (!location) {
+      throw new Error("Gateway returned redirect without Location header");
+    }
+    console.log(`[PublisherOAuth] Opening authorization URL: ${location}`);
+    await openUrl(location);
+    return;
+  }
+
+  // If Gateway returns JSON with authorize_url (alternative response format)
+  if (response.ok) {
+    const data = await response.json();
+    const url = data?.authorize_url || data?.url;
+    if (url) {
+      console.log(`[PublisherOAuth] Opening authorization URL: ${url}`);
+      await openUrl(url);
+      return;
+    }
+  }
+
+  const body = await response.text();
+  console.error(
+    `[PublisherOAuth] Unexpected response: ${response.status}`,
+    body,
+  );
+  throw new Error(`Failed to start OAuth flow (${response.status})`);
 }
 
 /**
