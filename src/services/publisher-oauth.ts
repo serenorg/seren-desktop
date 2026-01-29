@@ -14,6 +14,8 @@ import { getToken } from "@/lib/tauri-bridge";
  * Start OAuth flow for a publisher provider.
  * Fetches the authorization URL from the Gateway, then opens it in the browser.
  * Uses Tauri invoke to make the request from Rust where redirect: manual works.
+ *
+ * In dev mode, uses localhost redirect for easier testing without deep link conflicts.
  */
 export async function connectPublisher(providerSlug: string): Promise<void> {
   console.log(`[PublisherOAuth] Starting OAuth flow for ${providerSlug}`);
@@ -23,7 +25,12 @@ export async function connectPublisher(providerSlug: string): Promise<void> {
     throw new Error("Not authenticated. Please log in first.");
   }
 
+  // TEMPORARY: Using deep link for testing until backend supports localhost
+  // TODO: Revert to localhost in dev after backend whitelists http://localhost:8787
   const redirectUri = "seren://oauth/callback";
+
+  console.log(`[PublisherOAuth] Using redirect URI: ${redirectUri}`);
+
   const authUrl = `${apiBase}/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
 
   // Fetch the authorize endpoint to get the redirect Location header.
