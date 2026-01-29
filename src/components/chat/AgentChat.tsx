@@ -12,6 +12,7 @@ import {
   Show,
 } from "solid-js";
 import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
+import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
@@ -542,7 +543,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   </span>
                 </Show>
               </div>
-              <div class="flex gap-2">
+              <div class="flex items-center gap-2">
+                <VoiceInputButton
+                  onTranscript={(text) => {
+                    setInput((prev) => (prev ? `${prev} ${text}` : text));
+                    inputRef?.focus();
+                  }}
+                />
                 <Show when={isPrompting()}>
                   <button
                     type="button"

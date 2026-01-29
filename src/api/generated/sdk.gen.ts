@@ -253,7 +253,7 @@ export const executeApiStream = <ThrowOnError extends boolean = false>(options: 
 });
 
 /**
- * GET /api/agent/supported
+ * GET /agent/supported
  *
  * Returns supported x402 payment kinds for facilitator discovery.
  */

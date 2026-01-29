@@ -1,0 +1,97 @@
+/* ABOUTME: Styles for the VoiceInputButton component. */
+/* ABOUTME: Includes pulse animation for recording state and state-based colors. */
+
+.voice-input-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #848d97;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.voice-input-btn:hover {
+  background: #21262d;
+  color: #e6edf3;
+}
+
+.voice-input-btn[data-state="recording"] {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.voice-input-btn[data-state="transcribing"] {
+  color: #848d97;
+  cursor: wait;
+}
+
+.voice-input-btn[data-state="error"] {
+  color: #f85149;
+}
+
+.voice-input-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.voice-recording-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f85149;
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
+}
+
+.voice-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #30363d;
+  border-top-color: #848d97;
+  border-radius: 50%;
+  animation: voice-spin 0.6s linear infinite;
+}
+
+@keyframes voice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.voice-error-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #f85149;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
+}
