@@ -173,10 +173,12 @@ function debouncedTrigger(): void {
 /**
  * Initialize auto top-up monitoring.
  * Call this in your app's root component.
+ * Note: This creates an effect in the caller's reactive context.
  * @returns Cleanup function
  */
 export function initAutoTopUp(): () => void {
   // Create reactive effect that monitors balance
+  // Note: Effect is created in caller's context (App.tsx)
   createEffect(() => {
     const balance = walletState.balance;
     const isEnabled = settingsStore.get("autoTopUpEnabled");
@@ -188,13 +190,12 @@ export function initAutoTopUp(): () => void {
     }
   });
 
-  // Return cleanup function
+  // Return cleanup function for debounce timer
   return () => {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
-    // Note: SolidJS effects auto-cleanup, but we clear our timer
   };
 }
 

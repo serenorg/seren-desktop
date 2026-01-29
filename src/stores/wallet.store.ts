@@ -29,6 +29,8 @@ interface WalletState {
   lastDismissedBalanceAtomic: number | null;
   /** Track if auto-refresh is active (HMR-resistant) */
   autoRefreshActive: boolean;
+  /** Store timer ID in state for HMR safety */
+  refreshTimerId: ReturnType<typeof setInterval> | null;
   /** Daily claim eligibility data */
   dailyClaim: DailyClaimEligibility | null;
   /** Whether user dismissed the daily claim popup this session */
@@ -49,6 +51,7 @@ const initialState: WalletState = {
   error: null,
   lastDismissedBalanceAtomic: null,
   autoRefreshActive: false,
+  refreshTimerId: null,
   dailyClaim: null,
   dailyClaimDismissed: false,
   dailyClaimLoading: false,
@@ -58,9 +61,6 @@ const [walletState, setWalletState] = createStore<WalletState>(initialState);
 
 // Refresh interval in milliseconds (60 seconds)
 const REFRESH_INTERVAL = 60_000;
-
-// Timer reference for cleanup
-let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 // Lock to prevent duplicate top-ups
 let topUpInProgress = false;
@@ -75,6 +75,8 @@ async function refreshBalance(): Promise<void> {
     return;
   }
 
+  // Add stack trace to identify caller
+  console.log("[Wallet Store] refreshBalance called from:", new Error().stack?.split('\n')[2]?.trim());
   console.log("[Wallet Store] Setting isLoading = true");
   setWalletState("isLoading", true);
   setWalletState("error", null);
@@ -119,33 +121,43 @@ async function refreshBalance(): Promise<void> {
 function startAutoRefresh(): void {
   // Check store flag instead of module-level variable (HMR-resistant)
   if (walletState.autoRefreshActive) {
-    console.log("[Wallet Store] Auto-refresh already active");
+    console.log("[Wallet Store] Auto-refresh already active, skipping");
     return;
   }
 
-  console.log("[Wallet Store] Starting auto-refresh");
+  console.log("[Wallet Store] Starting auto-refresh, called from:", new Error().stack?.split('\n')[2]?.trim());
   setWalletState("autoRefreshActive", true);
 
   // Fetch immediately (but only if not already loading)
   if (!walletState.isLoading) {
+    console.log("[Wallet Store] Triggering initial balance fetch");
     refreshBalance();
   }
 
   // Then refresh periodically
-  refreshTimer = setInterval(() => {
+  console.log(`[Wallet Store] Setting up ${REFRESH_INTERVAL}ms interval`);
+  const timerId = setInterval(() => {
+    console.log("[Wallet Store] Interval timer fired");
     refreshBalance();
   }, REFRESH_INTERVAL);
+
+  // Store timer ID in state for HMR safety
+  setWalletState("refreshTimerId", timerId);
 }
 
 /**
  * Stop automatic balance refresh.
  */
 function stopAutoRefresh(): void {
-  if (refreshTimer) {
-    clearInterval(refreshTimer);
-    refreshTimer = null;
+  const timerId = walletState.refreshTimerId;
+  if (timerId) {
+    console.log("[Wallet Store] Stopping auto-refresh, clearing interval");
+    clearInterval(timerId);
   }
-  setWalletState("autoRefreshActive", false);
+  setWalletState({
+    autoRefreshActive: false,
+    refreshTimerId: null,
+  });
 }
 
 /**

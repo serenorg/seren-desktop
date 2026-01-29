@@ -25,6 +25,7 @@ mod mcp;
 mod sandbox;
 mod terminal;
 mod oauth;
+mod oauth_callback_server;
 mod sync;
 mod wallet;
 
@@ -474,7 +475,11 @@ pub fn run() {
                 );
             }
 
-            // Register deep link handler for OAuth callbacks
+            // Start OAuth callback server in dev mode
+            // Provides localhost:8787 redirect for OAuth without deep links
+            oauth_callback_server::start_oauth_callback_server(app.handle().clone());
+
+            // Register deep link handler for OAuth callbacks (production)
             // Note: Disabled on Windows due to WiX bundler ICE03 registry errors
             #[cfg(all(desktop, not(target_os = "windows")))]
             {

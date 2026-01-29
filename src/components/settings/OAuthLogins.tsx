@@ -144,9 +144,9 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
       // Flow continues via OAuth callback listener
     } catch (err) {
       if (connectTimeout) clearTimeout(connectTimeout);
-      setError(
-        err instanceof Error ? err.message : "Failed to start OAuth flow",
-      );
+      console.error(`[OAuthLogins] OAuth connect error for ${provider.slug}:`, err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(`Failed to connect: ${errorMessage}`);
       setConnectingProvider(null);
     }
   };
