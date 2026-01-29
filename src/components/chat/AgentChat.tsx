@@ -7,6 +7,7 @@ import type { DiffEvent } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { AgentSelector } from "./AgentSelector";
+import { AgentTabBar } from "./AgentTabBar";
 import { DiffCard } from "./DiffCard";
 import { PlanHeader } from "./PlanHeader";
 import { ThinkingBlock } from "./ThinkingBlock";
@@ -161,6 +162,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
+      {/* Agent Tab Bar */}
+      <Show when={hasSession()}>
+        <AgentTabBar onNewSession={startSession} />
+      </Show>
+
       {/* Plan Header */}
       <PlanHeader />
 
