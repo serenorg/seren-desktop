@@ -8,6 +8,7 @@ import "./AboutDialog.css";
 
 interface BuildInfo {
   app_version: string;
+  release_tag: string;
   commit: string;
   build_date: string;
   build_type: string;
@@ -53,6 +54,7 @@ export function AboutDialog() {
 
     const text = [
       `Version: ${data.app_version}`,
+      `Release: ${data.release_tag}`,
       `Commit: ${data.commit}`,
       `Date: ${data.build_date}`,
       `Build Type: ${data.build_type}`,
@@ -79,6 +81,7 @@ export function AboutDialog() {
             {(data) => (
               <div class="about-content">
                 <Row label="Version" value={data().app_version} />
+                <Row label="Release" value={data().release_tag} />
                 <Row label="Commit" value={data().commit} />
                 <Row label="Date" value={data().build_date} />
                 <Row label="Build Type" value={data().build_type} />

@@ -27,6 +27,21 @@ fn main() {
         println!("cargo:rustc-env=BUILT_DATE=unknown");
     }
 
+    // Embed release tag at compile time (e.g. v0.1.0-alpha.24)
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["describe", "--tags", "--abbrev=0"])
+        .output()
+    {
+        let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !tag.is_empty() {
+            println!("cargo:rustc-env=BUILT_RELEASE_TAG={tag}");
+        } else {
+            println!("cargo:rustc-env=BUILT_RELEASE_TAG=dev");
+        }
+    } else {
+        println!("cargo:rustc-env=BUILT_RELEASE_TAG=dev");
+    }
+
     // Embed Rust version at compile time
     if let Ok(output) = std::process::Command::new("rustc")
         .args(["--version"])
