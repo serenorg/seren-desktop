@@ -36,6 +36,7 @@ export interface ActiveSession {
   pendingToolCalls: Map<string, ToolCallEvent>;
   streamingContent: string;
   streamingThinking: string;
+  cwd: string;
 }
 
 interface AcpState {
@@ -148,6 +149,14 @@ export const acpStore = {
     return session?.streamingThinking ?? "";
   },
 
+  /**
+   * Get the current working directory for the active session.
+   */
+  get cwd(): string | null {
+    const session = this.activeSession;
+    return session?.cwd ?? null;
+  },
+
   // ============================================================================
   // Initialization
   // ============================================================================
@@ -238,6 +247,7 @@ export const acpStore = {
         pendingToolCalls: new Map(),
         streamingContent: "",
         streamingThinking: "",
+        cwd,
       };
 
       setState("sessions", info.id, session);
@@ -440,6 +450,28 @@ export const acpStore = {
    */
   setSelectedAgentType(agentType: AgentType) {
     setState("selectedAgentType", agentType);
+  },
+
+  /**
+   * Update the agent's working directory by sending a cd command.
+   * Called when the user opens a different folder while a session is active.
+   */
+  async updateCwd(newCwd: string) {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+
+    const session = state.sessions[sessionId];
+    if (!session || session.cwd === newCwd) return;
+
+    // Update stored cwd
+    setState("sessions", sessionId, "cwd", newCwd);
+
+    // Send cd instruction to the agent if session is ready
+    if (session.info.status === "ready") {
+      await this.sendPrompt(
+        `Please change your working directory to: ${newCwd}`,
+      );
+    }
   },
 
   /**
