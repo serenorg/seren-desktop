@@ -232,7 +232,7 @@ function App() {
                   <DatabasePanel />
                 </Match>
                 <Match when={overlayPanel() === "settings"}>
-                  <SettingsPanel />
+                  <SettingsPanel onSignInClick={handleSignInClick} />
                 </Match>
                 <Match when={overlayPanel() === "account"}>
                   <SignIn onSuccess={handleLoginSuccess} />

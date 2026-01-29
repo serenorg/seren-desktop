@@ -30,7 +30,11 @@ type SettingsSection =
   | "general"
   | "mcp";
 
-export const SettingsPanel: Component = () => {
+interface SettingsPanelProps {
+  onSignInClick?: () => void;
+}
+
+export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const [activeSection, setActiveSection] =
     createSignal<SettingsSection>("chat");
   const [showResetConfirm, setShowResetConfirm] = createSignal(false);
@@ -345,7 +349,7 @@ export const SettingsPanel: Component = () => {
         </Show>
 
         <Show when={activeSection() === "logins"}>
-          <OAuthLogins />
+          <OAuthLogins onSignInClick={props.onSignInClick} />
         </Show>
 
         <Show when={activeSection() === "editor"}>

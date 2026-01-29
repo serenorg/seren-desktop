@@ -23,7 +23,11 @@ import {
 } from "@/services/publisher-oauth";
 import { authStore } from "@/stores/auth.store";
 
-export const OAuthLogins: Component = () => {
+interface OAuthLoginsProps {
+  onSignInClick?: () => void;
+}
+
+export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
   const [connectingProvider, setConnectingProvider] = createSignal<
     string | null
   >(null);
@@ -163,11 +167,14 @@ export const OAuthLogins: Component = () => {
       <Show when={!authStore.isAuthenticated}>
         <div class="text-center py-10 px-6 text-muted-foreground">
           <span class="text-[2.5rem] block mb-3 opacity-60">🔐</span>
-          <p class="m-0">Sign in to connect accounts</p>
-          <p class="m-0 mt-2 text-[0.85rem] text-muted-foreground">
-            Sign in to Seren to see available OAuth providers and connect your
-            accounts.
-          </p>
+          <p class="m-0 mb-3">Sign in to connect accounts</p>
+          <button
+            type="button"
+            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border-none rounded cursor-pointer transition-colors duration-100 hover:bg-blue-500"
+            onClick={() => props.onSignInClick?.()}
+          >
+            Sign In
+          </button>
         </div>
       </Show>
 
