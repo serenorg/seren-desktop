@@ -8,7 +8,6 @@ import {
   clearDefaultOrganizationId,
   clearRefreshToken,
   clearToken,
-  getDefaultOrganizationId,
   getRefreshToken,
   getToken,
   storeDefaultOrganizationId,
@@ -178,7 +177,8 @@ interface ApiKeyCreateResponse {
 
 /**
  * Create a new API key for MCP authentication.
- * Uses the proper REST endpoint: POST /organizations/{org_id}/api-keys
+ * Uses the convenience route: POST /organizations/default/api-keys
+ * which resolves "default" to the user's first organization.
  * @returns API key (seren_xxx_yyy format)
  * @throws Error if not authenticated or request fails
  */
@@ -188,13 +188,8 @@ export async function createApiKey(): Promise<string> {
     throw new Error("Not authenticated");
   }
 
-  const orgId = await getDefaultOrganizationId();
-  if (!orgId) {
-    throw new Error("No default organization ID stored. Please log in again.");
-  }
-
   const response = await appFetch(
-    `${apiBase}/organizations/${orgId}/api-keys`,
+    `${apiBase}/organizations/default/api-keys`,
     {
       method: "POST",
       headers: {
