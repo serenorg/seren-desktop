@@ -58,10 +58,7 @@ interface AcpState {
   /** CLI install progress message */
   installStatus: string | null;
   /** Pending permission requests awaiting user response */
-  pendingPermissions: Record<
-    string,
-    import("@/services/acp").PermissionRequestEvent
-  >;
+  pendingPermissions: import("@/services/acp").PermissionRequestEvent[];
 }
 
 const [state, setState] = createStore<AcpState>({
@@ -73,7 +70,7 @@ const [state, setState] = createStore<AcpState>({
   isLoading: false,
   error: null,
   installStatus: null,
-  pendingPermissions: {},
+  pendingPermissions: [],
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
@@ -450,7 +447,9 @@ export const acpStore = {
   },
 
   async respondToPermission(requestId: string, optionId: string) {
-    const permission = state.pendingPermissions[requestId];
+    const permission = state.pendingPermissions.find(
+      (p) => p.requestId === requestId,
+    );
     if (!permission) return;
 
     try {
@@ -463,11 +462,31 @@ export const acpStore = {
       console.error("Failed to respond to permission:", error);
     }
 
-    setState("pendingPermissions", requestId, undefined!);
+    setState(
+      "pendingPermissions",
+      state.pendingPermissions.filter((p) => p.requestId !== requestId),
+    );
   },
 
-  dismissPermission(requestId: string) {
-    setState("pendingPermissions", requestId, undefined!);
+  async dismissPermission(requestId: string) {
+    const permission = state.pendingPermissions.find(
+      (p) => p.requestId === requestId,
+    );
+    if (permission) {
+      try {
+        await acpService.respondToPermission(
+          permission.sessionId,
+          requestId,
+          "deny",
+        );
+      } catch (error) {
+        console.error("Failed to send deny response:", error);
+      }
+    }
+    setState(
+      "pendingPermissions",
+      state.pendingPermissions.filter((p) => p.requestId !== requestId),
+    );
   },
 
   // ============================================================================
@@ -567,7 +586,10 @@ export const acpStore = {
       case "permissionRequest": {
         const permEvent =
           event.data as import("@/services/acp").PermissionRequestEvent;
-        setState("pendingPermissions", permEvent.requestId, permEvent);
+        setState("pendingPermissions", [
+          ...state.pendingPermissions,
+          permEvent,
+        ]);
         break;
       }
     }

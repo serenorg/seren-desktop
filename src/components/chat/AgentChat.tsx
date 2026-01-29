@@ -392,7 +392,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <For each={acpStore.messages}>{renderMessage}</For>
 
             {/* Permission request dialogs */}
-            <For each={Object.values(acpStore.pendingPermissions)}>
+            <For each={acpStore.pendingPermissions}>
               {(perm) => (
                 <div class="px-5 py-2">
                   <AcpPermissionDialog permission={perm} />
