@@ -4,10 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
-import {
-  callGatewayTool,
-  type PaymentProxyInfo,
-} from "@/services/mcp-gateway";
+import { callGatewayTool, type PaymentProxyInfo } from "@/services/mcp-gateway";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
 import { parsePaymentRequirements, type PaymentRequirements } from "@/lib/x402";
 import { x402Service } from "@/services/x402";
@@ -29,7 +26,7 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
   const { name, arguments: argsJson } = toolCall.function;
 
   try {
-    const args = JSON.parse(argsJson) as Record<string, unknown>;
+    const args = (argsJson ? JSON.parse(argsJson) : {}) as Record<string, unknown>;
 
     // Check if this is a Seren Gateway tool call (gateway__publisher__toolName)
     const gatewayInfo = parseGatewayToolName(name);
@@ -260,9 +257,7 @@ async function executeGatewayTool(
 
       // If crypto payment was signed, retry with the payment header
       if (paymentResult.paymentHeader) {
-        console.log(
-          "[Tool Executor] Retrying with signed payment...",
-        );
+        console.log("[Tool Executor] Retrying with signed payment...");
 
         const retryArgs = {
           ...args,
@@ -296,7 +291,11 @@ async function executeGatewayTool(
 
         // For SerenBucks, we might need to add a flag to indicate user confirmed
         // For now, just retry - the server should accept prepaid if available
-        const retryResponse = await callGatewayTool(publisherSlug, toolName, args);
+        const retryResponse = await callGatewayTool(
+          publisherSlug,
+          toolName,
+          args,
+        );
 
         const retryContent =
           typeof retryResponse.result === "string"
