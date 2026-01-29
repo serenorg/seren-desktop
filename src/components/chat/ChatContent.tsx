@@ -14,6 +14,8 @@ import {
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
 import { escapeHtml } from "@/lib/escape-html";
+import { pickAndReadImages } from "@/lib/images/attachments";
+import type { ImageAttachment } from "@/lib/providers/types";
 import { renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -34,12 +36,14 @@ import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { AgentChat } from "./AgentChat";
 import { AgentModeToggle } from "./AgentModeToggle";
-import { ThinkingStatus } from "./ThinkingStatus";
 import { ChatTabBar } from "./ChatTabBar";
 import { CompactedMessage } from "./CompactedMessage";
+import { ImageAttachmentBar } from "./ImageAttachmentBar";
+import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { StreamingMessage } from "./StreamingMessage";
+import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolStreamingMessage } from "./ToolStreamingMessage";
 import "highlight.js/styles/github-dark.css";
@@ -99,6 +103,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // Message queue for sending messages while streaming
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   const [showSignInPrompt, setShowSignInPrompt] = createSignal(false);
+  const [attachedImages, setAttachedImages] = createSignal<ImageAttachment[]>(
+    [],
+  );
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -330,12 +337,27 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     };
   };
 
+  const handleAttachImages = async () => {
+    const images = await pickAndReadImages();
+    if (images.length > 0) {
+      setAttachedImages((prev) => [...prev, ...images]);
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const sendMessage = async () => {
     const trimmed = input().trim();
-    if (!trimmed) return;
+    const images = attachedImages();
+    if (!trimmed && images.length === 0) return;
 
     // If using Seren provider and not authenticated, prompt sign-in
-    if (providerStore.activeProvider === "seren" && !authStore.isAuthenticated) {
+    if (
+      providerStore.activeProvider === "seren" &&
+      !authStore.isAuthenticated
+    ) {
       setShowSignInPrompt(true);
       return;
     }
@@ -351,14 +373,19 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
 
     // Send message immediately
-    await sendMessageImmediate(trimmed);
+    await sendMessageImmediate(trimmed, images.length > 0 ? images : undefined);
+    setAttachedImages([]);
   };
 
-  const sendMessageImmediate = async (messageContent: string) => {
+  const sendMessageImmediate = async (
+    messageContent: string,
+    images?: ImageAttachment[],
+  ) => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content: messageContent,
+      images,
       timestamp: Date.now(),
       model: chatStore.selectedModel,
       status: "complete",
@@ -384,6 +411,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             context,
             true,
             chatStore.messages,
+            images,
           ),
           toolsEnabled: true,
         }
@@ -539,7 +567,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               Sign in to chat with Seren, or add your own API key in Settings.
             </p>
           </div>
-          <SignIn onSuccess={() => { setShowSignInPrompt(false); checkAuth(); }} />
+          <SignIn
+            onSuccess={() => {
+              setShowSignInPrompt(false);
+              checkAuth();
+            }}
+          />
           <button
             type="button"
             class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1.5 rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3]"
@@ -648,6 +681,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       <article
                         class={`px-4 py-3 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
                       >
+                        <Show
+                          when={message.images && message.images.length > 0}
+                        >
+                          <MessageImages images={message.images ?? []} />
+                        </Show>
                         <div
                           class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-2 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_a]:text-[#58a6ff]"
                           innerHTML={
@@ -766,6 +804,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     onSelect={handlePublisherSelect}
                     onDismiss={dismissSuggestions}
                   />
+                  <ImageAttachmentBar
+                    images={attachedImages()}
+                    onAttach={handleAttachImages}
+                    onRemove={handleRemoveImage}
+                  />
                   <Show when={messageQueue().length > 0}>
                     <div class="flex items-center gap-2 px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e]">
                       <span>
@@ -879,7 +922,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     <button
                       type="submit"
                       class="bg-[#238636] text-white border-none px-3 py-1 rounded text-xs font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58]"
-                      disabled={!input().trim()}
+                      disabled={
+                        !input().trim() && attachedImages().length === 0
+                      }
                     >
                       {chatStore.isLoading ? "Queue" : "Send"}
                     </button>

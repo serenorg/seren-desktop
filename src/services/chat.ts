@@ -1,6 +1,8 @@
 // ABOUTME: Chat service supporting streaming completions with multi-provider routing.
 // ABOUTME: Routes requests through provider abstraction for Seren, Anthropic, OpenAI, Gemini.
 
+import { toDataUrl } from "@/lib/images/attachments";
+import { retrieveCodeContext } from "@/lib/indexing/context-retrieval";
 import {
   buildChatRequest,
   sendProviderMessage,
@@ -10,14 +12,15 @@ import { sendMessageWithTools as sendWithTools } from "@/lib/providers/seren";
 import type {
   ChatMessageWithTools,
   ChatResponse,
+  ContentBlock,
+  ImageAttachment,
   ToolCall,
   ToolResult,
 } from "@/lib/providers/types";
 import { executeTools, getAllTools } from "@/lib/tools";
-import { retrieveCodeContext } from "@/lib/indexing/context-retrieval";
+import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
-import { fileTreeState } from "@/stores/fileTree";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -36,6 +39,7 @@ export interface Message {
   id: string;
   role: ChatRole;
   content: string;
+  images?: ImageAttachment[];
   thinking?: string;
   model?: string;
   timestamp: number;
@@ -209,6 +213,32 @@ export type ToolStreamEvent =
     };
 
 /**
+ * Build multimodal content blocks from text and optional images.
+ */
+function buildUserContent(
+  text: string,
+  images?: ImageAttachment[],
+): string | ContentBlock[] {
+  if (!images || images.length === 0) {
+    return text;
+  }
+
+  const blocks: ContentBlock[] = [];
+
+  // Add image blocks first so the model sees them before the text
+  for (const img of images) {
+    blocks.push({
+      type: "image_url",
+      image_url: { url: toDataUrl(img) },
+    });
+  }
+
+  blocks.push({ type: "text", text });
+
+  return blocks;
+}
+
+/**
  * Send a message with tool support enabled.
  * Implements the tool execution loop: send → tool_calls → execute → send results → repeat.
  *
@@ -217,6 +247,7 @@ export type ToolStreamEvent =
  * @param context - Optional code context
  * @param enableTools - Whether to enable tools (default true)
  * @param history - Previous messages in the conversation
+ * @param images - Optional image attachments
  */
 export async function* streamMessageWithTools(
   content: string,
@@ -224,6 +255,7 @@ export async function* streamMessageWithTools(
   context?: ChatContext,
   enableTools = true,
   history: Message[] = [],
+  images?: ImageAttachment[],
 ): AsyncGenerator<ToolStreamEvent> {
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
@@ -270,8 +302,8 @@ export async function* streamMessageWithTools(
     }
   }
 
-  // Add current user message
-  messages.push({ role: "user", content });
+  // Add current user message (with images if attached)
+  messages.push({ role: "user", content: buildUserContent(content, images) });
 
   // Get tools if enabled, with model-specific limits
   const tools = enableTools ? getAllTools(model) : undefined;

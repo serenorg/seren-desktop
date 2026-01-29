@@ -82,11 +82,43 @@ export interface OAuthCredentials {
 export type ProviderCredentials = ApiKeyCredentials | OAuthCredentials;
 
 /**
+ * Text content block for multimodal messages.
+ */
+export interface TextContentBlock {
+  type: "text";
+  text: string;
+}
+
+/**
+ * Image content block for multimodal messages (OpenAI-compatible format).
+ */
+export interface ImageContentBlock {
+  type: "image_url";
+  image_url: {
+    url: string; // data:image/png;base64,... or https://...
+  };
+}
+
+/**
+ * Content block for multimodal messages.
+ */
+export type ContentBlock = TextContentBlock | ImageContentBlock;
+
+/**
+ * Image attachment metadata stored with messages.
+ */
+export interface ImageAttachment {
+  name: string;
+  mimeType: string;
+  base64: string; // raw base64 without data URL prefix
+}
+
+/**
  * Message format for chat requests.
  */
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
-  content: string;
+  content: string | ContentBlock[];
 }
 
 /**
@@ -160,7 +192,7 @@ export interface ToolCall {
  */
 export interface ChatMessageWithTools {
   role: "user" | "assistant" | "system" | "tool";
-  content: string | null;
+  content: string | ContentBlock[] | null;
   tool_calls?: ToolCall[];
   tool_call_id?: string; // Required when role is "tool"
 }
