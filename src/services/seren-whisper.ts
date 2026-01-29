@@ -31,23 +31,36 @@ interface AgentApiPayload {
 }
 
 /**
- * Convert a Blob to a base64-encoded string.
+ * Convert a Blob to a base64-encoded string using FileReader.
  */
-async function blobToBase64(blob: Blob): Promise<string> {
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("Failed to read audio data"));
+    reader.readAsDataURL(blob);
+  });
 }
+
+/** Map mime types to file extensions for the upload filename. */
+const MIME_EXTENSIONS: Record<string, string> = {
+  "audio/webm": "webm",
+  "audio/mp4": "mp4",
+  "audio/ogg": "ogg",
+};
 
 /**
  * Transcribe audio using the Seren Whisper publisher.
  * Sends audio as multipart/form-data via the Gateway.
  */
-export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+export async function transcribeAudio(
+  audioBlob: Blob,
+  mimeType = "audio/webm",
+): Promise<string> {
   const token = await getToken();
   if (!token) {
     throw new Error("Not authenticated - please log in");
@@ -65,8 +78,8 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
         { name: "model", value: "whisper-1" },
         {
           name: "file",
-          filename: "audio.webm",
-          content_type: "audio/webm",
+          filename: `audio.${MIME_EXTENSIONS[mimeType] || "webm"}`,
+          content_type: mimeType,
           data: base64Audio,
         },
       ],

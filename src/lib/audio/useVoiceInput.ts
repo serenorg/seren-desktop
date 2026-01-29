@@ -6,18 +6,32 @@ import { transcribeAudio } from "@/services/seren-whisper";
 
 export type VoiceState = "idle" | "recording" | "transcribing" | "error";
 
+const MIME_PREFERENCES = ["audio/webm", "audio/mp4", "audio/ogg"];
+
+function getSupportedMimeType(): string {
+  for (const mime of MIME_PREFERENCES) {
+    if (MediaRecorder.isTypeSupported(mime)) return mime;
+  }
+  return "";
+}
+
 export function useVoiceInput(onTranscript: (text: string) => void) {
   const [voiceState, setVoiceState] = createSignal<VoiceState>("idle");
   const [error, setError] = createSignal<string | null>(null);
 
   let recorder: MediaRecorder | null = null;
   let chunks: Blob[] = [];
+  let activeMimeType = "";
 
   async function startRecording() {
     try {
       setError(null);
+      activeMimeType = getSupportedMimeType();
+      const options: MediaRecorderOptions = activeMimeType
+        ? { mimeType: activeMimeType }
+        : {};
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      recorder = new MediaRecorder(stream, options);
       chunks = [];
 
       recorder.ondataavailable = (e) => {
@@ -26,7 +40,8 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunks, { type: "audio/webm" });
+        const mimeType = activeMimeType || "audio/webm";
+        const blob = new Blob(chunks, { type: mimeType });
         chunks = [];
 
         if (blob.size === 0) {
@@ -36,7 +51,7 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
 
         setVoiceState("transcribing");
         try {
-          const text = await transcribeAudio(blob);
+          const text = await transcribeAudio(blob, mimeType);
           if (text.trim()) {
             onTranscript(text.trim());
           }
@@ -70,7 +85,8 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
   function toggle() {
     if (voiceState() === "recording") {
       stopRecording();
-    } else {
+    } else if (voiceState() === "idle" || voiceState() === "error") {
+      clearError();
       startRecording();
     }
   }
