@@ -10,6 +10,7 @@ import { AgentSelector } from "./AgentSelector";
 import { DiffCard } from "./DiffCard";
 import { PlanHeader } from "./PlanHeader";
 import { ThinkingBlock } from "./ThinkingBlock";
+import { ThinkingStatus } from "./ThinkingStatus";
 import { ToolCallCard } from "./ToolCallCard";
 
 interface AgentChatProps {
@@ -234,10 +235,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             {/* Loading placeholder while waiting for first chunk */}
             <Show when={isPrompting() && !acpStore.streamingContent && !acpStore.streamingThinking}>
               <article class="px-5 py-4 border-b border-[#21262d]">
-                <div class="flex items-center gap-2 text-sm text-[#8b949e]">
-                  <span class="inline-block w-2 h-2 rounded-full bg-[#58a6ff] animate-pulse" />
-                  <span>Waiting for agent response…</span>
-                </div>
+                <ThinkingStatus />
               </article>
             </Show>
 
@@ -298,9 +296,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <div class="flex items-center gap-3">
                 <AgentSelector />
                 <Show when={isPrompting()}>
-                  <span class="text-xs text-[#8b949e]">
-                    Agent is working...
-                  </span>
+                  <ThinkingStatus />
                 </Show>
               </div>
               <div class="flex gap-2">
