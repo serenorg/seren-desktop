@@ -2796,6 +2796,11 @@ export type DailyClaimEligibilityDataResponse = {
  */
 export type DailyClaimEligibilityResponse = {
     can_claim: boolean;
+    /**
+     * Formatted USD amount that will be granted on a successful daily claim.
+     * Optional to avoid breaking older clients.
+     */
+    claim_amount_usd?: string | null;
     claims_remaining_this_month: number;
     reason?: string | null;
     /**
@@ -12114,10 +12119,18 @@ export type WalletTransactionHistoryResponse = {
 export type WalletTransactionResponse = {
     amount_atomic: number;
     amount_usd: string;
+    /**
+     * Bonus amount included in this grant (only for tier_bonus source)
+     */
+    bonus_amount_usd?: string | null;
     created_at: string;
     description?: string | null;
     expires_at?: string | null;
     id: string;
+    /**
+     * Original Stripe payment amount (only for fiat_purchase source)
+     */
+    paid_amount_usd?: string | null;
     remaining_atomic: number;
     remaining_usd: string;
     source: string;
