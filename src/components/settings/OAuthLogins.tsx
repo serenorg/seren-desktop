@@ -13,6 +13,7 @@ import {
 import {
   listConnections,
   listProviders,
+  listStorePublishers,
   type PublisherOAuthProviderResponse,
   type UserOAuthConnectionResponse,
 } from "@/api";
@@ -21,6 +22,7 @@ import {
   connectPublisher,
   disconnectPublisher,
 } from "@/services/publisher-oauth";
+import { apiBase } from "@/lib/config";
 import { authStore } from "@/stores/auth.store";
 
 interface OAuthLoginsProps {
@@ -43,7 +45,31 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
       console.error("[OAuthLogins] Error fetching providers:", error);
       return [];
     }
-    return data?.providers || [];
+    const providers = data?.providers || [];
+    console.log("[OAuthLogins] OAuth providers:", providers.map(p => ({ name: p.name, id: p.id, slug: p.slug, logo_url: p.logo_url })));
+    return providers;
+  });
+
+  // Fetch publishers to get logo URLs keyed by oauth_provider_id
+  const [publisherLogos] = createResource(async () => {
+    const { data, error } = await listStorePublishers({
+      query: { limit: 100 },
+      throwOnError: false,
+    });
+    if (error) return {} as Record<string, string>;
+    const logos: Record<string, string> = {};
+    const publishers = data?.data || [];
+    console.log("[OAuthLogins] Publishers with OAuth:", publishers.filter(p => p.oauth_provider_id).map(p => ({ name: p.name, oauth_provider_id: p.oauth_provider_id, logo_url: p.logo_url })));
+    for (const pub of publishers) {
+      if (pub.oauth_provider_id && pub.logo_url) {
+        const url = pub.logo_url.startsWith("/")
+          ? `${apiBase}${pub.logo_url}`
+          : pub.logo_url;
+        logos[pub.oauth_provider_id] = url;
+      }
+    }
+    console.log("[OAuthLogins] Logo map:", logos);
+    return logos;
   });
 
   // Fetch user's connected OAuth accounts
@@ -66,6 +92,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
         const errorParam = urlObj.searchParams.get("error");
 
         if (errorParam) {
+          if (connectTimeout) clearTimeout(connectTimeout);
           setError(`OAuth error: ${errorParam}`);
           setConnectingProvider(null);
           return;
@@ -74,9 +101,11 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
         // Refresh connections after successful OAuth callback
         // The Gateway handles token exchange, we just need to refresh
         await refetchConnections();
+        if (connectTimeout) clearTimeout(connectTimeout);
         setConnectingProvider(null);
         setError(null);
       } catch (err) {
+        if (connectTimeout) clearTimeout(connectTimeout);
         setError(err instanceof Error ? err.message : "OAuth callback failed");
         setConnectingProvider(null);
       }
@@ -95,14 +124,26 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     );
   };
 
+  let connectTimeout: ReturnType<typeof setTimeout> | null = null;
+
   const handleConnect = async (provider: PublisherOAuthProviderResponse) => {
     setError(null);
     setConnectingProvider(provider.slug);
+
+    // Reset after 2 minutes if callback never arrives
+    if (connectTimeout) clearTimeout(connectTimeout);
+    connectTimeout = setTimeout(() => {
+      if (connectingProvider()) {
+        setConnectingProvider(null);
+        setError("Connection timed out. Please try again.");
+      }
+    }, 120_000);
 
     try {
       await connectPublisher(provider.slug);
       // Flow continues via OAuth callback listener
     } catch (err) {
+      if (connectTimeout) clearTimeout(connectTimeout);
       setError(
         err instanceof Error ? err.message : "Failed to start OAuth flow",
       );
@@ -215,12 +256,12 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                   }`}
                 >
                   <div class="flex items-center gap-4 flex-1 min-w-0">
-                    {/* Provider Icon/Logo */}
+                    {/* Publisher Logo */}
                     <Show
-                      when={provider.logo_url}
+                      when={provider.logo_url || publisherLogos()?.[provider.id]}
                       fallback={
-                        <div class="w-10 h-10 flex items-center justify-center bg-[rgba(148,163,184,0.1)] rounded-lg text-xl">
-                          🔗
+                        <div class="w-10 h-10 flex items-center justify-center bg-[rgba(148,163,184,0.1)] rounded-lg text-base font-semibold text-muted-foreground">
+                          {provider.name?.charAt(0).toUpperCase() ?? "?"}
                         </div>
                       }
                     >

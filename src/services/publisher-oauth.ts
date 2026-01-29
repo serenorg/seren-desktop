@@ -8,60 +8,35 @@ import {
   type UserOAuthConnectionResponse,
 } from "@/api";
 import { apiBase } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/lib/tauri-bridge";
 
 /**
  * Start OAuth flow for a publisher provider.
- * Makes an authenticated request to get the provider's redirect URL,
- * then opens it in the user's browser.
+ * Fetches the authorization URL from the Gateway, then opens it in the browser.
+ * Uses Tauri invoke to make the request from Rust where redirect: manual works.
  */
 export async function connectPublisher(providerSlug: string): Promise<void> {
   console.log(`[PublisherOAuth] Starting OAuth flow for ${providerSlug}`);
-
-  const redirectUri = "seren://oauth/callback";
-  const authUrl = `${apiBase}/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
 
   const token = await getToken();
   if (!token) {
     throw new Error("Not authenticated. Please log in first.");
   }
 
-  // Fetch with redirect: "manual" to capture the Location header
-  // instead of following the redirect (which would fail in fetch context)
-  const response = await appFetch(authUrl, {
-    redirect: "manual",
-    headers: { Authorization: `Bearer ${token}` },
+  const redirectUri = "seren://oauth/callback";
+  const authUrl = `${apiBase}/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+  // Fetch the authorize endpoint to get the redirect Location header.
+  // Tauri's JS fetch ignores redirect: "manual", so we use the Rust backend
+  // via invoke to make the request without following redirects.
+  const { invoke } = await import("@tauri-apps/api/core");
+  const location: string = await invoke("get_oauth_redirect_url", {
+    url: authUrl,
+    bearerToken: token,
   });
 
-  // Gateway returns 302 with Location pointing to the provider's OAuth page
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get("Location");
-    if (!location) {
-      throw new Error("Gateway returned redirect without Location header");
-    }
-    console.log(`[PublisherOAuth] Opening authorization URL: ${location}`);
-    await openUrl(location);
-    return;
-  }
-
-  // If Gateway returns JSON with authorize_url (alternative response format)
-  if (response.ok) {
-    const data = await response.json();
-    const url = data?.authorize_url || data?.url;
-    if (url) {
-      console.log(`[PublisherOAuth] Opening authorization URL: ${url}`);
-      await openUrl(url);
-      return;
-    }
-  }
-
-  const body = await response.text();
-  console.error(
-    `[PublisherOAuth] Unexpected response: ${response.status}`,
-    body,
-  );
-  throw new Error(`Failed to start OAuth flow (${response.status})`);
+  console.log(`[PublisherOAuth] Opening authorization URL: ${location}`);
+  await openUrl(location);
 }
 
 /**

@@ -39,6 +39,50 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// Fetch a URL with Bearer auth and return the redirect Location header.
+/// Used for OAuth authorize endpoints that return 302 redirects.
+#[tauri::command]
+async fn get_oauth_redirect_url(url: String, bearer_token: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", bearer_token))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if response.status().is_redirection() {
+        let location = response
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .ok_or("Redirect response missing Location header")?;
+        return Ok(location.to_string());
+    }
+
+    let status = response.status();
+
+    // If not a redirect, try to parse JSON with authorize_url
+    if status.is_success() {
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if let Some(url) = body.get("authorize_url").or(body.get("url")) {
+            if let Some(url_str) = url.as_str() {
+                return Ok(url_str.to_string());
+            }
+        }
+    }
+
+    Err(format!("Unexpected response status: {}", status))
+}
+
 #[tauri::command]
 fn store_token(app: tauri::AppHandle, token: String) -> Result<(), String> {
     let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
@@ -451,6 +495,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            get_oauth_redirect_url,
             store_token,
             get_token,
             clear_token,

@@ -4,5 +4,16 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Seren uses your microphone to transcribe voice input for AI chat.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.serendb.desktop</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>seren</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
