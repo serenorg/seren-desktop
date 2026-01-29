@@ -34,6 +34,7 @@ import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { AgentChat } from "./AgentChat";
 import { AgentModeToggle } from "./AgentModeToggle";
+import { ThinkingStatus } from "./ThinkingStatus";
 import { ChatTabBar } from "./ChatTabBar";
 import { CompactedMessage } from "./CompactedMessage";
 import { ModelSelector } from "./ModelSelector";
@@ -684,6 +685,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       </article>
                     )}
                   </For>
+                </Show>
+
+                <Show when={chatStore.isLoading && !streamingSession()}>
+                  <article class="px-5 py-4 border-b border-[#21262d]">
+                    <ThinkingStatus />
+                  </article>
                 </Show>
 
                 <Show when={streamingSession()}>
