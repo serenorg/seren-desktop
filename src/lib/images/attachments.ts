@@ -1,12 +1,12 @@
 // ABOUTME: Image attachment utilities for picking, reading, and validating images.
 // ABOUTME: Provides file dialog integration and base64 conversion for chat image attachments.
 
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { readFile } from "@tauri-apps/plugin-fs";
 import type { ImageAttachment } from "@/lib/providers/types";
 
 const SUPPORTED_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_BASE64_SIZE = 27 * 1024 * 1024; // ~20MB file = ~27MB base64
 
 const MIME_TYPES: Record<string, string> = {
   png: "image/png",
@@ -60,19 +60,10 @@ export async function readImageAttachment(
     throw new Error(`Unsupported image format: .${ext}`);
   }
 
-  const bytes = await readFile(path);
-  if (bytes.length > MAX_FILE_SIZE) {
-    throw new Error(
-      `Image too large: ${(bytes.length / 1024 / 1024).toFixed(1)}MB (max 20MB)`,
-    );
+  const base64 = await invoke<string>("read_file_base64", { path });
+  if (base64.length > MAX_BASE64_SIZE) {
+    throw new Error("Image too large (max 20MB)");
   }
-
-  // Convert Uint8Array to base64
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  const base64 = btoa(binary);
 
   return {
     name: getFileName(path),
