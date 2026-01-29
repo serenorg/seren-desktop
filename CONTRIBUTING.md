@@ -10,12 +10,20 @@ Be respectful. We're all here to build something useful.
 
 1. Fork the repository
 2. Clone your fork: `git clone git@github.com:YOUR_USERNAME/seren-desktop.git`
-3. Create a branch: `git checkout -b feature/your-feature`
+3. Create a worktree for your feature:
+
+   ```bash
+   git worktree add ../.worktrees/your-feature -b feature/your-feature
+   cd ../.worktrees/your-feature
+   ```
+
 4. Make changes
 5. Test: `pnpm test`
-6. Commit: `git commit -m "feat: add your feature"`
-7. Push: `git push origin feature/your-feature`
-8. Open a Pull Request
+6. Lint: `pnpm check`
+7. Commit: `git commit -m "feat: add your feature"`
+8. Push: `git push origin feature/your-feature`
+9. Open a Pull Request
+10. Clean up: `git worktree remove ../.worktrees/your-feature`
 
 ## Development Setup
 
@@ -35,9 +43,7 @@ npm install -g pnpm
 # Install Tauri CLI
 cargo install tauri-cli
 
-# Optional: Install faster linker (recommended)
-# macOS:
-brew install michaeleisel/zld/zld
+# Optional: Install faster linker (Linux only)
 # Linux:
 sudo apt install mold
 ```
@@ -97,7 +103,7 @@ Examples:
 1. Update documentation if needed
 2. Add tests for new features
 3. Ensure `pnpm test` passes
-4. Ensure `pnpm lint` passes
+4. Ensure `pnpm check` passes (Biome linting and formatting)
 5. Request review from maintainers
 
 ## Security
@@ -116,8 +122,14 @@ See [SECURITY.md](SECURITY.md) for full security policy.
 ## Testing
 
 ```bash
-# Run frontend tests
+# Run unit tests
 pnpm test
+
+# Run e2e tests (headless)
+pnpm test:e2e
+
+# Run e2e tests with UI
+pnpm test:e2e:ui
 
 # Run Rust tests
 cargo test --manifest-path src-tauri/Cargo.toml
