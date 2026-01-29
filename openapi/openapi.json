@@ -805,7 +805,7 @@
         "tags": [
           "agent"
         ],
-        "summary": "GET /api/agent/supported",
+        "summary": "GET /agent/supported",
         "description": "Returns supported x402 payment kinds for facilitator discovery.",
         "operationId": "get_supported",
         "responses": {
@@ -13546,6 +13546,11 @@
           "can_claim": {
             "type": "boolean"
           },
+          "claim_amount_usd": {
+            "type": "string",
+            "description": "Formatted USD amount that will be granted on a successful daily claim.\nOptional to avoid breaking older clients.",
+            "nullable": true
+          },
           "claims_remaining_this_month": {
             "type": "integer",
             "format": "int32"
@@ -23389,6 +23394,11 @@
           "amount_usd": {
             "type": "string"
           },
+          "bonus_amount_usd": {
+            "type": "string",
+            "description": "Bonus amount included in this grant (only for tier_bonus source)",
+            "nullable": true
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -23405,6 +23415,11 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "paid_amount_usd": {
+            "type": "string",
+            "description": "Original Stripe payment amount (only for fiat_purchase source)",
+            "nullable": true
           },
           "remaining_atomic": {
             "type": "integer",
