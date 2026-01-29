@@ -27,6 +27,13 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
     let stream: MediaStream | null = null;
     try {
       setError(null);
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error(
+          "Microphone access is not available. Please ensure the app has microphone permission in System Settings > Privacy & Security > Microphone.",
+        );
+      }
+
       activeMimeType = getSupportedMimeType();
       const options: MediaRecorderOptions = activeMimeType
         ? { mimeType: activeMimeType }
