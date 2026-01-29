@@ -29,13 +29,13 @@ export const AgentModeToggle: Component = () => {
   return (
     <div class="flex items-center gap-2">
       {/* Mode Toggle */}
-      <div class="flex items-center bg-[#21262d] rounded-md p-0.5 border border-[#30363d]">
+      <div class="flex items-center bg-[#161b22] rounded-lg p-0.5 border border-[#30363d]">
         <button
           type="button"
-          class={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+          class={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
             !isAgentMode()
-              ? "bg-[#238636] text-white"
-              : "bg-transparent text-[#e6edf3] hover:bg-[#30363d]"
+              ? "bg-[#58a6ff]/15 text-[#58a6ff] shadow-[0_0_0_1px_rgba(88,166,255,0.3)]"
+              : "bg-transparent text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d]"
           }`}
           onClick={() => acpStore.setAgentModeEnabled(false)}
         >
@@ -43,10 +43,10 @@ export const AgentModeToggle: Component = () => {
         </button>
         <button
           type="button"
-          class={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+          class={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
             isAgentMode()
-              ? "bg-[#8957e5] text-white"
-              : "bg-transparent text-[#e6edf3] hover:bg-[#30363d]"
+              ? "bg-[#8957e5]/15 text-[#a371f7] shadow-[0_0_0_1px_rgba(137,87,229,0.3)]"
+              : "bg-transparent text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d]"
           }`}
           onClick={() => acpStore.setAgentModeEnabled(true)}
         >

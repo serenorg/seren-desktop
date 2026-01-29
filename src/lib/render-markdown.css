@@ -1,11 +1,12 @@
 /* Code block wrapper with copy button */
 .code-block-wrapper {
   position: relative;
-  margin: 12px 0;
+  margin: 16px 0;
   background: #161b22;
   border: 1px solid #30363d;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .code-block-header {
@@ -73,5 +74,5 @@
   background: transparent;
   padding: 0;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
