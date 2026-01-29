@@ -2,7 +2,7 @@
 // ABOUTME: Handles agent session lifecycle and message streaming.
 
 import type { Component } from "solid-js";
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, on, Show } from "solid-js";
 import type { DiffEvent } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
@@ -30,12 +30,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   // Get the current working directory from file tree
   const getCwd = () => {
-    if (fileTreeState.rootPath) {
-      return fileTreeState.rootPath;
-    }
-    // Fallback to current directory (agent will use its own cwd)
-    return ".";
+    return fileTreeState.rootPath || null;
   };
+
+  const hasFolderOpen = () => Boolean(fileTreeState.rootPath);
 
   const scrollToBottom = () => {
     if (messagesRef) {
@@ -55,8 +53,25 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     requestAnimationFrame(scrollToBottom);
   });
 
+  // Sync agent cwd when the user opens a different folder
+  createEffect(
+    on(
+      () => fileTreeState.rootPath,
+      (newPath: string | null) => {
+        if (newPath && hasSession()) {
+          acpStore.updateCwd(newPath);
+        }
+      },
+      { defer: true },
+    ),
+  );
+
   const startSession = async () => {
     const cwd = getCwd();
+    if (!cwd) {
+      console.warn("[AgentChat] No folder open, cannot start session");
+      return;
+    }
     console.log("[AgentChat] Starting session with cwd:", cwd);
     try {
       const sessionId = await acpStore.spawnSession(cwd);
@@ -227,11 +242,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                       </div>
                     </div>
                   </Show>
+                  <Show when={!hasFolderOpen()}>
+                    <div class="w-full px-3 py-2 bg-[#da3633]/10 border border-[#da3633]/30 rounded-md text-xs text-[#f85149]">
+                      Open a folder first to set the agent's working directory.
+                    </div>
+                  </Show>
                   <button
                     type="button"
                     class="px-4 py-2 bg-[#238636] text-white rounded-md text-sm font-medium hover:bg-[#2ea043] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={startSession}
-                    disabled={acpStore.isLoading}
+                    disabled={acpStore.isLoading || !hasFolderOpen()}
                   >
                     {acpStore.isLoading
                       ? (acpStore.installStatus ?? "Starting...")
@@ -309,6 +329,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           >
             Dismiss
           </button>
+        </div>
+      </Show>
+
+      {/* Agent CWD Display */}
+      <Show when={hasSession() && acpStore.cwd}>
+        <div class="shrink-0 px-4 py-1.5 border-t border-[#21262d] bg-[#0d1117] flex items-center gap-2 text-xs text-[#8b949e]">
+          <svg class="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" role="img" aria-label="Folder">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          <span class="truncate" title={acpStore.cwd!}>{acpStore.cwd}</span>
         </div>
       </Show>
 
