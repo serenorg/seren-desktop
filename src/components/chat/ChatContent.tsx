@@ -13,6 +13,8 @@ import {
   Show,
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
+import { getCompletions, parseCommand } from "@/lib/commands/parser";
+import type { CommandContext } from "@/lib/commands/types";
 import { escapeHtml } from "@/lib/escape-html";
 import { pickAndReadImages } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
@@ -42,6 +44,7 @@ import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { SlashCommandPopup } from "./SlashCommandPopup";
 import { StreamingMessage } from "./StreamingMessage";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
@@ -97,6 +100,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
+  const [commandStatus, setCommandStatus] = createSignal<string | null>(null);
+  const [commandPopupIndex, setCommandPopupIndex] = createSignal(0);
   // Input history navigation (terminal-style up/down arrow)
   const [historyIndex, setHistoryIndex] = createSignal(-1);
   const [savedInput, setSavedInput] = createSignal("");
@@ -109,6 +114,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  const handlePickImages = () => handleAttachImages();
 
   // Copy button click handler (event delegation)
   const handleCopyClick = (event: MouseEvent) => {
@@ -211,6 +217,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // Register copy button handler (event delegation)
     messagesRef?.addEventListener("click", handleCopyClick);
 
+    // Listen for slash command events
+    window.addEventListener("seren:pick-images", handlePickImages);
+
     try {
       await chatStore.loadHistory();
     } catch (error) {
@@ -236,6 +245,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   onCleanup(() => {
     document.removeEventListener("keydown", handleKeyDown);
     messagesRef?.removeEventListener("click", handleCopyClick);
+    window.removeEventListener(
+      "seren:pick-images",
+      handlePickImages as EventListener,
+    );
 
     // Reset loading state if still active when unmounting (e.g., HMR)
     if (chatStore.isLoading) {
@@ -348,10 +361,40 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     setAttachedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const executeSlashCommand = (trimmed: string) => {
+    const parsed = parseCommand(trimmed, "chat");
+    if (!parsed) return false;
+
+    const ctx: CommandContext = {
+      rawInput: trimmed,
+      args: parsed.args,
+      panel: "chat",
+      clearInput: () => setInput(""),
+      openPanel: (panel: string) => {
+        window.dispatchEvent(
+          new CustomEvent("seren:open-panel", { detail: panel }),
+        );
+      },
+      showStatus: (message: string) => {
+        setCommandStatus(message);
+        setTimeout(() => setCommandStatus(null), 4000);
+      },
+    };
+
+    parsed.command.execute(ctx);
+    setCommandPopupIndex(0);
+    return true;
+  };
+
   const sendMessage = async () => {
     const trimmed = input().trim();
     const images = attachedImages();
     if (!trimmed && images.length === 0) return;
+
+    // Check for slash commands first
+    if (trimmed.startsWith("/") && images.length === 0) {
+      if (executeSlashCommand(trimmed)) return;
+    }
 
     // If using Seren provider and not authenticated, prompt sign-in
     if (
@@ -824,88 +867,148 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       </button>
                     </div>
                   </Show>
-                  <textarea
-                    ref={(el) => {
-                      inputRef = el;
-                      console.log(
-                        "[ChatContent] Textarea ref set, disabled:",
-                        el.disabled,
-                        "isLoading:",
-                        chatStore.isLoading,
-                      );
-                    }}
-                    value={input()}
-                    placeholder={
-                      chatStore.isLoading
-                        ? "Type to queue message..."
-                        : "Ask Seren anything…"
-                    }
-                    class="w-full min-h-[60px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-2 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58]"
-                    onInput={(event) => {
-                      setInput(event.currentTarget.value);
-                      if (historyIndex() !== -1) {
-                        setHistoryIndex(-1);
-                        setSavedInput("");
+                  <div class="relative">
+                    <SlashCommandPopup
+                      input={input()}
+                      panel="chat"
+                      selectedIndex={commandPopupIndex()}
+                      onSelect={(cmd) => {
+                        setInput(`/${cmd.name} `);
+                        inputRef?.focus();
+                        setCommandPopupIndex(0);
+                      }}
+                    />
+                    <textarea
+                      ref={(el) => {
+                        inputRef = el;
+                        console.log(
+                          "[ChatContent] Textarea ref set, disabled:",
+                          el.disabled,
+                          "isLoading:",
+                          chatStore.isLoading,
+                        );
+                      }}
+                      value={input()}
+                      placeholder={
+                        chatStore.isLoading
+                          ? "Type to queue message..."
+                          : "Ask Seren anything… (type / for commands)"
                       }
-                    }}
-                    onKeyDown={(event) => {
-                      const history = userMessageHistory();
-
-                      // Up arrow: navigate to older message
-                      if (event.key === "ArrowUp" && history.length > 0) {
-                        const textarea = event.currentTarget;
-                        if (textarea.selectionStart === 0 || input() === "") {
-                          event.preventDefault();
-
-                          if (historyIndex() === -1) {
-                            setSavedInput(input());
-                          }
-
-                          const newIndex = Math.min(
-                            historyIndex() + 1,
-                            history.length - 1,
-                          );
-                          setHistoryIndex(newIndex);
-                          setInput(history[newIndex]);
+                      class="w-full min-h-[60px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-2 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58]"
+                      onInput={(event) => {
+                        setInput(event.currentTarget.value);
+                        setCommandPopupIndex(0);
+                        if (historyIndex() !== -1) {
+                          setHistoryIndex(-1);
+                          setSavedInput("");
                         }
-                      }
+                      }}
+                      onKeyDown={(event) => {
+                        // Slash command popup keyboard navigation
+                        const isSlashInput =
+                          input().startsWith("/") && !input().includes(" ");
+                        if (isSlashInput) {
+                          const matches = getCompletions(input(), "chat");
+                          if (matches.length > 0) {
+                            if (event.key === "ArrowUp") {
+                              event.preventDefault();
+                              setCommandPopupIndex((i) =>
+                                i > 0 ? i - 1 : matches.length - 1,
+                              );
+                              return;
+                            }
+                            if (event.key === "ArrowDown") {
+                              event.preventDefault();
+                              setCommandPopupIndex((i) =>
+                                i < matches.length - 1 ? i + 1 : 0,
+                              );
+                              return;
+                            }
+                            if (
+                              event.key === "Tab" ||
+                              (event.key === "Enter" && !event.shiftKey)
+                            ) {
+                              event.preventDefault();
+                              const selected = matches[commandPopupIndex()];
+                              if (selected) {
+                                setInput(`/${selected.name} `);
+                                setCommandPopupIndex(0);
+                              }
+                              return;
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              setInput("");
+                              return;
+                            }
+                          }
+                        }
 
-                      // Down arrow: navigate to newer message
-                      if (event.key === "ArrowDown" && historyIndex() >= 0) {
-                        const textarea = event.currentTarget;
-                        if (textarea.selectionStart === textarea.value.length) {
-                          event.preventDefault();
+                        const history = userMessageHistory();
 
-                          const newIndex = historyIndex() - 1;
-                          setHistoryIndex(newIndex);
+                        // Up arrow: navigate to older message
+                        if (event.key === "ArrowUp" && history.length > 0) {
+                          const textarea = event.currentTarget;
+                          if (textarea.selectionStart === 0 || input() === "") {
+                            event.preventDefault();
 
-                          if (newIndex < 0) {
-                            setInput(savedInput());
-                            setSavedInput("");
-                          } else {
+                            if (historyIndex() === -1) {
+                              setSavedInput(input());
+                            }
+
+                            const newIndex = Math.min(
+                              historyIndex() + 1,
+                              history.length - 1,
+                            );
+                            setHistoryIndex(newIndex);
                             setInput(history[newIndex]);
                           }
                         }
-                      }
 
-                      // Enter key handling
-                      if (event.key === "Enter") {
-                        const enterToSend =
-                          settingsStore.get("chatEnterToSend");
-                        if (enterToSend) {
-                          if (!event.shiftKey) {
+                        // Down arrow: navigate to newer message
+                        if (event.key === "ArrowDown" && historyIndex() >= 0) {
+                          const textarea = event.currentTarget;
+                          if (
+                            textarea.selectionStart === textarea.value.length
+                          ) {
                             event.preventDefault();
-                            sendMessage();
-                          }
-                        } else {
-                          if (event.metaKey || event.ctrlKey) {
-                            event.preventDefault();
-                            sendMessage();
+
+                            const newIndex = historyIndex() - 1;
+                            setHistoryIndex(newIndex);
+
+                            if (newIndex < 0) {
+                              setInput(savedInput());
+                              setSavedInput("");
+                            } else {
+                              setInput(history[newIndex]);
+                            }
                           }
                         }
-                      }
-                    }}
-                  />
+
+                        // Enter key handling
+                        if (event.key === "Enter") {
+                          const enterToSend =
+                            settingsStore.get("chatEnterToSend");
+                          if (enterToSend) {
+                            if (!event.shiftKey) {
+                              event.preventDefault();
+                              sendMessage();
+                            }
+                          } else {
+                            if (event.metaKey || event.ctrlKey) {
+                              event.preventDefault();
+                              sendMessage();
+                            }
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+                  <Show when={commandStatus()}>
+                    <div class="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e] whitespace-pre-wrap">
+                      {commandStatus()}
+                    </div>
+                  </Show>
                   <div class="flex justify-between items-center">
                     <div class="flex items-center gap-2">
                       <ModelSelector />

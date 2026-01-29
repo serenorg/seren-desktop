@@ -2,7 +2,17 @@
 // ABOUTME: Handles agent session lifecycle and message streaming.
 
 import type { Component } from "solid-js";
-import { createEffect, createSignal, For, on, Show } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
+import { getCompletions, parseCommand } from "@/lib/commands/parser";
+import type { CommandContext } from "@/lib/commands/types";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
 import type { DiffEvent } from "@/services/acp";
@@ -13,6 +23,7 @@ import { AgentTabBar } from "./AgentTabBar";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
+import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ToolCallCard } from "./ToolCallCard";
@@ -27,8 +38,18 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const [attachedImages, setAttachedImages] = createSignal<ImageAttachment[]>(
     [],
   );
+  const [commandStatus, setCommandStatus] = createSignal<string | null>(null);
+  const [commandPopupIndex, setCommandPopupIndex] = createSignal(0);
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
+
+  const onPickImages = () => handleAttachImages();
+  onMount(() => {
+    window.addEventListener("seren:pick-images", onPickImages);
+  });
+  onCleanup(() => {
+    window.removeEventListener("seren:pick-images", onPickImages);
+  });
 
   const hasSession = () => acpStore.activeSession !== null;
   const isReady = () => acpStore.activeSession?.info.status === "ready";
@@ -99,10 +120,40 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     setAttachedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const executeSlashCommand = (trimmed: string) => {
+    const parsed = parseCommand(trimmed, "agent");
+    if (!parsed) return false;
+
+    const ctx: CommandContext = {
+      rawInput: trimmed,
+      args: parsed.args,
+      panel: "agent",
+      clearInput: () => setInput(""),
+      openPanel: (panel: string) => {
+        window.dispatchEvent(
+          new CustomEvent("seren:open-panel", { detail: panel }),
+        );
+      },
+      showStatus: (message: string) => {
+        setCommandStatus(message);
+        setTimeout(() => setCommandStatus(null), 4000);
+      },
+    };
+
+    parsed.command.execute(ctx);
+    setCommandPopupIndex(0);
+    return true;
+  };
+
   const sendMessage = async () => {
     const trimmed = input().trim();
     const images = attachedImages();
     if ((!trimmed && images.length === 0) || !hasSession()) return;
+
+    // Check for slash commands first
+    if (trimmed.startsWith("/") && images.length === 0) {
+      if (executeSlashCommand(trimmed)) return;
+    }
 
     // If agent is prompting, queue the message instead
     if (isPrompting()) {
@@ -142,6 +193,38 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    // Slash command popup keyboard navigation
+    const isSlashInput = input().startsWith("/") && !input().includes(" ");
+    if (isSlashInput) {
+      const matches = getCompletions(input(), "agent");
+      if (matches.length > 0) {
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setCommandPopupIndex((i) => (i > 0 ? i - 1 : matches.length - 1));
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setCommandPopupIndex((i) => (i < matches.length - 1 ? i + 1 : 0));
+          return;
+        }
+        if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+          event.preventDefault();
+          const selected = matches[commandPopupIndex()];
+          if (selected) {
+            setInput(`/${selected.name} `);
+            setCommandPopupIndex(0);
+          }
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setInput("");
+          return;
+        }
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendMessage();
@@ -396,19 +479,39 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               onAttach={handleAttachImages}
               onRemove={handleRemoveImage}
             />
-            <textarea
-              ref={inputRef}
-              value={input()}
-              placeholder={
-                isPrompting()
-                  ? "Type to queue message..."
-                  : "Tell the agent what to do..."
-              }
-              class="w-full min-h-[80px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
-              onInput={(e) => setInput(e.currentTarget.value)}
-              onKeyDown={handleKeyDown}
-              disabled={!hasSession()}
-            />
+            <div class="relative">
+              <SlashCommandPopup
+                input={input()}
+                panel="agent"
+                selectedIndex={commandPopupIndex()}
+                onSelect={(cmd) => {
+                  setInput(`/${cmd.name} `);
+                  inputRef?.focus();
+                  setCommandPopupIndex(0);
+                }}
+              />
+              <textarea
+                ref={inputRef}
+                value={input()}
+                placeholder={
+                  isPrompting()
+                    ? "Type to queue message..."
+                    : "Tell the agent what to do… (type / for commands)"
+                }
+                class="w-full min-h-[80px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
+                onInput={(e) => {
+                  setInput(e.currentTarget.value);
+                  setCommandPopupIndex(0);
+                }}
+                onKeyDown={handleKeyDown}
+                disabled={!hasSession()}
+              />
+            </div>
+            <Show when={commandStatus()}>
+              <div class="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e] whitespace-pre-wrap">
+                {commandStatus()}
+              </div>
+            </Show>
             <div class="flex justify-between items-center">
               <div class="flex items-center gap-3">
                 <AgentSelector />

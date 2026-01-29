@@ -14,18 +14,18 @@ import {
 import { SignIn } from "@/components/auth/SignIn";
 import { CatalogPanel } from "@/components/catalog";
 import { ChatContent } from "@/components/chat/ChatContent";
+// MCP OAuth dialog removed - now using API key auth flow
+import { AboutDialog } from "@/components/common/AboutDialog";
 import { Header, type Panel } from "@/components/common/Header";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { ResizableLayout } from "@/components/common/ResizableLayout";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
-// MCP OAuth dialog removed - now using API key auth flow
-import { AboutDialog } from "@/components/common/AboutDialog";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
-import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { FileExplorer } from "@/components/sidebar/FileExplorer";
+import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
@@ -95,6 +95,18 @@ function App() {
       // Escape closes overlay panels
       setOverlayPanel(null);
     });
+
+    // Listen for slash command panel navigation
+    const onOpenPanel = ((e: CustomEvent) => {
+      const p = e.detail as string;
+      if (p === "editor") {
+        setShowEditor(true);
+        setOverlayPanel(null);
+      } else {
+        handlePanelChange(p as Panel);
+      }
+    }) as EventListener;
+    window.addEventListener("seren:open-panel", onOpenPanel);
   });
 
   onCleanup(() => {
