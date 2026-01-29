@@ -41,14 +41,18 @@ export const ProviderSettings: Component = () => {
 
   // Listen for OAuth callbacks
   onMount(async () => {
+    console.log("[ProviderSettings] Setting up OAuth callback listener");
     const unlisten = await listenForOAuthCallback(async (url) => {
+      console.log("[ProviderSettings] Received OAuth callback URL:", url);
       try {
         const urlObj = new URL(url);
         const code = urlObj.searchParams.get("code");
         const state = urlObj.searchParams.get("state");
         const error = urlObj.searchParams.get("error");
+        console.log("[ProviderSettings] Callback params - code:", !!code, "state:", !!state, "error:", error);
 
         if (error) {
+          console.log("[ProviderSettings] OAuth error received:", error);
           setOauthError(`OAuth error: ${error}`);
           setOauthInProgress(null);
           return;
