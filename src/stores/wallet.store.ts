@@ -4,9 +4,9 @@
 import { createStore } from "solid-js/store";
 import {
   claimDailyCredits,
-  fetchDailyEligibility,
-  type DailyClaimEligibilityResponse,
+  type DailyClaimEligibility,
   type DailyClaimResponse,
+  fetchDailyEligibility,
 } from "@/services/dailyClaim";
 import { fetchBalance, type WalletBalance } from "@/services/wallet";
 
@@ -30,7 +30,7 @@ interface WalletState {
   /** Track if auto-refresh is active (HMR-resistant) */
   autoRefreshActive: boolean;
   /** Daily claim eligibility data */
-  dailyClaim: DailyClaimEligibilityResponse | null;
+  dailyClaim: DailyClaimEligibility | null;
   /** Whether user dismissed the daily claim popup this session */
   dailyClaimDismissed: boolean;
   /** Whether daily claim check is in progress */

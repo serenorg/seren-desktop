@@ -7,12 +7,21 @@ import type {
   DailyClaimResponse,
 } from "@/api/generated/types.gen";
 
-export type { DailyClaimEligibilityResponse, DailyClaimResponse };
+export type { DailyClaimResponse };
+
+/**
+ * Extended eligibility response that includes optional claim amount.
+ * The claim_amount_usd field is added by the backend when available (see issue #226).
+ * Falls back gracefully when the field is absent.
+ */
+export type DailyClaimEligibility = DailyClaimEligibilityResponse & {
+  claim_amount_usd?: string | null;
+};
 
 /**
  * Check if the current user is eligible to claim daily credits.
  */
-export async function fetchDailyEligibility(): Promise<DailyClaimEligibilityResponse> {
+export async function fetchDailyEligibility(): Promise<DailyClaimEligibility> {
   const { data, error } = await checkDailyEligibility({
     throwOnError: false,
   });

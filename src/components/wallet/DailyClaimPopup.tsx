@@ -2,12 +2,12 @@
 // ABOUTME: Shows eligibility, handles claim action, and supports dismissal.
 
 import { type Component, createSignal, Show } from "solid-js";
+import type { DailyClaimResponse } from "@/services/dailyClaim";
 import {
   claimDaily,
   dismissDailyClaim,
   walletState,
 } from "@/stores/wallet.store";
-import type { DailyClaimResponse } from "@/services/dailyClaim";
 import "./DailyClaimPopup.css";
 
 /**
@@ -16,8 +16,9 @@ import "./DailyClaimPopup.css";
  */
 export const DailyClaimPopup: Component = () => {
   const [claiming, setClaiming] = createSignal(false);
-  const [claimResult, setClaimResult] =
-    createSignal<DailyClaimResponse | null>(null);
+  const [claimResult, setClaimResult] = createSignal<DailyClaimResponse | null>(
+    null,
+  );
   const [error, setError] = createSignal<string | null>(null);
 
   const shouldShow = () => {
@@ -106,8 +107,9 @@ export const DailyClaimPopup: Component = () => {
 
             <div class="daily-claim-body">
               <p class="daily-claim-message">
-                You have unclaimed SerenBucks today! Claim your free daily
-                credits to use with AI models and publisher tools.
+                {walletState.dailyClaim?.claim_amount_usd
+                  ? `You have ${walletState.dailyClaim.claim_amount_usd} unclaimed SerenBucks today! Claim your ${walletState.dailyClaim.claim_amount_usd} of SerenBucks to use with AI models and publisher tools.`
+                  : "You have unclaimed SerenBucks today! Claim your free daily credits to use with AI models and publisher tools."}
               </p>
               <Show when={walletState.dailyClaim}>
                 <p class="daily-claim-remaining">
