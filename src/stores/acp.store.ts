@@ -3,6 +3,7 @@
 
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
+import { settingsStore } from "@/stores/settings.store";
 import type {
   AcpEvent,
   AcpSessionInfo,
@@ -56,6 +57,11 @@ interface AcpState {
   error: string | null;
   /** CLI install progress message */
   installStatus: string | null;
+  /** Pending permission requests awaiting user response */
+  pendingPermissions: Record<
+    string,
+    import("@/services/acp").PermissionRequestEvent
+  >;
 }
 
 const [state, setState] = createStore<AcpState>({
@@ -67,6 +73,7 @@ const [state, setState] = createStore<AcpState>({
   isLoading: false,
   error: null,
   installStatus: null,
+  pendingPermissions: {},
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
@@ -115,6 +122,10 @@ export const acpStore = {
 
   get installStatus() {
     return state.installStatus;
+  },
+
+  get pendingPermissions() {
+    return state.pendingPermissions;
   },
 
   /**
@@ -236,7 +247,11 @@ export const acpStore = {
         setState("installStatus", null);
       }
 
-      const info = await acpService.spawnAgent(state.selectedAgentType, cwd);
+      const info = await acpService.spawnAgent(
+        state.selectedAgentType,
+        cwd,
+        settingsStore.settings.agentSandboxMode,
+      );
       console.log("[AcpStore] Spawn result:", info);
 
       // Create session state
@@ -434,6 +449,27 @@ export const acpStore = {
     }
   },
 
+  async respondToPermission(requestId: string, optionId: string) {
+    const permission = state.pendingPermissions[requestId];
+    if (!permission) return;
+
+    try {
+      await acpService.respondToPermission(
+        permission.sessionId,
+        requestId,
+        optionId,
+      );
+    } catch (error) {
+      console.error("Failed to respond to permission:", error);
+    }
+
+    setState("pendingPermissions", requestId, undefined!);
+  },
+
+  dismissPermission(requestId: string) {
+    setState("pendingPermissions", requestId, undefined!);
+  },
+
   // ============================================================================
   // UI State
   // ============================================================================
@@ -528,11 +564,12 @@ export const acpStore = {
         this.addErrorMessage(sessionId, event.data.error);
         break;
 
-      case "permissionRequest":
-        // For now, permissions are auto-approved in the backend
-        // In the future, we could show a UI prompt here
-        console.log("Permission requested:", event.data);
+      case "permissionRequest": {
+        const permEvent =
+          event.data as import("@/services/acp").PermissionRequestEvent;
+        setState("pendingPermissions", permEvent.requestId, permEvent);
         break;
+      }
     }
   },
 
@@ -647,10 +684,7 @@ export const acpStore = {
         content: session.streamingContent,
         timestamp: Date.now(),
       };
-      setState("sessions", sessionId, "messages", (msgs) => [
-        ...msgs,
-        message,
-      ]);
+      setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
       setState("sessions", sessionId, "streamingContent", "");
     }
   },

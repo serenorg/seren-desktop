@@ -22,6 +22,8 @@ mod acp;
 mod embedded_runtime;
 mod files;
 mod mcp;
+mod sandbox;
+mod terminal;
 mod oauth;
 mod sync;
 mod wallet;
@@ -546,6 +548,8 @@ pub fn run() {
             acp::acp_list_sessions,
             #[cfg(feature = "acp")]
             acp::acp_set_permission_mode,
+            #[cfg(feature = "acp")]
+            acp::acp_respond_to_permission,
             #[cfg(feature = "acp")]
             acp::acp_get_available_agents,
             #[cfg(feature = "acp")]

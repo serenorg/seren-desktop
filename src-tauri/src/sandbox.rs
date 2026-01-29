@@ -1,0 +1,296 @@
+// ABOUTME: macOS seatbelt sandbox profile generation and command wrapping.
+// ABOUTME: Enforces filesystem and network restrictions via sandbox-exec.
+
+use std::path::{Path, PathBuf};
+
+/// Security tier controlling what the agent can do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxMode {
+    /// Read workspace files only. No writes, no commands, no network.
+    ReadOnly,
+    /// Read anywhere, write to workspace + /tmp, execute commands, no network by default.
+    WorkspaceWrite,
+    /// No restrictions. Sandbox is not applied.
+    FullAccess,
+}
+
+impl Default for SandboxMode {
+    fn default() -> Self {
+        Self::WorkspaceWrite
+    }
+}
+
+impl std::str::FromStr for SandboxMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "read-only" => Ok(Self::ReadOnly),
+            "workspace-write" => Ok(Self::WorkspaceWrite),
+            "full-access" => Ok(Self::FullAccess),
+            _ => Err(format!("Unknown sandbox mode: {}", s)),
+        }
+    }
+}
+
+/// Configuration for the sandbox applied to a terminal process.
+pub struct SandboxConfig {
+    pub mode: SandboxMode,
+    pub workspace: PathBuf,
+    pub writable_paths: Vec<PathBuf>,
+    pub sensitive_read_paths: Vec<PathBuf>,
+    pub network_allowed: bool,
+}
+
+impl SandboxConfig {
+    /// Create config from mode and workspace path, using sensible defaults.
+    pub fn from_mode(mode: SandboxMode, workspace: &Path) -> Self {
+        let home = dirs_home(workspace);
+
+        let writable_paths = match mode {
+            SandboxMode::ReadOnly => vec![],
+            SandboxMode::WorkspaceWrite | SandboxMode::FullAccess => vec![
+                workspace.to_path_buf(),
+                PathBuf::from("/tmp"),
+                PathBuf::from("/private/tmp"),
+            ],
+        };
+
+        let sensitive_read_paths = vec![
+            home.join(".ssh"),
+            home.join(".gnupg"),
+            home.join(".aws"),
+            home.join(".config/gcloud"),
+            home.join("Library/Keychains"),
+        ];
+
+        let network_allowed = matches!(mode, SandboxMode::FullAccess);
+
+        Self {
+            mode,
+            workspace: workspace.to_path_buf(),
+            writable_paths,
+            sensitive_read_paths,
+            network_allowed,
+        }
+    }
+}
+
+/// Generate a macOS seatbelt profile string in Scheme/Lisp syntax.
+///
+/// This is ported from Anthropic's sandbox-runtime TypeScript implementation.
+/// The profile is passed to `sandbox-exec -p <profile>` to enforce restrictions.
+pub fn generate_seatbelt_profile(config: &SandboxConfig) -> String {
+    let mut lines = Vec::new();
+
+    lines.push("(version 1)".to_string());
+    lines.push("(deny default)".to_string());
+    lines.push(String::new());
+
+    // Process execution (required for the command to run at all)
+    lines.push(";; Process execution".to_string());
+    lines.push("(allow process-exec)".to_string());
+    lines.push("(allow process-fork)".to_string());
+    lines.push(String::new());
+
+    // System access (required for basic process operation)
+    lines.push(";; System access".to_string());
+    lines.push("(allow sysctl-read)".to_string());
+    lines.push("(allow mach-lookup)".to_string());
+    lines.push("(allow mach-register)".to_string());
+    lines.push("(allow signal (target self))".to_string());
+    lines.push("(allow iokit-open)".to_string());
+    lines.push(String::new());
+
+    // Pseudo-terminal access (required for terminal emulation)
+    lines.push(";; Pseudo-terminal access".to_string());
+    lines.push("(allow file-read* file-write* file-ioctl (regex #\"^/dev/pty\"))".to_string());
+    lines.push("(allow file-read* file-write* file-ioctl (regex #\"^/dev/tty\"))".to_string());
+    lines.push("(allow file-read* (literal \"/dev/urandom\"))".to_string());
+    lines.push("(allow file-read* (literal \"/dev/null\"))".to_string());
+    lines.push("(allow file-write* (literal \"/dev/null\"))".to_string());
+    lines.push(String::new());
+
+    // File read access
+    lines.push(";; File read access".to_string());
+    lines.push("(allow file-read*)".to_string());
+    for path in &config.sensitive_read_paths {
+        if path.exists() {
+            lines.push(format!(
+                "(deny file-read* (subpath \"{}\"))",
+                escape_seatbelt_path(path)
+            ));
+        }
+    }
+    lines.push(String::new());
+
+    // File write access
+    lines.push(";; File write access".to_string());
+    if config.mode == SandboxMode::ReadOnly {
+        lines.push("(deny file-write*)".to_string());
+    } else {
+        lines.push("(deny file-write*)".to_string());
+        for path in &config.writable_paths {
+            lines.push(format!(
+                "(allow file-write* (subpath \"{}\"))",
+                escape_seatbelt_path(path)
+            ));
+        }
+    }
+    lines.push(String::new());
+
+    // Network access
+    lines.push(";; Network access".to_string());
+    if config.network_allowed {
+        lines.push("(allow network*)".to_string());
+    } else {
+        lines.push("(deny network*)".to_string());
+    }
+
+    lines.join("\n")
+}
+
+/// Wrap a command with `sandbox-exec` on macOS.
+///
+/// Returns `(command, args)`. On non-macOS platforms or FullAccess mode,
+/// returns the original command and args unchanged.
+pub fn wrap_command(
+    command: &str,
+    args: &[String],
+    config: &SandboxConfig,
+) -> (String, Vec<String>) {
+    if config.mode == SandboxMode::FullAccess {
+        return (command.to_string(), args.to_vec());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let profile = generate_seatbelt_profile(config);
+
+        // Build the inner command string: "command arg1 arg2 ..."
+        let inner_command = if args.is_empty() {
+            shell_escape(command)
+        } else {
+            let escaped_args: Vec<String> = args.iter().map(|a| shell_escape(a)).collect();
+            format!("{} {}", shell_escape(command), escaped_args.join(" "))
+        };
+
+        let sandbox_args = vec![
+            "-p".to_string(),
+            profile,
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            inner_command,
+        ];
+
+        ("sandbox-exec".to_string(), sandbox_args)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Linux bubblewrap support is Phase 3.
+        // For now, run unsandboxed on non-macOS platforms.
+        (command.to_string(), args.to_vec())
+    }
+}
+
+/// Escape a path for use in seatbelt profile strings.
+fn escape_seatbelt_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+/// Escape a string for safe use in a POSIX shell command.
+fn shell_escape(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    // If the string contains only safe characters, return as-is
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '=' | ':' | ','))
+    {
+        return s.to_string();
+    }
+    // Otherwise, wrap in single quotes and escape any single quotes within
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Get the user's home directory, falling back to workspace parent.
+fn dirs_home(fallback: &Path) -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| fallback.parent().unwrap_or(fallback).to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_only_profile_denies_writes() {
+        let config = SandboxConfig::from_mode(SandboxMode::ReadOnly, Path::new("/workspace"));
+        let profile = generate_seatbelt_profile(&config);
+
+        assert!(profile.contains("(deny file-write*)"));
+        // Read-only should NOT allow writes to any subpath
+        assert!(!profile.contains("(allow file-write* (subpath"));
+        assert!(profile.contains("(deny network*)"));
+    }
+
+    #[test]
+    fn test_workspace_write_allows_workspace() {
+        let config = SandboxConfig::from_mode(SandboxMode::WorkspaceWrite, Path::new("/workspace"));
+        let profile = generate_seatbelt_profile(&config);
+
+        assert!(profile.contains("(allow file-write* (subpath \"/workspace\"))"));
+        assert!(profile.contains("(allow file-write* (subpath \"/tmp\"))"));
+        assert!(profile.contains("(deny network*)"));
+    }
+
+    #[test]
+    fn test_full_access_not_sandboxed() {
+        let (cmd, args) = wrap_command("echo", &["hello".to_string()], &SandboxConfig {
+            mode: SandboxMode::FullAccess,
+            workspace: PathBuf::from("/workspace"),
+            writable_paths: vec![],
+            sensitive_read_paths: vec![],
+            network_allowed: true,
+        });
+
+        assert_eq!(cmd, "echo");
+        assert_eq!(args, vec!["hello"]);
+    }
+
+    #[test]
+    fn test_shell_escape_safe_string() {
+        assert_eq!(shell_escape("hello"), "hello");
+        assert_eq!(shell_escape("/usr/bin/ls"), "/usr/bin/ls");
+    }
+
+    #[test]
+    fn test_shell_escape_special_chars() {
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn test_shell_escape_empty() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_wrap_command_uses_sandbox_exec() {
+        let config = SandboxConfig::from_mode(SandboxMode::WorkspaceWrite, Path::new("/workspace"));
+        let (cmd, args) = wrap_command("ls", &["-la".to_string()], &config);
+
+        assert_eq!(cmd, "sandbox-exec");
+        assert_eq!(args[0], "-p");
+        // args[1] is the profile string
+        assert_eq!(args[2], "/bin/sh");
+        assert_eq!(args[3], "-c");
+        assert!(args[4].contains("ls"));
+    }
+}

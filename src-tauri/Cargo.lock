@@ -6195,6 +6195,7 @@ dependencies = [
  "html2md",
  "jiff",
  "lazy_static",
+ "libc",
  "notify",
  "rand 0.9.2",
  "regex",

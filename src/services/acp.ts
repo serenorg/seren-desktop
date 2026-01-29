@@ -78,10 +78,17 @@ export interface PromptCompleteEvent {
   stopReason: string;
 }
 
+export interface PermissionOption {
+  optionId: string;
+  label?: string;
+  description?: string;
+}
+
 export interface PermissionRequestEvent {
   sessionId: string;
+  requestId: string;
   toolCall: unknown;
-  options: unknown[];
+  options: PermissionOption[];
 }
 
 export interface SessionStatusEvent {
@@ -120,10 +127,12 @@ export type AcpEvent =
 export async function spawnAgent(
   agentType: AgentType,
   cwd: string,
+  sandboxMode?: string,
 ): Promise<AcpSessionInfo> {
   return invoke<AcpSessionInfo>("acp_spawn", {
     agentType,
     cwd,
+    sandboxMode: sandboxMode ?? null,
   });
 }
 
@@ -167,6 +176,21 @@ export async function setPermissionMode(
   mode: string,
 ): Promise<void> {
   return invoke("acp_set_permission_mode", { sessionId, mode });
+}
+
+/**
+ * Respond to a permission request from the agent.
+ */
+export async function respondToPermission(
+  sessionId: string,
+  requestId: string,
+  optionId: string,
+): Promise<void> {
+  return invoke("acp_respond_to_permission", {
+    sessionId,
+    requestId,
+    optionId,
+  });
 }
 
 /**

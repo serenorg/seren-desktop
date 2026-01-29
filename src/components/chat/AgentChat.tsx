@@ -11,6 +11,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
@@ -389,6 +390,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             }
           >
             <For each={acpStore.messages}>{renderMessage}</For>
+
+            {/* Permission request dialogs */}
+            <For each={Object.values(acpStore.pendingPermissions)}>
+              {(perm) => (
+                <div class="px-5 py-2">
+                  <AcpPermissionDialog permission={perm} />
+                </div>
+              )}
+            </For>
 
             {/* Loading placeholder while waiting for first chunk */}
             <Show
