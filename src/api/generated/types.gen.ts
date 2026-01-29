@@ -13414,202 +13414,6 @@ export type GetTransactionsResponses = {
 
 export type GetTransactionsResponse = GetTransactionsResponses[keyof GetTransactionsResponses];
 
-export type ListConnectionsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/oauth/connections';
-};
-
-export type ListConnectionsResponses = {
-    /**
-     * List of user's OAuth connections
-     */
-    200: ConnectionsResponse;
-};
-
-export type ListConnectionsResponse = ListConnectionsResponses[keyof ListConnectionsResponses];
-
-export type RevokeConnectionByIdData = {
-    body?: never;
-    path: {
-        /**
-         * OAuth provider UUID to disconnect
-         */
-        provider_id: string;
-    };
-    query?: never;
-    url: '/api/oauth/connections/providers/{provider_id}';
-};
-
-export type RevokeConnectionByIdErrors = {
-    /**
-     * Connection not found
-     */
-    404: unknown;
-};
-
-export type RevokeConnectionByIdResponses = {
-    /**
-     * Connection revoked successfully
-     */
-    200: RevokeResponse;
-};
-
-export type RevokeConnectionByIdResponse = RevokeConnectionByIdResponses[keyof RevokeConnectionByIdResponses];
-
-export type RevokeConnectionData = {
-    body?: never;
-    path: {
-        /**
-         * OAuth provider slug to disconnect
-         */
-        provider: string;
-    };
-    query?: never;
-    url: '/api/oauth/connections/{provider}';
-};
-
-export type RevokeConnectionErrors = {
-    /**
-     * Connection not found
-     */
-    404: unknown;
-};
-
-export type RevokeConnectionResponses = {
-    /**
-     * Connection revoked successfully
-     */
-    200: RevokeResponse;
-};
-
-export type RevokeConnectionResponse = RevokeConnectionResponses[keyof RevokeConnectionResponses];
-
-export type ListProvidersData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/oauth/providers';
-};
-
-export type ListProvidersResponses = {
-    /**
-     * List of available OAuth providers
-     */
-    200: ProvidersResponse;
-};
-
-export type ListProvidersResponse = ListProvidersResponses[keyof ListProvidersResponses];
-
-export type InitiateOauthByIdData = {
-    body?: never;
-    path: {
-        /**
-         * OAuth provider UUID
-         */
-        provider_id: string;
-    };
-    query?: {
-        /**
-         * Where to redirect after OAuth completes
-         */
-        redirect_uri?: string | null;
-    };
-    url: '/api/oauth/providers/{provider_id}/authorize';
-};
-
-export type InitiateOauthByIdErrors = {
-    /**
-     * Provider not found
-     */
-    404: unknown;
-};
-
-export type OauthCallbackByIdData = {
-    body?: never;
-    path: {
-        /**
-         * OAuth provider UUID
-         */
-        provider_id: string;
-    };
-    query: {
-        /**
-         * Authorization code from provider
-         */
-        code: string;
-        /**
-         * State parameter for CSRF verification
-         */
-        state: string;
-    };
-    url: '/api/oauth/providers/{provider_id}/callback';
-};
-
-export type OauthCallbackByIdErrors = {
-    /**
-     * Invalid callback parameters
-     */
-    400: unknown;
-    /**
-     * Provider not found
-     */
-    404: unknown;
-};
-
-export type InitiateOauthData = {
-    body?: never;
-    path: {
-        /**
-         * OAuth provider slug (e.g., 'neon')
-         */
-        provider: string;
-    };
-    query?: {
-        /**
-         * Where to redirect after OAuth completes
-         */
-        redirect_uri?: string | null;
-    };
-    url: '/api/oauth/{provider}/authorize';
-};
-
-export type InitiateOauthErrors = {
-    /**
-     * Provider not found
-     */
-    404: unknown;
-};
-
-export type OauthCallbackData = {
-    body?: never;
-    path: {
-        /**
-         * OAuth provider slug
-         */
-        provider: string;
-    };
-    query: {
-        /**
-         * Authorization code from provider
-         */
-        code: string;
-        /**
-         * State parameter for CSRF verification
-         */
-        state: string;
-    };
-    url: '/api/oauth/{provider}/callback';
-};
-
-export type OauthCallbackErrors = {
-    /**
-     * Invalid callback parameters
-     */
-    400: unknown;
-};
-
 export type ForgotPasswordData = {
     body: ForgotPasswordRequest;
     path?: never;
@@ -14049,6 +13853,202 @@ export type ListAllDatabasesResponses = {
 
 export type ListAllDatabasesResponse = ListAllDatabasesResponses[keyof ListAllDatabasesResponses];
 
+export type ListConnectionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/oauth/connections';
+};
+
+export type ListConnectionsResponses = {
+    /**
+     * List of user's OAuth connections
+     */
+    200: ConnectionsResponse;
+};
+
+export type ListConnectionsResponse = ListConnectionsResponses[keyof ListConnectionsResponses];
+
+export type RevokeConnectionByIdData = {
+    body?: never;
+    path: {
+        /**
+         * OAuth provider UUID to disconnect
+         */
+        provider_id: string;
+    };
+    query?: never;
+    url: '/oauth/connections/providers/{provider_id}';
+};
+
+export type RevokeConnectionByIdErrors = {
+    /**
+     * Connection not found
+     */
+    404: unknown;
+};
+
+export type RevokeConnectionByIdResponses = {
+    /**
+     * Connection revoked successfully
+     */
+    200: RevokeResponse;
+};
+
+export type RevokeConnectionByIdResponse = RevokeConnectionByIdResponses[keyof RevokeConnectionByIdResponses];
+
+export type RevokeConnectionData = {
+    body?: never;
+    path: {
+        /**
+         * OAuth provider slug to disconnect
+         */
+        provider: string;
+    };
+    query?: never;
+    url: '/oauth/connections/{provider}';
+};
+
+export type RevokeConnectionErrors = {
+    /**
+     * Connection not found
+     */
+    404: unknown;
+};
+
+export type RevokeConnectionResponses = {
+    /**
+     * Connection revoked successfully
+     */
+    200: RevokeResponse;
+};
+
+export type RevokeConnectionResponse = RevokeConnectionResponses[keyof RevokeConnectionResponses];
+
+export type ListProvidersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/oauth/providers';
+};
+
+export type ListProvidersResponses = {
+    /**
+     * List of available OAuth providers
+     */
+    200: ProvidersResponse;
+};
+
+export type ListProvidersResponse = ListProvidersResponses[keyof ListProvidersResponses];
+
+export type InitiateOauthByIdData = {
+    body?: never;
+    path: {
+        /**
+         * OAuth provider UUID
+         */
+        provider_id: string;
+    };
+    query?: {
+        /**
+         * Where to redirect after OAuth completes
+         */
+        redirect_uri?: string | null;
+    };
+    url: '/oauth/providers/{provider_id}/authorize';
+};
+
+export type InitiateOauthByIdErrors = {
+    /**
+     * Provider not found
+     */
+    404: unknown;
+};
+
+export type OauthCallbackByIdData = {
+    body?: never;
+    path: {
+        /**
+         * OAuth provider UUID
+         */
+        provider_id: string;
+    };
+    query: {
+        /**
+         * Authorization code from provider
+         */
+        code: string;
+        /**
+         * State parameter for CSRF verification
+         */
+        state: string;
+    };
+    url: '/oauth/providers/{provider_id}/callback';
+};
+
+export type OauthCallbackByIdErrors = {
+    /**
+     * Invalid callback parameters
+     */
+    400: unknown;
+    /**
+     * Provider not found
+     */
+    404: unknown;
+};
+
+export type InitiateOauthData = {
+    body?: never;
+    path: {
+        /**
+         * OAuth provider slug (e.g., 'neon')
+         */
+        provider: string;
+    };
+    query?: {
+        /**
+         * Where to redirect after OAuth completes
+         */
+        redirect_uri?: string | null;
+    };
+    url: '/oauth/{provider}/authorize';
+};
+
+export type InitiateOauthErrors = {
+    /**
+     * Provider not found
+     */
+    404: unknown;
+};
+
+export type OauthCallbackData = {
+    body?: never;
+    path: {
+        /**
+         * OAuth provider slug
+         */
+        provider: string;
+    };
+    query: {
+        /**
+         * Authorization code from provider
+         */
+        code: string;
+        /**
+         * State parameter for CSRF verification
+         */
+        state: string;
+    };
+    url: '/oauth/{provider}/callback';
+};
+
+export type OauthCallbackErrors = {
+    /**
+     * Invalid callback parameters
+     */
+    400: unknown;
+};
+
 export type ListOrganizationsData = {
     body?: never;
     path?: never;
@@ -14071,6 +14071,94 @@ export type ListOrganizationsResponses = {
 };
 
 export type ListOrganizationsResponse = ListOrganizationsResponses[keyof ListOrganizationsResponses];
+
+export type ListDefaultOrgApiKeysData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/organizations/default/api-keys';
+};
+
+export type ListDefaultOrgApiKeysErrors = {
+    /**
+     * User has no organization
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type ListDefaultOrgApiKeysResponses = {
+    /**
+     * List of API keys
+     */
+    200: ApiKeysResponse;
+};
+
+export type ListDefaultOrgApiKeysResponse = ListDefaultOrgApiKeysResponses[keyof ListDefaultOrgApiKeysResponses];
+
+export type CreateDefaultOrgApiKeyData = {
+    body: CreateApiKeyRequest;
+    path?: never;
+    query?: never;
+    url: '/organizations/default/api-keys';
+};
+
+export type CreateDefaultOrgApiKeyErrors = {
+    /**
+     * User has no organization
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type CreateDefaultOrgApiKeyResponses = {
+    /**
+     * API key created
+     */
+    201: ApiKeyCreatedResponse;
+};
+
+export type CreateDefaultOrgApiKeyResponse = CreateDefaultOrgApiKeyResponses[keyof CreateDefaultOrgApiKeyResponses];
+
+export type RevokeDefaultOrgApiKeyData = {
+    body?: never;
+    path: {
+        /**
+         * API key ID
+         */
+        key_id: string;
+    };
+    query?: never;
+    url: '/organizations/default/api-keys/{key_id}';
+};
+
+export type RevokeDefaultOrgApiKeyErrors = {
+    /**
+     * User has no organization
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * API key not found
+     */
+    404: unknown;
+};
+
+export type RevokeDefaultOrgApiKeyResponses = {
+    /**
+     * API key revoked
+     */
+    200: unknown;
+};
 
 export type GetPublisherTemplateAnalyticsData = {
     body?: never;

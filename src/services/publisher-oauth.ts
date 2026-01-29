@@ -20,7 +20,7 @@ export async function connectPublisher(providerSlug: string): Promise<void> {
   console.log(`[PublisherOAuth] Starting OAuth flow for ${providerSlug}`);
 
   const redirectUri = "seren://oauth/callback";
-  const authUrl = `${apiBase}/api/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const authUrl = `${apiBase}/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
 
   const token = await getToken();
   if (!token) {
