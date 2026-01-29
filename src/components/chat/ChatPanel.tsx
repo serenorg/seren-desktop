@@ -10,6 +10,7 @@ import {
   Show,
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
+import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { FileTree } from "@/components/sidebar/FileTree";
 import { escapeHtml } from "@/lib/escape-html";
 import {
@@ -855,13 +856,23 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                             : "Ctrl+Enter to send"}
                         </span>
                       </div>
-                      <button
-                        type="submit"
-                        class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-md text-[13px] font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
-                        disabled={chatStore.isLoading}
-                      >
-                        Send
-                      </button>
+                      <div class="flex items-center gap-2">
+                        <VoiceInputButton
+                          onTranscript={(text) => {
+                            setInput((prev) =>
+                              prev ? `${prev} ${text}` : text,
+                            );
+                            inputRef?.focus();
+                          }}
+                        />
+                        <button
+                          type="submit"
+                          class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-md text-[13px] font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
+                          disabled={chatStore.isLoading}
+                        >
+                          Send
+                        </button>
+                      </div>
                     </div>
                   </form>
                 </div>
