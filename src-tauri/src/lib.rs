@@ -462,6 +462,7 @@ pub fn run() {
             clear_provider_key,
             get_configured_providers,
             files::read_file,
+            files::read_file_base64,
             files::write_file,
             files::list_directory,
             files::path_exists,

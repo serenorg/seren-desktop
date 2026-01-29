@@ -1,6 +1,7 @@
 // ABOUTME: File system operations for the editor.
 // ABOUTME: Provides commands for reading, writing, and listing files/directories.
 
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -16,6 +17,13 @@ pub struct FileEntry {
 #[tauri::command]
 pub fn read_file(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+}
+
+/// Read a file and return its contents as base64.
+#[tauri::command]
+pub fn read_file_base64(path: String) -> Result<String, String> {
+    let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+    Ok(STANDARD.encode(&bytes))
 }
 
 /// Write content to a file.
