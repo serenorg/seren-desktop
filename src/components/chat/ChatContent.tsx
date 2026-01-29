@@ -710,11 +710,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     chatStore.messages.length > 0 || chatStore.compactedSummary
                   }
                   fallback={
-                    <div class="flex-1 flex flex-col items-center justify-center p-6 text-[#8b949e]">
-                      <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">
+                    <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
+                      <h3 class="m-0 mb-3 text-lg font-medium text-[#e6edf3]">
                         Start a conversation
                       </h3>
-                      <p class="m-0 text-sm text-center max-w-[240px]">
+                      <p class="m-0 text-sm text-center max-w-[280px] leading-relaxed">
                         Ask questions about code or request help with tasks.
                       </p>
                     </div>
@@ -723,7 +723,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   <For each={chatStore.messages}>
                     {(message) => (
                       <article
-                        class={`px-4 py-3 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
+                        class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
                       >
                         <Show
                           when={message.images && message.images.length > 0}
@@ -731,7 +731,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                           <MessageImages images={message.images ?? []} />
                         </Show>
                         <div
-                          class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-2 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-2 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_a]:text-[#58a6ff]"
+                          class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-[#f0f6fc] [&_h1]:border-b [&_h1]:border-[#21262d] [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-[#f0f6fc] [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-[#f0f6fc] [&_code]:bg-[#1c2333] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-[#f0f6fc] [&_strong]:font-semibold"
                           innerHTML={
                             message.role === "assistant"
                               ? renderMarkdown(message.content)
@@ -834,7 +834,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 )}
               </Show>
 
-              <div class="shrink-0 p-3 border-t border-[#21262d] bg-[#161b22]">
+              <div class="shrink-0 px-4 py-3.5 border-t border-[#21262d] bg-[#161b22]">
                 <form
                   class="flex flex-col gap-2"
                   onSubmit={(event) => {
@@ -895,7 +895,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                           ? "Type to queue message..."
                           : "Ask Seren anything… (type / for commands)"
                       }
-                      class="w-full min-h-[60px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-2 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58]"
+                      class="w-full min-h-[72px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-xl text-[#e6edf3] px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-[#58a6ff] focus:shadow-[0_0_0_3px_rgba(88,166,255,0.15)] placeholder:text-[#484f58]"
                       onInput={(event) => {
                         setInput(event.currentTarget.value);
                         setCommandPopupIndex(0);
@@ -1032,7 +1032,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       />
                       <button
                         type="submit"
-                        class="bg-[#238636] text-white border-none px-3 py-1 rounded text-xs font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58]"
+                        class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#2ea043] hover:shadow-[0_2px_8px_rgba(35,134,54,0.3)] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:shadow-none"
                         disabled={
                           !input().trim() && attachedImages().length === 0
                         }

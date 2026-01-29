@@ -14,9 +14,9 @@ export const ThinkingToggle: Component = () => {
   return (
     <button
       type="button"
-      class={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors border ${
+      class={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all border ${
         isEnabled()
-          ? "bg-[#238636]/20 border-[#238636] text-[#3fb950]"
+          ? "bg-[#58a6ff]/10 border-[#58a6ff]/30 text-[#58a6ff]"
           : "bg-transparent border-[#30363d] text-[#8b949e] hover:border-[#484f58] hover:text-[#e6edf3]"
       }`}
       onClick={toggle}
