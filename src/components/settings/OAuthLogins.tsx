@@ -86,12 +86,16 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
 
   // Listen for OAuth callbacks
   onMount(async () => {
+    console.log("[OAuthLogins] Setting up OAuth callback listener");
     const unlisten = await listenForOAuthCallback(async (url) => {
+      console.log("[OAuthLogins] Received OAuth callback URL:", url);
       try {
         const urlObj = new URL(url);
+        console.log("[OAuthLogins] Parsed URL - origin:", urlObj.origin, "pathname:", urlObj.pathname, "search:", urlObj.search);
         const errorParam = urlObj.searchParams.get("error");
 
         if (errorParam) {
+          console.log("[OAuthLogins] OAuth error received:", errorParam);
           if (connectTimeout) clearTimeout(connectTimeout);
           setError(`OAuth error: ${errorParam}`);
           setConnectingProvider(null);
@@ -100,11 +104,14 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
 
         // Refresh connections after successful OAuth callback
         // The Gateway handles token exchange, we just need to refresh
+        console.log("[OAuthLogins] Refreshing connections after successful OAuth");
         await refetchConnections();
+        console.log("[OAuthLogins] Connections refreshed successfully");
         if (connectTimeout) clearTimeout(connectTimeout);
         setConnectingProvider(null);
         setError(null);
       } catch (err) {
+        console.error("[OAuthLogins] Error processing OAuth callback:", err);
         if (connectTimeout) clearTimeout(connectTimeout);
         setError(err instanceof Error ? err.message : "OAuth callback failed");
         setConnectingProvider(null);
@@ -127,6 +134,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
   let connectTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const handleConnect = async (provider: PublisherOAuthProviderResponse) => {
+    console.log("[OAuthLogins] Starting OAuth flow for provider:", provider.slug);
     setError(null);
     setConnectingProvider(provider.slug);
 

@@ -486,11 +486,23 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
+                    println!("[Deep Link] Received event: {:?}", event);
                     let urls = event.urls();
+                    println!("[Deep Link] URLs count: {}", urls.len());
                     for url in urls {
+                        println!("[Deep Link] Processing URL: {}", url);
+                        println!("[Deep Link] - scheme: {}", url.scheme());
+                        println!("[Deep Link] - path: {}", url.path());
                         if url.scheme() == "seren" && url.path() == "/oauth/callback" {
+                            println!("[Deep Link] Match! Emitting oauth-callback event with URL: {}", url.to_string());
                             // Emit event to frontend with OAuth callback data
-                            let _ = handle.emit("oauth-callback", url.to_string());
+                            if let Err(e) = handle.emit("oauth-callback", url.to_string()) {
+                                eprintln!("[Deep Link] Failed to emit oauth-callback event: {}", e);
+                            } else {
+                                println!("[Deep Link] Successfully emitted oauth-callback event");
+                            }
+                        } else {
+                            println!("[Deep Link] No match - scheme: {}, path: {}", url.scheme(), url.path());
                         }
                     }
                 });
