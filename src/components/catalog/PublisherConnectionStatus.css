@@ -1,0 +1,102 @@
+.publisher-connection-status {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.connection-error {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: rgba(248, 81, 73, 0.1);
+  color: #f85149;
+  font-size: 13px;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.connection-status.connected .status-indicator {
+  background: #3fb950;
+  box-shadow: 0 0 8px rgba(63, 185, 80, 0.5);
+}
+
+.connection-status.disconnected .status-indicator {
+  background: #6e7681;
+}
+
+.connection-status.loading .status-indicator {
+  background: #58a6ff;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.status-text {
+  flex: 1;
+  color: var(--text-muted-foreground);
+}
+
+.btn-connect,
+.btn-disconnect {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-connect {
+  background: #238636;
+  color: white;
+}
+
+.btn-connect:hover:not(:disabled) {
+  background: #2ea043;
+}
+
+.btn-disconnect {
+  background: rgba(248, 81, 73, 0.1);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+
+.btn-disconnect:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.2);
+  border-color: #f85149;
+}
+
+.btn-connect:disabled,
+.btn-disconnect:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.loading-spinner.small {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
