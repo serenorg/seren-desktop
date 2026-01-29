@@ -160,6 +160,8 @@ struct AcpSession {
     command_tx: Option<mpsc::Sender<AcpCommand>>,
     /// Handle to the worker thread
     _worker_handle: Option<thread::JoinHandle<()>>,
+    /// Pending permission requests awaiting user response (shared with ClientDelegate)
+    pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
 }
 
 /// State for managing ACP sessions
@@ -199,6 +201,9 @@ struct ClientDelegate {
     app: AppHandle,
     session_id: String,
     cwd: String,
+    terminals: Arc<Mutex<crate::terminal::TerminalManager>>,
+    sandbox_mode: crate::sandbox::SandboxMode,
+    pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -207,27 +212,55 @@ impl Client for ClientDelegate {
         &self,
         args: RequestPermissionRequest,
     ) -> AcpResult<RequestPermissionResponse> {
-        // Emit permission request to frontend
+        let request_id = Uuid::new_v4().to_string();
+        let (response_tx, response_rx) = oneshot::channel::<String>();
+
+        // Store the response channel so the frontend can send back a decision
+        self.pending_permissions
+            .lock()
+            .await
+            .insert(request_id.clone(), response_tx);
+
+        // Emit permission request to frontend with request_id for correlation
         let _ = self.app.emit(
             events::PERMISSION_REQUEST,
             serde_json::json!({
                 "sessionId": self.session_id,
+                "requestId": request_id,
                 "toolCall": serde_json::to_value(&args.tool_call).ok(),
                 "options": serde_json::to_value(&args.options).ok(),
             }),
         );
 
-        // For now, auto-approve with the first option if available
-        // In a full implementation, we'd wait for user response
-        let option_id = args
-            .options
-            .first()
-            .map(|o| o.option_id.clone())
-            .unwrap_or_else(|| agent_client_protocol::PermissionOptionId::new("allow_once"));
+        // Wait for user response (5-minute timeout)
+        let option_id_str =
+            match tokio::time::timeout(std::time::Duration::from_secs(300), response_rx).await {
+                Ok(Ok(id)) => id,
+                Ok(Err(_)) => {
+                    // Channel dropped — permission request was dismissed
+                    self.pending_permissions.lock().await.remove(&request_id);
+                    return Err(agent_client_protocol::Error::internal_error()
+                        .data(serde_json::Value::String(
+                            "Permission request cancelled".into(),
+                        )));
+                }
+                Err(_) => {
+                    // Timeout
+                    self.pending_permissions.lock().await.remove(&request_id);
+                    return Err(agent_client_protocol::Error::internal_error()
+                        .data(serde_json::Value::String(
+                            "Permission request timed out".into(),
+                        )));
+                }
+            };
+
+        self.pending_permissions.lock().await.remove(&request_id);
 
         Ok(RequestPermissionResponse::new(
             agent_client_protocol::RequestPermissionOutcome::Selected(
-                agent_client_protocol::SelectedPermissionOutcome::new(option_id),
+                agent_client_protocol::SelectedPermissionOutcome::new(
+                    agent_client_protocol::PermissionOptionId::new(option_id_str),
+                ),
             ),
         ))
     }
@@ -257,40 +290,112 @@ impl Client for ClientDelegate {
 
     async fn create_terminal(
         &self,
-        _args: CreateTerminalRequest,
+        args: CreateTerminalRequest,
     ) -> AcpResult<CreateTerminalResponse> {
-        // Terminal creation not yet implemented
-        Err(agent_client_protocol::Error::internal_error()
-            .data(serde_json::Value::String("Terminal not implemented".into())))
+        let terminal_id = Uuid::new_v4().to_string();
+        let cwd_path = args
+            .cwd
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new(&self.cwd));
+        let sandbox_config =
+            crate::sandbox::SandboxConfig::from_mode(self.sandbox_mode, cwd_path);
+
+        // Build env vars from request
+        let env_vars: Vec<(String, String)> = args
+            .env
+            .iter()
+            .map(|e| (e.name.clone(), e.value.clone()))
+            .collect();
+
+        // Get embedded runtime PATH
+        let env_path = crate::embedded_runtime::get_embedded_path().to_string();
+
+        let mut terminals = self.terminals.lock().await;
+        terminals
+            .create(
+                terminal_id.clone(),
+                &args.command,
+                &args.args,
+                &env_vars,
+                cwd_path,
+                args.output_byte_limit,
+                &sandbox_config,
+                &env_path,
+            )
+            .await
+            .map_err(|e| {
+                agent_client_protocol::Error::internal_error()
+                    .data(serde_json::Value::String(e))
+            })?;
+
+        Ok(CreateTerminalResponse::new(
+            agent_client_protocol::TerminalId::new(terminal_id),
+        ))
     }
 
     async fn terminal_output(
         &self,
-        _args: TerminalOutputRequest,
+        args: TerminalOutputRequest,
     ) -> AcpResult<TerminalOutputResponse> {
-        Err(agent_client_protocol::Error::internal_error()
-            .data(serde_json::Value::String("Terminal not implemented".into())))
+        let terminals = self.terminals.lock().await;
+        let (output, truncated, exit_status) =
+            terminals.get_output(&args.terminal_id.0).await.map_err(|e| {
+                agent_client_protocol::Error::internal_error()
+                    .data(serde_json::Value::String(e))
+            })?;
+
+        let mut response = TerminalOutputResponse::new(output, truncated);
+        if let Some(status) = exit_status {
+            let mut acp_status = agent_client_protocol::TerminalExitStatus::new();
+            if let Some(code) = status.exit_code {
+                acp_status = acp_status.exit_code(code);
+            }
+            if let Some(sig) = status.signal {
+                acp_status = acp_status.signal(sig);
+            }
+            response = response.exit_status(acp_status);
+        }
+        Ok(response)
     }
 
     async fn release_terminal(
         &self,
-        _args: ReleaseTerminalRequest,
+        args: ReleaseTerminalRequest,
     ) -> AcpResult<ReleaseTerminalResponse> {
+        let mut terminals = self.terminals.lock().await;
+        let _ = terminals.release(&args.terminal_id.0);
         Ok(ReleaseTerminalResponse::default())
     }
 
     async fn wait_for_terminal_exit(
         &self,
-        _args: WaitForTerminalExitRequest,
+        args: WaitForTerminalExitRequest,
     ) -> AcpResult<WaitForTerminalExitResponse> {
-        Err(agent_client_protocol::Error::internal_error()
-            .data(serde_json::Value::String("Terminal not implemented".into())))
+        let terminals = self.terminals.lock().await;
+        let status = terminals
+            .wait_for_exit(&args.terminal_id.0)
+            .await
+            .map_err(|e| {
+                agent_client_protocol::Error::internal_error()
+                    .data(serde_json::Value::String(e))
+            })?;
+
+        let mut acp_status = agent_client_protocol::TerminalExitStatus::new();
+        if let Some(code) = status.exit_code {
+            acp_status = acp_status.exit_code(code);
+        }
+        if let Some(sig) = status.signal {
+            acp_status = acp_status.signal(sig);
+        }
+        Ok(WaitForTerminalExitResponse::new(acp_status))
     }
 
     async fn kill_terminal_command(
         &self,
-        _args: KillTerminalCommandRequest,
+        args: KillTerminalCommandRequest,
     ) -> AcpResult<KillTerminalCommandResponse> {
+        let terminals = self.terminals.lock().await;
+        let _ = terminals.kill(&args.terminal_id.0);
         Ok(KillTerminalCommandResponse::default())
     }
 
@@ -453,8 +558,15 @@ pub async fn acp_spawn(
     state: State<'_, AcpState>,
     agent_type: AgentType,
     cwd: String,
+    sandbox_mode: Option<String>,
 ) -> Result<AcpSessionInfo, String> {
     let cwd = normalize_cwd(&cwd)?;
+    let parsed_sandbox_mode = sandbox_mode
+        .as_deref()
+        .map(|s| s.parse::<crate::sandbox::SandboxMode>())
+        .transpose()
+        .map_err(|e| e)?
+        .unwrap_or_default();
     let session_id = Uuid::new_v4().to_string();
     let now = jiff::Timestamp::now();
 
@@ -462,6 +574,9 @@ pub async fn acp_spawn(
     let (command_tx, command_rx) = mpsc::channel::<AcpCommand>(32);
 
     // Create session entry
+    let pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     let session = AcpSession {
         id: session_id.clone(),
         agent_type,
@@ -470,6 +585,7 @@ pub async fn acp_spawn(
         created_at: now,
         command_tx: Some(command_tx),
         _worker_handle: None,
+        pending_permissions: Arc::clone(&pending_permissions),
     };
 
     let session_arc = Arc::new(Mutex::new(session));
@@ -511,6 +627,8 @@ pub async fn acp_spawn(
                 agent_type,
                 cwd_clone,
                 command_rx,
+                pending_permissions,
+                parsed_sandbox_mode,
             )
             .await
             {
@@ -557,6 +675,8 @@ async fn run_session_worker(
     agent_type: AgentType,
     cwd: String,
     mut command_rx: mpsc::Receiver<AcpCommand>,
+    pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
+    sandbox_mode: crate::sandbox::SandboxMode,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
     let args = agent_type.args();
@@ -620,6 +740,9 @@ async fn run_session_worker(
         app: app.clone(),
         session_id: session_id.clone(),
         cwd: cwd.clone(),
+        terminals: Arc::new(Mutex::new(crate::terminal::TerminalManager::new())),
+        sandbox_mode,
+        pending_permissions,
     };
 
     // Create ACP connection - use spawn_local since we're in a LocalSet
@@ -929,6 +1052,30 @@ pub async fn acp_set_permission_mode(
     response_rx
         .await
         .map_err(|_| "Worker thread dropped".to_string())?
+}
+
+/// Respond to a permission request from the frontend
+#[tauri::command]
+pub async fn acp_respond_to_permission(
+    state: State<'_, AcpState>,
+    session_id: String,
+    request_id: String,
+    option_id: String,
+) -> Result<(), String> {
+    let sessions = state.sessions.read().await;
+    let session_arc = sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+    let session = session_arc.lock().await;
+
+    let mut permissions = session.pending_permissions.lock().await;
+    let sender = permissions
+        .remove(&request_id)
+        .ok_or_else(|| format!("Permission request '{}' not found", request_id))?;
+
+    sender
+        .send(option_id)
+        .map_err(|_| "Permission request channel closed".to_string())
 }
 
 /// Get available agents with actual availability checks.

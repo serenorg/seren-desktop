@@ -81,6 +81,10 @@ export interface Settings {
   // Semantic indexing settings
   semanticIndexingEnabled: boolean;
 
+  // Agent settings
+  agentSandboxMode: "read-only" | "workspace-write" | "full-access";
+  agentAutoApproveReads: boolean;
+
   // General settings
   telemetryEnabled: boolean;
 }
@@ -125,6 +129,9 @@ const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   // Semantic indexing
   semanticIndexingEnabled: false,
+  // Agent
+  agentSandboxMode: "workspace-write",
+  agentAutoApproveReads: true,
   // General
   telemetryEnabled: true,
 };

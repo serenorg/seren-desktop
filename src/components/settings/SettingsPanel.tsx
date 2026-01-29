@@ -21,6 +21,7 @@ import { SearchableModelSelect } from "./SearchableModelSelect";
 
 type SettingsSection =
   | "chat"
+  | "agent"
   | "providers"
   | "logins"
   | "editor"
@@ -110,6 +111,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
     { id: "chat", label: "Chat", icon: "💬" },
+    { id: "agent", label: "Agent", icon: "🛡️" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },
     { id: "editor", label: "Editor", icon: "📝" },
@@ -894,6 +896,103 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 </div>
               </div>
             </Show>
+          </section>
+        </Show>
+
+        <Show when={activeSection() === "agent"}>
+          <section>
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Agent</h3>
+            <p class="m-0 mb-6 text-muted-foreground leading-normal">
+              Configure sandbox security and permissions for AI agent sessions.
+            </p>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Sandbox Mode
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  Controls what the agent can access on your system
+                </span>
+              </label>
+              <div class="flex gap-3">
+                <For
+                  each={
+                    [
+                      {
+                        value: "read-only",
+                        label: "Read Only",
+                        desc: "Read workspace files only",
+                      },
+                      {
+                        value: "workspace-write",
+                        label: "Workspace Write",
+                        desc: "Read + write workspace, run commands",
+                      },
+                      {
+                        value: "full-access",
+                        label: "Full Access",
+                        desc: "No restrictions",
+                      },
+                    ] as const
+                  }
+                >
+                  {(mode) => (
+                    <button
+                      type="button"
+                      class={`flex flex-col items-center gap-2 px-6 py-4 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 ${
+                        settingsState.app.agentSandboxMode === mode.value
+                          ? "border-accent bg-[rgba(99,102,241,0.1)]"
+                          : "border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                      }`}
+                      onClick={() =>
+                        handleStringChange("agentSandboxMode", mode.value)
+                      }
+                    >
+                      <span class="text-2xl">
+                        {mode.value === "read-only"
+                          ? "\u{1F512}"
+                          : mode.value === "workspace-write"
+                            ? "\u{1F4DD}"
+                            : "\u26A0\uFE0F"}
+                      </span>
+                      <span
+                        class={`text-[0.85rem] ${settingsState.app.agentSandboxMode === mode.value ? "text-foreground" : "text-muted-foreground"}`}
+                      >
+                        {mode.label}
+                      </span>
+                      <span class="text-[0.7rem] text-muted-foreground text-center">
+                        {mode.desc}
+                      </span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.agentAutoApproveReads}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "agentAutoApproveReads",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="mt-1 w-4 h-4 accent-[var(--color-primary,#6366f1)]"
+                />
+                <div class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Auto-approve read operations
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Automatically approve file read requests without prompting
+                  </span>
+                </div>
+              </label>
+            </div>
           </section>
         </Show>
 
