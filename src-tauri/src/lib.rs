@@ -1,7 +1,6 @@
 // ABOUTME: Core library for the Seren Desktop Tauri application.
 // ABOUTME: Contains Tauri commands and the application run function.
 
-#[cfg(not(target_os = "windows"))]
 use tauri::Emitter;
 use tauri_plugin_store::StoreExt;
 
@@ -272,6 +271,66 @@ fn get_oauth_callback_port() -> Result<u16, String> {
     oauth::get_available_port()
 }
 
+#[derive(serde::Serialize)]
+struct BuildInfo {
+    app_version: String,
+    commit: String,
+    build_date: String,
+    build_type: String,
+    tauri_version: String,
+    webview: String,
+    rust_version: String,
+    os: String,
+}
+
+#[tauri::command]
+fn get_build_info(app: tauri::AppHandle) -> BuildInfo {
+    let version = app.config().version.clone().unwrap_or_else(|| "unknown".into());
+
+    let webview = if cfg!(target_os = "macos") {
+        "WebKit (macOS)".to_string()
+    } else if cfg!(target_os = "windows") {
+        "WebView2 (Windows)".to_string()
+    } else {
+        "WebKitGTK (Linux)".to_string()
+    };
+
+    let os = format!(
+        "{} {} {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        os_version()
+    );
+
+    BuildInfo {
+        app_version: version,
+        commit: env!("BUILT_COMMIT").to_string(),
+        build_date: env!("BUILT_DATE").to_string(),
+        build_type: "Alpha".to_string(),
+        tauri_version: tauri::VERSION.to_string(),
+        webview,
+        rust_version: env!("BUILT_RUST_VERSION").to_string(),
+        os,
+    }
+}
+
+fn os_version() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        String::new()
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
@@ -300,7 +359,62 @@ pub fn run() {
     }
 
     builder
+        .on_menu_event(|app, event| {
+            if event.id().0 == "about" {
+                let _ = app.emit("open-about", ());
+            }
+        })
         .setup(|app| {
+            // Build custom menu with About item that emits to frontend
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+
+                let about = MenuItem::with_id(app, "about", "About Seren", true, None::<&str>)?;
+                let separator = PredefinedMenuItem::separator(app)?;
+                let quit = PredefinedMenuItem::quit(app, Some("Quit Seren"))?;
+                let hide = PredefinedMenuItem::hide(app, Some("Hide Seren"))?;
+                let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+                let show_all = PredefinedMenuItem::show_all(app, None)?;
+
+                let app_menu = Submenu::with_items(
+                    app,
+                    "Seren",
+                    true,
+                    &[&about, &separator, &hide, &hide_others, &show_all, &separator, &quit],
+                )?;
+
+                let edit_menu = {
+                    let undo = PredefinedMenuItem::undo(app, None)?;
+                    let redo = PredefinedMenuItem::redo(app, None)?;
+                    let cut = PredefinedMenuItem::cut(app, None)?;
+                    let copy = PredefinedMenuItem::copy(app, None)?;
+                    let paste = PredefinedMenuItem::paste(app, None)?;
+                    let select_all = PredefinedMenuItem::select_all(app, None)?;
+                    Submenu::with_items(
+                        app,
+                        "Edit",
+                        true,
+                        &[&undo, &redo, &separator, &cut, &copy, &paste, &separator, &select_all],
+                    )?
+                };
+
+                let window_menu = {
+                    let minimize = PredefinedMenuItem::minimize(app, None)?;
+                    let zoom = PredefinedMenuItem::maximize(app, Some("Zoom"))?;
+                    let close = PredefinedMenuItem::close_window(app, None)?;
+                    let fullscreen = PredefinedMenuItem::fullscreen(app, None)?;
+                    Submenu::with_items(
+                        app,
+                        "Window",
+                        true,
+                        &[&minimize, &zoom, &fullscreen, &separator, &close],
+                    )?
+                };
+
+                let menu = Menu::with_items(app, &[&app_menu, &edit_menu, &window_menu])?;
+                app.set_menu(menu)?;
+            }
             // Configure embedded runtime early in startup
             // This prepends bundled Node.js and Git to PATH
             let paths = embedded_runtime::configure_embedded_runtime(app.handle());
@@ -400,6 +514,8 @@ pub fn run() {
             // OAuth browser flow commands
             start_oauth_browser_flow,
             get_oauth_callback_port,
+            // Build info
+            get_build_info,
             // Semantic indexing commands
             commands::indexing::init_project_index,
             commands::indexing::get_index_status,
