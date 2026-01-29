@@ -274,6 +274,7 @@ fn get_oauth_callback_port() -> Result<u16, String> {
 #[derive(serde::Serialize)]
 struct BuildInfo {
     app_version: String,
+    release_tag: String,
     commit: String,
     build_date: String,
     build_type: String,
@@ -304,6 +305,7 @@ fn get_build_info(app: tauri::AppHandle) -> BuildInfo {
 
     BuildInfo {
         app_version: version,
+        release_tag: env!("BUILT_RELEASE_TAG").to_string(),
         commit: env!("BUILT_COMMIT").to_string(),
         build_date: env!("BUILT_DATE").to_string(),
         build_type: "Alpha".to_string(),
