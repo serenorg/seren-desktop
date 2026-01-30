@@ -20,6 +20,8 @@ pub mod services {
 #[cfg(feature = "acp")]
 mod acp;
 mod embedded_runtime;
+#[cfg(feature = "moltbot")]
+mod moltbot;
 mod files;
 mod mcp;
 mod sandbox;

@@ -86,3 +86,4 @@ tauri-plugin-deep-link = "2"
 [features]
 default = ["acp"]
 acp = ["agent-client-protocol", "claude-code-acp-rs"]
+moltbot = []
