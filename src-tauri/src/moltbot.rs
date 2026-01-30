@@ -272,23 +272,8 @@ pub async fn moltbot_start(
     }
     emit_status(&app, ProcessStatus::Running);
 
-    // Spawn a monitoring task that watches for process exit
-    let app_handle = app.clone();
-    let state_status = Arc::new(Mutex::new(ProcessStatus::Running));
-    let status_clone = state_status.clone();
-
-    tokio::spawn(async move {
-        // Wait a bit for the process to potentially crash immediately
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-        // We can't easily get the child from state here without complex ownership,
-        // so the monitor task is a placeholder for now.
-        // In production, we'd use a channel or shared handle to monitor the process.
-        // For v1, process crash detection happens when HTTP calls fail.
-        eprintln!("[Moltbot] Process monitor started for port {}", port);
-
-        let _ = (app_handle, status_clone);
-    });
+    // Start WebSocket listener to receive real-time events from Moltbot
+    spawn_ws_listener(app.clone(), port, token);
 
     Ok(())
 }
@@ -392,6 +377,92 @@ pub async fn moltbot_status(state: State<'_, MoltbotState>) -> Result<MoltbotSta
         channels,
         uptime_secs,
     })
+}
+
+// --- WebSocket Listener for Moltbot Gateway Events ---
+
+/// Connect to Moltbot's WebSocket gateway and forward events to the frontend.
+/// Retries connection with backoff since Moltbot takes a few seconds to initialize.
+pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
+    tokio::spawn(async move {
+        let max_retries = 10;
+        let mut attempt = 0;
+
+        loop {
+            attempt += 1;
+            let url = format!("ws://127.0.0.1:{}/ws?token={}", port, hook_token);
+
+            match tokio_tungstenite::connect_async(&url).await {
+                Ok((ws_stream, _)) => {
+                    eprintln!("[Moltbot WS] Connected to gateway on port {}", port);
+                    attempt = 0; // Reset on successful connect
+
+                    use futures::StreamExt;
+                    let (_, mut read) = ws_stream.split();
+
+                    while let Some(msg) = read.next().await {
+                        match msg {
+                            Ok(tokio_tungstenite::tungstenite::Message::Text(text)) => {
+                                handle_ws_message(&app, &text);
+                            }
+                            Ok(tokio_tungstenite::tungstenite::Message::Close(_)) => {
+                                eprintln!("[Moltbot WS] Connection closed by server");
+                                break;
+                            }
+                            Err(e) => {
+                                eprintln!("[Moltbot WS] Error: {}", e);
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Err(e) => {
+                    if attempt >= max_retries {
+                        eprintln!(
+                            "[Moltbot WS] Failed to connect after {} attempts: {}",
+                            max_retries, e
+                        );
+                        return;
+                    }
+                    eprintln!(
+                        "[Moltbot WS] Connection attempt {}/{} failed: {}",
+                        attempt, max_retries, e
+                    );
+                }
+            }
+
+            // Backoff: 1s, 2s, 4s, 8s... capped at 30s
+            let delay = std::cmp::min(1 << attempt, 30);
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+        }
+    });
+}
+
+/// Parse and forward a WebSocket message from Moltbot to the frontend
+fn handle_ws_message(app: &AppHandle, text: &str) {
+    let parsed: Result<serde_json::Value, _> = serde_json::from_str(text);
+    let Ok(msg) = parsed else {
+        eprintln!("[Moltbot WS] Failed to parse message: {}", text);
+        return;
+    };
+
+    let event_type = msg
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    match event_type {
+        "channel:connected" | "channel:disconnected" | "channel:error" => {
+            let _ = app.emit(events::CHANNEL_EVENT, &msg);
+        }
+        "message:received" => {
+            let _ = app.emit(events::MESSAGE_RECEIVED, &msg);
+        }
+        _ => {
+            eprintln!("[Moltbot WS] Unhandled event type: {}", event_type);
+        }
+    }
 }
 
 // --- HTTP Client for Moltbot Webhook API ---

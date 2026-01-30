@@ -73,6 +73,7 @@ tiny_http = "0.12"
 agent-client-protocol = { version = "0.9", features = ["unstable"], optional = true }
 claude-code-acp-rs = { git = "https://github.com/serenorg/claude-code-acp-rs", optional = true }
 anyhow = "1"
+tokio-tungstenite = { version = "0.24", optional = true }
 # Note: codex-acp has unresolved dependency issues (ssh auth for tungstenite fork)
 # Will add Codex support when upstream issues are resolved
 # codex-acp = { git = "https://github.com/zed-industries/codex-acp" }
@@ -86,4 +87,4 @@ tauri-plugin-deep-link = "2"
 [features]
 default = ["acp"]
 acp = ["agent-client-protocol", "claude-code-acp-rs"]
-moltbot = []
+moltbot = ["tokio-tungstenite"]
