@@ -561,6 +561,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               </div>
               <div class="flex items-center gap-2">
                 <VoiceInputButton
+                  mode="agent"
                   onTranscript={(text) => {
                     setInput((prev) => (prev ? `${prev} ${text}` : text));
                     if (settingsStore.get("voiceAutoSubmit")) {
