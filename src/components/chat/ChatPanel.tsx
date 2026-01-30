@@ -161,6 +161,13 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
 
   // Keyboard shortcuts for tab management
   const handleKeyDown = (event: KeyboardEvent) => {
+    // Escape: Cancel active streaming
+    if (event.key === "Escape" && streamingSession()) {
+      event.preventDefault();
+      cancelStreaming();
+      return;
+    }
+
     const isMod = event.metaKey || event.ctrlKey;
 
     // Ctrl/Cmd+T: New tab
@@ -360,6 +367,15 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
       .map((m) => m.content)
       .reverse(),
   );
+
+  const cancelStreaming = () => {
+    const session = streamingSession();
+    if (!session) return;
+    // Clearing the session unmounts the streaming component, which triggers
+    // onCleanup → sets isCancelled and calls stream.return().
+    setStreamingSession(null);
+    chatStore.setLoading(false);
+  };
 
   const buildContext = (): ChatContext | undefined => {
     if (!editorStore.selectedText) return undefined;
@@ -865,13 +881,26 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                             inputRef?.focus();
                           }}
                         />
-                        <button
-                          type="submit"
-                          class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-md text-[13px] font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
-                          disabled={chatStore.isLoading}
+                        <Show
+                          when={streamingSession()}
+                          fallback={
+                            <button
+                              type="submit"
+                              class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-md text-[13px] font-medium cursor-pointer transition-colors hover:bg-[#2ea043] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
+                              disabled={chatStore.isLoading}
+                            >
+                              Send
+                            </button>
+                          }
                         >
-                          Send
-                        </button>
+                          <button
+                            type="button"
+                            class="px-4 py-1.5 bg-[#21262d] text-[#f85149] border border-[#30363d] rounded-md text-[13px] font-medium hover:bg-[#30363d] transition-colors cursor-pointer"
+                            onClick={cancelStreaming}
+                          >
+                            Stop
+                          </button>
+                        </Show>
                       </div>
                     </div>
                   </form>
