@@ -229,17 +229,41 @@ pub async fn moltbot_start(
     emit_status(&app, ProcessStatus::Starting);
 
     // Find binary
-    let binary_path = find_moltbot_binary()?;
+    let binary_path = match find_moltbot_binary() {
+        Ok(path) => path,
+        Err(e) => {
+            let mut status = state.status.lock().await;
+            *status = ProcessStatus::Stopped;
+            emit_status(&app, ProcessStatus::Stopped);
+            return Err(e);
+        }
+    };
 
     // Get or create hook token
-    let token = load_or_create_hook_token(&app)?;
+    let token = match load_or_create_hook_token(&app) {
+        Ok(t) => t,
+        Err(e) => {
+            let mut status = state.status.lock().await;
+            *status = ProcessStatus::Stopped;
+            emit_status(&app, ProcessStatus::Stopped);
+            return Err(e);
+        }
+    };
     {
         let mut hook_token = state.hook_token.lock().await;
         *hook_token = Some(token.clone());
     }
 
     // Find available port
-    let port = find_available_port()?;
+    let port = match find_available_port() {
+        Ok(p) => p,
+        Err(e) => {
+            let mut status = state.status.lock().await;
+            *status = ProcessStatus::Stopped;
+            emit_status(&app, ProcessStatus::Stopped);
+            return Err(e);
+        }
+    };
     {
         let mut p = state.port.lock().await;
         *p = port;

@@ -37,6 +37,7 @@ src-tauri/binaries/
 # Embedded runtime binaries (downloaded, not committed)
 # Keep .gitkeep placeholder for CI
 src-tauri/embedded-runtime/bin/
+src-tauri/embedded-runtime/moltbot/
 src-tauri/embedded-runtime/darwin-*/
 src-tauri/embedded-runtime/win32-*/
 src-tauri/embedded-runtime/linux-*/
