@@ -914,92 +914,163 @@ fn load_trust_settings(app: &AppHandle) -> HashMap<String, ChannelTrustConfig> {
     HashMap::new()
 }
 
-/// Connect a channel via the openclaw CLI (`channels add` command).
-/// The running gateway detects the config change and hot-reloads the channel.
+/// Resolve the OpenClaw config file path.
+/// Checks OPENCLAW_CONFIG_PATH env, then ~/.openclaw/openclaw.json,
+/// then legacy paths (~/.clawdbot/, ~/.moltbot/).
+fn resolve_openclaw_config_path() -> Result<std::path::PathBuf, String> {
+    if let Ok(env_path) = std::env::var("OPENCLAW_CONFIG_PATH") {
+        let p = std::path::PathBuf::from(env_path.trim());
+        if !p.as_os_str().is_empty() {
+            return Ok(p);
+        }
+    }
+
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .map_err(|_| "Could not determine home directory (HOME/USERPROFILE not set)")?;
+
+    // Primary path
+    let primary = home.join(".openclaw").join("openclaw.json");
+    if primary.exists() {
+        return Ok(primary);
+    }
+
+    // Legacy paths
+    for dir_name in &[".clawdbot", ".moltbot", ".moldbot"] {
+        let legacy = home.join(dir_name).join("openclaw.json");
+        if legacy.exists() {
+            return Ok(legacy);
+        }
+    }
+
+    // Default to primary (will be created)
+    Ok(primary)
+}
+
+/// Read the OpenClaw config file, returning an empty object if it doesn't exist.
+fn read_openclaw_config() -> Result<serde_json::Value, String> {
+    let config_path = resolve_openclaw_config_path()?;
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let contents = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read {}: {}", config_path.display(), e))?;
+    serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse {}: {}", config_path.display(), e))
+}
+
+/// Write the OpenClaw config file atomically (temp file + rename, permissions 0o600).
+fn write_openclaw_config(config: &serde_json::Value) -> Result<(), String> {
+    let config_path = resolve_openclaw_config_path()?;
+
+    // Ensure parent directory exists
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config dir {}: {}", parent.display(), e))?;
+    }
+
+    let json_str = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    // Atomic write: temp file + rename
+    let tmp_path = config_path.with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp_path, &json_str)
+        .map_err(|e| format!("Failed to write temp config: {}", e))?;
+
+    // Set permissions to 0o600 (owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&tmp_path, perms)
+            .map_err(|e| format!("Failed to set config permissions: {}", e))?;
+    }
+
+    std::fs::rename(&tmp_path, &config_path)
+        .map_err(|e| format!("Failed to rename temp config: {}", e))?;
+
+    eprintln!("[OpenClaw] Config written to {}", config_path.display());
+    Ok(())
+}
+
+/// Connect a channel by writing directly to the OpenClaw config file.
+/// Bypasses the CLI (which has a bug where the plugin registry isn't initialized).
+/// The running gateway hot-reloads config within ~200ms.
 async fn request_channel_connect(
     platform: &str,
     credentials: &HashMap<String, String>,
 ) -> Result<serde_json::Value, String> {
-    let embedded_path = crate::embedded_runtime::get_embedded_path();
-
-    // We need to call `openclaw.mjs channels add`, not the gateway.
-    let openclaw_pkg = find_openclaw_mjs()?;
-
     eprintln!(
-        "[OpenClaw] Channel connect: platform={}, openclaw={}",
-        platform,
-        openclaw_pkg.display()
-    );
-
-    let mut cmd = tokio::process::Command::new("node");
-    cmd.arg(&openclaw_pkg)
-        .arg("channels")
-        .arg("add")
-        .arg("--channel")
-        .arg(platform);
-
-    // Map credential keys to CLI flags
-    if let Some(token) = credentials.get("token") {
-        cmd.arg("--token").arg(token);
-    }
-    if let Some(bot_token) = credentials.get("botToken") {
-        cmd.arg("--bot-token").arg(bot_token);
-    }
-    if let Some(app_token) = credentials.get("appToken") {
-        cmd.arg("--app-token").arg(app_token);
-    }
-    if let Some(phone) = credentials.get("phone") {
-        cmd.arg("--signal-number").arg(phone);
-    }
-
-    // Force non-interactive mode via CI environment variable
-    cmd.env("CI", "1");
-
-    if !embedded_path.is_empty() {
-        cmd.env("PATH", &embedded_path);
-    }
-
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    eprintln!(
-        "[OpenClaw] Spawning: node {} channels add --channel {}",
-        openclaw_pkg.display(),
+        "[OpenClaw] Channel connect via config write: platform={}",
         platform
     );
 
-    // Spawn with a 30-second timeout to prevent hanging on interactive prompts
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn channels add: {}", e))?;
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        child.wait_with_output(),
-    )
-    .await
-    .map_err(|_| format!("Channel add timed out after 30s — the openclaw CLI may be waiting for interactive input"))?
-    .map_err(|e| format!("Failed to run channels add: {}", e))?;
+    let mut config = read_openclaw_config()?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    eprintln!(
-        "[OpenClaw] Channel add exit={} stdout={} stderr={}",
-        output.status,
-        stdout.trim(),
-        stderr.trim()
-    );
-
-    if !output.status.success() {
-        let msg = if !stderr.is_empty() { &stderr } else { &stdout };
-        return Err(format!("Channel add failed: {}", msg.trim()));
+    // Ensure channels object exists
+    if config.get("channels").is_none() {
+        config["channels"] = serde_json::json!({});
     }
+
+    // Apply channel-specific config
+    match platform {
+        "signal" => {
+            let phone = credentials
+                .get("phone")
+                .ok_or("Signal requires a phone number (\"phone\" credential)")?;
+            config["channels"]["signal"] = serde_json::json!({
+                "enabled": true,
+                "account": phone,
+            });
+        }
+        "telegram" => {
+            let bot_token = credentials
+                .get("botToken")
+                .or_else(|| credentials.get("token"))
+                .ok_or("Telegram requires a bot token (\"botToken\" credential)")?;
+            config["channels"]["telegram"] = serde_json::json!({
+                "enabled": true,
+                "botToken": bot_token,
+            });
+        }
+        "discord" => {
+            let bot_token = credentials
+                .get("botToken")
+                .or_else(|| credentials.get("token"))
+                .ok_or("Discord requires a bot token (\"botToken\" credential)")?;
+            config["channels"]["discord"] = serde_json::json!({
+                "enabled": true,
+                "botToken": bot_token,
+            });
+        }
+        "slack" => {
+            let bot_token = credentials
+                .get("botToken")
+                .ok_or("Slack requires a bot token (\"botToken\" credential)")?;
+            let mut channel_config = serde_json::json!({
+                "enabled": true,
+                "botToken": bot_token,
+            });
+            if let Some(app_token) = credentials.get("appToken") {
+                channel_config["appToken"] = serde_json::Value::String(app_token.clone());
+            }
+            config["channels"]["slack"] = channel_config;
+        }
+        _ => {
+            return Err(format!(
+                "Unsupported channel platform: {}. Supported: signal, telegram, discord, slack",
+                platform
+            ));
+        }
+    }
+
+    write_openclaw_config(&config)?;
 
     Ok(serde_json::json!({
         "ok": true,
         "platform": platform,
-        "message": stdout.trim(),
+        "message": format!("Channel {} enabled in config. Gateway will hot-reload.", platform),
     }))
 }
 
