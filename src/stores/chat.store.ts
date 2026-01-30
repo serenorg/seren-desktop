@@ -72,6 +72,8 @@ interface ChatState {
   error: string | null;
   retryingMessageId: string | null;
   isCompacting: boolean;
+  /** Pending input to pre-fill in the chat input field */
+  pendingInput: string | null;
 }
 
 const [state, setState] = createStore<ChatState>({
@@ -83,6 +85,7 @@ const [state, setState] = createStore<ChatState>({
   error: null,
   retryingMessageId: null,
   isCompacting: false,
+  pendingInput: null,
 });
 
 /**
@@ -168,6 +171,10 @@ export const chatStore = {
 
   get isCompacting() {
     return state.isCompacting;
+  },
+
+  get pendingInput() {
+    return state.pendingInput;
   },
 
   /**
@@ -389,6 +396,10 @@ export const chatStore = {
     setState("retryingMessageId", id);
   },
 
+  setPendingInput(input: string | null) {
+    setState("pendingInput", input);
+  },
+
   // ============================================================================
   // Persistence
   // ============================================================================
@@ -569,6 +580,33 @@ Summary:`;
     } finally {
       setState("isCompacting", false);
     }
+  },
+
+  /**
+   * Create a new conversation with an initial user message and switch to it.
+   * The message is added to state and persisted, but NOT sent to the AI.
+   * The caller is responsible for navigating to the chat panel where the
+   * message will be displayed and can be sent.
+   */
+  async createConversationWithMessage(
+    title: string,
+    initialMessage: string,
+  ): Promise<Conversation> {
+    const conversation = await this.createConversation(title);
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: initialMessage,
+      timestamp: Date.now(),
+      model: conversation.selectedModel,
+      status: "complete",
+    };
+
+    this.addMessage(userMessage);
+    await this.persistMessage(userMessage);
+
+    return conversation;
   },
 
   /**
