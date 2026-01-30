@@ -43,34 +43,45 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
       chunks = [];
 
       recorder.ondataavailable = (e) => {
+        console.log("[VoiceInput] ondataavailable, size:", e.data.size);
         if (e.data.size > 0) chunks.push(e.data);
       };
 
       recorder.onstop = async () => {
+        console.log("[VoiceInput] onstop fired, chunks:", chunks.length);
         stream?.getTracks().forEach((t) => t.stop());
         const mimeType = activeMimeType || "audio/webm";
         const blob = new Blob(chunks, { type: mimeType });
         chunks = [];
 
+        console.log("[VoiceInput] Blob size:", blob.size, "type:", mimeType);
         if (blob.size === 0) {
+          console.log("[VoiceInput] Empty blob, returning to idle");
           setVoiceState("idle");
           return;
         }
 
         setVoiceState("transcribing");
         try {
+          console.log("[VoiceInput] Sending blob for transcription");
           const text = await transcribeAudio(blob, mimeType);
+          console.log("[VoiceInput] Transcription result:", JSON.stringify(text), "type:", typeof text);
           if (text?.trim()) {
+            console.log("[VoiceInput] Calling onTranscript with:", text.trim());
             onTranscript(text.trim());
+          } else {
+            console.log("[VoiceInput] No text returned from transcription");
           }
           setVoiceState("idle");
         } catch (err) {
+          console.error("[VoiceInput] Transcription error:", err);
           setError(err instanceof Error ? err.message : "Transcription failed");
           setVoiceState("error");
         }
       };
 
       recorder.start();
+      console.log("[VoiceInput] Recording started, mimeType:", activeMimeType);
       setVoiceState("recording");
     } catch (err) {
       stream?.getTracks().forEach((t) => t.stop());
@@ -86,12 +97,14 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
   }
 
   function stopRecording() {
+    console.log("[VoiceInput] stopRecording called, state:", recorder?.state);
     if (recorder?.state === "recording") {
       recorder.stop();
     }
   }
 
   function toggle() {
+    console.log("[VoiceInput] toggle called, voiceState:", voiceState());
     if (voiceState() === "recording") {
       stopRecording();
     } else if (voiceState() === "idle" || voiceState() === "error") {
