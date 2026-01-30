@@ -22,6 +22,7 @@ function execText(cmd: string, args: string[], cwd?: string): string {
     cwd,
     env: process.env,
     encoding: "utf8",
+    shell: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (res.error) throw res.error;
@@ -37,6 +38,7 @@ function run(cmd: string, args: string[], cwd?: string): void {
   const res = spawnSync(cmd, args, {
     cwd,
     env: process.env,
+    shell: true,
     stdio: "inherit",
   });
   if (res.error) throw res.error;
@@ -50,6 +52,7 @@ function runAndTail(cmd: string, args: string[], cwd: string, tailLines: number)
     cwd,
     env: process.env,
     encoding: "utf8",
+    shell: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (res.error) throw res.error;
