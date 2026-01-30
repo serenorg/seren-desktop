@@ -282,7 +282,9 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
     // Spawn the OpenClaw process
     // Pass config via env vars (not CLI args, to avoid exposure in `ps`)
     let mut cmd = tokio::process::Command::new("node");
-    cmd.arg(&openclaw_mjs).arg("gateway");
+    cmd.arg(&openclaw_mjs)
+        .arg("gateway")
+        .arg("--allow-unconfigured"); // Allow running without `openclaw setup`
     cmd.env("OPENCLAW_GATEWAY_PORT", port.to_string())
         .env("OPENCLAW_GATEWAY_TOKEN", &token)
         .env("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
