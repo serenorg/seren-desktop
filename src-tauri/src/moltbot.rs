@@ -718,20 +718,24 @@ async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
         for (channel_id, accounts) in channel_accounts {
             if let Some(arr) = accounts.as_array() {
                 for account in arr {
-                    let connected = account.get("connected").and_then(|v| v.as_bool()).unwrap_or(false);
                     let running = account.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let has_error = account.get("lastError").and_then(|v| v.as_str()).is_some();
+                    let configured = account.get("configured").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let has_error = account.get("lastError").map(|v| !v.is_null()).unwrap_or(false);
                     let account_id = account.get("accountId").and_then(|v| v.as_str()).unwrap_or("default");
                     let label = account.get("label").or(account.get("name"))
                         .and_then(|v| v.as_str())
                         .unwrap_or(channel_id.as_str());
 
-                    let status = if connected {
+                    // openclaw status doesn't have a "connected" field —
+                    // running + no error = connected, running + error = connecting/retry
+                    let status = if running && !has_error {
                         ChannelStatus::Connected
-                    } else if running {
+                    } else if running && has_error {
                         ChannelStatus::Connecting
                     } else if has_error {
                         ChannelStatus::Error
+                    } else if configured {
+                        ChannelStatus::Disconnected
                     } else {
                         ChannelStatus::Disconnected
                     };
