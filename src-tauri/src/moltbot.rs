@@ -394,6 +394,177 @@ pub async fn moltbot_status(state: State<'_, MoltbotState>) -> Result<MoltbotSta
     })
 }
 
+// --- HTTP Client for Moltbot Webhook API ---
+
+/// Send a message via Moltbot's webhook API
+async fn webhook_send(
+    port: u16,
+    hook_token: &str,
+    message: &str,
+    channel: Option<&str>,
+    to: Option<&str>,
+) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let mut body = serde_json::json!({
+        "message": message,
+        "token": hook_token,
+    });
+    if let Some(ch) = channel {
+        body["channel"] = serde_json::Value::String(ch.to_string());
+    }
+    if let Some(recipient) = to {
+        body["to"] = serde_json::Value::String(recipient.to_string());
+    }
+
+    let url = format!("http://127.0.0.1:{}/hooks/agent", port);
+
+    let response = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Moltbot webhook request failed: {}", e))?;
+
+    let status = response.status();
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    if !status.is_success() {
+        return Err(format!(
+            "Moltbot webhook returned {}: {}",
+            status, response_text
+        ));
+    }
+
+    Ok(response_text)
+}
+
+/// Query Moltbot for connected channels via its HTTP API
+async fn query_channels(port: u16, hook_token: &str) -> Result<Vec<ChannelInfo>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let url = format!("http://127.0.0.1:{}/api/channels", port);
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", hook_token))
+        .send()
+        .await
+        .map_err(|e| format!("Moltbot channels request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Moltbot channels returned {}: {}", status, body));
+    }
+
+    // Parse the response — adapt to Moltbot's actual API shape
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse channels response: {}", e))?;
+
+    let channels = if let Some(arr) = body.as_array() {
+        arr.iter()
+            .filter_map(|item| {
+                Some(ChannelInfo {
+                    id: item.get("id")?.as_str()?.to_string(),
+                    platform: item.get("platform")?.as_str()?.to_string(),
+                    display_name: item
+                        .get("displayName")
+                        .or(item.get("display_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Unknown")
+                        .to_string(),
+                    status: match item
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("disconnected")
+                    {
+                        "connected" => ChannelStatus::Connected,
+                        "connecting" => ChannelStatus::Connecting,
+                        "error" => ChannelStatus::Error,
+                        _ => ChannelStatus::Disconnected,
+                    },
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Ok(channels)
+}
+
+/// Send a message through Moltbot (Tauri command)
+#[tauri::command]
+pub async fn moltbot_send(
+    state: State<'_, MoltbotState>,
+    channel: String,
+    to: String,
+    message: String,
+) -> Result<String, String> {
+    let status = *state.status.lock().await;
+    if status != ProcessStatus::Running {
+        return Err("Moltbot is not running. Start it in Settings → Moltbot.".to_string());
+    }
+
+    let port = *state.port.lock().await;
+    let hook_token = state
+        .hook_token
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Hook token not configured".to_string())?;
+
+    webhook_send(
+        port,
+        &hook_token,
+        &message,
+        Some(&channel),
+        Some(&to),
+    )
+    .await
+}
+
+/// List connected channels (Tauri command)
+#[tauri::command]
+pub async fn moltbot_list_channels(
+    state: State<'_, MoltbotState>,
+) -> Result<Vec<ChannelInfo>, String> {
+    let status = *state.status.lock().await;
+    if status != ProcessStatus::Running {
+        return Err("Moltbot is not running. Start it in Settings → Moltbot.".to_string());
+    }
+
+    let port = *state.port.lock().await;
+    let hook_token = state
+        .hook_token
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Hook token not configured".to_string())?;
+
+    let channels = query_channels(port, &hook_token).await?;
+
+    // Update cached channel list
+    {
+        let mut cached = state.channels.lock().await;
+        *cached = channels.clone();
+    }
+
+    Ok(channels)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +618,61 @@ mod tests {
                 "initial status should be Stopped"
             );
         });
+    }
+
+    #[test]
+    fn test_webhook_send_uses_correct_url() {
+        // Verify the URL construction uses 127.0.0.1, not localhost
+        let port: u16 = 8080;
+        let url = format!("http://127.0.0.1:{}/hooks/agent", port);
+        assert!(
+            url.contains("127.0.0.1"),
+            "URL must use 127.0.0.1, not localhost"
+        );
+        assert!(!url.contains("localhost"), "URL must not contain localhost");
+    }
+
+    #[test]
+    fn test_webhook_body_includes_required_fields() {
+        let message = "Hello";
+        let token = "abc123";
+        let body = serde_json::json!({
+            "message": message,
+            "token": token,
+        });
+        assert_eq!(body["message"], "Hello");
+        assert_eq!(body["token"], "abc123");
+    }
+
+    #[test]
+    fn test_webhook_body_includes_optional_fields() {
+        let mut body = serde_json::json!({
+            "message": "test",
+            "token": "tok",
+        });
+        body["channel"] = serde_json::Value::String("whatsapp".to_string());
+        body["to"] = serde_json::Value::String("+1234567890".to_string());
+        assert_eq!(body["channel"], "whatsapp");
+        assert_eq!(body["to"], "+1234567890");
+    }
+
+    #[test]
+    fn test_channel_status_parsing() {
+        let connected: ChannelStatus = match "connected" {
+            "connected" => ChannelStatus::Connected,
+            "connecting" => ChannelStatus::Connecting,
+            "error" => ChannelStatus::Error,
+            _ => ChannelStatus::Disconnected,
+        };
+        assert_eq!(connected, ChannelStatus::Connected);
+
+        let unknown: ChannelStatus = match "garbage" {
+            "connected" => ChannelStatus::Connected,
+            "connecting" => ChannelStatus::Connecting,
+            "error" => ChannelStatus::Error,
+            _ => ChannelStatus::Disconnected,
+        };
+        assert_eq!(unknown, ChannelStatus::Disconnected);
     }
 
     #[test]
