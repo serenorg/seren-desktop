@@ -922,6 +922,12 @@ async fn request_channel_connect(
         .ok_or_else(|| "Cannot resolve moltbot bin directory".to_string())?;
     let moltbot_pkg = script_dir.join("../moltbot/openclaw.mjs");
 
+    eprintln!("[Moltbot] Channel connect: platform={}, openclaw={}", platform, moltbot_pkg.display());
+
+    if !moltbot_pkg.exists() {
+        return Err(format!("openclaw.mjs not found at {}", moltbot_pkg.display()));
+    }
+
     let mut cmd = tokio::process::Command::new("node");
     cmd.arg(&moltbot_pkg)
         .arg("channels")
@@ -943,6 +949,9 @@ async fn request_channel_connect(
         cmd.arg("--signal-number").arg(phone);
     }
 
+    // Force non-interactive mode via CI environment variable
+    cmd.env("CI", "1");
+
     if !embedded_path.is_empty() {
         cmd.env("PATH", &embedded_path);
     }
@@ -951,20 +960,28 @@ async fn request_channel_connect(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run channels add: {}", e))?;
+    eprintln!("[Moltbot] Spawning: node {} channels add --channel {}", moltbot_pkg.display(), platform);
+
+    // Spawn with a 30-second timeout to prevent hanging on interactive prompts
+    let child = cmd.spawn().map_err(|e| format!("Failed to spawn channels add: {}", e))?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        child.wait_with_output(),
+    )
+    .await
+    .map_err(|_| format!("Channel add timed out after 30s — the openclaw CLI may be waiting for interactive input"))?
+    .map_err(|e| format!("Failed to run channels add: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    eprintln!("[Moltbot] Channel add exit={} stdout={} stderr={}", output.status, stdout.trim(), stderr.trim());
 
     if !output.status.success() {
         let msg = if !stderr.is_empty() { &stderr } else { &stdout };
         return Err(format!("Channel add failed: {}", msg.trim()));
     }
 
-    eprintln!("[Moltbot] Channel add stdout: {}", stdout.trim());
     Ok(serde_json::json!({
         "ok": true,
         "platform": platform,

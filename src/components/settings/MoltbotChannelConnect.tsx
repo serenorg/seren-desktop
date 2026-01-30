@@ -498,7 +498,7 @@ const TokenFlow: Component<{
           {props.platform.tokenLabel ?? "API Token"}
         </span>
         <input
-          type="password"
+          type="text"
           placeholder={props.platform.tokenPlaceholder ?? "Paste token here..."}
           value={token()}
           onInput={(e) => setToken(e.currentTarget.value)}
