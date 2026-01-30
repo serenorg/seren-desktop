@@ -1027,7 +1027,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       <VoiceInputButton
                         onTranscript={(text) => {
                           setInput((prev) => (prev ? `${prev} ${text}` : text));
-                          inputRef?.focus();
+                          sendMessage();
                         }}
                       />
                       <button

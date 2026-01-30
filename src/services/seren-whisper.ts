@@ -112,10 +112,12 @@ export async function transcribeAudio(
     throw new Error(msg);
   }
 
-  if (!result.text) {
+  // Gateway wraps the upstream response in {status, body: {text: "..."}}
+  const text = result.body?.text ?? result.text;
+  if (!text) {
     console.error("[Whisper] No text in response:", JSON.stringify(result));
     throw new Error("No transcription returned from Whisper API");
   }
 
-  return result.text;
+  return text;
 }

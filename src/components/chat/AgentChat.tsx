@@ -562,7 +562,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <VoiceInputButton
                   onTranscript={(text) => {
                     setInput((prev) => (prev ? `${prev} ${text}` : text));
-                    inputRef?.focus();
+                    sendMessage();
                   }}
                 />
                 <Show when={isPrompting()}>

@@ -878,7 +878,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                             setInput((prev) =>
                               prev ? `${prev} ${text}` : text,
                             );
-                            inputRef?.focus();
+                            sendMessage();
                           }}
                         />
                         <Show
