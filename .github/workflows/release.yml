@@ -55,7 +55,7 @@ jobs:
             echo "- **macOS (Apple Silicon)**: \`Seren-Desktop_*_aarch64.dmg\`"
             echo "- **macOS (Intel)**: \`Seren-Desktop_*_x64.dmg\`"
             echo "- **Windows**: \`Seren-Desktop_*_x64-setup.exe\` or \`.msi\`"
-            echo "- **Linux**: \`.AppImage\` or \`.deb\`"
+            echo "- **Linux**: \`.deb\`"
             echo ""
             echo "## Note"
             echo ""
@@ -216,8 +216,14 @@ jobs:
         run: pnpm tauri build --target ${{ matrix.target }}
 
       # Build the app (unsigned for macOS without certificates, or other platforms)
-      - name: Build Tauri app (unsigned)
-        if: matrix.os != 'macos-latest' || env.HAS_APPLE_SIGNING != 'true'
+      - name: Build Tauri app (unsigned, Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles deb
+      - name: Build Tauri app (unsigned, other)
+        if: matrix.os != 'macos-latest' && matrix.os != 'ubuntu-latest'
+        run: pnpm tauri build --target ${{ matrix.target }}
+      - name: Build Tauri app (unsigned, macOS without signing)
+        if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING != 'true'
         run: pnpm tauri build --target ${{ matrix.target }}
 
       # macOS: Notarize the app (skip if no Apple ID configured)
@@ -264,13 +270,6 @@ jobs:
         with:
           name: Seren-Desktop-${{ matrix.name }}.deb
           path: src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
-
-      - name: Upload Linux AppImage
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Seren-Desktop-${{ matrix.name }}.AppImage
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
 
       # Clean up macOS keychain (only if we created one)
       - name: Cleanup macOS keychain

@@ -77,9 +77,12 @@ jobs:
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
         run: pnpm tauri build
-      - name: Build (macOS/Linux)
-        if: matrix.os != 'windows-latest'
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
         run: pnpm tauri build
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm tauri build --bundles deb
       - uses: actions/upload-artifact@v4
         with:
           name: seren-desktop-${{ matrix.os }}
