@@ -232,8 +232,9 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
     if (current > 0) setStep(steps[current - 1]);
   };
 
-  const connectedPlatforms = () =>
-    moltbotStore.channels.filter((c) => c.status === "connected");
+  // Show all known channels (not just "connected") because the gateway
+  // may not have started the channel yet after config hot-reload.
+  const connectedPlatforms = () => moltbotStore.channels;
 
   // --- Step Handlers ---
 
@@ -258,9 +259,11 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
     setStep("connect-channels");
   };
 
-  const handleChannelConnected = () => {
+  const handleChannelConnected = async () => {
     setShowConnectModal(false);
-    moltbotStore.refreshChannels();
+    // Wait for gateway to hot-reload the new channel config, then refresh
+    await new Promise((r) => setTimeout(r, 1500));
+    await moltbotStore.refreshChannels();
     const nextIdx = connectingIndex() + 1;
     if (nextIdx < selectedPlatforms().length) {
       setConnectingIndex(nextIdx);
