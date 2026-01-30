@@ -1027,7 +1027,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       <VoiceInputButton
                         onTranscript={(text) => {
                           setInput((prev) => (prev ? `${prev} ${text}` : text));
-                          sendMessage();
+                          if (settingsStore.get("voiceAutoSubmit")) {
+                            sendMessage();
+                          } else {
+                            inputRef?.focus();
+                          }
                         }}
                       />
                       <button
