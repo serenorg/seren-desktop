@@ -260,16 +260,18 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
   };
 
   const handleChannelConnected = async () => {
-    setShowConnectModal(false);
-    // Wait for gateway to hot-reload the new channel config, then refresh
-    await new Promise((r) => setTimeout(r, 1500));
-    await moltbotStore.refreshChannels();
     const nextIdx = connectingIndex() + 1;
     if (nextIdx < selectedPlatforms().length) {
+      // More channels to connect — advance index before closing modal
       setConnectingIndex(nextIdx);
     } else {
+      // All channels done — advance step before closing modal
       setStep("agent-mode");
     }
+    setShowConnectModal(false);
+    // Refresh channels in background for the agent-mode/trust steps
+    await new Promise((r) => setTimeout(r, 1500));
+    await moltbotStore.refreshChannels();
   };
 
   const handleSkipChannel = () => {
