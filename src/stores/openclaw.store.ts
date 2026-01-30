@@ -1,4 +1,4 @@
-// ABOUTME: Reactive state for Moltbot process status, connected channels, and per-channel config.
+// ABOUTME: Reactive state for OpenClaw process status, connected channels, and per-channel config.
 // ABOUTME: Communicates with Rust backend via Tauri invoke() calls and listens for events.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -22,11 +22,11 @@ export type ChannelStatus =
   | "connecting"
   | "error";
 
-export type AgentMode = "seren" | "moltbot";
+export type AgentMode = "seren" | "openclaw";
 
 export type TrustLevel = "auto" | "mention-only" | "approval-required";
 
-export interface MoltbotChannel {
+export interface OpenClawChannel {
   id: string;
   platform: string;
   displayName: string;
@@ -36,9 +36,9 @@ export interface MoltbotChannel {
   errorMessage?: string;
 }
 
-interface MoltbotState {
+interface OpenClawState {
   processStatus: ProcessStatus;
-  channels: MoltbotChannel[];
+  channels: OpenClawChannel[];
   setupComplete: boolean;
   port: number | null;
   uptimeSecs: number | null;
@@ -48,7 +48,7 @@ interface MoltbotState {
 // Store
 // ============================================================================
 
-const [state, setState] = createStore<MoltbotState>({
+const [state, setState] = createStore<OpenClawState>({
   processStatus: "stopped",
   channels: [],
   setupComplete: false,
@@ -59,6 +59,9 @@ const [state, setState] = createStore<MoltbotState>({
 let unlistenStatus: UnlistenFn | null = null;
 let unlistenChannel: UnlistenFn | null = null;
 let unlistenMessage: UnlistenFn | null = null;
+let initPromise: Promise<void> | null = null;
+
+const OPENCLAW_STORE = "openclaw.json";
 
 // ============================================================================
 // Event Listeners
@@ -66,7 +69,7 @@ let unlistenMessage: UnlistenFn | null = null;
 
 async function setupEventListeners() {
   unlistenStatus = await listen<{ status: ProcessStatus }>(
-    "moltbot://status-changed",
+    "openclaw://status-changed",
     (event) => {
       setState("processStatus", event.payload.status);
     },
@@ -77,7 +80,7 @@ async function setupEventListeners() {
     id?: string;
     platform?: string;
     status?: string;
-  }>("moltbot://channel-event", (event) => {
+  }>("openclaw://channel-event", (event) => {
     const { type: eventType, id } = event.payload;
 
     if (!id) return;
@@ -102,7 +105,7 @@ async function setupEventListeners() {
     }
   });
 
-  unlistenMessage = await listen("moltbot://message-received", (_event) => {
+  unlistenMessage = await listen("openclaw://message-received", (_event) => {
     // Message events are handled by the notification system (Phase 6)
     // and agent routing (Phase 4). No store update needed here.
   });
@@ -145,7 +148,7 @@ function defaultTrustLevel(platform: string): TrustLevel {
 // Actions
 // ============================================================================
 
-export const moltbotStore = {
+export const openclawStore = {
   // --- Getters ---
 
   get processStatus() {
@@ -167,57 +170,75 @@ export const moltbotStore = {
   // --- Lifecycle ---
 
   async init() {
-    await setupEventListeners();
-    // Load setupComplete flag from Tauri store
-    try {
-      const value = await invoke<string | null>("get_setting", {
-        store: "moltbot.json",
-        key: "setup_complete",
-      });
+    if (initPromise) return initPromise;
+
+    initPromise = (async () => {
+      await setupEventListeners();
+
+      // Load setupComplete flag from Tauri store
+      let value: string | null = null;
+      try {
+        value = await invoke<string | null>("get_setting", {
+          store: OPENCLAW_STORE,
+          key: "setup_complete",
+        });
+      } catch {
+        // Store doesn't exist yet — first run
+      }
+
       setState("setupComplete", value === "true");
-    } catch {
-      // Store doesn't exist yet — first run
-      setState("setupComplete", false);
-    }
+    })();
+
+    return initPromise;
   },
 
   destroy() {
     teardownEventListeners();
+    initPromise = null;
   },
 
   // --- Process Management ---
 
   async start() {
     try {
-      await invoke("moltbot_start");
+      await invoke("openclaw_start");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // "already running" is not an error — treat it as success
       if (msg.toLowerCase().includes("already running")) {
-        console.log("[Moltbot Store] Moltbot already running, skipping start");
-        return;
+        console.log(
+          "[OpenClaw Store] OpenClaw already running, skipping start",
+        );
+      } else {
+        console.error("[OpenClaw Store] Failed to start:", e);
+        throw e;
       }
-      console.error("[Moltbot Store] Failed to start:", e);
-      throw e;
     }
+
+    // Refresh status and channels once the process is (re)started
+    await openclawStore.refreshStatus();
+    await openclawStore.refreshChannels();
   },
 
   async stop() {
     try {
-      await invoke("moltbot_stop");
+      await invoke("openclaw_stop");
     } catch (e) {
-      console.error("[Moltbot Store] Failed to stop:", e);
+      console.error("[OpenClaw Store] Failed to stop:", e);
       throw e;
     }
   },
 
   async restart() {
     try {
-      await invoke("moltbot_restart");
+      await invoke("openclaw_restart");
     } catch (e) {
-      console.error("[Moltbot Store] Failed to restart:", e);
+      console.error("[OpenClaw Store] Failed to restart:", e);
       throw e;
     }
+
+    await openclawStore.refreshStatus();
+    await openclawStore.refreshChannels();
   },
 
   async refreshStatus() {
@@ -225,14 +246,14 @@ export const moltbotStore = {
       const info = await invoke<{
         processStatus: ProcessStatus;
         port: number | null;
-        channels: MoltbotChannel[];
+        channels: OpenClawChannel[];
         uptimeSecs: number | null;
-      }>("moltbot_status");
+      }>("openclaw_status");
       setState("processStatus", info.processStatus);
       setState("port", info.port);
       setState("uptimeSecs", info.uptimeSecs);
     } catch (e) {
-      console.error("[Moltbot Store] Failed to get status:", e);
+      console.error("[OpenClaw Store] Failed to get status:", e);
     }
   },
 
@@ -240,7 +261,9 @@ export const moltbotStore = {
 
   async refreshChannels() {
     try {
-      const channels = await invoke<MoltbotChannel[]>("moltbot_list_channels");
+      const channels = await invoke<OpenClawChannel[]>(
+        "openclaw_list_channels",
+      );
       // Preserve local agentMode and trustLevel settings
       const merged = channels.map((ch) => {
         const existing = state.channels.find((c) => c.id === ch.id);
@@ -254,20 +277,20 @@ export const moltbotStore = {
 
       // Sync default trust levels to backend for any channels it doesn't know about yet
       for (const ch of merged) {
-        invoke("moltbot_set_trust", {
+        invoke("openclaw_set_trust", {
           channelId: ch.id,
           trustLevel: ch.trustLevel,
           agentMode: ch.agentMode,
         }).catch((e) => {
           console.error(
-            "[Moltbot Store] Failed to sync trust for channel:",
+            "[OpenClaw Store] Failed to sync trust for channel:",
             ch.id,
             e,
           );
         });
       }
     } catch (e) {
-      console.error("[Moltbot Store] Failed to list channels:", e);
+      console.error("[OpenClaw Store] Failed to list channels:", e);
     }
   },
 
@@ -287,40 +310,45 @@ export const moltbotStore = {
 
     // Sync trust settings to Rust backend for enforcement
     const channel = state.channels[index];
-    invoke("moltbot_set_trust", {
+    invoke("openclaw_set_trust", {
       channelId,
       trustLevel: channel.trustLevel,
       agentMode: channel.agentMode,
     }).catch((e) => {
-      console.error("[Moltbot Store] Failed to sync trust settings:", e);
+      console.error("[OpenClaw Store] Failed to sync trust settings:", e);
     });
   },
 
   // --- Messaging ---
 
   async connectChannel(platform: string, credentials: Record<string, string>) {
-    // Auto-start moltbot if not running
+    // Auto-start OpenClaw if not running
     if (state.processStatus !== "running") {
-      console.log("[Moltbot Store] Moltbot not running, auto-starting before channel connect...");
-      await moltbotStore.start();
+      console.log(
+        "[OpenClaw Store] OpenClaw not running, auto-starting before channel connect...",
+      );
+      await openclawStore.start();
       // Wait briefly for the gateway to be ready
       await new Promise((r) => setTimeout(r, 2000));
     }
-    console.log("[Moltbot Store] Connecting channel:", platform);
-    const result = await invoke<Record<string, unknown>>("moltbot_connect_channel", {
-      platform,
-      credentials,
-    });
-    console.log("[Moltbot Store] Channel connect result:", result);
+    console.log("[OpenClaw Store] Connecting channel:", platform);
+    const result = await invoke<Record<string, unknown>>(
+      "openclaw_connect_channel",
+      {
+        platform,
+        credentials,
+      },
+    );
+    console.log("[OpenClaw Store] Channel connect result:", result);
     return result;
   },
 
   async getQrCode(platform: string) {
-    return invoke<string>("moltbot_get_qr", { platform });
+    return invoke<string>("openclaw_get_qr", { platform });
   },
 
   async disconnectChannel(channelId: string) {
-    await invoke("moltbot_disconnect_channel", { channelId });
+    await invoke("openclaw_disconnect_channel", { channelId });
     // Remove from local state
     setState(
       "channels",
@@ -329,7 +357,7 @@ export const moltbotStore = {
   },
 
   async sendMessage(channel: string, to: string, message: string) {
-    return invoke<string>("moltbot_send", {
+    return invoke<string>("openclaw_send", {
       channel,
       to,
       message,
@@ -342,12 +370,12 @@ export const moltbotStore = {
     setState("setupComplete", true);
     try {
       await invoke("set_setting", {
-        store: "moltbot.json",
+        store: OPENCLAW_STORE,
         key: "setup_complete",
         value: "true",
       });
     } catch (e) {
-      console.error("[Moltbot Store] Failed to save setup state:", e);
+      console.error("[OpenClaw Store] Failed to save setup state:", e);
     }
   },
 

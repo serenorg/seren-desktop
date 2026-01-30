@@ -1,4 +1,4 @@
-// ABOUTME: Approval dialog for Moltbot messages when trust level is "approval-required".
+// ABOUTME: Approval dialog for OpenClaw messages when trust level is "approval-required".
 // ABOUTME: Shows inbound message, draft AI response, and approve/reject buttons.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -20,7 +20,10 @@ interface ApprovalRequest {
   id: string;
   channel: string;
   platform: string;
-  from: string;
+  /** Recipient identifier (phone number, username, etc.) */
+  to: string;
+  /** Optional human-friendly label for UI */
+  displayName?: string;
   message: string;
   draftResponse: string;
 }
@@ -29,13 +32,13 @@ interface ApprovalRequest {
 // Main Component
 // ============================================================================
 
-export const MoltbotApprovalManager: Component = () => {
+export const OpenClawApprovalManager: Component = () => {
   const [requests, setRequests] = createSignal<ApprovalRequest[]>([]);
   let unlisten: UnlistenFn | undefined;
 
   onMount(async () => {
     unlisten = await listen<ApprovalRequest>(
-      "moltbot://approval-needed",
+      "openclaw://approval-needed",
       (event) => {
         setRequests((prev) => [...prev, event.payload]);
       },
@@ -51,15 +54,15 @@ export const MoltbotApprovalManager: Component = () => {
     approved: boolean,
   ) => {
     if (approved) {
-      // Grant server-side approval so subsequent moltbot_send passes trust check
-      await invoke("moltbot_grant_approval", {
+      // Grant server-side approval so subsequent openclaw_send passes trust check
+      await invoke("openclaw_grant_approval", {
         channel: request.channel,
-        to: request.from,
+        to: request.to,
       });
     }
     // Emit approval response to unblock the agent's requestApproval() promise
     await invoke("plugin:event|emit", {
-      event: "moltbot://approval-response",
+      event: "openclaw://approval-response",
       payload: { id: request.id, approved },
     });
     // Remove from queue
@@ -104,8 +107,10 @@ const ApprovalCard: Component<{
       </div>
 
       <p class="m-0 mb-1 text-[0.8rem] text-muted-foreground">
-        From:{" "}
-        <span class="text-foreground font-medium">{props.request.from}</span>
+        To:{" "}
+        <span class="text-foreground font-medium">
+          {props.request.displayName ?? props.request.to}
+        </span>
       </p>
 
       <div class="px-3 py-2 mb-2 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.15)] rounded text-[0.85rem] text-foreground max-h-[60px] overflow-y-auto">
@@ -140,4 +145,4 @@ const ApprovalCard: Component<{
   );
 };
 
-export default MoltbotApprovalManager;
+export default OpenClawApprovalManager;

@@ -1,12 +1,12 @@
-// ABOUTME: Compact Moltbot status indicator for the sidebar/editor panel.
+// ABOUTME: Compact OpenClaw status indicator for the sidebar/editor panel.
 // ABOUTME: Shows running state with channel count, clickable to open settings.
 
 import { type Component, Show } from "solid-js";
-import { moltbotStore } from "@/stores/moltbot.store";
+import { openclawStore } from "@/stores/openclaw.store";
 
-export const MoltbotStatus: Component = () => {
+export const OpenClawStatus: Component = () => {
   const statusColor = () => {
-    switch (moltbotStore.processStatus) {
+    switch (openclawStore.processStatus) {
       case "running":
         return "#22c55e";
       case "starting":
@@ -20,12 +20,12 @@ export const MoltbotStatus: Component = () => {
   };
 
   const label = () => {
-    if (!moltbotStore.setupComplete) return null;
-    if (moltbotStore.isRunning) {
-      const count = moltbotStore.connectedChannelCount;
-      return count > 0 ? `Moltbot (${count})` : "Moltbot";
+    if (!openclawStore.setupComplete) return null;
+    if (openclawStore.isRunning) {
+      const count = openclawStore.connectedChannelCount;
+      return count > 0 ? `OpenClaw (${count})` : "OpenClaw";
     }
-    if (moltbotStore.processStatus === "crashed") return "Moltbot crashed";
+    if (openclawStore.processStatus === "crashed") return "OpenClaw crashed";
     return null;
   };
 
@@ -37,7 +37,7 @@ export const MoltbotStatus: Component = () => {
         onClick={() =>
           window.dispatchEvent(new CustomEvent("seren:open-settings"))
         }
-        title="Open Moltbot settings"
+        title="Open OpenClaw settings"
       >
         <span
           class="w-1.5 h-1.5 rounded-full inline-block"
@@ -49,4 +49,4 @@ export const MoltbotStatus: Component = () => {
   );
 };
 
-export default MoltbotStatus;
+export default OpenClawStatus;

@@ -1,4 +1,4 @@
-// ABOUTME: First-run onboarding wizard for Moltbot messaging integration.
+// ABOUTME: First-run onboarding wizard for OpenClaw messaging integration.
 // ABOUTME: Guides user through channel selection, connection, agent mode, and trust config.
 
 import {
@@ -11,10 +11,10 @@ import {
 } from "solid-js";
 import {
   type AgentMode,
-  moltbotStore,
+  openclawStore,
   type TrustLevel,
-} from "@/stores/moltbot.store";
-import { MoltbotChannelConnect } from "./MoltbotChannelConnect";
+} from "@/stores/openclaw.store";
+import { OpenClawChannelConnect } from "./OpenClawChannelConnect";
 
 // ============================================================================
 // Types
@@ -200,12 +200,12 @@ const AVAILABLE_PLATFORMS: PlatformOption[] = [
 // Main Wizard Component
 // ============================================================================
 
-interface MoltbotWizardProps {
+interface OpenClawWizardProps {
   onComplete: () => void;
   onSkip: () => void;
 }
 
-export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
+export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
   const [step, setStep] = createSignal<WizardStep>("welcome");
   const [selectedPlatforms, setSelectedPlatforms] = createSignal<string[]>([]);
   const [connectingIndex, setConnectingIndex] = createSignal(0);
@@ -234,21 +234,21 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
 
   // Show all known channels (not just "connected") because the gateway
   // may not have started the channel yet after config hot-reload.
-  const connectedPlatforms = () => moltbotStore.channels;
+  const connectedPlatforms = () => openclawStore.channels;
 
   // --- Step Handlers ---
 
   const handleSelectDone = async () => {
     if (selectedPlatforms().length === 0) return;
-    // Start Moltbot before entering connection step so channels can actually connect
-    if (!moltbotStore.isRunning) {
+    // Start OpenClaw before entering connection step so channels can actually connect
+    if (!openclawStore.isRunning) {
       setStarting(true);
       setError(null);
       try {
-        await moltbotStore.start();
+        await openclawStore.start();
       } catch (e) {
         setError(
-          `Failed to start Moltbot: ${e instanceof Error ? e.message : String(e)}`,
+          `Failed to start OpenClaw: ${e instanceof Error ? e.message : String(e)}`,
         );
         setStarting(false);
         return;
@@ -271,7 +271,7 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
     setShowConnectModal(false);
     // Refresh channels in background for the agent-mode/trust steps
     await new Promise((r) => setTimeout(r, 1500));
-    await moltbotStore.refreshChannels();
+    await openclawStore.refreshChannels();
   };
 
   const handleSkipChannel = () => {
@@ -288,7 +288,7 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
     for (const channel of connectedPlatforms()) {
       const mode = channelAgentModes()[channel.platform];
       if (mode) {
-        moltbotStore.configureChannel(channel.id, { agentMode: mode });
+        openclawStore.configureChannel(channel.id, { agentMode: mode });
       }
     }
     setStep("trust-config");
@@ -299,7 +299,7 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
     for (const channel of connectedPlatforms()) {
       const trust = channelTrustLevels()[channel.platform];
       if (trust) {
-        moltbotStore.configureChannel(channel.id, { trustLevel: trust });
+        openclawStore.configureChannel(channel.id, { trustLevel: trust });
       }
     }
     setStep("done");
@@ -309,10 +309,10 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
     setStarting(true);
     setError(null);
     try {
-      if (!moltbotStore.isRunning) {
-        await moltbotStore.start();
+      if (!openclawStore.isRunning) {
+        await openclawStore.start();
       }
-      await moltbotStore.completeSetup();
+      await openclawStore.completeSetup();
       props.onComplete();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -329,7 +329,7 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
           <div class="text-center py-6">
             <span class="text-[3rem] block mb-4">🦞</span>
             <h3 class="m-0 mb-3 text-[1.5rem] font-semibold text-foreground">
-              Welcome to Moltbot
+              Welcome to OpenClaw
             </h3>
             <p class="m-0 mb-6 text-[1rem] text-muted-foreground leading-relaxed">
               Connect your messaging apps. Your AI agent can send and receive
@@ -485,7 +485,7 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
             </div>
 
             <Show when={showConnectModal()}>
-              <MoltbotChannelConnect
+              <OpenClawChannelConnect
                 platformId={selectedPlatforms()[connectingIndex()]}
                 onClose={() => setShowConnectModal(false)}
                 onConnected={handleChannelConnected}
@@ -532,13 +532,13 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
                         <button
                           type="button"
                           class={`px-3 py-1.5 rounded-md text-[0.8rem] cursor-pointer transition-all duration-150 border ${
-                            mode() === "moltbot"
+                            mode() === "openclaw"
                               ? "bg-accent border-accent text-white"
                               : "bg-transparent border-[rgba(148,163,184,0.3)] text-muted-foreground hover:bg-[rgba(148,163,184,0.1)]"
                           }`}
-                          onClick={() => setMode("moltbot")}
+                          onClick={() => setMode("openclaw")}
                         >
-                          Moltbot AI
+                          OpenClaw AI
                         </button>
                       </div>
                     </div>
@@ -652,10 +652,10 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
               disabled={starting()}
             >
               {starting()
-                ? "Starting Moltbot..."
-                : moltbotStore.isRunning
+                ? "Starting OpenClaw..."
+                : openclawStore.isRunning
                   ? "Finish Setup"
-                  : "Start Moltbot"}
+                  : "Start OpenClaw"}
             </button>
           </div>
         </Match>
@@ -706,4 +706,4 @@ const TrustButton: Component<{
   </button>
 );
 
-export default MoltbotWizard;
+export default OpenClawWizard;

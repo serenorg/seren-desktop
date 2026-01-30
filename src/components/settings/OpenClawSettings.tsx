@@ -1,33 +1,33 @@
-// ABOUTME: Settings tab for Moltbot messaging integration — process control, channels, and config.
+// ABOUTME: Settings tab for OpenClaw messaging integration — process control, channels, and config.
 // ABOUTME: Renders as wizard on first visit, config panel after setup is complete.
 
 import { type Component, createSignal, For, onMount, Show } from "solid-js";
 import {
   type AgentMode,
-  type MoltbotChannel,
-  moltbotStore,
+  type OpenClawChannel,
+  openclawStore,
   type TrustLevel,
-} from "@/stores/moltbot.store";
-import { MoltbotChannelConnect } from "./MoltbotChannelConnect";
-import { MoltbotWizard } from "./MoltbotWizard";
+} from "@/stores/openclaw.store";
+import { OpenClawChannelConnect } from "./OpenClawChannelConnect";
+import { OpenClawWizard } from "./OpenClawWizard";
 
-export const MoltbotSettings: Component = () => {
+export const OpenClawSettings: Component = () => {
   const [error, setError] = createSignal<string | null>(null);
   const [isToggling, setIsToggling] = createSignal(false);
   const [showConnectModal, setShowConnectModal] = createSignal(false);
 
   onMount(() => {
-    moltbotStore.init();
+    openclawStore.init();
   });
 
   const handleToggleProcess = async () => {
     setIsToggling(true);
     setError(null);
     try {
-      if (moltbotStore.isRunning) {
-        await moltbotStore.stop();
+      if (openclawStore.isRunning) {
+        await openclawStore.stop();
       } else {
-        await moltbotStore.start();
+        await openclawStore.start();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -40,7 +40,7 @@ export const MoltbotSettings: Component = () => {
     setIsToggling(true);
     setError(null);
     try {
-      await moltbotStore.restart();
+      await openclawStore.restart();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -50,14 +50,14 @@ export const MoltbotSettings: Component = () => {
 
   const handleRefreshChannels = async () => {
     try {
-      await moltbotStore.refreshChannels();
+      await openclawStore.refreshChannels();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const statusColor = () => {
-    switch (moltbotStore.processStatus) {
+    switch (openclawStore.processStatus) {
       case "running":
         return "#22c55e";
       case "starting":
@@ -71,7 +71,7 @@ export const MoltbotSettings: Component = () => {
   };
 
   const statusLabel = () => {
-    switch (moltbotStore.processStatus) {
+    switch (openclawStore.processStatus) {
       case "running":
         return "Running";
       case "starting":
@@ -88,9 +88,9 @@ export const MoltbotSettings: Component = () => {
   return (
     <section>
       <Show
-        when={moltbotStore.setupComplete}
+        when={openclawStore.setupComplete}
         fallback={
-          <MoltbotWizard
+          <OpenClawWizard
             onComplete={() => {
               // Wizard sets setupComplete in the store
             }}
@@ -100,10 +100,10 @@ export const MoltbotSettings: Component = () => {
           />
         }
       >
-        <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Moltbot</h3>
+        <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">OpenClaw</h3>
         <p class="m-0 mb-6 text-muted-foreground leading-normal">
           AI-powered messaging across WhatsApp, Telegram, Signal, Discord, and
-          more. Moltbot routes messages to your AI agent.
+          more. OpenClaw routes messages to your AI agent.
         </p>
 
         {/* Status Bar */}
@@ -116,15 +116,15 @@ export const MoltbotSettings: Component = () => {
             <span class="text-[0.9rem] text-foreground font-medium">
               {statusLabel()}
             </span>
-            <Show when={moltbotStore.connectedChannelCount > 0}>
+            <Show when={openclawStore.connectedChannelCount > 0}>
               <span class="text-[0.8rem] text-muted-foreground">
-                ({moltbotStore.connectedChannelCount} channel
-                {moltbotStore.connectedChannelCount !== 1 ? "s" : ""})
+                ({openclawStore.connectedChannelCount} channel
+                {openclawStore.connectedChannelCount !== 1 ? "s" : ""})
               </span>
             </Show>
           </div>
           <div class="flex items-center gap-2">
-            <Show when={moltbotStore.isRunning}>
+            <Show when={openclawStore.isRunning}>
               <button
                 type="button"
                 class="px-3 py-1.5 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-[0.8rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
@@ -137,12 +137,16 @@ export const MoltbotSettings: Component = () => {
             <button
               type="button"
               class={`px-3 py-1.5 border-none rounded-md text-[0.8rem] text-white cursor-pointer transition-all duration-150 hover:opacity-80 ${
-                moltbotStore.isRunning ? "bg-[#ef4444]" : "bg-[#22c55e]"
+                openclawStore.isRunning ? "bg-[#ef4444]" : "bg-[#22c55e]"
               }`}
               onClick={handleToggleProcess}
               disabled={isToggling()}
             >
-              {isToggling() ? "..." : moltbotStore.isRunning ? "Stop" : "Start"}
+              {isToggling()
+                ? "..."
+                : openclawStore.isRunning
+                  ? "Stop"
+                  : "Start"}
             </button>
           </div>
         </div>
@@ -156,15 +160,15 @@ export const MoltbotSettings: Component = () => {
 
         {/* Connected Channels */}
         <Show
-          when={moltbotStore.channels.length > 0}
+          when={openclawStore.channels.length > 0}
           fallback={
             <div class="text-center py-10 px-6 text-muted-foreground">
               <span class="text-[2.5rem] block mb-3 opacity-60">🦞</span>
               <p class="m-0">No channels connected</p>
               <p class="m-0 mt-2 text-[0.85rem] text-muted-foreground">
-                Start Moltbot and connect your first messaging channel.
+                Start OpenClaw and connect your first messaging channel.
               </p>
-              <Show when={moltbotStore.isRunning}>
+              <Show when={openclawStore.isRunning}>
                 <button
                   type="button"
                   class="mt-4 px-4 py-2 bg-accent border-none rounded-md text-white text-[0.85rem] cursor-pointer transition-all duration-150 hover:opacity-80"
@@ -180,12 +184,12 @@ export const MoltbotSettings: Component = () => {
             Connected Channels
           </h4>
           <div class="flex flex-col gap-2 mb-6">
-            <For each={moltbotStore.channels}>
+            <For each={openclawStore.channels}>
               {(channel) => (
                 <ChannelRow
                   channel={channel}
                   onConfigChange={(config) =>
-                    moltbotStore.configureChannel(channel.id, config)
+                    openclawStore.configureChannel(channel.id, config)
                   }
                 />
               )}
@@ -212,7 +216,7 @@ export const MoltbotSettings: Component = () => {
 
         {/* Connect Channel Button (when no channels) */}
         <Show
-          when={moltbotStore.isRunning && moltbotStore.channels.length === 0}
+          when={openclawStore.isRunning && openclawStore.channels.length === 0}
         >
           <button
             type="button"
@@ -225,11 +229,11 @@ export const MoltbotSettings: Component = () => {
 
         {/* Channel Connect Modal */}
         <Show when={showConnectModal()}>
-          <MoltbotChannelConnect
+          <OpenClawChannelConnect
             onClose={() => setShowConnectModal(false)}
             onConnected={() => {
               setShowConnectModal(false);
-              moltbotStore.refreshChannels();
+              openclawStore.refreshChannels();
             }}
           />
         </Show>
@@ -243,7 +247,7 @@ export const MoltbotSettings: Component = () => {
 // ============================================================================
 
 const ChannelRow: Component<{
-  channel: MoltbotChannel;
+  channel: OpenClawChannel;
   onConfigChange: (config: {
     agentMode?: AgentMode;
     trustLevel?: TrustLevel;
@@ -292,7 +296,7 @@ const ChannelRow: Component<{
           }
         >
           <option value="seren">Seren AI</option>
-          <option value="moltbot">Moltbot AI</option>
+          <option value="openclaw">OpenClaw AI</option>
         </select>
 
         {/* Trust Level */}
@@ -315,4 +319,4 @@ const ChannelRow: Component<{
   );
 };
 
-export default MoltbotSettings;
+export default OpenClawSettings;

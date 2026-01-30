@@ -2,6 +2,7 @@
 // ABOUTME: Handles tool call parsing, execution, and result formatting.
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
@@ -10,7 +11,7 @@ import { x402Service } from "@/services/x402";
 import {
   parseGatewayToolName,
   parseMcpToolName,
-  parseMoltbotToolName,
+  parseOpenClawToolName,
 } from "./definitions";
 
 /**
@@ -20,6 +21,62 @@ interface FileEntry {
   name: string;
   path: string;
   is_directory: boolean;
+}
+
+const OPENCLAW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+function parseOpenClawApprovalError(
+  message: string,
+): { approvalId: string } | null {
+  const trimmed = message.trim();
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart === -1) return null;
+  const json = trimmed.slice(jsonStart);
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed != null &&
+      "code" in parsed &&
+      (parsed as { code?: unknown }).code === "approval_required" &&
+      "approvalId" in parsed
+    ) {
+      const approvalId = (parsed as { approvalId?: unknown }).approvalId;
+      if (typeof approvalId === "string" && approvalId.length > 0) {
+        return { approvalId };
+      }
+    }
+  } catch {
+    // Not JSON
+  }
+  return null;
+}
+
+async function waitForOpenClawApproval(approvalId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let unlisten: UnlistenFn | undefined;
+    const timeout = setTimeout(() => {
+      unlisten?.();
+      resolve(false);
+    }, OPENCLAW_APPROVAL_TIMEOUT_MS);
+
+    listen<{ id: string; approved: boolean }>(
+      "openclaw://approval-response",
+      (event) => {
+        if (event.payload.id !== approvalId) return;
+        clearTimeout(timeout);
+        unlisten?.();
+        resolve(event.payload.approved);
+      },
+    )
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {
+        clearTimeout(timeout);
+        resolve(false);
+      });
+  });
 }
 
 /**
@@ -57,10 +114,14 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
       );
     }
 
-    // Check if this is a Moltbot tool call (moltbot__toolName)
-    const moltbotInfo = parseMoltbotToolName(name);
-    if (moltbotInfo) {
-      return await executeMoltbotTool(toolCall.id, moltbotInfo.toolName, args);
+    // Check if this is an OpenClaw tool call (openclaw__toolName)
+    const openclawInfo = parseOpenClawToolName(name);
+    if (openclawInfo) {
+      return await executeOpenClawTool(
+        toolCall.id,
+        openclawInfo.toolName,
+        args,
+      );
     }
 
     // Otherwise, handle local file tools
@@ -152,9 +213,9 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
 }
 
 /**
- * Execute a Moltbot tool call via Tauri IPC.
+ * Execute an OpenClaw tool call via Tauri IPC.
  */
-async function executeMoltbotTool(
+async function executeOpenClawTool(
   toolCallId: string,
   toolName: string,
   args: Record<string, unknown>,
@@ -172,13 +233,34 @@ async function executeMoltbotTool(
             is_error: true,
           };
         }
-        // Grant approval server-side since tool calls are user-initiated
-        await invoke("moltbot_grant_approval", { channel, to });
-        const result = await invoke<string>("moltbot_send", {
-          channel,
-          to,
-          message,
-        });
+        let result: string;
+        try {
+          result = await invoke<string>("openclaw_send", {
+            channel,
+            to,
+            message,
+          });
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          const approval = parseOpenClawApprovalError(errorMessage);
+          if (!approval) throw error;
+
+          const approved = await waitForOpenClawApproval(approval.approvalId);
+          if (!approved) {
+            return {
+              tool_call_id: toolCallId,
+              content: "Message was not approved.",
+              is_error: true,
+            };
+          }
+
+          result = await invoke<string>("openclaw_send", {
+            channel,
+            to,
+            message,
+          });
+        }
         return {
           tool_call_id: toolCallId,
           content: result || "Message sent successfully.",
@@ -193,7 +275,7 @@ async function executeMoltbotTool(
             displayName: string;
             status: string;
           }>
-        >("moltbot_list_channels");
+        >("openclaw_list_channels");
         return {
           tool_call_id: toolCallId,
           content: JSON.stringify(channels, null, 2),
@@ -216,7 +298,7 @@ async function executeMoltbotTool(
             displayName: string;
             status: string;
           }>
-        >("moltbot_list_channels");
+        >("openclaw_list_channels");
         const found = allChannels.find((c) => c.id === channelId);
         if (!found) {
           return {
@@ -234,7 +316,7 @@ async function executeMoltbotTool(
       default:
         return {
           tool_call_id: toolCallId,
-          content: `Unknown Moltbot tool: ${toolName}`,
+          content: `Unknown OpenClaw tool: ${toolName}`,
           is_error: true,
         };
     }
@@ -242,7 +324,7 @@ async function executeMoltbotTool(
     const message = error instanceof Error ? error.message : String(error);
     return {
       tool_call_id: toolCallId,
-      content: `Moltbot tool error: ${message}`,
+      content: `OpenClaw tool error: ${message}`,
       is_error: true,
     };
   }

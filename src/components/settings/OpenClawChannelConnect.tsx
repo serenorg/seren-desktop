@@ -1,4 +1,4 @@
-// ABOUTME: Channel connection UI for Moltbot — platform picker and per-platform auth flows.
+// ABOUTME: Channel connection UI for OpenClaw — platform picker and per-platform auth flows.
 // ABOUTME: Handles QR code display (WhatsApp), token input (Telegram/Discord), and generic fallback.
 
 import {
@@ -10,7 +10,7 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { moltbotStore } from "@/stores/moltbot.store";
+import { openclawStore } from "@/stores/openclaw.store";
 
 // ============================================================================
 // Platform Definitions
@@ -148,7 +148,7 @@ const PLATFORMS: PlatformDef[] = [
     ),
     authType: "instructions",
     instructions:
-      "iMessage requires macOS with BlueBubbles or similar bridge. Configure BlueBubbles separately, then Moltbot will detect it automatically.",
+      "iMessage requires macOS with BlueBubbles or similar bridge. Configure BlueBubbles separately, then OpenClaw will detect it automatically.",
   },
   {
     id: "mattermost",
@@ -213,18 +213,18 @@ const PLATFORMS: PlatformDef[] = [
 // Main Component
 // ============================================================================
 
-interface MoltbotChannelConnectProps {
+interface OpenClawChannelConnectProps {
   onClose: () => void;
   onConnected: () => void;
   /** Pre-select a platform, skipping the picker step */
   platformId?: string;
 }
 
-export const MoltbotChannelConnect: Component<MoltbotChannelConnectProps> = (
+export const OpenClawChannelConnect: Component<OpenClawChannelConnectProps> = (
   props,
 ) => {
   const initialPlatform = props.platformId
-    ? PLATFORMS.find((p) => p.id === props.platformId) ?? null
+    ? (PLATFORMS.find((p) => p.id === props.platformId) ?? null)
     : null;
   const [selectedPlatform, setSelectedPlatform] =
     createSignal<PlatformDef | null>(initialPlatform);
@@ -234,7 +234,7 @@ export const MoltbotChannelConnect: Component<MoltbotChannelConnectProps> = (
   };
 
   const handleConnected = () => {
-    moltbotStore.refreshChannels();
+    openclawStore.refreshChannels();
     props.onConnected();
   };
 
@@ -368,7 +368,7 @@ const QrCodeFlow: Component<{
     setLoading(true);
     setError(null);
     try {
-      const qr = await moltbotStore.getQrCode(props.platform.id);
+      const qr = await openclawStore.getQrCode(props.platform.id);
       setQrData(qr);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -381,8 +381,8 @@ const QrCodeFlow: Component<{
     // Poll for channel connection status
     pollInterval = setInterval(async () => {
       try {
-        await moltbotStore.refreshChannels();
-        const connected = moltbotStore.channels.find(
+        await openclawStore.refreshChannels();
+        const connected = openclawStore.channels.find(
           (c) => c.platform === props.platform.id && c.status === "connected",
         );
         if (connected) {
@@ -472,7 +472,7 @@ const TokenFlow: Component<{
     setConnecting(true);
     setError(null);
     try {
-      await moltbotStore.connectChannel(props.platform.id, { token: value });
+      await openclawStore.connectChannel(props.platform.id, { token: value });
       setSuccess(true);
       setTimeout(() => props.onConnected(), 1500);
     } catch (e) {
@@ -492,9 +492,7 @@ const TokenFlow: Component<{
           <p class="m-0 text-[1rem] font-medium text-foreground">
             {props.platform.name} connected
           </p>
-          <p class="m-0 text-[0.85rem] text-muted-foreground">
-            Continuing...
-          </p>
+          <p class="m-0 text-[0.85rem] text-muted-foreground">Continuing...</p>
         </div>
       </Show>
 
@@ -516,7 +514,9 @@ const TokenFlow: Component<{
           </span>
           <input
             type="text"
-            placeholder={props.platform.tokenPlaceholder ?? "Paste token here..."}
+            placeholder={
+              props.platform.tokenPlaceholder ?? "Paste token here..."
+            }
             value={token()}
             onInput={(e) => setToken(e.currentTarget.value)}
             class="px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent"
@@ -553,8 +553,8 @@ const OAuthFlow: Component<{
     try {
       const { connectPublisher } = await import("@/services/publisher-oauth");
       await connectPublisher(props.platform.id);
-      // After OAuth completes, tell Moltbot backend to use the OAuth token
-      await moltbotStore.connectChannel(props.platform.id, {
+      // After OAuth completes, tell OpenClaw backend to use the OAuth token
+      await openclawStore.connectChannel(props.platform.id, {
         auth_type: "oauth",
       });
       props.onConnected();
@@ -611,7 +611,7 @@ const PhoneFlow: Component<{
     setLoading(true);
     setError(null);
     try {
-      await moltbotStore.connectChannel(props.platform.id, {
+      await openclawStore.connectChannel(props.platform.id, {
         phone: value,
         step: "request",
       });
@@ -630,7 +630,7 @@ const PhoneFlow: Component<{
     setLoading(true);
     setError(null);
     try {
-      await moltbotStore.connectChannel(props.platform.id, {
+      await openclawStore.connectChannel(props.platform.id, {
         phone: phone().trim(),
         code,
         step: "verify",
@@ -726,7 +726,7 @@ const InstructionsFlow: Component<{
       </p>
 
       <div class="px-4 py-3 bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded-lg text-[0.85rem] text-[#eab308]">
-        After configuring the external bridge, restart Moltbot and the channel
+        After configuring the external bridge, restart OpenClaw and the channel
         will appear automatically.
       </div>
 
@@ -741,4 +741,4 @@ const InstructionsFlow: Component<{
   );
 };
 
-export default MoltbotChannelConnect;
+export default OpenClawChannelConnect;

@@ -17,7 +17,7 @@ import {
 import { claimDaily, walletState } from "@/stores/wallet.store";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
-import { MoltbotSettings } from "./MoltbotSettings";
+import { OpenClawSettings } from "./OpenClawSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
 
 type SettingsSection =
@@ -31,7 +31,7 @@ type SettingsSection =
   | "appearance"
   | "general"
   | "mcp"
-  | "moltbot";
+  | "openclaw";
 
 interface SettingsPanelProps {
   onSignInClick?: () => void;
@@ -122,7 +122,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "appearance", label: "Appearance", icon: "🎨" },
     { id: "general", label: "General", icon: "⚙️" },
     { id: "mcp", label: "MCP Servers", icon: "🔌" },
-    { id: "moltbot", label: "Moltbot", icon: "🦞" },
+    { id: "openclaw", label: "OpenClaw", icon: "🦞" },
   ];
 
   return (
@@ -1235,8 +1235,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
           </section>
         </Show>
 
-        <Show when={activeSection() === "moltbot"}>
-          <MoltbotSettings />
+        <Show when={activeSection() === "openclaw"}>
+          <OpenClawSettings />
         </Show>
       </main>
 

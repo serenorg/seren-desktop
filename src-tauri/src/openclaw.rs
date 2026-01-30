@@ -1,5 +1,5 @@
-// ABOUTME: Manages the Moltbot child process lifecycle — spawn, monitor, terminate.
-// ABOUTME: Communicates with Moltbot via localhost HTTP webhook API and WebSocket events.
+// ABOUTME: Manages the OpenClaw child process lifecycle — spawn, monitor, terminate.
+// ABOUTME: Communicates with OpenClaw via localhost HTTP webhook API and WebSocket events.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -8,11 +8,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
 
-const MOLTBOT_STORE: &str = "moltbot.json";
+const OPENCLAW_STORE: &str = "openclaw.json";
 const HOOK_TOKEN_KEY: &str = "hook_token";
 const MAX_RESTART_ATTEMPTS: u32 = 3;
 
-/// Moltbot process status
+/// OpenClaw process status
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ProcessStatus {
@@ -46,7 +46,7 @@ pub enum ChannelStatus {
 /// Status information returned to the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MoltbotStatusInfo {
+pub struct OpenClawStatusInfo {
     pub process_status: ProcessStatus,
     pub port: Option<u16>,
     pub channels: Vec<ChannelInfo>,
@@ -55,10 +55,10 @@ pub struct MoltbotStatusInfo {
 
 /// Events emitted to the frontend
 mod events {
-    pub const STATUS_CHANGED: &str = "moltbot://status-changed";
-    pub const CHANNEL_EVENT: &str = "moltbot://channel-event";
-    pub const MESSAGE_RECEIVED: &str = "moltbot://message-received";
-    pub const APPROVAL_NEEDED: &str = "moltbot://approval-needed";
+    pub const STATUS_CHANGED: &str = "openclaw://status-changed";
+    pub const CHANNEL_EVENT: &str = "openclaw://channel-event";
+    pub const MESSAGE_RECEIVED: &str = "openclaw://message-received";
+    pub const APPROVAL_NEEDED: &str = "openclaw://approval-needed";
 }
 
 /// Trust level for a channel
@@ -78,15 +78,15 @@ pub struct ChannelTrustConfig {
     pub agent_mode: String,
 }
 
-/// Internal state for managing the Moltbot process
-struct MoltbotProcess {
+/// Internal state for managing the OpenClaw process
+struct OpenClawProcess {
     child: tokio::process::Child,
     started_at: std::time::Instant,
 }
 
-/// State for managing the Moltbot integration
-pub struct MoltbotState {
-    process: Mutex<Option<MoltbotProcess>>,
+/// State for managing the OpenClaw integration
+pub struct OpenClawState {
+    process: Mutex<Option<OpenClawProcess>>,
     status: Mutex<ProcessStatus>,
     hook_token: Mutex<Option<String>>,
     port: Mutex<u16>,
@@ -98,7 +98,7 @@ pub struct MoltbotState {
     approved_ids: Mutex<HashSet<String>>,
 }
 
-impl MoltbotState {
+impl OpenClawState {
     pub fn new() -> Self {
         Self {
             process: Mutex::new(None),
@@ -113,7 +113,7 @@ impl MoltbotState {
     }
 }
 
-impl Default for MoltbotState {
+impl Default for OpenClawState {
     fn default() -> Self {
         Self::new()
     }
@@ -138,8 +138,8 @@ fn generate_hook_token() -> String {
     hex::encode(bytes)
 }
 
-/// Find the Moltbot binary in known locations
-fn find_moltbot_binary() -> Result<std::path::PathBuf, String> {
+/// Find the OpenClaw binary in known locations
+fn find_openclaw_binary() -> Result<std::path::PathBuf, String> {
     let exe_path =
         std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
     let exe_dir = exe_path
@@ -147,7 +147,7 @@ fn find_moltbot_binary() -> Result<std::path::PathBuf, String> {
         .ok_or_else(|| "Failed to get exe directory".to_string())?;
 
     let ext = if cfg!(windows) { ".exe" } else { "" };
-    let bin_filename = format!("moltbot{}", ext);
+    let bin_filename = format!("openclaw{}", ext);
 
     let candidates = [
         // 1. Production macOS: In Resources/embedded-runtime/bin/
@@ -165,13 +165,13 @@ fn find_moltbot_binary() -> Result<std::path::PathBuf, String> {
 
     for candidate in &candidates {
         if candidate.exists() {
-            eprintln!("[Moltbot] Found binary at: {:?}", candidate);
+            eprintln!("[OpenClaw] Found binary at: {:?}", candidate);
             return Ok(candidate.clone());
         }
     }
 
     Err(format!(
-        "Moltbot binary not found. Checked locations:\n{}",
+        "OpenClaw binary not found. Checked locations:\n{}",
         candidates
             .iter()
             .map(|p| format!("  - {:?}", p))
@@ -182,7 +182,7 @@ fn find_moltbot_binary() -> Result<std::path::PathBuf, String> {
 
 /// Load or generate the hook token from encrypted store
 fn load_or_create_hook_token(app: &AppHandle) -> Result<String, String> {
-    let store = app.store(MOLTBOT_STORE).map_err(|e| e.to_string())?;
+    let store = app.store(OPENCLAW_STORE).map_err(|e| e.to_string())?;
 
     if let Some(token) = store
         .get(HOOK_TOKEN_KEY)
@@ -207,17 +207,14 @@ fn emit_status(app: &AppHandle, status: ProcessStatus) {
     );
 }
 
-/// Start the Moltbot background process
+/// Start the OpenClaw background process
 #[tauri::command]
-pub async fn moltbot_start(
-    app: AppHandle,
-    state: State<'_, MoltbotState>,
-) -> Result<(), String> {
+pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> Result<(), String> {
     // Check if already running
     {
         let status = state.status.lock().await;
         if *status == ProcessStatus::Running || *status == ProcessStatus::Starting {
-            return Err("Moltbot is already running".to_string());
+            return Err("OpenClaw is already running".to_string());
         }
     }
 
@@ -229,7 +226,7 @@ pub async fn moltbot_start(
     emit_status(&app, ProcessStatus::Starting);
 
     // Find binary
-    let binary_path = match find_moltbot_binary() {
+    let binary_path = match find_openclaw_binary() {
         Ok(path) => path,
         Err(e) => {
             let mut status = state.status.lock().await;
@@ -278,12 +275,13 @@ pub async fn moltbot_start(
         }
     }
 
-    // Spawn the Moltbot process
+    // Spawn the OpenClaw process
     // Pass config via env vars (not CLI args, to avoid exposure in `ps`)
     let mut cmd = tokio::process::Command::new(&binary_path);
-    cmd.env("MOLTBOT_PORT", port.to_string())
-        .env("MOLTBOT_HOOK_TOKEN", &token)
-        .env("MOLTBOT_HOST", "127.0.0.1")
+    cmd.env("OPENCLAW_GATEWAY_PORT", port.to_string())
+        .env("OPENCLAW_GATEWAY_TOKEN", &token)
+        .env("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
+        .env("OPENCLAW_SKIP_CHANNELS", "1")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -296,23 +294,22 @@ pub async fn moltbot_start(
     }
 
     let child = cmd.spawn().map_err(|e| {
-        let mut status_lock =
-            futures::executor::block_on(state.status.lock());
+        let mut status_lock = futures::executor::block_on(state.status.lock());
         *status_lock = ProcessStatus::Stopped;
         emit_status(&app, ProcessStatus::Stopped);
-        format!("Failed to spawn Moltbot: {}", e)
+        format!("Failed to spawn OpenClaw: {}", e)
     })?;
 
     let pid = child.id();
     eprintln!(
-        "[Moltbot] Process spawned: pid={:?}, port={}, binary={:?}",
+        "[OpenClaw] Process spawned: pid={:?}, port={}, binary={:?}",
         pid, port, binary_path
     );
 
     // Store process
     {
         let mut process = state.process.lock().await;
-        *process = Some(MoltbotProcess {
+        *process = Some(OpenClawProcess {
             child,
             started_at: std::time::Instant::now(),
         });
@@ -327,7 +324,7 @@ pub async fn moltbot_start(
     }
     emit_status(&app, ProcessStatus::Running);
 
-    // Start WebSocket listener to receive real-time events from Moltbot
+    // Start WebSocket listener to receive real-time events from OpenClaw
     spawn_ws_listener(app.clone(), port, token);
 
     // Start process monitor for crash detection and auto-restart
@@ -336,16 +333,13 @@ pub async fn moltbot_start(
     Ok(())
 }
 
-/// Stop the Moltbot background process
+/// Stop the OpenClaw background process
 #[tauri::command]
-pub async fn moltbot_stop(
-    app: AppHandle,
-    state: State<'_, MoltbotState>,
-) -> Result<(), String> {
+pub async fn openclaw_stop(app: AppHandle, state: State<'_, OpenClawState>) -> Result<(), String> {
     let mut process_lock = state.process.lock().await;
 
     if let Some(mut proc) = process_lock.take() {
-        eprintln!("[Moltbot] Stopping process...");
+        eprintln!("[OpenClaw] Stopping process...");
 
         // Try graceful shutdown first (SIGTERM on Unix)
         #[cfg(unix)]
@@ -358,18 +352,13 @@ pub async fn moltbot_stop(
         }
 
         // Wait up to 5 seconds for graceful shutdown
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            proc.child.wait(),
-        )
-        .await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), proc.child.wait()).await {
             Ok(Ok(status)) => {
-                eprintln!("[Moltbot] Process exited gracefully: {:?}", status);
+                eprintln!("[OpenClaw] Process exited gracefully: {:?}", status);
             }
             _ => {
                 // Force kill
-                eprintln!("[Moltbot] Force killing process...");
+                eprintln!("[OpenClaw] Force killing process...");
                 let _ = proc.child.kill().await;
             }
         }
@@ -391,11 +380,11 @@ pub async fn moltbot_stop(
     Ok(())
 }
 
-/// Restart the Moltbot process
+/// Restart the OpenClaw process
 #[tauri::command]
-pub async fn moltbot_restart(
+pub async fn openclaw_restart(
     app: AppHandle,
-    state: State<'_, MoltbotState>,
+    state: State<'_, OpenClawState>,
 ) -> Result<(), String> {
     {
         let mut status = state.status.lock().await;
@@ -403,29 +392,29 @@ pub async fn moltbot_restart(
     }
     emit_status(&app, ProcessStatus::Restarting);
 
-    moltbot_stop(app.clone(), state.clone()).await?;
+    openclaw_stop(app.clone(), state.clone()).await?;
 
     // Brief pause between stop and start
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    moltbot_start(app, state).await
+    openclaw_start(app, state).await
 }
 
-/// Get the current Moltbot status
+/// Get the current OpenClaw status
 #[tauri::command]
-pub async fn moltbot_status(state: State<'_, MoltbotState>) -> Result<MoltbotStatusInfo, String> {
+pub async fn openclaw_status(
+    state: State<'_, OpenClawState>,
+) -> Result<OpenClawStatusInfo, String> {
     let status = *state.status.lock().await;
     let port = *state.port.lock().await;
     let channels = state.channels.lock().await.clone();
 
     let uptime_secs = {
         let process = state.process.lock().await;
-        process
-            .as_ref()
-            .map(|p| p.started_at.elapsed().as_secs())
+        process.as_ref().map(|p| p.started_at.elapsed().as_secs())
     };
 
-    Ok(MoltbotStatusInfo {
+    Ok(OpenClawStatusInfo {
         process_status: status,
         port: if status == ProcessStatus::Running {
             Some(port)
@@ -439,18 +428,17 @@ pub async fn moltbot_status(state: State<'_, MoltbotState>) -> Result<MoltbotSta
 
 // --- Process Monitor for Crash Detection and Auto-Restart ---
 
-/// Monitors the Moltbot child process. If it exits unexpectedly,
+/// Monitors the OpenClaw child process. If it exits unexpectedly,
 /// updates status to Crashed and attempts restart up to MAX_RESTART_ATTEMPTS.
 fn spawn_process_monitor(app: AppHandle) {
     tokio::spawn(async move {
-        let state = app.state::<MoltbotState>();
+        let state = app.state::<OpenClawState>();
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             let current_status = *state.status.lock().await;
-            if current_status != ProcessStatus::Running
-                && current_status != ProcessStatus::Starting
+            if current_status != ProcessStatus::Running && current_status != ProcessStatus::Starting
             {
                 // Process was intentionally stopped or not running — exit monitor
                 return;
@@ -475,7 +463,7 @@ fn spawn_process_monitor(app: AppHandle) {
                 continue;
             }
 
-            eprintln!("[Moltbot Monitor] Process exited unexpectedly");
+            eprintln!("[OpenClaw Monitor] Process exited unexpectedly");
 
             // Update status to Crashed
             {
@@ -492,7 +480,7 @@ fn spawn_process_monitor(app: AppHandle) {
 
             if restart_count >= MAX_RESTART_ATTEMPTS {
                 eprintln!(
-                    "[Moltbot Monitor] Max restart attempts ({}) reached, giving up",
+                    "[OpenClaw Monitor] Max restart attempts ({}) reached, giving up",
                     MAX_RESTART_ATTEMPTS
                 );
                 return;
@@ -500,7 +488,7 @@ fn spawn_process_monitor(app: AppHandle) {
 
             // Attempt restart
             eprintln!(
-                "[Moltbot Monitor] Attempting restart ({}/{})",
+                "[OpenClaw Monitor] Attempting restart ({}/{})",
                 restart_count + 1,
                 MAX_RESTART_ATTEMPTS
             );
@@ -520,14 +508,14 @@ fn spawn_process_monitor(app: AppHandle) {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             // Restart via the command (re-uses the full startup logic)
-            match moltbot_start(app.clone(), app.state::<MoltbotState>()).await {
+            match openclaw_start(app.clone(), app.state::<OpenClawState>()).await {
                 Ok(()) => {
-                    eprintln!("[Moltbot Monitor] Restart succeeded");
-                    // The new moltbot_start will spawn its own monitor, so exit this one
+                    eprintln!("[OpenClaw Monitor] Restart succeeded");
+                    // The new openclaw_start will spawn its own monitor, so exit this one
                     return;
                 }
                 Err(e) => {
-                    eprintln!("[Moltbot Monitor] Restart failed: {}", e);
+                    eprintln!("[OpenClaw Monitor] Restart failed: {}", e);
                     // Loop will check restart count on next iteration
                 }
             }
@@ -535,10 +523,10 @@ fn spawn_process_monitor(app: AppHandle) {
     });
 }
 
-// --- WebSocket Listener for Moltbot Gateway Events ---
+// --- WebSocket Listener for OpenClaw Gateway Events ---
 
-/// Connect to Moltbot's WebSocket gateway and forward events to the frontend.
-/// Retries connection with backoff since Moltbot takes a few seconds to initialize.
+/// Connect to OpenClaw's WebSocket gateway and forward events to the frontend.
+/// Retries connection with backoff since OpenClaw takes a few seconds to initialize.
 pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
     tokio::spawn(async move {
         let max_retries = 10;
@@ -550,7 +538,7 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
 
             match tokio_tungstenite::connect_async(&url).await {
                 Ok((ws_stream, _)) => {
-                    eprintln!("[Moltbot WS] Connected to gateway on port {}", port);
+                    eprintln!("[OpenClaw WS] Connected to gateway on port {}", port);
                     attempt = 0; // Reset on successful connect
 
                     use futures::StreamExt;
@@ -562,11 +550,11 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
                                 handle_ws_message(&app, &text);
                             }
                             Ok(tokio_tungstenite::tungstenite::Message::Close(_)) => {
-                                eprintln!("[Moltbot WS] Connection closed by server");
+                                eprintln!("[OpenClaw WS] Connection closed by server");
                                 break;
                             }
                             Err(e) => {
-                                eprintln!("[Moltbot WS] Error: {}", e);
+                                eprintln!("[OpenClaw WS] Error: {}", e);
                                 break;
                             }
                             _ => {}
@@ -576,13 +564,13 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
                 Err(e) => {
                     if attempt >= max_retries {
                         eprintln!(
-                            "[Moltbot WS] Failed to connect after {} attempts: {}",
+                            "[OpenClaw WS] Failed to connect after {} attempts: {}",
                             max_retries, e
                         );
                         return;
                     }
                     eprintln!(
-                        "[Moltbot WS] Connection attempt {}/{} failed: {}",
+                        "[OpenClaw WS] Connection attempt {}/{} failed: {}",
                         attempt, max_retries, e
                     );
                 }
@@ -595,11 +583,11 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
     });
 }
 
-/// Parse and forward a WebSocket message from Moltbot to the frontend
+/// Parse and forward a WebSocket message from OpenClaw to the frontend
 fn handle_ws_message(app: &AppHandle, text: &str) {
     let parsed: Result<serde_json::Value, _> = serde_json::from_str(text);
     let Ok(msg) = parsed else {
-        eprintln!("[Moltbot WS] Failed to parse message: {}", text);
+        eprintln!("[OpenClaw WS] Failed to parse message: {}", text);
         return;
     };
 
@@ -616,14 +604,14 @@ fn handle_ws_message(app: &AppHandle, text: &str) {
             let _ = app.emit(events::MESSAGE_RECEIVED, &msg);
         }
         _ => {
-            eprintln!("[Moltbot WS] Unhandled event type: {}", event_type);
+            eprintln!("[OpenClaw WS] Unhandled event type: {}", event_type);
         }
     }
 }
 
-// --- HTTP Client for Moltbot Webhook API ---
+// --- HTTP Client for OpenClaw Webhook API ---
 
-/// Send a message via Moltbot's webhook API
+/// Send a message via OpenClaw's webhook API
 async fn webhook_send(
     port: u16,
     hook_token: &str,
@@ -654,7 +642,7 @@ async fn webhook_send(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Moltbot webhook request failed: {}", e))?;
+        .map_err(|e| format!("OpenClaw webhook request failed: {}", e))?;
 
     let status = response.status();
     let response_text = response
@@ -664,7 +652,7 @@ async fn webhook_send(
 
     if !status.is_success() {
         return Err(format!(
-            "Moltbot webhook returned {}: {}",
+            "OpenClaw webhook returned {}: {}",
             status, response_text
         ));
     }
@@ -672,18 +660,18 @@ async fn webhook_send(
     Ok(response_text)
 }
 
-/// Query Moltbot for connected channels via its HTTP API
+/// Query OpenClaw for connected channels via its HTTP API
 /// Query channel status via the openclaw CLI (`channels status`).
 async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
-    let binary_path = find_moltbot_binary()?;
+    let binary_path = find_openclaw_binary()?;
     let script_dir = binary_path
         .parent()
-        .ok_or_else(|| "Cannot resolve moltbot bin directory".to_string())?;
-    let moltbot_pkg = script_dir.join("../moltbot/openclaw.mjs");
+        .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
+    let openclaw_pkg = script_dir.join("../openclaw/openclaw.mjs");
     let embedded_path = crate::embedded_runtime::get_embedded_path();
 
     let mut cmd = tokio::process::Command::new("node");
-    cmd.arg(&moltbot_pkg)
+    cmd.arg(&openclaw_pkg)
         .arg("channels")
         .arg("status")
         .arg("--json")
@@ -718,11 +706,25 @@ async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
         for (channel_id, accounts) in channel_accounts {
             if let Some(arr) = accounts.as_array() {
                 for account in arr {
-                    let running = account.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let configured = account.get("configured").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let has_error = account.get("lastError").map(|v| !v.is_null()).unwrap_or(false);
-                    let account_id = account.get("accountId").and_then(|v| v.as_str()).unwrap_or("default");
-                    let label = account.get("label").or(account.get("name"))
+                    let running = account
+                        .get("running")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let configured = account
+                        .get("configured")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let has_error = account
+                        .get("lastError")
+                        .map(|v| !v.is_null())
+                        .unwrap_or(false);
+                    let account_id = account
+                        .get("accountId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default");
+                    let label = account
+                        .get("label")
+                        .or(account.get("name"))
                         .and_then(|v| v.as_str())
                         .unwrap_or(channel_id.as_str());
 
@@ -754,22 +756,22 @@ async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
     Ok(channels)
 }
 
-/// Send a message through Moltbot (Tauri command).
+/// Send a message through OpenClaw (Tauri command).
 /// Enforces trust level before sending. For approval-required channels, the caller
 /// must first obtain an approval_id via the approval UI, then grant it via
-/// moltbot_grant_approval before calling this. The approved parameter is NOT trusted
+/// openclaw_grant_approval before calling this. The approved parameter is NOT trusted
 /// from callers — only server-tracked approval IDs are accepted.
 #[tauri::command]
-pub async fn moltbot_send(
+pub async fn openclaw_send(
     app: AppHandle,
-    state: State<'_, MoltbotState>,
+    state: State<'_, OpenClawState>,
     channel: String,
     to: String,
     message: String,
 ) -> Result<String, String> {
     let status = *state.status.lock().await;
     if status != ProcessStatus::Running {
-        return Err("Moltbot is not running. Start it in Settings → Moltbot.".to_string());
+        return Err("OpenClaw is not running. Start it in Settings → OpenClaw.".to_string());
     }
 
     // Enforce trust level
@@ -811,12 +813,17 @@ pub async fn moltbot_send(
                                 "id": approval_id,
                                 "channel": channel,
                                 "platform": platform,
-                                "from": to,
+                                "to": to,
                                 "message": message,
                                 "draftResponse": message,
                             }),
                         );
-                        return Err("Message requires approval. Approval event emitted.".to_string());
+                        return Err(serde_json::json!({
+                            "code": "approval_required",
+                            "approvalId": approval_id,
+                            "message": "Message requires approval"
+                        })
+                        .to_string());
                     }
                 }
                 TrustLevel::MentionOnly => {
@@ -838,22 +845,15 @@ pub async fn moltbot_send(
         .clone()
         .ok_or_else(|| "Hook token not configured".to_string())?;
 
-    webhook_send(
-        port,
-        &hook_token,
-        &message,
-        Some(&channel),
-        Some(&to),
-    )
-    .await
+    webhook_send(port, &hook_token, &message, Some(&channel), Some(&to)).await
 }
 
 /// Grant approval for a pending message. Called by the approval UI when the user
 /// approves a draft response. The approval is keyed by channel:to so the subsequent
-/// moltbot_send call for that recipient can proceed.
+/// openclaw_send call for that recipient can proceed.
 #[tauri::command]
-pub async fn moltbot_grant_approval(
-    state: State<'_, MoltbotState>,
+pub async fn openclaw_grant_approval(
+    state: State<'_, OpenClawState>,
     channel: String,
     to: String,
 ) -> Result<(), String> {
@@ -864,11 +864,11 @@ pub async fn moltbot_grant_approval(
 }
 
 /// Set trust configuration for a channel (Tauri command).
-/// Persists to moltbot.json so trust levels survive restarts.
+/// Persists to openclaw.json so trust levels survive restarts.
 #[tauri::command]
-pub async fn moltbot_set_trust(
+pub async fn openclaw_set_trust(
     app: AppHandle,
-    state: State<'_, MoltbotState>,
+    state: State<'_, OpenClawState>,
     channel_id: String,
     trust_level: TrustLevel,
     agent_mode: String,
@@ -888,20 +888,22 @@ pub async fn moltbot_set_trust(
     Ok(())
 }
 
-/// Persist trust settings to the moltbot.json store.
+/// Persist trust settings to the openclaw.json store.
 fn persist_trust_settings(app: &AppHandle, settings: &HashMap<String, ChannelTrustConfig>) {
-    if let Ok(store) = app.store(MOLTBOT_STORE) {
+    if let Ok(store) = app.store(OPENCLAW_STORE) {
         let json = serde_json::to_value(settings).unwrap_or_default();
         store.set("trust_settings", json);
         let _ = store.save();
     }
 }
 
-/// Load trust settings from the moltbot.json store.
+/// Load trust settings from the openclaw.json store.
 fn load_trust_settings(app: &AppHandle) -> HashMap<String, ChannelTrustConfig> {
-    if let Ok(store) = app.store(MOLTBOT_STORE) {
+    if let Ok(store) = app.store(OPENCLAW_STORE) {
         if let Some(val) = store.get("trust_settings") {
-            if let Ok(settings) = serde_json::from_value::<HashMap<String, ChannelTrustConfig>>(val.clone()) {
+            if let Ok(settings) =
+                serde_json::from_value::<HashMap<String, ChannelTrustConfig>>(val.clone())
+            {
                 return settings;
             }
         }
@@ -915,25 +917,32 @@ async fn request_channel_connect(
     platform: &str,
     credentials: &HashMap<String, String>,
 ) -> Result<serde_json::Value, String> {
-    let binary_path = find_moltbot_binary()?;
+    let binary_path = find_openclaw_binary()?;
     let embedded_path = crate::embedded_runtime::get_embedded_path();
 
-    // The moltbot wrapper invokes `openclaw.mjs gateway` by default,
+    // The openclaw wrapper invokes `openclaw.mjs gateway` by default,
     // but we need to call `openclaw.mjs channels add` instead.
     // Build the node command directly to call the CLI.
     let script_dir = binary_path
         .parent()
-        .ok_or_else(|| "Cannot resolve moltbot bin directory".to_string())?;
-    let moltbot_pkg = script_dir.join("../moltbot/openclaw.mjs");
+        .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
+    let openclaw_pkg = script_dir.join("../openclaw/openclaw.mjs");
 
-    eprintln!("[Moltbot] Channel connect: platform={}, openclaw={}", platform, moltbot_pkg.display());
+    eprintln!(
+        "[OpenClaw] Channel connect: platform={}, openclaw={}",
+        platform,
+        openclaw_pkg.display()
+    );
 
-    if !moltbot_pkg.exists() {
-        return Err(format!("openclaw.mjs not found at {}", moltbot_pkg.display()));
+    if !openclaw_pkg.exists() {
+        return Err(format!(
+            "openclaw.mjs not found at {}",
+            openclaw_pkg.display()
+        ));
     }
 
     let mut cmd = tokio::process::Command::new("node");
-    cmd.arg(&moltbot_pkg)
+    cmd.arg(&openclaw_pkg)
         .arg("channels")
         .arg("add")
         .arg("--channel")
@@ -964,10 +973,16 @@ async fn request_channel_connect(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    eprintln!("[Moltbot] Spawning: node {} channels add --channel {}", moltbot_pkg.display(), platform);
+    eprintln!(
+        "[OpenClaw] Spawning: node {} channels add --channel {}",
+        openclaw_pkg.display(),
+        platform
+    );
 
     // Spawn with a 30-second timeout to prevent hanging on interactive prompts
-    let child = cmd.spawn().map_err(|e| format!("Failed to spawn channels add: {}", e))?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn channels add: {}", e))?;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         child.wait_with_output(),
@@ -979,7 +994,12 @@ async fn request_channel_connect(
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    eprintln!("[Moltbot] Channel add exit={} stdout={} stderr={}", output.status, stdout.trim(), stderr.trim());
+    eprintln!(
+        "[OpenClaw] Channel add exit={} stdout={} stderr={}",
+        output.status,
+        stdout.trim(),
+        stderr.trim()
+    );
 
     if !output.status.success() {
         let msg = if !stderr.is_empty() { &stderr } else { &stdout };
@@ -1005,14 +1025,14 @@ async fn request_qr_code(_port: u16, _hook_token: &str, platform: &str) -> Resul
 
 /// Connect a messaging channel (Tauri command)
 #[tauri::command]
-pub async fn moltbot_connect_channel(
-    state: State<'_, MoltbotState>,
+pub async fn openclaw_connect_channel(
+    state: State<'_, OpenClawState>,
     platform: String,
     credentials: HashMap<String, String>,
 ) -> Result<serde_json::Value, String> {
     let status = *state.status.lock().await;
     if status != ProcessStatus::Running {
-        return Err("Moltbot is not running. Start it first.".to_string());
+        return Err("OpenClaw is not running. Start it first.".to_string());
     }
 
     request_channel_connect(&platform, &credentials).await
@@ -1020,13 +1040,13 @@ pub async fn moltbot_connect_channel(
 
 /// Get QR code for WhatsApp-style connections (Tauri command)
 #[tauri::command]
-pub async fn moltbot_get_qr(
-    state: State<'_, MoltbotState>,
+pub async fn openclaw_get_qr(
+    state: State<'_, OpenClawState>,
     platform: String,
 ) -> Result<String, String> {
     let status = *state.status.lock().await;
     if status != ProcessStatus::Running {
-        return Err("Moltbot is not running. Start it first.".to_string());
+        return Err("OpenClaw is not running. Start it first.".to_string());
     }
 
     let port = *state.port.lock().await;
@@ -1042,25 +1062,25 @@ pub async fn moltbot_get_qr(
 
 /// Disconnect a channel (Tauri command)
 #[tauri::command]
-pub async fn moltbot_disconnect_channel(
-    state: State<'_, MoltbotState>,
+pub async fn openclaw_disconnect_channel(
+    state: State<'_, OpenClawState>,
     channel_id: String,
 ) -> Result<(), String> {
     let status = *state.status.lock().await;
     if status != ProcessStatus::Running {
-        return Err("Moltbot is not running.".to_string());
+        return Err("OpenClaw is not running.".to_string());
     }
 
     // Use openclaw CLI to remove the channel
-    let binary_path = find_moltbot_binary().map_err(|e| format!("Cannot find moltbot: {}", e))?;
+    let binary_path = find_openclaw_binary().map_err(|e| format!("Cannot find openclaw: {}", e))?;
     let script_dir = binary_path
         .parent()
-        .ok_or_else(|| "Cannot resolve moltbot bin directory".to_string())?;
-    let moltbot_pkg = script_dir.join("../moltbot/openclaw.mjs");
+        .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
+    let openclaw_pkg = script_dir.join("../openclaw/openclaw.mjs");
     let embedded_path = crate::embedded_runtime::get_embedded_path();
 
     let mut cmd = tokio::process::Command::new("node");
-    cmd.arg(&moltbot_pkg)
+    cmd.arg(&openclaw_pkg)
         .arg("channels")
         .arg("remove")
         .arg("--channel")
@@ -1097,12 +1117,12 @@ pub async fn moltbot_disconnect_channel(
 
 /// List connected channels (Tauri command)
 #[tauri::command]
-pub async fn moltbot_list_channels(
-    state: State<'_, MoltbotState>,
+pub async fn openclaw_list_channels(
+    state: State<'_, OpenClawState>,
 ) -> Result<Vec<ChannelInfo>, String> {
     let status = *state.status.lock().await;
     if status != ProcessStatus::Running {
-        return Err("Moltbot is not running. Start it in Settings → Moltbot.".to_string());
+        return Err("OpenClaw is not running. Start it in Settings → OpenClaw.".to_string());
     }
 
     let channels = query_channels().await?;
@@ -1156,12 +1176,12 @@ mod tests {
     }
 
     #[test]
-    fn test_moltbot_state_default_status() {
+    fn test_openclaw_state_default_status() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
         rt.block_on(async {
-            let state = MoltbotState::new();
+            let state = OpenClawState::new();
             let status = state.status.lock().await;
             assert_eq!(
                 *status,
@@ -1293,24 +1313,24 @@ mod tests {
     }
 
     #[test]
-    fn test_moltbot_state_channels_initially_empty() {
+    fn test_openclaw_state_channels_initially_empty() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
         rt.block_on(async {
-            let state = MoltbotState::new();
+            let state = OpenClawState::new();
             let channels = state.channels.lock().await;
             assert!(channels.is_empty(), "channels should be empty initially");
         });
     }
 
     #[test]
-    fn test_moltbot_state_hook_token_initially_none() {
+    fn test_openclaw_state_hook_token_initially_none() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
         rt.block_on(async {
-            let state = MoltbotState::new();
+            let state = OpenClawState::new();
             let token = state.hook_token.lock().await;
             assert!(token.is_none(), "hook token should be None initially");
         });
@@ -1342,16 +1362,16 @@ mod tests {
     }
 
     #[test]
-    fn test_find_moltbot_binary_returns_error_when_not_found() {
+    fn test_find_openclaw_binary_returns_error_when_not_found() {
         // In test environment, the binary won't exist
-        let result = find_moltbot_binary();
+        let result = find_openclaw_binary();
         assert!(
             result.is_err(),
             "should return error when binary is not found"
         );
         let err = result.unwrap_err();
         assert!(
-            err.contains("Moltbot binary not found"),
+            err.contains("OpenClaw binary not found"),
             "error message should indicate binary not found"
         );
     }

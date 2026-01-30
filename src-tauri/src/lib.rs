@@ -20,15 +20,15 @@ pub mod services {
 #[cfg(feature = "acp")]
 mod acp;
 mod embedded_runtime;
-#[cfg(feature = "moltbot")]
-mod moltbot;
 mod files;
 mod mcp;
-mod sandbox;
-mod terminal;
 mod oauth;
 mod oauth_callback_server;
+#[cfg(feature = "openclaw")]
+mod openclaw;
+mod sandbox;
 mod sync;
+mod terminal;
 mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
@@ -335,7 +335,11 @@ struct BuildInfo {
 
 #[tauri::command]
 fn get_build_info(app: tauri::AppHandle) -> BuildInfo {
-    let version = app.config().version.clone().unwrap_or_else(|| "unknown".into());
+    let version = app
+        .config()
+        .version
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
 
     let webview = if cfg!(target_os = "macos") {
         "WebKit (macOS)".to_string()
@@ -409,9 +413,9 @@ pub fn run() {
         builder = builder.manage(acp::AcpState::new());
     }
 
-    #[cfg(feature = "moltbot")]
+    #[cfg(feature = "openclaw")]
     {
-        builder = builder.manage(moltbot::MoltbotState::new());
+        builder = builder.manage(openclaw::OpenClawState::new());
     }
 
     builder
@@ -437,7 +441,15 @@ pub fn run() {
                     app,
                     "Seren",
                     true,
-                    &[&about, &separator, &hide, &hide_others, &show_all, &separator, &quit],
+                    &[
+                        &about,
+                        &separator,
+                        &hide,
+                        &hide_others,
+                        &show_all,
+                        &separator,
+                        &quit,
+                    ],
                 )?;
 
                 let edit_menu = {
@@ -451,7 +463,16 @@ pub fn run() {
                         app,
                         "Edit",
                         true,
-                        &[&undo, &redo, &separator, &cut, &copy, &paste, &separator, &select_all],
+                        &[
+                            &undo,
+                            &redo,
+                            &separator,
+                            &cut,
+                            &copy,
+                            &paste,
+                            &separator,
+                            &select_all,
+                        ],
                     )?
                 };
 
@@ -613,28 +634,29 @@ pub fn run() {
             acp::acp_check_agent_available,
             #[cfg(feature = "acp")]
             acp::acp_ensure_claude_cli,
-            // Moltbot commands (conditionally included when moltbot feature is enabled)
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_start,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_stop,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_restart,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_status,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_send,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_list_channels,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_connect_channel,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_get_qr,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_disconnect_channel,
-            #[cfg(feature = "moltbot")]
-            moltbot::moltbot_set_trust,
-            moltbot::moltbot_grant_approval,
+            // OpenClaw commands (conditionally included when openclaw feature is enabled)
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_start,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_stop,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_restart,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_status,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_send,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_list_channels,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_connect_channel,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_get_qr,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_disconnect_channel,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_set_trust,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_grant_approval,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -85,6 +85,6 @@ tokio-tungstenite = { version = "0.24", optional = true }
 tauri-plugin-deep-link = "2"
 
 [features]
-default = ["acp", "moltbot"]
+default = ["acp", "openclaw"]
 acp = ["agent-client-protocol", "claude-code-acp-rs"]
-moltbot = ["tokio-tungstenite"]
+openclaw = ["tokio-tungstenite"]
