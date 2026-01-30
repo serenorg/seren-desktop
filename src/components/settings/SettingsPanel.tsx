@@ -17,6 +17,7 @@ import {
 import { claimDaily, walletState } from "@/stores/wallet.store";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
+import { MoltbotSettings } from "./MoltbotSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
 
 type SettingsSection =
@@ -29,7 +30,8 @@ type SettingsSection =
   | "indexing"
   | "appearance"
   | "general"
-  | "mcp";
+  | "mcp"
+  | "moltbot";
 
 interface SettingsPanelProps {
   onSignInClick?: () => void;
@@ -120,6 +122,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "appearance", label: "Appearance", icon: "🎨" },
     { id: "general", label: "General", icon: "⚙️" },
     { id: "mcp", label: "MCP Servers", icon: "🔌" },
+    { id: "moltbot", label: "Moltbot", icon: "🦞" },
   ];
 
   return (
@@ -1230,6 +1233,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </div>
             </Show>
           </section>
+        </Show>
+
+        <Show when={activeSection() === "moltbot"}>
+          <MoltbotSettings />
         </Show>
       </main>
 
