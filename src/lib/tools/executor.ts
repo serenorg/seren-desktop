@@ -198,6 +198,37 @@ async function executeMoltbotTool(
           is_error: false,
         };
       }
+      case "channel_status": {
+        const channelId = args.channel as string;
+        if (!channelId) {
+          return {
+            tool_call_id: toolCallId,
+            content: "Missing required parameter: channel",
+            is_error: true,
+          };
+        }
+        const allChannels = await invoke<
+          Array<{
+            id: string;
+            platform: string;
+            displayName: string;
+            status: string;
+          }>
+        >("moltbot_list_channels");
+        const found = allChannels.find((c) => c.id === channelId);
+        if (!found) {
+          return {
+            tool_call_id: toolCallId,
+            content: `Channel not found: ${channelId}`,
+            is_error: true,
+          };
+        }
+        return {
+          tool_call_id: toolCallId,
+          content: JSON.stringify(found, null, 2),
+          is_error: false,
+        };
+      }
       default:
         return {
           tool_call_id: toolCallId,

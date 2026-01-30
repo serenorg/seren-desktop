@@ -40,6 +40,7 @@ import {
 } from "@/stores/auth.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
+import { moltbotStore } from "@/stores/moltbot.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
 import { updaterStore } from "@/stores/updater.store";
@@ -114,6 +115,9 @@ function App() {
     const onOpenSettings = () => setOverlayPanel("settings");
     window.addEventListener("seren:open-settings", onOpenSettings);
 
+    // Initialize Moltbot store (load setup state + event listeners) before agent
+    moltbotStore.init();
+
     // Start Moltbot message agent
     startMoltbotAgent();
   });
@@ -121,6 +125,7 @@ function App() {
   onCleanup(() => {
     shortcuts.destroy();
     stopMoltbotAgent();
+    moltbotStore.destroy();
   });
 
   // Store cleanup function for auto top-up

@@ -87,8 +87,23 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
 
   // --- Step Handlers ---
 
-  const handleSelectDone = () => {
+  const handleSelectDone = async () => {
     if (selectedPlatforms().length === 0) return;
+    // Start Moltbot before entering connection step so channels can actually connect
+    if (!moltbotStore.isRunning) {
+      setStarting(true);
+      setError(null);
+      try {
+        await moltbotStore.start();
+      } catch (e) {
+        setError(
+          `Failed to start Moltbot: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        setStarting(false);
+        return;
+      }
+      setStarting(false);
+    }
     setConnectingIndex(0);
     setStep("connect-channels");
   };

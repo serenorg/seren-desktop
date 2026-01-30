@@ -263,6 +263,16 @@ export const moltbotStore = {
     if (config.trustLevel !== undefined) {
       setState("channels", index, "trustLevel", config.trustLevel);
     }
+
+    // Sync trust settings to Rust backend for enforcement
+    const channel = state.channels[index];
+    invoke("moltbot_set_trust", {
+      channelId,
+      trustLevel: channel.trustLevel,
+      agentMode: channel.agentMode,
+    }).catch((e) => {
+      console.error("[Moltbot Store] Failed to sync trust settings:", e);
+    });
   },
 
   // --- Messaging ---

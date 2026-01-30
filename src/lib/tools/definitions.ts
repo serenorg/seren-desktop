@@ -8,6 +8,7 @@ import type {
   ToolParameterSchema,
 } from "@/lib/providers/types";
 import { type GatewayTool, getGatewayTools } from "@/services/mcp-gateway";
+import { moltbotStore } from "@/stores/moltbot.store";
 
 /**
  * Maximum number of tools by model family.
@@ -169,6 +170,24 @@ export const MOLTBOT_TOOLS: ToolDefinition[] = [
       parameters: {
         type: "object",
         properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: `${MOLTBOT_TOOL_PREFIX}channel_status`,
+      description:
+        "Get the detailed status of a specific Moltbot messaging channel including connection state and platform info.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: {
+            type: "string",
+            description: "The channel ID to check status for",
+          },
+        },
+        required: ["channel"],
       },
     },
   },
@@ -367,6 +386,13 @@ export const FILE_TOOLS: ToolDefinition[] = [
 ];
 
 /**
+ * Check if Moltbot is set up and running so we can expose its tools.
+ */
+function isMoltbotAvailable(): boolean {
+  return moltbotStore.setupComplete && moltbotStore.isRunning;
+}
+
+/**
  * Get all available tools, including file tools, local MCP tools, and Seren Gateway tools.
  * - File tools: Local file operations via Tauri (highest priority)
  * - Local MCP tools: User-added MCP servers via stdio (high priority)
@@ -402,13 +428,15 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
     seenNames.add(toolName);
   }
 
-  // Add Moltbot messaging tools (if Moltbot is available)
-  for (const moltbotTool of MOLTBOT_TOOLS) {
-    if (tools.length >= limit) break;
-    const toolName = moltbotTool.function.name;
-    if (!seenNames.has(toolName)) {
-      tools.push(moltbotTool);
-      seenNames.add(toolName);
+  // Add Moltbot messaging tools only when Moltbot is set up and running
+  if (isMoltbotAvailable()) {
+    for (const moltbotTool of MOLTBOT_TOOLS) {
+      if (tools.length >= limit) break;
+      const toolName = moltbotTool.function.name;
+      if (!seenNames.has(toolName)) {
+        tools.push(moltbotTool);
+        seenNames.add(toolName);
+      }
     }
   }
 

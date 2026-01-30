@@ -63,11 +63,21 @@ function convertToAnthropicFormat(messages: ChatMessage[]): {
   const systemMessage = messages.find((m) => m.role === "system");
   const otherMessages = messages.filter((m) => m.role !== "system");
 
+  const normalizeContent = (
+    content: string | import("./types").ContentBlock[],
+  ): string => {
+    if (typeof content === "string") return content;
+    return content
+      .filter((b): b is import("./types").TextContentBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+  };
+
   return {
-    system: systemMessage?.content,
+    system: systemMessage ? normalizeContent(systemMessage.content) : undefined,
     messages: otherMessages.map((m) => ({
       role: m.role as "user" | "assistant",
-      content: m.content,
+      content: normalizeContent(m.content),
     })),
   };
 }

@@ -4,9 +4,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { sendMessageWithTools } from "@/lib/providers/seren";
+import type {
+  ChatMessageWithTools,
+  ChatResponse,
+  ToolCall,
+} from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools/definitions";
 import { executeTools } from "@/lib/tools/executor";
-import type { ChatMessageWithTools, ChatResponse, ToolCall } from "@/lib/types";
 import { moltbotStore } from "@/stores/moltbot.store";
 
 // ============================================================================
@@ -223,7 +227,7 @@ async function getAIResponse(
   const model = "claude-sonnet-4-20250514"; // Default model for messaging
   const tools = getAllTools(model);
 
-  let response: ChatResponse;
+  let response: ChatResponse | undefined;
   const maxIterations = 5;
 
   for (let i = 0; i < maxIterations; i++) {

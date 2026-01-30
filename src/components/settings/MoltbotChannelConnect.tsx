@@ -59,9 +59,7 @@ const PLATFORMS: PlatformDef[] = [
     id: "slack",
     name: "Slack",
     icon: "💼",
-    authType: "token",
-    tokenLabel: "Bot OAuth Token",
-    tokenPlaceholder: "xoxb-...",
+    authType: "oauth",
   },
   {
     id: "imessage",
@@ -172,6 +170,12 @@ export const MoltbotChannelConnect: Component<MoltbotChannelConnectProps> = (
                 </Match>
                 <Match when={platform().authType === "token"}>
                   <TokenFlow
+                    platform={platform()}
+                    onConnected={handleConnected}
+                  />
+                </Match>
+                <Match when={platform().authType === "oauth"}>
+                  <OAuthFlow
                     platform={platform()}
                     onConnected={handleConnected}
                   />
@@ -388,6 +392,60 @@ const TokenFlow: Component<{
         disabled={!token().trim() || connecting()}
       >
         {connecting() ? "Connecting..." : "Connect"}
+      </button>
+    </div>
+  );
+};
+
+// ============================================================================
+// OAuth Flow (Slack)
+// ============================================================================
+
+const OAuthFlow: Component<{
+  platform: PlatformDef;
+  onConnected: () => void;
+}> = (props) => {
+  const [error, setError] = createSignal<string | null>(null);
+  const [connecting, setConnecting] = createSignal(false);
+
+  const handleOAuth = async () => {
+    setConnecting(true);
+    setError(null);
+    try {
+      const { connectPublisher } = await import("@/services/publisher-oauth");
+      await connectPublisher(props.platform.id);
+      // After OAuth completes, tell Moltbot backend to use the OAuth token
+      await moltbotStore.connectChannel(props.platform.id, {
+        auth_type: "oauth",
+      });
+      props.onConnected();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  return (
+    <div class="flex flex-col gap-4">
+      <p class="m-0 text-[0.9rem] text-muted-foreground">
+        Connect {props.platform.name} using OAuth. You'll be redirected to
+        authorize access.
+      </p>
+
+      <Show when={error()}>
+        <div class="px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
+          {error()}
+        </div>
+      </Show>
+
+      <button
+        type="button"
+        class="px-4 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+        onClick={handleOAuth}
+        disabled={connecting()}
+      >
+        {connecting() ? "Connecting..." : `Sign in with ${props.platform.name}`}
       </button>
     </div>
   );

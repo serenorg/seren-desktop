@@ -4,7 +4,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::TcpListener;
-use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
@@ -62,6 +61,23 @@ mod events {
     pub const APPROVAL_NEEDED: &str = "moltbot://approval-needed";
 }
 
+/// Trust level for a channel
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrustLevel {
+    Auto,
+    MentionOnly,
+    ApprovalRequired,
+}
+
+/// Per-channel trust settings stored in the Rust backend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelTrustConfig {
+    pub trust_level: TrustLevel,
+    pub agent_mode: String,
+}
+
 /// Internal state for managing the Moltbot process
 struct MoltbotProcess {
     child: tokio::process::Child,
@@ -76,6 +92,7 @@ pub struct MoltbotState {
     port: Mutex<u16>,
     restart_count: Mutex<u32>,
     channels: Mutex<Vec<ChannelInfo>>,
+    trust_settings: Mutex<HashMap<String, ChannelTrustConfig>>,
 }
 
 impl MoltbotState {
@@ -87,6 +104,7 @@ impl MoltbotState {
             port: Mutex::new(0),
             restart_count: Mutex::new(0),
             channels: Mutex::new(Vec::new()),
+            trust_settings: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -275,6 +293,9 @@ pub async fn moltbot_start(
     // Start WebSocket listener to receive real-time events from Moltbot
     spawn_ws_listener(app.clone(), port, token);
 
+    // Start process monitor for crash detection and auto-restart
+    spawn_process_monitor(app);
+
     Ok(())
 }
 
@@ -377,6 +398,104 @@ pub async fn moltbot_status(state: State<'_, MoltbotState>) -> Result<MoltbotSta
         channels,
         uptime_secs,
     })
+}
+
+// --- Process Monitor for Crash Detection and Auto-Restart ---
+
+/// Monitors the Moltbot child process. If it exits unexpectedly,
+/// updates status to Crashed and attempts restart up to MAX_RESTART_ATTEMPTS.
+fn spawn_process_monitor(app: AppHandle) {
+    tokio::spawn(async move {
+        let state = app.state::<MoltbotState>();
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+            let current_status = *state.status.lock().await;
+            if current_status != ProcessStatus::Running
+                && current_status != ProcessStatus::Starting
+            {
+                // Process was intentionally stopped or not running — exit monitor
+                return;
+            }
+
+            // Check if the child process has exited
+            let exited = {
+                let mut process_lock = state.process.lock().await;
+                if let Some(ref mut proc) = *process_lock {
+                    match proc.child.try_wait() {
+                        Ok(Some(_exit_status)) => true,
+                        Ok(None) => false, // still running
+                        Err(_) => true,    // error checking — treat as crashed
+                    }
+                } else {
+                    // No process stored — exit monitor
+                    return;
+                }
+            };
+
+            if !exited {
+                continue;
+            }
+
+            eprintln!("[Moltbot Monitor] Process exited unexpectedly");
+
+            // Update status to Crashed
+            {
+                let mut status = state.status.lock().await;
+                *status = ProcessStatus::Crashed;
+            }
+            emit_status(&app, ProcessStatus::Crashed);
+
+            // Check restart count
+            let restart_count = {
+                let count = state.restart_count.lock().await;
+                *count
+            };
+
+            if restart_count >= MAX_RESTART_ATTEMPTS {
+                eprintln!(
+                    "[Moltbot Monitor] Max restart attempts ({}) reached, giving up",
+                    MAX_RESTART_ATTEMPTS
+                );
+                return;
+            }
+
+            // Attempt restart
+            eprintln!(
+                "[Moltbot Monitor] Attempting restart ({}/{})",
+                restart_count + 1,
+                MAX_RESTART_ATTEMPTS
+            );
+
+            {
+                let mut count = state.restart_count.lock().await;
+                *count += 1;
+            }
+
+            // Clear the old process
+            {
+                let mut process_lock = state.process.lock().await;
+                *process_lock = None;
+            }
+
+            // Brief pause before restart
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+            // Restart via the command (re-uses the full startup logic)
+            match moltbot_start(app.clone(), app.state::<MoltbotState>()).await {
+                Ok(()) => {
+                    eprintln!("[Moltbot Monitor] Restart succeeded");
+                    // The new moltbot_start will spawn its own monitor, so exit this one
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("[Moltbot Monitor] Restart failed: {}", e);
+                    // Loop will check restart count on next iteration
+                }
+            }
+        }
+    });
 }
 
 // --- WebSocket Listener for Moltbot Gateway Events ---
@@ -576,17 +695,51 @@ async fn query_channels(port: u16, hook_token: &str) -> Result<Vec<ChannelInfo>,
     Ok(channels)
 }
 
-/// Send a message through Moltbot (Tauri command)
+/// Send a message through Moltbot (Tauri command).
+/// Enforces trust level before sending — approval-required channels must have
+/// approval handled by the frontend before calling this command.
 #[tauri::command]
 pub async fn moltbot_send(
+    app: AppHandle,
     state: State<'_, MoltbotState>,
     channel: String,
     to: String,
     message: String,
+    approved: Option<bool>,
 ) -> Result<String, String> {
     let status = *state.status.lock().await;
     if status != ProcessStatus::Running {
         return Err("Moltbot is not running. Start it in Settings → Moltbot.".to_string());
+    }
+
+    // Enforce trust level
+    {
+        let trust_settings = state.trust_settings.lock().await;
+        if let Some(config) = trust_settings.get(&channel) {
+            match config.trust_level {
+                TrustLevel::ApprovalRequired => {
+                    if approved != Some(true) {
+                        // Emit approval-needed event and reject the send
+                        let _ = app.emit(
+                            events::APPROVAL_NEEDED,
+                            serde_json::json!({
+                                "channel": channel,
+                                "to": to,
+                                "message": message,
+                            }),
+                        );
+                        return Err("Message requires approval. Approval event emitted.".to_string());
+                    }
+                }
+                TrustLevel::MentionOnly => {
+                    // For mention-only, the frontend agent should already filter.
+                    // Backend allows all explicit sends (they're intentional).
+                }
+                TrustLevel::Auto => {
+                    // No restrictions
+                }
+            }
+        }
     }
 
     let port = *state.port.lock().await;
@@ -605,6 +758,25 @@ pub async fn moltbot_send(
         Some(&to),
     )
     .await
+}
+
+/// Set trust configuration for a channel (Tauri command)
+#[tauri::command]
+pub async fn moltbot_set_trust(
+    state: State<'_, MoltbotState>,
+    channel_id: String,
+    trust_level: TrustLevel,
+    agent_mode: String,
+) -> Result<(), String> {
+    let mut trust_settings = state.trust_settings.lock().await;
+    trust_settings.insert(
+        channel_id,
+        ChannelTrustConfig {
+            trust_level,
+            agent_mode,
+        },
+    );
+    Ok(())
 }
 
 /// Request a channel connection via Moltbot's HTTP API

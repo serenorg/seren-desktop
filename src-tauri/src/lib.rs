@@ -632,6 +632,8 @@ pub fn run() {
             moltbot::moltbot_get_qr,
             #[cfg(feature = "moltbot")]
             moltbot::moltbot_disconnect_channel,
+            #[cfg(feature = "moltbot")]
+            moltbot::moltbot_set_trust,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
