@@ -3,6 +3,7 @@
 
 import { createEffect, onCleanup, Show } from "solid-js";
 import { useVoiceInput } from "@/lib/audio/useVoiceInput";
+import { settingsStore } from "@/stores/settings.store";
 import "./VoiceInputButton.css";
 
 interface VoiceInputButtonProps {
@@ -49,24 +50,44 @@ export function VoiceInputButton(props: VoiceInputButtonProps) {
     return "Voice input";
   };
 
+  const autoSubmit = () => settingsStore.get("voiceAutoSubmit");
+
+  const toggleAutoSubmit = (e: MouseEvent) => {
+    e.stopPropagation();
+    settingsStore.set("voiceAutoSubmit", !autoSubmit());
+  };
+
   return (
-    <button
-      type="button"
-      class="voice-input-btn"
-      data-state={voiceState()}
-      onClick={toggle}
-      disabled={voiceState() === "transcribing"}
-      title={title()}
-    >
-      <Show when={voiceState() === "transcribing"} fallback={<MicIcon />}>
-        <div class="voice-spinner" />
-      </Show>
-      <Show when={voiceState() === "recording"}>
-        <div class="voice-recording-dot" />
-      </Show>
-      <Show when={voiceState() === "error" && error()}>
-        <div class="voice-error-tooltip">{error()}</div>
-      </Show>
-    </button>
+    <div class="voice-input-group">
+      <button
+        type="button"
+        class="voice-input-btn"
+        data-state={voiceState()}
+        onClick={toggle}
+        disabled={voiceState() === "transcribing"}
+        title={title()}
+      >
+        <Show when={voiceState() === "transcribing"} fallback={<MicIcon />}>
+          <div class="voice-spinner" />
+        </Show>
+        <Show when={voiceState() === "recording"}>
+          <div class="voice-recording-dot" />
+        </Show>
+        <Show when={voiceState() === "error" && error()}>
+          <div class="voice-error-tooltip">{error()}</div>
+        </Show>
+      </button>
+      <button
+        type="button"
+        class="voice-auto-submit-toggle"
+        classList={{ active: autoSubmit() }}
+        onClick={toggleAutoSubmit}
+        title={autoSubmit() ? "Auto-send on (click to disable)" : "Auto-send off (click to enable)"}
+      >
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-label="Auto-send toggle" role="img">
+          <path d="M.989 8 .064 2.68a1.342 1.342 0 0 1 1.85-1.462l13.402 5.744a1.13 1.13 0 0 1 0 2.076L1.913 14.782a1.343 1.343 0 0 1-1.85-1.463L.99 8Zm.603-5.288L2.38 7.25h4.87a.75.75 0 0 1 0 1.5H2.38l-.788 4.538L13.929 8Z" />
+        </svg>
+      </button>
+    </div>
   );
 }
