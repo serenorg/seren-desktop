@@ -409,6 +409,11 @@ pub fn run() {
         builder = builder.manage(acp::AcpState::new());
     }
 
+    #[cfg(feature = "moltbot")]
+    {
+        builder = builder.manage(moltbot::MoltbotState::new());
+    }
+
     builder
         .on_menu_event(|app, event| {
             if event.id().0 == "about" {
@@ -608,6 +613,19 @@ pub fn run() {
             acp::acp_check_agent_available,
             #[cfg(feature = "acp")]
             acp::acp_ensure_claude_cli,
+            // Moltbot commands (conditionally included when moltbot feature is enabled)
+            #[cfg(feature = "moltbot")]
+            moltbot::moltbot_start,
+            #[cfg(feature = "moltbot")]
+            moltbot::moltbot_stop,
+            #[cfg(feature = "moltbot")]
+            moltbot::moltbot_restart,
+            #[cfg(feature = "moltbot")]
+            moltbot::moltbot_status,
+            #[cfg(feature = "moltbot")]
+            moltbot::moltbot_send,
+            #[cfg(feature = "moltbot")]
+            moltbot::moltbot_list_channels,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
