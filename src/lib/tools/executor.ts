@@ -172,11 +172,12 @@ async function executeMoltbotTool(
             is_error: true,
           };
         }
+        // Grant approval server-side since tool calls are user-initiated
+        await invoke("moltbot_grant_approval", { channel, to });
         const result = await invoke<string>("moltbot_send", {
           channel,
           to,
           message,
-          approved: true,
         });
         return {
           tool_call_id: toolCallId,

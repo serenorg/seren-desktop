@@ -2,7 +2,7 @@
 // ABOUTME: Communicates with Moltbot via localhost HTTP webhook API and WebSocket events.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::TcpListener;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
@@ -93,6 +93,9 @@ pub struct MoltbotState {
     restart_count: Mutex<u32>,
     channels: Mutex<Vec<ChannelInfo>>,
     trust_settings: Mutex<HashMap<String, ChannelTrustConfig>>,
+    /// Approval IDs granted by the frontend approval dialog.
+    /// Consumed on use to prevent replay.
+    approved_ids: Mutex<HashSet<String>>,
 }
 
 impl MoltbotState {
@@ -105,6 +108,7 @@ impl MoltbotState {
             restart_count: Mutex::new(0),
             channels: Mutex::new(Vec::new()),
             trust_settings: Mutex::new(HashMap::new()),
+            approved_ids: Mutex::new(HashSet::new()),
         }
     }
 }
@@ -239,6 +243,15 @@ pub async fn moltbot_start(
     {
         let mut p = state.port.lock().await;
         *p = port;
+    }
+
+    // Load persisted trust settings
+    {
+        let persisted = load_trust_settings(&app);
+        if !persisted.is_empty() {
+            let mut trust_settings = state.trust_settings.lock().await;
+            *trust_settings = persisted;
+        }
     }
 
     // Spawn the Moltbot process
@@ -696,8 +709,10 @@ async fn query_channels(port: u16, hook_token: &str) -> Result<Vec<ChannelInfo>,
 }
 
 /// Send a message through Moltbot (Tauri command).
-/// Enforces trust level before sending — approval-required channels must have
-/// approval handled by the frontend before calling this command.
+/// Enforces trust level before sending. For approval-required channels, the caller
+/// must first obtain an approval_id via the approval UI, then grant it via
+/// moltbot_grant_approval before calling this. The approved parameter is NOT trusted
+/// from callers — only server-tracked approval IDs are accepted.
 #[tauri::command]
 pub async fn moltbot_send(
     app: AppHandle,
@@ -705,7 +720,6 @@ pub async fn moltbot_send(
     channel: String,
     to: String,
     message: String,
-    approved: Option<bool>,
 ) -> Result<String, String> {
     let status = *state.status.lock().await;
     if status != ProcessStatus::Running {
@@ -718,7 +732,12 @@ pub async fn moltbot_send(
         if let Some(config) = trust_settings.get(&channel) {
             match config.trust_level {
                 TrustLevel::ApprovalRequired => {
-                    if approved != Some(true) {
+                    // Check if there's a granted approval for this channel+to pair
+                    let approval_key = format!("{}:{}", channel, to);
+                    let mut approved_ids = state.approved_ids.lock().await;
+                    let has_approval = approved_ids.remove(&approval_key);
+
+                    if !has_approval {
                         // Generate a unique approval ID for matching responses
                         let approval_id = format!(
                             "{}:{}:{}",
@@ -783,23 +802,65 @@ pub async fn moltbot_send(
     .await
 }
 
-/// Set trust configuration for a channel (Tauri command)
+/// Grant approval for a pending message. Called by the approval UI when the user
+/// approves a draft response. The approval is keyed by channel:to so the subsequent
+/// moltbot_send call for that recipient can proceed.
+#[tauri::command]
+pub async fn moltbot_grant_approval(
+    state: State<'_, MoltbotState>,
+    channel: String,
+    to: String,
+) -> Result<(), String> {
+    let approval_key = format!("{}:{}", channel, to);
+    let mut approved_ids = state.approved_ids.lock().await;
+    approved_ids.insert(approval_key);
+    Ok(())
+}
+
+/// Set trust configuration for a channel (Tauri command).
+/// Persists to moltbot.json so trust levels survive restarts.
 #[tauri::command]
 pub async fn moltbot_set_trust(
+    app: AppHandle,
     state: State<'_, MoltbotState>,
     channel_id: String,
     trust_level: TrustLevel,
     agent_mode: String,
 ) -> Result<(), String> {
-    let mut trust_settings = state.trust_settings.lock().await;
-    trust_settings.insert(
-        channel_id,
-        ChannelTrustConfig {
-            trust_level,
-            agent_mode,
-        },
-    );
+    {
+        let mut trust_settings = state.trust_settings.lock().await;
+        trust_settings.insert(
+            channel_id,
+            ChannelTrustConfig {
+                trust_level,
+                agent_mode,
+            },
+        );
+        // Persist to store
+        persist_trust_settings(&app, &trust_settings);
+    }
     Ok(())
+}
+
+/// Persist trust settings to the moltbot.json store.
+fn persist_trust_settings(app: &AppHandle, settings: &HashMap<String, ChannelTrustConfig>) {
+    if let Ok(store) = app.store(MOLTBOT_STORE) {
+        let json = serde_json::to_value(settings).unwrap_or_default();
+        store.set("trust_settings", json);
+        let _ = store.save();
+    }
+}
+
+/// Load trust settings from the moltbot.json store.
+fn load_trust_settings(app: &AppHandle) -> HashMap<String, ChannelTrustConfig> {
+    if let Ok(store) = app.store(MOLTBOT_STORE) {
+        if let Some(val) = store.get("trust_settings") {
+            if let Ok(settings) = serde_json::from_value::<HashMap<String, ChannelTrustConfig>>(val.clone()) {
+                return settings;
+            }
+        }
+    }
+    HashMap::new()
 }
 
 /// Request a channel connection via Moltbot's HTTP API

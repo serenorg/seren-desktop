@@ -187,14 +187,18 @@ async function processInboundMessage(msg: InboundMessage): Promise<void> {
         session.messages.pop();
         return;
       }
+      // Grant server-side approval so moltbot_send allows the message
+      await invoke("moltbot_grant_approval", {
+        channel: msg.channel,
+        to: msg.from,
+      });
     }
 
-    // Send response via Moltbot (approved flag signals frontend approval is done)
+    // Send response via Moltbot
     await invoke("moltbot_send", {
       channel: msg.channel,
       to: msg.from,
       message: response,
-      approved: true,
     });
 
     // Add assistant response to history
@@ -214,7 +218,6 @@ async function processInboundMessage(msg: InboundMessage): Promise<void> {
           channel: msg.channel,
           to: msg.from,
           message: "I'm unable to respond right now. Please try again later.",
-          approved: true,
         });
       } catch {
         // Can't even send error — give up silently

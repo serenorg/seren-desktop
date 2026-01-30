@@ -46,14 +46,24 @@ export const MoltbotApprovalManager: Component = () => {
     unlisten?.();
   });
 
-  const handleResponse = async (id: string, approved: boolean) => {
-    // Emit approval response
+  const handleResponse = async (
+    request: ApprovalRequest,
+    approved: boolean,
+  ) => {
+    if (approved) {
+      // Grant server-side approval so subsequent moltbot_send passes trust check
+      await invoke("moltbot_grant_approval", {
+        channel: request.channel,
+        to: request.from,
+      });
+    }
+    // Emit approval response to unblock the agent's requestApproval() promise
     await invoke("plugin:event|emit", {
       event: "moltbot://approval-response",
-      payload: { id, approved },
+      payload: { id: request.id, approved },
     });
     // Remove from queue
-    setRequests((prev) => prev.filter((r) => r.id !== id));
+    setRequests((prev) => prev.filter((r) => r.id !== request.id));
   };
 
   return (
@@ -63,8 +73,8 @@ export const MoltbotApprovalManager: Component = () => {
           {(request) => (
             <ApprovalCard
               request={request}
-              onApprove={() => handleResponse(request.id, true)}
-              onReject={() => handleResponse(request.id, false)}
+              onApprove={() => handleResponse(request, true)}
+              onReject={() => handleResponse(request, false)}
             />
           )}
         </For>

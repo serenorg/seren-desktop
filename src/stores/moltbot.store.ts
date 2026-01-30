@@ -245,6 +245,21 @@ export const moltbotStore = {
         };
       });
       setState("channels", merged);
+
+      // Sync default trust levels to backend for any channels it doesn't know about yet
+      for (const ch of merged) {
+        invoke("moltbot_set_trust", {
+          channelId: ch.id,
+          trustLevel: ch.trustLevel,
+          agentMode: ch.agentMode,
+        }).catch((e) => {
+          console.error(
+            "[Moltbot Store] Failed to sync trust for channel:",
+            ch.id,
+            e,
+          );
+        });
+      }
     } catch (e) {
       console.error("[Moltbot Store] Failed to list channels:", e);
     }
@@ -297,17 +312,11 @@ export const moltbotStore = {
     );
   },
 
-  async sendMessage(
-    channel: string,
-    to: string,
-    message: string,
-    approved?: boolean,
-  ) {
+  async sendMessage(channel: string, to: string, message: string) {
     return invoke<string>("moltbot_send", {
       channel,
       to,
       message,
-      approved: approved ?? false,
     });
   },
 
