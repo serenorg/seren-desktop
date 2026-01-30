@@ -10,6 +10,7 @@ import type {
   AgentInfo,
   AgentType,
   DiffEvent,
+  DiffProposalEvent,
   PlanEntry,
   SessionStatus,
   ToolCallEvent,
@@ -59,6 +60,8 @@ interface AcpState {
   installStatus: string | null;
   /** Pending permission requests awaiting user response */
   pendingPermissions: import("@/services/acp").PermissionRequestEvent[];
+  /** Pending diff proposals awaiting user accept/reject */
+  pendingDiffProposals: DiffProposalEvent[];
 }
 
 const [state, setState] = createStore<AcpState>({
@@ -71,6 +74,7 @@ const [state, setState] = createStore<AcpState>({
   error: null,
   installStatus: null,
   pendingPermissions: [],
+  pendingDiffProposals: [],
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
@@ -123,6 +127,10 @@ export const acpStore = {
 
   get pendingPermissions() {
     return state.pendingPermissions;
+  },
+
+  get pendingDiffProposals() {
+    return state.pendingDiffProposals;
   },
 
   /**
@@ -489,6 +497,28 @@ export const acpStore = {
     );
   },
 
+  async respondToDiffProposal(proposalId: string, accepted: boolean) {
+    const proposal = state.pendingDiffProposals.find(
+      (p) => p.proposalId === proposalId,
+    );
+    if (!proposal) return;
+
+    try {
+      await acpService.respondToDiffProposal(
+        proposal.sessionId,
+        proposalId,
+        accepted,
+      );
+    } catch (error) {
+      console.error("Failed to respond to diff proposal:", error);
+    }
+
+    setState(
+      "pendingDiffProposals",
+      state.pendingDiffProposals.filter((p) => p.proposalId !== proposalId),
+    );
+  },
+
   // ============================================================================
   // UI State
   // ============================================================================
@@ -589,6 +619,15 @@ export const acpStore = {
         setState("pendingPermissions", [
           ...state.pendingPermissions,
           permEvent,
+        ]);
+        break;
+      }
+
+      case "diffProposal": {
+        const proposalEvent = event.data as DiffProposalEvent;
+        setState("pendingDiffProposals", [
+          ...state.pendingDiffProposals,
+          proposalEvent,
         ]);
         break;
       }
@@ -737,4 +776,4 @@ export const acpStore = {
   },
 };
 
-export type { AgentType, SessionStatus, AcpSessionInfo, AgentInfo, DiffEvent };
+export type { AgentType, SessionStatus, AcpSessionInfo, AgentInfo, DiffEvent, DiffProposalEvent };

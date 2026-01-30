@@ -12,6 +12,7 @@ import {
   Show,
 } from "solid-js";
 import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
+import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
@@ -407,6 +408,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             }
           >
             <For each={acpStore.messages}>{renderMessage}</For>
+
+            {/* Diff proposal dialogs */}
+            <For each={acpStore.pendingDiffProposals}>
+              {(proposal) => (
+                <div class="px-5 py-2">
+                  <DiffProposalDialog proposal={proposal} />
+                </div>
+              )}
+            </For>
 
             {/* Permission request dialogs */}
             <For each={acpStore.pendingPermissions}>
