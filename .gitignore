@@ -60,3 +60,6 @@ docs/
 # Lock files (keep pnpm-lock.yaml)
 package-lock.json
 yarn.lock
+
+# Claude Code local settings (per-developer)
+.claude/settings.local.json
