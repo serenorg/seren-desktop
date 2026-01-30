@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync,
   copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
+  readFileSync,
+  renameSync,
   readdirSync,
   rmSync,
   statSync,
@@ -13,6 +14,8 @@ import {
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+
+const DEFAULT_OPENCLAW_DIST_TAG = "latest";
 
 function execText(cmd: string, args: string[], cwd?: string): string {
   const res = spawnSync(cmd, args, {
@@ -63,24 +66,6 @@ function runAndTail(cmd: string, args: string[], cwd: string, tailLines: number)
   }
 }
 
-function resolveOpenClawDir(repoRoot: string): string {
-  const envDir = process.env.OPENCLAW_DIR?.trim();
-  if (envDir) return path.resolve(envDir);
-
-  // Try sibling of repo root first, then sibling of git toplevel (for worktrees)
-  const sibling = path.resolve(repoRoot, "..", "openclaw");
-  if (existsSync(sibling)) return sibling;
-
-  let gitTopLevel = repoRoot;
-  try {
-    gitTopLevel = execText("git", ["-C", repoRoot, "rev-parse", "--show-toplevel"]) || repoRoot;
-  } catch {
-    // fall back to repoRoot
-  }
-
-  return path.resolve(path.dirname(gitTopLevel), "openclaw");
-}
-
 function dirSizeBytes(dir: string): number {
   let total = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -111,97 +96,129 @@ function main(): void {
   const repoRoot = path.resolve(scriptDir, "..");
   const destDir = path.join(repoRoot, "src-tauri", "embedded-runtime");
 
-  const openclawDir = resolveOpenClawDir(repoRoot);
-  if (!existsSync(openclawDir)) {
-    throw new Error(
-      `OpenClaw repo not found at ${openclawDir}. Set OPENCLAW_DIR to your OpenClaw checkout.`,
-    );
-  }
-
-  console.log(`[build-openclaw] Source: ${openclawDir}`);
   console.log(`[build-openclaw] Destination: ${destDir}`);
-
-  // --- 1. Build openclaw if dist/ is missing ---
-  if (!existsSync(path.join(openclawDir, "dist"))) {
-    console.log("[build-openclaw] Building openclaw...");
-    run("pnpm", ["build"], openclawDir);
-  }
 
   // --- 2. Create openclaw directory in embedded-runtime ---
   const openclawRuntimeDir = path.join(destDir, "openclaw");
-  rmSync(openclawRuntimeDir, { recursive: true, force: true });
-  mkdirSync(openclawRuntimeDir, { recursive: true });
+  const markerPath = path.join(openclawRuntimeDir, ".seren-openclaw-bundle.json");
+  let npmRequestedSpec: string | undefined;
+  let npmResolvedSpec: string | undefined;
 
-  console.log("[build-openclaw] Copying openclaw dist...");
-  cpSync(path.join(openclawDir, "dist"), path.join(openclawRuntimeDir, "dist"), { recursive: true });
-  copyFileSync(path.join(openclawDir, "openclaw.mjs"), path.join(openclawRuntimeDir, "openclaw.mjs"));
-  copyFileSync(path.join(openclawDir, "package.json"), path.join(openclawRuntimeDir, "package.json"));
-
-  // Copy skills and assets if they exist
-  for (const dirName of ["skills", "assets", "extensions"]) {
-    const srcDir = path.join(openclawDir, dirName);
-    if (existsSync(srcDir)) {
-      cpSync(srcDir, path.join(openclawRuntimeDir, dirName), { recursive: true });
+  // Prefer an explicitly-provided local checkout (developer workflow).
+  // Otherwise fetch the pinned npm package (CI/release workflow).
+  const openclawDir = process.env.OPENCLAW_DIR?.trim();
+  if (openclawDir) {
+    const resolved = path.resolve(openclawDir);
+    if (!existsSync(resolved)) {
+      throw new Error(`OPENCLAW_DIR was set but does not exist: ${resolved}`);
     }
+
+    console.log(`[build-openclaw] Source: ${resolved}`);
+
+    rmSync(openclawRuntimeDir, { recursive: true, force: true });
+
+    // --- 1. Build openclaw if dist/ is missing ---
+    if (!existsSync(path.join(resolved, "dist"))) {
+      console.log("[build-openclaw] Building openclaw...");
+      run("pnpm", ["build"], resolved);
+    }
+
+    mkdirSync(openclawRuntimeDir, { recursive: true });
+
+    console.log("[build-openclaw] Copying openclaw dist...");
+    cpSync(path.join(resolved, "dist"), path.join(openclawRuntimeDir, "dist"), { recursive: true });
+    copyFileSync(path.join(resolved, "openclaw.mjs"), path.join(openclawRuntimeDir, "openclaw.mjs"));
+    copyFileSync(path.join(resolved, "package.json"), path.join(openclawRuntimeDir, "package.json"));
+
+    // Copy skills and assets if they exist
+    for (const dirName of ["skills", "assets", "extensions"]) {
+      const srcDir = path.join(resolved, dirName);
+      if (existsSync(srcDir)) {
+        cpSync(srcDir, path.join(openclawRuntimeDir, dirName), { recursive: true });
+      }
+    }
+  } else {
+    const versionOverride = process.env.OPENCLAW_VERSION?.trim();
+    const requestedRaw = versionOverride || DEFAULT_OPENCLAW_DIST_TAG;
+    npmRequestedSpec = requestedRaw.startsWith("openclaw@")
+      ? requestedRaw
+      : `openclaw@${requestedRaw}`;
+
+    let resolvedVersion: string;
+    try {
+      resolvedVersion = execText("npm", ["view", npmRequestedSpec, "version"]);
+    } catch (err) {
+      // If we're following `latest` and the registry is unavailable, allow offline builds
+      // when a bundle is already present.
+      if (!versionOverride) {
+        if (existsSync(markerPath) && existsSync(path.join(openclawRuntimeDir, "node_modules"))) {
+          console.warn(
+            `[build-openclaw] Warning: failed to resolve ${npmRequestedSpec}; using existing bundle at ${openclawRuntimeDir}`,
+          );
+          return;
+        }
+      }
+      throw err;
+    }
+    npmResolvedSpec = `openclaw@${resolvedVersion}`;
+    console.log(`[build-openclaw] Source: npm:${npmRequestedSpec} (resolved ${npmResolvedSpec})`);
+
+    // Fast path: already bundled + dependencies installed for the resolved version.
+    if (existsSync(markerPath) && existsSync(path.join(openclawRuntimeDir, "node_modules"))) {
+      try {
+        const marker = JSON.parse(readFileSync(markerPath, "utf8"));
+        if (marker?.source === `npm:${npmResolvedSpec}`) {
+          console.log("[build-openclaw] Already bundled; skipping.");
+          return;
+        }
+      } catch {
+        // ignore malformed marker; rebuild
+      }
+    }
+
+    rmSync(openclawRuntimeDir, { recursive: true, force: true });
+
+    const tmpDir = path.join(destDir, ".tmp-openclaw");
+    rmSync(tmpDir, { recursive: true, force: true });
+    mkdirSync(tmpDir, { recursive: true });
+
+    // Download tarball from the npm registry (no local checkout required).
+    const packedFilename = execText("npm", ["pack", npmResolvedSpec, "--silent"], tmpDir);
+    const tarPath = path.join(tmpDir, packedFilename);
+    if (!existsSync(tarPath)) {
+      throw new Error(`npm pack did not produce expected tarball at: ${tarPath}`);
+    }
+
+    // Extract and move into place (tarball contains a top-level "package/" directory).
+    run("tar", ["-xzf", tarPath, "-C", tmpDir]);
+    const extractedDir = path.join(tmpDir, "package");
+    if (!existsSync(extractedDir)) {
+      throw new Error(`Extracted package directory not found at: ${extractedDir}`);
+    }
+
+    renameSync(extractedDir, openclawRuntimeDir);
+    rmSync(tmpDir, { recursive: true, force: true });
   }
 
   console.log("[build-openclaw] Installing production dependencies...");
   runAndTail("pnpm", ["install", "--prod", "--ignore-scripts"], openclawRuntimeDir, 5);
 
-  // --- 3. Create the openclaw wrapper script ---
-  const wrapperPath = path.join(destDir, "bin", "openclaw");
-  mkdirSync(path.dirname(wrapperPath), { recursive: true });
-
-  const wrapperLines = [
-    "#!/usr/bin/env bash",
-    "# ABOUTME: Wrapper script that launches openclaw gateway via Node.js.",
-    "",
-    "set -euo pipefail",
-    "",
-    "# Default OpenClaw gateway env vars if not already set by the parent process",
-    'export OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-3100}"',
-    'export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-}"',
-    'export OPENCLAW_GATEWAY_HOST="${OPENCLAW_GATEWAY_HOST:-127.0.0.1}"',
-    "",
-    "# Disable channels that aren't configured (faster startup)",
-    "# Channels are connected dynamically via the Seren UI",
-    'export OPENCLAW_SKIP_CHANNELS="${OPENCLAW_SKIP_CHANNELS:-1}"',
-    "",
-    "# Resolve the openclaw package directory (sibling to bin/)",
-    'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
-    'OPENCLAW_PKG="$SCRIPT_DIR/../openclaw"',
-    "",
-    'if [ ! -f "$OPENCLAW_PKG/openclaw.mjs" ]; then',
-    '  echo "[openclaw] ERROR: openclaw.mjs not found at $OPENCLAW_PKG" >&2',
-    "  exit 1",
-    "fi",
-    "",
-    "# Find node: prefer embedded runtime, then system",
-    "if command -v node >/dev/null 2>&1; then",
-    '  NODE_BIN="node"',
-    "else",
-    '  echo "[openclaw] ERROR: Node.js not found in PATH" >&2',
-    "  exit 1",
-    "fi",
-    "",
-    'NODE_VERSION=$($NODE_BIN --version 2>/dev/null || echo "unknown")',
-    'echo "[openclaw] Starting gateway on ${OPENCLAW_GATEWAY_HOST}:${OPENCLAW_GATEWAY_PORT} (node $NODE_VERSION)" >&2',
-    "",
-    'exec "$NODE_BIN" "$OPENCLAW_PKG/openclaw.mjs" gateway',
-  ];
-
-  const wrapper = `${wrapperLines.join("\n")}\n`;
-
-  writeFileSync(wrapperPath, wrapper, { encoding: "utf8" });
-  try {
-    chmodSync(wrapperPath, 0o755);
-  } catch {
-    // Match the bash script on Unix (fail if chmod fails), but allow Windows to proceed.
-    if (process.platform !== "win32") throw new Error(`Failed to chmod +x: ${wrapperPath}`);
+  if (!openclawDir) {
+    if (!npmRequestedSpec || !npmResolvedSpec) {
+      throw new Error("Internal error: npm spec resolution missing for OpenClaw bundle");
+    }
+    writeFileSync(
+      markerPath,
+      `${JSON.stringify({
+        source: `npm:${npmResolvedSpec}`,
+        requested: `npm:${npmRequestedSpec}`,
+        bundledAt: new Date().toISOString(),
+      })}\n`,
+      "utf8",
+    );
   }
 
-  console.log(`[build-openclaw] Done. Wrapper at: ${wrapperPath}`);
-  console.log(`[build-openclaw] OpenClaw package at: ${openclawRuntimeDir}`);
+  console.log(`[build-openclaw] Done. OpenClaw package at: ${openclawRuntimeDir}`);
 
   let sizeText = "";
   try {

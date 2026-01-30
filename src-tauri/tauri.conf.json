@@ -5,9 +5,9 @@
   "identifier": "com.serendb.desktop",
   "mainBinaryName": "Seren",
   "build": {
-    "beforeDevCommand": "pnpm build:sidecar && pnpm dev",
+    "beforeDevCommand": "pnpm build:sidecar && pnpm build:openclaw && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build:sidecar:release && pnpm build",
+    "beforeBuildCommand": "pnpm build:sidecar:release && pnpm build:openclaw && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
