@@ -166,6 +166,9 @@ export const openclawStore = {
   get connectedChannelCount() {
     return state.channels.filter((c) => c.status === "connected").length;
   },
+  get port() {
+    return state.port;
+  },
 
   // --- Lifecycle ---
 

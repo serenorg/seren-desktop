@@ -667,11 +667,13 @@ async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
     let script_dir = binary_path
         .parent()
         .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
-    let openclaw_pkg = script_dir.join("../openclaw/openclaw.mjs");
+    let openclaw_pkg_dir = script_dir.join("../openclaw");
+    let openclaw_pkg = openclaw_pkg_dir.join("openclaw.mjs");
     let embedded_path = crate::embedded_runtime::get_embedded_path();
 
     let mut cmd = tokio::process::Command::new("node");
-    cmd.arg(&openclaw_pkg)
+    cmd.current_dir(&openclaw_pkg_dir)
+        .arg(&openclaw_pkg)
         .arg("channels")
         .arg("status")
         .arg("--json")
@@ -926,7 +928,8 @@ async fn request_channel_connect(
     let script_dir = binary_path
         .parent()
         .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
-    let openclaw_pkg = script_dir.join("../openclaw/openclaw.mjs");
+    let openclaw_pkg_dir = script_dir.join("../openclaw");
+    let openclaw_pkg = openclaw_pkg_dir.join("openclaw.mjs");
 
     eprintln!(
         "[OpenClaw] Channel connect: platform={}, openclaw={}",
@@ -942,7 +945,8 @@ async fn request_channel_connect(
     }
 
     let mut cmd = tokio::process::Command::new("node");
-    cmd.arg(&openclaw_pkg)
+    cmd.current_dir(&openclaw_pkg_dir)
+        .arg(&openclaw_pkg)
         .arg("channels")
         .arg("add")
         .arg("--channel")
@@ -1076,11 +1080,13 @@ pub async fn openclaw_disconnect_channel(
     let script_dir = binary_path
         .parent()
         .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
-    let openclaw_pkg = script_dir.join("../openclaw/openclaw.mjs");
+    let openclaw_pkg_dir = script_dir.join("../openclaw");
+    let openclaw_pkg = openclaw_pkg_dir.join("openclaw.mjs");
     let embedded_path = crate::embedded_runtime::get_embedded_path();
 
     let mut cmd = tokio::process::Command::new("node");
-    cmd.arg(&openclaw_pkg)
+    cmd.current_dir(&openclaw_pkg_dir)
+        .arg(&openclaw_pkg)
         .arg("channels")
         .arg("remove")
         .arg("--channel")

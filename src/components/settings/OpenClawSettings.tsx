@@ -214,6 +214,25 @@ export const OpenClawSettings: Component = () => {
           </div>
         </Show>
 
+        {/* OpenClaw Dashboard */}
+        <Show when={moltbotStore.isRunning && moltbotStore.port}>
+          <div class="mt-6 pt-6 border-t border-[rgba(148,163,184,0.15)]">
+            <h4 class="m-0 mb-2 text-[1rem] font-semibold text-foreground">
+              OpenClaw Dashboard
+            </h4>
+            <p class="m-0 mb-3 text-[0.8rem] text-muted-foreground">
+              Configure channel security policies, allowlists, and DM/group settings.
+            </p>
+            <div class="rounded-lg border border-[rgba(148,163,184,0.2)] overflow-hidden">
+              <iframe
+                src={`http://127.0.0.1:${moltbotStore.port}/`}
+                style="width: 100%; height: 600px; border: none; background: #1a1a2e;"
+                title="OpenClaw Dashboard"
+              />
+            </div>
+          </div>
+        </Show>
+
         {/* Connect Channel Button (when no channels) */}
         <Show
           when={openclawStore.isRunning && openclawStore.channels.length === 0}
