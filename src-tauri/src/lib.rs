@@ -645,6 +645,8 @@ pub fn run() {
             acp::acp_check_agent_available,
             #[cfg(feature = "acp")]
             acp::acp_ensure_claude_cli,
+            #[cfg(feature = "acp")]
+            acp::acp_respond_to_diff_proposal,
             // OpenClaw commands (conditionally included when openclaw feature is enabled)
             #[cfg(feature = "openclaw")]
             openclaw::openclaw_start,

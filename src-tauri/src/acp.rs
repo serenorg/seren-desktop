@@ -162,6 +162,8 @@ struct AcpSession {
     _worker_handle: Option<thread::JoinHandle<()>>,
     /// Pending permission requests awaiting user response (shared with ClientDelegate)
     pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
+    /// Pending diff proposals awaiting user accept/reject (shared with ClientDelegate)
+    pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
 }
 
 /// State for managing ACP sessions
@@ -194,6 +196,7 @@ mod events {
     pub const PERMISSION_REQUEST: &str = "acp://permission-request";
     pub const SESSION_STATUS: &str = "acp://session-status";
     pub const ERROR: &str = "acp://error";
+    pub const DIFF_PROPOSAL: &str = "acp://diff-proposal";
 }
 
 /// Client delegate that handles requests from the agent
@@ -204,6 +207,8 @@ struct ClientDelegate {
     terminals: Arc<Mutex<crate::terminal::TerminalManager>>,
     sandbox_mode: crate::sandbox::SandboxMode,
     pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
+    /// Pending diff proposals awaiting user accept/reject
+    pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -270,6 +275,64 @@ impl Client for ClientDelegate {
         args: WriteTextFileRequest,
     ) -> AcpResult<WriteTextFileResponse> {
         let path = std::path::Path::new(&self.cwd).join(&args.path);
+
+        // Read existing content for diff comparison
+        let old_text = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+
+        let proposal_id = Uuid::new_v4().to_string();
+        let (response_tx, response_rx) = oneshot::channel::<bool>();
+
+        // Store the response channel
+        self.pending_diff_proposals
+            .lock()
+            .await
+            .insert(proposal_id.clone(), response_tx);
+
+        // Emit diff proposal to frontend
+        let _ = self.app.emit(
+            events::DIFF_PROPOSAL,
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "proposalId": proposal_id,
+                "path": args.path,
+                "oldText": old_text,
+                "newText": args.content,
+            }),
+        );
+
+        // Wait for user response (5-minute timeout)
+        let accepted =
+            match tokio::time::timeout(std::time::Duration::from_secs(300), response_rx).await {
+                Ok(Ok(accepted)) => accepted,
+                Ok(Err(_)) => {
+                    self.pending_diff_proposals
+                        .lock()
+                        .await
+                        .remove(&proposal_id);
+                    return Err(agent_client_protocol::Error::internal_error().data(
+                        serde_json::Value::String("Diff proposal dismissed".into()),
+                    ));
+                }
+                Err(_) => {
+                    self.pending_diff_proposals
+                        .lock()
+                        .await
+                        .remove(&proposal_id);
+                    return Err(agent_client_protocol::Error::internal_error().data(
+                        serde_json::Value::String("Diff proposal timed out".into()),
+                    ));
+                }
+            };
+
+        self.pending_diff_proposals
+            .lock()
+            .await
+            .remove(&proposal_id);
+
+        if !accepted {
+            return Err(agent_client_protocol::Error::internal_error()
+                .data(serde_json::Value::String("User rejected the edit".into())));
+        }
 
         match tokio::fs::write(&path, &args.content).await {
             Ok(_) => Ok(WriteTextFileResponse::new()),
@@ -576,6 +639,8 @@ pub async fn acp_spawn(
     // Create session entry
     let pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    let pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let session = AcpSession {
         id: session_id.clone(),
@@ -586,6 +651,7 @@ pub async fn acp_spawn(
         command_tx: Some(command_tx),
         _worker_handle: None,
         pending_permissions: Arc::clone(&pending_permissions),
+        pending_diff_proposals: Arc::clone(&pending_diff_proposals),
     };
 
     let session_arc = Arc::new(Mutex::new(session));
@@ -628,6 +694,7 @@ pub async fn acp_spawn(
                 cwd_clone,
                 command_rx,
                 pending_permissions,
+                pending_diff_proposals,
                 parsed_sandbox_mode,
             )
             .await
@@ -676,6 +743,7 @@ async fn run_session_worker(
     cwd: String,
     mut command_rx: mpsc::Receiver<AcpCommand>,
     pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
+    pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     sandbox_mode: crate::sandbox::SandboxMode,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
@@ -743,6 +811,7 @@ async fn run_session_worker(
         terminals: Arc::new(Mutex::new(crate::terminal::TerminalManager::new())),
         sandbox_mode,
         pending_permissions,
+        pending_diff_proposals,
     };
 
     // Create ACP connection - use spawn_local since we're in a LocalSet
@@ -1076,6 +1145,30 @@ pub async fn acp_respond_to_permission(
     sender
         .send(option_id)
         .map_err(|_| "Permission request channel closed".to_string())
+}
+
+/// Respond to a diff proposal from the frontend (accept or reject)
+#[tauri::command]
+pub async fn acp_respond_to_diff_proposal(
+    state: State<'_, AcpState>,
+    session_id: String,
+    proposal_id: String,
+    accepted: bool,
+) -> Result<(), String> {
+    let sessions = state.sessions.read().await;
+    let session_arc = sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+    let session = session_arc.lock().await;
+
+    let mut proposals = session.pending_diff_proposals.lock().await;
+    let sender = proposals
+        .remove(&proposal_id)
+        .ok_or_else(|| format!("Diff proposal '{}' not found", proposal_id))?;
+
+    sender
+        .send(accepted)
+        .map_err(|_| "Diff proposal channel closed".to_string())
 }
 
 /// Get available agents with actual availability checks.

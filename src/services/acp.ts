@@ -100,6 +100,14 @@ export interface SessionStatusEvent {
   };
 }
 
+export interface DiffProposalEvent {
+  sessionId: string;
+  proposalId: string;
+  path: string;
+  oldText: string;
+  newText: string;
+}
+
 export interface ErrorEvent {
   sessionId: string;
   error: string;
@@ -114,6 +122,7 @@ export type AcpEvent =
   | { type: "planUpdate"; data: PlanUpdateEvent }
   | { type: "promptComplete"; data: PromptCompleteEvent }
   | { type: "permissionRequest"; data: PermissionRequestEvent }
+  | { type: "diffProposal"; data: DiffProposalEvent }
   | { type: "sessionStatus"; data: SessionStatusEvent }
   | { type: "error"; data: ErrorEvent };
 
@@ -194,6 +203,21 @@ export async function respondToPermission(
 }
 
 /**
+ * Respond to a diff proposal (accept or reject a file edit).
+ */
+export async function respondToDiffProposal(
+  sessionId: string,
+  proposalId: string,
+  accepted: boolean,
+): Promise<void> {
+  return invoke("acp_respond_to_diff_proposal", {
+    sessionId,
+    proposalId,
+    accepted,
+  });
+}
+
+/**
  * Get list of available agents and their status.
  */
 export async function getAvailableAgents(): Promise<AgentInfo[]> {
@@ -231,6 +255,7 @@ const EVENT_CHANNELS = {
   planUpdate: "acp://plan-update",
   promptComplete: "acp://prompt-complete",
   permissionRequest: "acp://permission-request",
+  diffProposal: "acp://diff-proposal",
   sessionStatus: "acp://session-status",
   error: "acp://error",
 } as const;
@@ -399,6 +424,11 @@ export async function subscribeToAllEvents(
     await subscribeToEvent<PermissionRequestEvent>(
       "permissionRequest",
       (data) => callback({ type: "permissionRequest", data }),
+    ),
+  );
+  unlisteners.push(
+    await subscribeToEvent<DiffProposalEvent>("diffProposal", (data) =>
+      callback({ type: "diffProposal", data }),
     ),
   );
   unlisteners.push(
