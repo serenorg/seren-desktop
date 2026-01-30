@@ -133,7 +133,27 @@ function needsApproval(msg: InboundMessage): boolean {
 // Message Processing Pipeline
 // ============================================================================
 
+function sendDesktopNotification(msg: InboundMessage): void {
+  const channel = moltbotStore.channels.find((c) => c.id === msg.channel);
+
+  // Never show full content for approval-required channels
+  const body =
+    channel?.trustLevel === "approval-required"
+      ? `New message from ${msg.fromName} on ${msg.platform}`
+      : msg.message.length > 100
+        ? `${msg.message.slice(0, 100)}...`
+        : msg.message;
+
+  // Use browser Notification API (Tauri exposes it)
+  if ("Notification" in globalThis && Notification.permission === "granted") {
+    new Notification(`${msg.fromName} — ${msg.platform}`, { body });
+  }
+}
+
 async function processInboundMessage(msg: InboundMessage): Promise<void> {
+  // Always send desktop notification for inbound messages
+  sendDesktopNotification(msg);
+
   if (!shouldRespond(msg)) return;
 
   const session = getOrCreateSession(
