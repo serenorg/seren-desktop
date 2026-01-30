@@ -236,6 +236,17 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     );
   });
 
+  // Watch for pending input from store (e.g., from catalog "Let's Chat" button)
+  createEffect(() => {
+    const pending = chatStore.pendingInput;
+    if (pending) {
+      setInput(pending);
+      chatStore.setPendingInput(null);
+      // Focus the input after a short delay to ensure panel is visible
+      setTimeout(() => inputRef?.focus(), 100);
+    }
+  });
+
   // Auto-scroll to bottom when messages change or streaming starts
   createEffect(() => {
     void chatStore.messages;

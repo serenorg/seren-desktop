@@ -14,6 +14,8 @@ import {
   getPricingDisplay,
   type Publisher,
 } from "@/services/catalog";
+import { acpStore } from "@/stores/acp.store";
+import { chatStore } from "@/stores/chat.store";
 
 interface CatalogPanelProps {
   onSignInClick?: () => void;
@@ -90,6 +92,30 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
   // Get publisher name if resource_name is different
   function getPublisherName(publisher: Publisher): string | null {
     return publisher.resource_name ? publisher.name : null;
+  }
+
+  // Handle "Let's Chat" button click - create conversation and navigate to chat
+  async function handleLetsChatClick(
+    event: MouseEvent,
+    publisher: Publisher,
+  ): Promise<void> {
+    event.stopPropagation(); // Prevent card selection
+
+    const message = `I'm exploring the "${publisher.name}" publisher. ${publisher.description}
+
+What are some creative and practical ways I could use this in my projects? Please suggest specific use cases and examples.`;
+
+    // Create a new conversation with a descriptive title
+    await chatStore.createConversation(`Exploring ${publisher.name}`);
+
+    // Set pending input for the chat panel to pick up
+    chatStore.setPendingInput(message);
+
+    // Disable agent mode so regular chat is visible
+    acpStore.setAgentModeEnabled(false);
+
+    // Navigate to chat panel
+    window.dispatchEvent(new CustomEvent("seren:open-panel", { detail: "chat" }));
   }
 
   return (
@@ -264,9 +290,20 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
                               agents
                             </span>
                           </div>
-                          <span class="text-[13px] font-medium text-[#22c55e]">
-                            {getPricingDisplay(publisher)}
-                          </span>
+                          <div class="flex items-center gap-2">
+                            <button
+                              type="button"
+                              class="flex items-center gap-1.5 px-2.5 py-1.5 bg-[rgba(99,102,241,0.1)] border border-[rgba(99,102,241,0.3)] rounded-md text-[12px] font-medium text-[#818cf8] cursor-pointer transition-all hover:bg-[rgba(99,102,241,0.2)] hover:border-[rgba(99,102,241,0.5)]"
+                              onClick={(e) => handleLetsChatClick(e, publisher)}
+                              title="Start a chat about this publisher"
+                            >
+                              <span>💬</span>
+                              Let's Chat
+                            </button>
+                            <span class="text-[13px] font-medium text-[#22c55e]">
+                              {getPricingDisplay(publisher)}
+                            </span>
+                          </div>
                         </div>
                       </article>
                     )}
