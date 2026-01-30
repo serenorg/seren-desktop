@@ -463,6 +463,7 @@ const TokenFlow: Component<{
   const [token, setToken] = createSignal("");
   const [error, setError] = createSignal<string | null>(null);
   const [connecting, setConnecting] = createSignal(false);
+  const [success, setSuccess] = createSignal(false);
 
   const handleConnect = async () => {
     const value = token().trim();
@@ -472,7 +473,8 @@ const TokenFlow: Component<{
     setError(null);
     try {
       await moltbotStore.connectChannel(props.platform.id, { token: value });
-      props.onConnected();
+      setSuccess(true);
+      setTimeout(() => props.onConnected(), 1500);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -482,38 +484,54 @@ const TokenFlow: Component<{
 
   return (
     <div class="flex flex-col gap-4">
-      <p class="m-0 text-[0.9rem] text-muted-foreground">
-        Enter your {props.platform.tokenLabel ?? "API token"} to connect{" "}
-        {props.platform.name}.
-      </p>
-
-      <Show when={error()}>
-        <div class="px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
-          {error()}
+      <Show when={success()}>
+        <div class="flex flex-col items-center gap-3 py-6">
+          <div class="w-12 h-12 rounded-full bg-[rgba(34,197,94,0.15)] flex items-center justify-center text-[1.5rem]">
+            ✓
+          </div>
+          <p class="m-0 text-[1rem] font-medium text-foreground">
+            {props.platform.name} connected
+          </p>
+          <p class="m-0 text-[0.85rem] text-muted-foreground">
+            Continuing...
+          </p>
         </div>
       </Show>
 
-      <label class="flex flex-col gap-1.5">
-        <span class="text-[0.85rem] font-medium text-foreground">
-          {props.platform.tokenLabel ?? "API Token"}
-        </span>
-        <input
-          type="text"
-          placeholder={props.platform.tokenPlaceholder ?? "Paste token here..."}
-          value={token()}
-          onInput={(e) => setToken(e.currentTarget.value)}
-          class="px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent"
-        />
-      </label>
+      <Show when={!success()}>
+        <p class="m-0 text-[0.9rem] text-muted-foreground">
+          Enter your {props.platform.tokenLabel ?? "API token"} to connect{" "}
+          {props.platform.name}.
+        </p>
 
-      <button
-        type="button"
-        class="px-4 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
-        onClick={handleConnect}
-        disabled={!token().trim() || connecting()}
-      >
-        {connecting() ? "Connecting..." : "Connect"}
-      </button>
+        <Show when={error()}>
+          <div class="px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
+            {error()}
+          </div>
+        </Show>
+
+        <label class="flex flex-col gap-1.5">
+          <span class="text-[0.85rem] font-medium text-foreground">
+            {props.platform.tokenLabel ?? "API Token"}
+          </span>
+          <input
+            type="text"
+            placeholder={props.platform.tokenPlaceholder ?? "Paste token here..."}
+            value={token()}
+            onInput={(e) => setToken(e.currentTarget.value)}
+            class="px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent"
+          />
+        </label>
+
+        <button
+          type="button"
+          class="px-4 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={handleConnect}
+          disabled={!token().trim() || connecting()}
+        >
+          {connecting() ? "Connecting..." : "Connect"}
+        </button>
+      </Show>
     </div>
   );
 };
