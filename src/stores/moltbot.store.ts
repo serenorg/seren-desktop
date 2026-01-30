@@ -293,10 +293,20 @@ export const moltbotStore = {
   // --- Messaging ---
 
   async connectChannel(platform: string, credentials: Record<string, string>) {
-    return invoke<Record<string, unknown>>("moltbot_connect_channel", {
+    // Auto-start moltbot if not running
+    if (state.processStatus !== "running") {
+      console.log("[Moltbot Store] Moltbot not running, auto-starting before channel connect...");
+      await moltbotStore.start();
+      // Wait briefly for the gateway to be ready
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    console.log("[Moltbot Store] Connecting channel:", platform);
+    const result = await invoke<Record<string, unknown>>("moltbot_connect_channel", {
       platform,
       credentials,
     });
+    console.log("[Moltbot Store] Channel connect result:", result);
+    return result;
   },
 
   async getQrCode(platform: string) {
