@@ -201,7 +201,9 @@ function main(): void {
   }
 
   console.log("[build-openclaw] Installing production dependencies...");
-  runAndTail("pnpm", ["install", "--prod", "--ignore-scripts"], openclawRuntimeDir, 5);
+  // --shamefully-hoist flattens node_modules so nested deps are directly accessible
+  // (pnpm's default nested structure causes ERR_MODULE_NOT_FOUND at runtime)
+  runAndTail("pnpm", ["install", "--prod", "--shamefully-hoist"], openclawRuntimeDir, 5);
 
   if (!openclawDir) {
     if (!npmRequestedSpec || !npmResolvedSpec) {
