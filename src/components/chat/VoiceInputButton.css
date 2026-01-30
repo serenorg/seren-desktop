@@ -118,6 +118,28 @@
   color: #2ea043;
 }
 
+.voice-auto-submit-toggle::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #8b949e;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+}
+
+.voice-auto-submit-toggle:hover::after {
+  opacity: 1;
+}
+
 .voice-error-tooltip {
   position: absolute;
   bottom: calc(100% + 8px);
