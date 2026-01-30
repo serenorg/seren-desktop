@@ -194,6 +194,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     await acpStore.cancelPrompt();
   };
 
+  const handleGlobalKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape" && isPrompting()) {
+      event.preventDefault();
+      handleCancel();
+    }
+  };
+
+  onMount(() => {
+    document.addEventListener("keydown", handleGlobalKeyDown);
+  });
+
+  onCleanup(() => {
+    document.removeEventListener("keydown", handleGlobalKeyDown);
+  });
+
   const handleKeyDown = (event: KeyboardEvent) => {
     // Slash command popup keyboard navigation
     const isSlashInput = input().startsWith("/") && !input().includes(" ");
