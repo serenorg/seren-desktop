@@ -926,6 +926,121 @@ mod tests {
     }
 
     #[test]
+    fn test_ws_message_channel_connected_event() {
+        let json = r#"{"type":"channel:connected","id":"ch1","platform":"whatsapp"}"#;
+        let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
+        let event_type = parsed.get("type").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(event_type, "channel:connected");
+    }
+
+    #[test]
+    fn test_ws_message_channel_disconnected_event() {
+        let json = r#"{"type":"channel:disconnected","id":"ch2"}"#;
+        let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
+        let event_type = parsed.get("type").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(event_type, "channel:disconnected");
+    }
+
+    #[test]
+    fn test_ws_message_unknown_event_type() {
+        let json = r#"{"type":"unknown:event","data":"test"}"#;
+        let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
+        let event_type = parsed.get("type").and_then(|v| v.as_str()).unwrap();
+        assert_ne!(event_type, "channel:connected");
+        assert_ne!(event_type, "message:received");
+    }
+
+    #[test]
+    fn test_ws_message_missing_type_field() {
+        let json = r#"{"data":"no type field"}"#;
+        let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
+        let event_type = parsed
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        assert_eq!(event_type, "unknown");
+    }
+
+    #[test]
+    fn test_ws_message_invalid_json() {
+        let result: Result<serde_json::Value, _> = serde_json::from_str("not json");
+        assert!(result.is_err(), "invalid JSON should fail to parse");
+    }
+
+    #[test]
+    fn test_connect_channel_url_construction() {
+        let port: u16 = 9090;
+        let url = format!("http://127.0.0.1:{}/api/channels/connect", port);
+        assert!(url.contains("127.0.0.1"));
+        assert!(url.contains("/api/channels/connect"));
+    }
+
+    #[test]
+    fn test_qr_code_url_construction() {
+        let port: u16 = 9090;
+        let platform = "whatsapp";
+        let url = format!("http://127.0.0.1:{}/api/channels/{}/qr", port, platform);
+        assert!(url.contains("/api/channels/whatsapp/qr"));
+    }
+
+    #[test]
+    fn test_disconnect_url_construction() {
+        let port: u16 = 9090;
+        let channel_id = "ch-abc123";
+        let url = format!("http://127.0.0.1:{}/api/channels/{}", port, channel_id);
+        assert!(url.contains("/api/channels/ch-abc123"));
+    }
+
+    #[test]
+    fn test_moltbot_state_channels_initially_empty() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let state = MoltbotState::new();
+            let channels = state.channels.lock().await;
+            assert!(channels.is_empty(), "channels should be empty initially");
+        });
+    }
+
+    #[test]
+    fn test_moltbot_state_hook_token_initially_none() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let state = MoltbotState::new();
+            let token = state.hook_token.lock().await;
+            assert!(token.is_none(), "hook token should be None initially");
+        });
+    }
+
+    #[test]
+    fn test_channel_info_serialization() {
+        let channel = ChannelInfo {
+            id: "test-id".to_string(),
+            platform: "telegram".to_string(),
+            display_name: "Test Bot".to_string(),
+            status: ChannelStatus::Connected,
+        };
+        let json = serde_json::to_string(&channel).unwrap();
+        assert!(json.contains("\"id\":\"test-id\""));
+        assert!(json.contains("\"platform\":\"telegram\""));
+        assert!(json.contains("\"displayName\":\"Test Bot\""));
+        assert!(json.contains("\"status\":\"connected\""));
+    }
+
+    #[test]
+    fn test_process_status_serialization() {
+        let running = serde_json::to_string(&ProcessStatus::Running).unwrap();
+        assert_eq!(running, "\"running\"");
+        let crashed = serde_json::to_string(&ProcessStatus::Crashed).unwrap();
+        assert_eq!(crashed, "\"crashed\"");
+        let stopped = serde_json::to_string(&ProcessStatus::Stopped).unwrap();
+        assert_eq!(stopped, "\"stopped\"");
+    }
+
+    #[test]
     fn test_find_moltbot_binary_returns_error_when_not_found() {
         // In test environment, the binary won't exist
         let result = find_moltbot_binary();
