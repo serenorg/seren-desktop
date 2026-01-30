@@ -22,11 +22,13 @@ mod acp;
 mod embedded_runtime;
 mod files;
 mod mcp;
-mod sandbox;
-mod terminal;
 mod oauth;
 mod oauth_callback_server;
+#[cfg(feature = "openclaw")]
+mod openclaw;
+mod sandbox;
 mod sync;
+mod terminal;
 mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
@@ -333,7 +335,11 @@ struct BuildInfo {
 
 #[tauri::command]
 fn get_build_info(app: tauri::AppHandle) -> BuildInfo {
-    let version = app.config().version.clone().unwrap_or_else(|| "unknown".into());
+    let version = app
+        .config()
+        .version
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
 
     let webview = if cfg!(target_os = "macos") {
         "WebKit (macOS)".to_string()
@@ -407,6 +413,11 @@ pub fn run() {
         builder = builder.manage(acp::AcpState::new());
     }
 
+    #[cfg(feature = "openclaw")]
+    {
+        builder = builder.manage(openclaw::OpenClawState::new());
+    }
+
     builder
         .on_menu_event(|app, event| {
             if event.id().0 == "about" {
@@ -430,7 +441,15 @@ pub fn run() {
                     app,
                     "Seren",
                     true,
-                    &[&about, &separator, &hide, &hide_others, &show_all, &separator, &quit],
+                    &[
+                        &about,
+                        &separator,
+                        &hide,
+                        &hide_others,
+                        &show_all,
+                        &separator,
+                        &quit,
+                    ],
                 )?;
 
                 let edit_menu = {
@@ -444,7 +463,16 @@ pub fn run() {
                         app,
                         "Edit",
                         true,
-                        &[&undo, &redo, &separator, &cut, &copy, &paste, &separator, &select_all],
+                        &[
+                            &undo,
+                            &redo,
+                            &separator,
+                            &cut,
+                            &copy,
+                            &paste,
+                            &separator,
+                            &select_all,
+                        ],
                     )?
                 };
 
@@ -618,6 +646,29 @@ pub fn run() {
             acp::acp_check_agent_available,
             #[cfg(feature = "acp")]
             acp::acp_ensure_claude_cli,
+            // OpenClaw commands (conditionally included when openclaw feature is enabled)
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_start,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_stop,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_restart,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_status,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_send,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_list_channels,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_connect_channel,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_get_qr,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_disconnect_channel,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_set_trust,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_grant_approval,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

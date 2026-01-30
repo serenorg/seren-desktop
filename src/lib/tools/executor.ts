@@ -2,12 +2,17 @@
 // ABOUTME: Handles tool call parsing, execution, and result formatting.
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
+import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
 import { callGatewayTool, type PaymentProxyInfo } from "@/services/mcp-gateway";
-import { parseGatewayToolName, parseMcpToolName } from "./definitions";
-import { parsePaymentRequirements, type PaymentRequirements } from "@/lib/x402";
 import { x402Service } from "@/services/x402";
+import {
+  parseGatewayToolName,
+  parseMcpToolName,
+  parseOpenClawToolName,
+} from "./definitions";
 
 /**
  * File entry returned by list_directory.
@@ -18,6 +23,62 @@ interface FileEntry {
   is_directory: boolean;
 }
 
+const OPENCLAW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+function parseOpenClawApprovalError(
+  message: string,
+): { approvalId: string } | null {
+  const trimmed = message.trim();
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart === -1) return null;
+  const json = trimmed.slice(jsonStart);
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed != null &&
+      "code" in parsed &&
+      (parsed as { code?: unknown }).code === "approval_required" &&
+      "approvalId" in parsed
+    ) {
+      const approvalId = (parsed as { approvalId?: unknown }).approvalId;
+      if (typeof approvalId === "string" && approvalId.length > 0) {
+        return { approvalId };
+      }
+    }
+  } catch {
+    // Not JSON
+  }
+  return null;
+}
+
+async function waitForOpenClawApproval(approvalId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let unlisten: UnlistenFn | undefined;
+    const timeout = setTimeout(() => {
+      unlisten?.();
+      resolve(false);
+    }, OPENCLAW_APPROVAL_TIMEOUT_MS);
+
+    listen<{ id: string; approved: boolean }>(
+      "openclaw://approval-response",
+      (event) => {
+        if (event.payload.id !== approvalId) return;
+        clearTimeout(timeout);
+        unlisten?.();
+        resolve(event.payload.approved);
+      },
+    )
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {
+        clearTimeout(timeout);
+        resolve(false);
+      });
+  });
+}
+
 /**
  * Execute a single tool call and return the result.
  * Routes to MCP servers or file tools based on prefix.
@@ -26,7 +87,10 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
   const { name, arguments: argsJson } = toolCall.function;
 
   try {
-    const args = (argsJson ? JSON.parse(argsJson) : {}) as Record<string, unknown>;
+    const args = (argsJson ? JSON.parse(argsJson) : {}) as Record<
+      string,
+      unknown
+    >;
 
     // Check if this is a Seren Gateway tool call (gateway__publisher__toolName)
     const gatewayInfo = parseGatewayToolName(name);
@@ -46,6 +110,16 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         toolCall.id,
         mcpInfo.serverName,
         mcpInfo.toolName,
+        args,
+      );
+    }
+
+    // Check if this is an OpenClaw tool call (openclaw__toolName)
+    const openclawInfo = parseOpenClawToolName(name);
+    if (openclawInfo) {
+      return await executeOpenClawTool(
+        toolCall.id,
+        openclawInfo.toolName,
         args,
       );
     }
@@ -133,6 +207,124 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
     return {
       tool_call_id: toolCall.id,
       content: `Error: ${message}`,
+      is_error: true,
+    };
+  }
+}
+
+/**
+ * Execute an OpenClaw tool call via Tauri IPC.
+ */
+async function executeOpenClawTool(
+  toolCallId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  try {
+    switch (toolName) {
+      case "send_message": {
+        const channel = args.channel as string;
+        const to = args.to as string;
+        const message = args.message as string;
+        if (!channel || !to || !message) {
+          return {
+            tool_call_id: toolCallId,
+            content: "Missing required parameters: channel, to, message",
+            is_error: true,
+          };
+        }
+        let result: string;
+        try {
+          result = await invoke<string>("openclaw_send", {
+            channel,
+            to,
+            message,
+          });
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          const approval = parseOpenClawApprovalError(errorMessage);
+          if (!approval) throw error;
+
+          const approved = await waitForOpenClawApproval(approval.approvalId);
+          if (!approved) {
+            return {
+              tool_call_id: toolCallId,
+              content: "Message was not approved.",
+              is_error: true,
+            };
+          }
+
+          result = await invoke<string>("openclaw_send", {
+            channel,
+            to,
+            message,
+          });
+        }
+        return {
+          tool_call_id: toolCallId,
+          content: result || "Message sent successfully.",
+          is_error: false,
+        };
+      }
+      case "list_channels": {
+        const channels = await invoke<
+          Array<{
+            id: string;
+            platform: string;
+            displayName: string;
+            status: string;
+          }>
+        >("openclaw_list_channels");
+        return {
+          tool_call_id: toolCallId,
+          content: JSON.stringify(channels, null, 2),
+          is_error: false,
+        };
+      }
+      case "channel_status": {
+        const channelId = args.channel as string;
+        if (!channelId) {
+          return {
+            tool_call_id: toolCallId,
+            content: "Missing required parameter: channel",
+            is_error: true,
+          };
+        }
+        const allChannels = await invoke<
+          Array<{
+            id: string;
+            platform: string;
+            displayName: string;
+            status: string;
+          }>
+        >("openclaw_list_channels");
+        const found = allChannels.find((c) => c.id === channelId);
+        if (!found) {
+          return {
+            tool_call_id: toolCallId,
+            content: `Channel not found: ${channelId}`,
+            is_error: true,
+          };
+        }
+        return {
+          tool_call_id: toolCallId,
+          content: JSON.stringify(found, null, 2),
+          is_error: false,
+        };
+      }
+      default:
+        return {
+          tool_call_id: toolCallId,
+          content: `Unknown OpenClaw tool: ${toolName}`,
+          is_error: true,
+        };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      tool_call_id: toolCallId,
+      content: `OpenClaw tool error: ${message}`,
       is_error: true,
     };
   }

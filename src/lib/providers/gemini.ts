@@ -42,9 +42,19 @@ function convertToGeminiFormat(messages: ChatMessage[]): {
   const systemMessage = messages.find((m) => m.role === "system");
   const otherMessages = messages.filter((m) => m.role !== "system");
 
+  const normalizeContent = (
+    content: string | import("./types").ContentBlock[],
+  ): string => {
+    if (typeof content === "string") return content;
+    return content
+      .filter((b): b is import("./types").TextContentBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+  };
+
   const contents = otherMessages.map((m) => ({
     role: (m.role === "assistant" ? "model" : "user") as "user" | "model",
-    parts: [{ text: m.content }],
+    parts: [{ text: normalizeContent(m.content) }],
   }));
 
   const result: {
@@ -54,7 +64,7 @@ function convertToGeminiFormat(messages: ChatMessage[]): {
 
   if (systemMessage) {
     result.systemInstruction = {
-      parts: [{ text: systemMessage.content }],
+      parts: [{ text: normalizeContent(systemMessage.content) }],
     };
   }
 

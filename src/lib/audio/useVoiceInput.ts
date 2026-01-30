@@ -47,7 +47,7 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
       };
 
       recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
+        stream?.getTracks().forEach((t) => t.stop());
         const mimeType = activeMimeType || "audio/webm";
         const blob = new Blob(chunks, { type: mimeType });
         chunks = [];

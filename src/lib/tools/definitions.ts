@@ -8,6 +8,7 @@ import type {
   ToolParameterSchema,
 } from "@/lib/providers/types";
 import { type GatewayTool, getGatewayTools } from "@/services/mcp-gateway";
+import { openclawStore } from "@/stores/openclaw.store";
 
 /**
  * Maximum number of tools by model family.
@@ -64,6 +65,9 @@ export const GATEWAY_TOOL_PREFIX = "gateway__";
  */
 export const MCP_TOOL_PREFIX = "mcp__";
 
+/** Prefix for OpenClaw messaging tools. Format: openclaw__{toolName} */
+export const OPENCLAW_TOOL_PREFIX = "openclaw__";
+
 /**
  * Parse an MCP tool name to extract server name and original tool name.
  * Returns null if the name is not an MCP tool.
@@ -105,6 +109,83 @@ export function parseGatewayToolName(
     toolName: rest.slice(separatorIndex + 2),
   };
 }
+
+/** Parse an OpenClaw tool name to extract the tool name. */
+export function parseOpenClawToolName(
+  name: string,
+): { toolName: string } | null {
+  if (!name.startsWith(OPENCLAW_TOOL_PREFIX)) {
+    return null;
+  }
+  return {
+    toolName: name.slice(OPENCLAW_TOOL_PREFIX.length),
+  };
+}
+
+/**
+ * OpenClaw messaging tools available to the AI agent.
+ * These route through Tauri invoke() to the OpenClaw gateway.
+ */
+export const OPENCLAW_TOOLS: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: `${OPENCLAW_TOOL_PREFIX}send_message`,
+      description:
+        "Send a message to a contact on a connected messaging channel (WhatsApp, Telegram, Discord, etc.) via OpenClaw.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: {
+            type: "string",
+            description:
+              "The channel ID to send through (e.g., 'whatsapp', 'telegram')",
+          },
+          to: {
+            type: "string",
+            description:
+              "The recipient identifier (phone number, username, etc.)",
+          },
+          message: {
+            type: "string",
+            description: "The message text to send",
+          },
+        },
+        required: ["channel", "to", "message"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: `${OPENCLAW_TOOL_PREFIX}list_channels`,
+      description:
+        "List all connected OpenClaw messaging channels with their status.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: `${OPENCLAW_TOOL_PREFIX}channel_status`,
+      description:
+        "Get the detailed status of a specific OpenClaw messaging channel including connection state and platform info.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: {
+            type: "string",
+            description: "The channel ID to check status for",
+          },
+        },
+        required: ["channel"],
+      },
+    },
+  },
+];
 
 /**
  * Convert a local MCP tool to OpenAI function calling format.
@@ -298,6 +379,11 @@ export const FILE_TOOLS: ToolDefinition[] = [
   },
 ];
 
+/** Check if OpenClaw is set up and running so we can expose its tools. */
+function isOpenClawAvailable(): boolean {
+  return openclawStore.setupComplete && openclawStore.isRunning;
+}
+
 /**
  * Get all available tools, including file tools, local MCP tools, and Seren Gateway tools.
  * - File tools: Local file operations via Tauri (highest priority)
@@ -332,6 +418,18 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
 
     tools.push(toolDef);
     seenNames.add(toolName);
+  }
+
+  // Add OpenClaw messaging tools only when OpenClaw is set up and running
+  if (isOpenClawAvailable()) {
+    for (const openclawTool of OPENCLAW_TOOLS) {
+      if (tools.length >= limit) break;
+      const toolName = openclawTool.function.name;
+      if (!seenNames.has(toolName)) {
+        tools.push(openclawTool);
+        seenNames.add(toolName);
+      }
+    }
   }
 
   // Add tools from Seren Gateway publishers - fill remaining slots

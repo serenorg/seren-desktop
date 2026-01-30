@@ -44,7 +44,7 @@ rusqlite = { version = "0.33", features = ["bundled"] }
 sqlite-vec = "0.1"
 notify = "8"
 lazy_static = "1"
-tokio = { version = "1", features = ["process", "io-util", "sync", "io-std"] }
+tokio = { version = "1", features = ["process", "io-util", "sync", "io-std", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 async-trait = "0.1"
@@ -73,6 +73,7 @@ tiny_http = "0.12"
 agent-client-protocol = { version = "0.9", features = ["unstable"], optional = true }
 claude-code-acp-rs = { git = "https://github.com/serenorg/claude-code-acp-rs", optional = true }
 anyhow = "1"
+tokio-tungstenite = { version = "0.24", optional = true }
 # Note: codex-acp has unresolved dependency issues (ssh auth for tungstenite fork)
 # Will add Codex support when upstream issues are resolved
 # codex-acp = { git = "https://github.com/zed-industries/codex-acp" }
@@ -84,5 +85,6 @@ anyhow = "1"
 tauri-plugin-deep-link = "2"
 
 [features]
-default = ["acp"]
+default = ["acp", "openclaw"]
 acp = ["agent-client-protocol", "claude-code-acp-rs"]
+openclaw = ["tokio-tungstenite"]

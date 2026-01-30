@@ -12,6 +12,7 @@ import {
 } from "solid-js";
 import { FileTree } from "@/components/sidebar/FileTree";
 import { IndexingStatus } from "@/components/sidebar/IndexingStatus";
+import { OpenClawStatus } from "@/components/sidebar/OpenClawStatus";
 import {
   setAddToChatHandler,
   setExplainCodeHandler,
@@ -268,6 +269,7 @@ export const EditorPanel: Component = () => {
           />
         </div>
         <IndexingStatus />
+        <OpenClawStatus />
       </aside>
 
       <section class="flex-1 flex flex-col min-w-0">
