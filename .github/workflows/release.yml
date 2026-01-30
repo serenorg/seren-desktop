@@ -163,8 +163,18 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Prepare embedded runtime
-        run: pnpm prepare:runtime
+      - name: Prepare embedded runtime (macOS arm64)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: pnpm prepare:runtime:darwin-arm64
+      - name: Prepare embedded runtime (macOS x64)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: pnpm prepare:runtime:darwin-x64
+      - name: Prepare embedded runtime (Windows x64)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: pnpm prepare:runtime:win32-x64
+      - name: Prepare embedded runtime (Linux x64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: pnpm prepare:runtime:linux-x64
 
       # macOS: Import certificates and setup keychain (skip if no certificate)
       - name: Import macOS certificates
