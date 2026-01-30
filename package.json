@@ -12,7 +12,7 @@
     "tauri:dev": "pnpm tauri dev",
     "build:sidecar": "tsx scripts/build-sidecar.ts",
     "build:sidecar:release": "tsx scripts/build-sidecar.ts release",
-    "generate:api": "openapi-ts",
+    "generate:api": "openapi-ts -f openapi/openapi-ts.config.ts",
     "lint": "biome lint",
     "lint:fix": "biome lint --fix",
     "format": "biome format --write",
