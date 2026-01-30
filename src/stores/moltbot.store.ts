@@ -191,6 +191,12 @@ export const moltbotStore = {
     try {
       await invoke("moltbot_start");
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // "already running" is not an error — treat it as success
+      if (msg.toLowerCase().includes("already running")) {
+        console.log("[Moltbot Store] Moltbot already running, skipping start");
+        return;
+      }
       console.error("[Moltbot Store] Failed to start:", e);
       throw e;
     }
