@@ -98,9 +98,26 @@ export async function transcribeAudio(
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error("[Whisper] HTTP error:", response.status, errorText);
     throw new Error(`Whisper API error: ${response.status} - ${errorText}`);
   }
 
-  const result = (await response.json()) as TranscriptionResponse;
-  return result.text;
+  const result = await response.json();
+  console.log("[Whisper] Raw API response:", JSON.stringify(result));
+
+  // Gateway wraps upstream errors in a 200 response with a status field
+  if (result.status && result.status !== 200) {
+    const msg = result.body?.error?.message || `Upstream error: ${result.status}`;
+    console.error("[Whisper] Gateway upstream error:", msg);
+    throw new Error(msg);
+  }
+
+  // Gateway wraps the upstream response in {status, body: {text: "..."}}
+  const text = result.body?.text ?? result.text;
+  if (!text) {
+    console.error("[Whisper] No text in response:", JSON.stringify(result));
+    throw new Error("No transcription returned from Whisper API");
+  }
+
+  return text;
 }

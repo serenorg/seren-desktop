@@ -878,7 +878,11 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                             setInput((prev) =>
                               prev ? `${prev} ${text}` : text,
                             );
-                            inputRef?.focus();
+                            if (settingsStore.get("voiceAutoSubmit")) {
+                              sendMessage();
+                            } else {
+                              inputRef?.focus();
+                            }
                           }}
                         />
                         <Show

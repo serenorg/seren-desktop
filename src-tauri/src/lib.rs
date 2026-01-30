@@ -514,9 +514,8 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
-                    println!("[Deep Link] Received event: {:?}", event);
                     let urls = event.urls();
-                    println!("[Deep Link] URLs count: {}", urls.len());
+                    println!("[Deep Link] Received open URL event with {} URLs: {:?}", urls.len(), urls);
                     for url in urls {
                         println!("[Deep Link] Processing URL: {}", url);
                         println!("[Deep Link] - scheme: {}", url.scheme());

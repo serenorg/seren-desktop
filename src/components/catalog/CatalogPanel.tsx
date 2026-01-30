@@ -8,7 +8,6 @@ import {
   For,
   Show,
 } from "solid-js";
-import { SignIn } from "@/components/auth/SignIn";
 import {
   catalog,
   formatNumber,
@@ -16,7 +15,6 @@ import {
   type Publisher,
 } from "@/services/catalog";
 import { acpStore } from "@/stores/acp.store";
-import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 
 interface CatalogPanelProps {
@@ -42,12 +40,8 @@ export const CatalogPanel: Component<CatalogPanelProps> = (_props) => {
     { id: "compute", label: "Compute", icon: "🤖" },
   ];
 
-  // Load publishers when authenticated
-  createEffect(() => {
-    if (authStore.isAuthenticated) {
-      loadPublishers();
-    }
-  });
+  // Load publishers on mount
+  loadPublishers();
 
   // Filter publishers based on search and type
   createEffect(() => {
@@ -125,23 +119,6 @@ What are some creative and practical ways I could use this in my projects? Pleas
   }
 
   return (
-    <Show
-      when={authStore.isAuthenticated}
-      fallback={
-        <div class="flex flex-col items-center justify-center gap-8 p-8 min-h-[60vh]">
-          <div class="flex flex-col items-center gap-3 text-center">
-            <span class="text-[48px]">📚</span>
-            <h2 class="text-xl font-semibold text-white m-0">
-              Sign in to explore the catalog
-            </h2>
-            <p class="text-[#94a3b8] m-0">
-              Browse APIs, databases, and AI services available through Seren.
-            </p>
-          </div>
-          <SignIn onSuccess={() => checkAuth()} />
-        </div>
-      }
-    >
       <div class="flex flex-col h-full bg-transparent">
         <header class="p-6 pb-4 border-b border-[rgba(148,163,184,0.1)]">
           <h1 class="text-2xl font-semibold text-white m-0">
@@ -459,7 +436,6 @@ What are some creative and practical ways I could use this in my projects? Pleas
           </div>
         </Show>
       </div>
-    </Show>
   );
 };
 

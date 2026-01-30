@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::TcpListener;
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
@@ -138,40 +139,43 @@ fn generate_hook_token() -> String {
     hex::encode(bytes)
 }
 
-/// Find the OpenClaw binary in known locations
-fn find_openclaw_binary() -> Result<std::path::PathBuf, String> {
+/// Find the OpenClaw JS entrypoint in known locations.
+///
+/// This supports "mjs bundling": we bundle the OpenClaw package (dist + node_modules + openclaw.mjs)
+/// into `embedded-runtime/openclaw/` and spawn it with Node.js from our embedded runtime.
+fn find_openclaw_mjs() -> Result<PathBuf, String> {
     let exe_path =
         std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
     let exe_dir = exe_path
         .parent()
         .ok_or_else(|| "Failed to get exe directory".to_string())?;
 
-    let ext = if cfg!(windows) { ".exe" } else { "" };
-    let bin_filename = format!("openclaw{}", ext);
-
     let candidates = [
-        // 1. Production macOS: In Resources/embedded-runtime/bin/
+        // 1. Production macOS: In Resources/embedded-runtime/openclaw/
         exe_dir
-            .join("../Resources/embedded-runtime/bin")
-            .join(&bin_filename),
-        // 2. Production Linux/Windows: In resource dir next to exe
-        exe_dir.join("embedded-runtime/bin").join(&bin_filename),
-        // 3. Development: In src-tauri/embedded-runtime/bin/
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Resources/embedded-runtime/openclaw")
+            .join("openclaw.mjs"),
+        // 2. Production Linux/Windows: In embedded-runtime next to exe
+        exe_dir
             .join("embedded-runtime")
-            .join("bin")
-            .join(&bin_filename),
+            .join("openclaw")
+            .join("openclaw.mjs"),
+        // 3. Development: In src-tauri/embedded-runtime/openclaw/
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("embedded-runtime")
+            .join("openclaw")
+            .join("openclaw.mjs"),
     ];
 
     for candidate in &candidates {
         if candidate.exists() {
-            eprintln!("[OpenClaw] Found binary at: {:?}", candidate);
+            eprintln!("[OpenClaw] Found openclaw.mjs at: {:?}", candidate);
             return Ok(candidate.clone());
         }
     }
 
     Err(format!(
-        "OpenClaw binary not found. Checked locations:\n{}",
+        "openclaw.mjs not found. Checked locations:\n{}",
         candidates
             .iter()
             .map(|p| format!("  - {:?}", p))
@@ -225,8 +229,8 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
     }
     emit_status(&app, ProcessStatus::Starting);
 
-    // Find binary
-    let binary_path = match find_openclaw_binary() {
+    // Find OpenClaw entrypoint
+    let openclaw_mjs = match find_openclaw_mjs() {
         Ok(path) => path,
         Err(e) => {
             let mut status = state.status.lock().await;
@@ -277,7 +281,10 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
 
     // Spawn the OpenClaw process
     // Pass config via env vars (not CLI args, to avoid exposure in `ps`)
-    let mut cmd = tokio::process::Command::new(&binary_path);
+    let mut cmd = tokio::process::Command::new("node");
+    cmd.arg(&openclaw_mjs)
+        .arg("gateway")
+        .arg("--allow-unconfigured"); // Allow running without `openclaw setup`
     cmd.env("OPENCLAW_GATEWAY_PORT", port.to_string())
         .env("OPENCLAW_GATEWAY_TOKEN", &token)
         .env("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
@@ -302,8 +309,8 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
 
     let pid = child.id();
     eprintln!(
-        "[OpenClaw] Process spawned: pid={:?}, port={}, binary={:?}",
-        pid, port, binary_path
+        "[OpenClaw] Process spawned: pid={:?}, port={}, openclaw_mjs={:?}",
+        pid, port, openclaw_mjs
     );
 
     // Store process
@@ -663,17 +670,11 @@ async fn webhook_send(
 /// Query OpenClaw for connected channels via its HTTP API
 /// Query channel status via the openclaw CLI (`channels status`).
 async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
-    let binary_path = find_openclaw_binary()?;
-    let script_dir = binary_path
-        .parent()
-        .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
-    let openclaw_pkg_dir = script_dir.join("../openclaw");
-    let openclaw_pkg = openclaw_pkg_dir.join("openclaw.mjs");
+    let openclaw_pkg = find_openclaw_mjs()?;
     let embedded_path = crate::embedded_runtime::get_embedded_path();
 
     let mut cmd = tokio::process::Command::new("node");
-    cmd.current_dir(&openclaw_pkg_dir)
-        .arg(&openclaw_pkg)
+    cmd.arg(&openclaw_pkg)
         .arg("channels")
         .arg("status")
         .arg("--json")
@@ -919,17 +920,10 @@ async fn request_channel_connect(
     platform: &str,
     credentials: &HashMap<String, String>,
 ) -> Result<serde_json::Value, String> {
-    let binary_path = find_openclaw_binary()?;
     let embedded_path = crate::embedded_runtime::get_embedded_path();
 
-    // The openclaw wrapper invokes `openclaw.mjs gateway` by default,
-    // but we need to call `openclaw.mjs channels add` instead.
-    // Build the node command directly to call the CLI.
-    let script_dir = binary_path
-        .parent()
-        .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
-    let openclaw_pkg_dir = script_dir.join("../openclaw");
-    let openclaw_pkg = openclaw_pkg_dir.join("openclaw.mjs");
+    // We need to call `openclaw.mjs channels add`, not the gateway.
+    let openclaw_pkg = find_openclaw_mjs()?;
 
     eprintln!(
         "[OpenClaw] Channel connect: platform={}, openclaw={}",
@@ -937,16 +931,8 @@ async fn request_channel_connect(
         openclaw_pkg.display()
     );
 
-    if !openclaw_pkg.exists() {
-        return Err(format!(
-            "openclaw.mjs not found at {}",
-            openclaw_pkg.display()
-        ));
-    }
-
     let mut cmd = tokio::process::Command::new("node");
-    cmd.current_dir(&openclaw_pkg_dir)
-        .arg(&openclaw_pkg)
+    cmd.arg(&openclaw_pkg)
         .arg("channels")
         .arg("add")
         .arg("--channel")
@@ -1076,17 +1062,12 @@ pub async fn openclaw_disconnect_channel(
     }
 
     // Use openclaw CLI to remove the channel
-    let binary_path = find_openclaw_binary().map_err(|e| format!("Cannot find openclaw: {}", e))?;
-    let script_dir = binary_path
-        .parent()
-        .ok_or_else(|| "Cannot resolve openclaw bin directory".to_string())?;
-    let openclaw_pkg_dir = script_dir.join("../openclaw");
-    let openclaw_pkg = openclaw_pkg_dir.join("openclaw.mjs");
+    let openclaw_pkg =
+        find_openclaw_mjs().map_err(|e| format!("Cannot find openclaw.mjs: {}", e))?;
     let embedded_path = crate::embedded_runtime::get_embedded_path();
 
     let mut cmd = tokio::process::Command::new("node");
-    cmd.current_dir(&openclaw_pkg_dir)
-        .arg(&openclaw_pkg)
+    cmd.arg(&openclaw_pkg)
         .arg("channels")
         .arg("remove")
         .arg("--channel")
@@ -1368,17 +1349,24 @@ mod tests {
     }
 
     #[test]
-    fn test_find_openclaw_binary_returns_error_when_not_found() {
-        // In test environment, the binary won't exist
-        let result = find_openclaw_binary();
-        assert!(
-            result.is_err(),
-            "should return error when binary is not found"
-        );
-        let err = result.unwrap_err();
-        assert!(
-            err.contains("OpenClaw binary not found"),
-            "error message should indicate binary not found"
-        );
+    fn test_find_openclaw_mjs_returns_path_or_error() {
+        // This test suite may run with (or without) the OpenClaw bundle present.
+        // Accept either outcome but validate invariants.
+        match find_openclaw_mjs() {
+            Ok(path) => {
+                assert!(
+                    path.ends_with("openclaw.mjs"),
+                    "expected openclaw.mjs path, got: {:?}",
+                    path
+                );
+                assert!(path.exists(), "returned path should exist: {:?}", path);
+            }
+            Err(err) => {
+                assert!(
+                    err.contains("openclaw.mjs not found"),
+                    "error message should indicate openclaw.mjs not found"
+                );
+            }
+        }
     }
 }

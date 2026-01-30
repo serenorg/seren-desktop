@@ -85,6 +85,9 @@ export interface Settings {
   agentSandboxMode: "read-only" | "workspace-write" | "full-access";
   agentAutoApproveReads: boolean;
 
+  // Voice settings
+  voiceAutoSubmit: boolean;
+
   // General settings
   telemetryEnabled: boolean;
 }
@@ -132,6 +135,8 @@ const DEFAULT_SETTINGS: Settings = {
   // Agent
   agentSandboxMode: "workspace-write",
   agentAutoApproveReads: true,
+  // Voice
+  voiceAutoSubmit: true,
   // General
   telemetryEnabled: true,
 };

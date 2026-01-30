@@ -260,6 +260,30 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.voiceAutoSubmit}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "voiceAutoSubmit",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
+                />
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Auto-send voice input
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Automatically send message after voice transcription
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
               Auto-Compact
             </h4>

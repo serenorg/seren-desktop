@@ -18,6 +18,7 @@ import type { CommandContext } from "@/lib/commands/types";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
 import type { DiffEvent } from "@/services/acp";
+import { settingsStore } from "@/stores/settings.store";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { AgentSelector } from "./AgentSelector";
@@ -562,7 +563,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <VoiceInputButton
                   onTranscript={(text) => {
                     setInput((prev) => (prev ? `${prev} ${text}` : text));
-                    inputRef?.focus();
+                    if (settingsStore.get("voiceAutoSubmit")) {
+                      sendMessage();
+                    } else {
+                      inputRef?.focus();
+                    }
                   }}
                 />
                 <Show when={isPrompting()}>
