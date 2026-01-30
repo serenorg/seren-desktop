@@ -481,6 +481,7 @@ export const MoltbotWizard: Component<MoltbotWizardProps> = (props) => {
 
             <Show when={showConnectModal()}>
               <MoltbotChannelConnect
+                platformId={selectedPlatforms()[connectingIndex()]}
                 onClose={() => setShowConnectModal(false)}
                 onConnected={handleChannelConnected}
               />

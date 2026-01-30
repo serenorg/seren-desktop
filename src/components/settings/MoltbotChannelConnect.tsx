@@ -216,13 +216,18 @@ const PLATFORMS: PlatformDef[] = [
 interface MoltbotChannelConnectProps {
   onClose: () => void;
   onConnected: () => void;
+  /** Pre-select a platform, skipping the picker step */
+  platformId?: string;
 }
 
 export const MoltbotChannelConnect: Component<MoltbotChannelConnectProps> = (
   props,
 ) => {
+  const initialPlatform = props.platformId
+    ? PLATFORMS.find((p) => p.id === props.platformId) ?? null
+    : null;
   const [selectedPlatform, setSelectedPlatform] =
-    createSignal<PlatformDef | null>(null);
+    createSignal<PlatformDef | null>(initialPlatform);
 
   const handleBack = () => {
     setSelectedPlatform(null);
@@ -242,7 +247,7 @@ export const MoltbotChannelConnect: Component<MoltbotChannelConnectProps> = (
         {/* Header */}
         <div class="flex items-center justify-between px-6 py-4 border-b border-[rgba(148,163,184,0.15)]">
           <div class="flex items-center gap-3">
-            <Show when={selectedPlatform()}>
+            <Show when={selectedPlatform() && !props.platformId}>
               <button
                 type="button"
                 class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-muted-foreground cursor-pointer hover:bg-[rgba(148,163,184,0.1)]"
