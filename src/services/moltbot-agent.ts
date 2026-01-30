@@ -189,11 +189,12 @@ async function processInboundMessage(msg: InboundMessage): Promise<void> {
       }
     }
 
-    // Send response via Moltbot
+    // Send response via Moltbot (approved flag signals frontend approval is done)
     await invoke("moltbot_send", {
       channel: msg.channel,
       to: msg.from,
       message: response,
+      approved: true,
     });
 
     // Add assistant response to history
@@ -213,6 +214,7 @@ async function processInboundMessage(msg: InboundMessage): Promise<void> {
           channel: msg.channel,
           to: msg.from,
           message: "I'm unable to respond right now. Please try again later.",
+          approved: true,
         });
       } catch {
         // Can't even send error — give up silently

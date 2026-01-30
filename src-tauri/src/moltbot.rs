@@ -719,13 +719,36 @@ pub async fn moltbot_send(
             match config.trust_level {
                 TrustLevel::ApprovalRequired => {
                     if approved != Some(true) {
-                        // Emit approval-needed event and reject the send
+                        // Generate a unique approval ID for matching responses
+                        let approval_id = format!(
+                            "{}:{}:{}",
+                            channel,
+                            to,
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+
+                        // Look up channel info for platform name
+                        let channels = state.channels.lock().await;
+                        let platform = channels
+                            .iter()
+                            .find(|c| c.id == channel)
+                            .map(|c| c.platform.clone())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        drop(channels);
+
+                        // Emit approval-needed event with full payload matching frontend expectations
                         let _ = app.emit(
                             events::APPROVAL_NEEDED,
                             serde_json::json!({
+                                "id": approval_id,
                                 "channel": channel,
-                                "to": to,
+                                "platform": platform,
+                                "from": to,
                                 "message": message,
+                                "draftResponse": message,
                             }),
                         );
                         return Err("Message requires approval. Approval event emitted.".to_string());

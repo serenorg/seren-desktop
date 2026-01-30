@@ -297,8 +297,18 @@ export const moltbotStore = {
     );
   },
 
-  async sendMessage(channel: string, to: string, message: string) {
-    return invoke<string>("moltbot_send", { channel, to, message });
+  async sendMessage(
+    channel: string,
+    to: string,
+    message: string,
+    approved?: boolean,
+  ) {
+    return invoke<string>("moltbot_send", {
+      channel,
+      to,
+      message,
+      approved: approved ?? false,
+    });
   },
 
   // --- Setup ---

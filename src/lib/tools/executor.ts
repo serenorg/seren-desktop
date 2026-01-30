@@ -176,6 +176,7 @@ async function executeMoltbotTool(
           channel,
           to,
           message,
+          approved: true,
         });
         return {
           tool_call_id: toolCallId,
