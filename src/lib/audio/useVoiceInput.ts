@@ -60,7 +60,7 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
         setVoiceState("transcribing");
         try {
           const text = await transcribeAudio(blob, mimeType);
-          if (text.trim()) {
+          if (text?.trim()) {
             onTranscript(text.trim());
           }
           setVoiceState("idle");
