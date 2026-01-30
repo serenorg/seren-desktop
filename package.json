@@ -10,6 +10,7 @@
     "serve": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "pnpm tauri dev",
+    "build:openclaw": "tsx scripts/build-openclaw.ts",
     "build:sidecar": "tsx scripts/build-sidecar.ts",
     "build:sidecar:release": "tsx scripts/build-sidecar.ts release",
     "generate:api": "openapi-ts",
