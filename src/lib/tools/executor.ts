@@ -4,10 +4,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
+import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
 import { callGatewayTool, type PaymentProxyInfo } from "@/services/mcp-gateway";
-import { parseGatewayToolName, parseMcpToolName } from "./definitions";
-import { parsePaymentRequirements, type PaymentRequirements } from "@/lib/x402";
 import { x402Service } from "@/services/x402";
+import {
+  parseGatewayToolName,
+  parseMcpToolName,
+  parseMoltbotToolName,
+} from "./definitions";
 
 /**
  * File entry returned by list_directory.
@@ -26,7 +30,10 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
   const { name, arguments: argsJson } = toolCall.function;
 
   try {
-    const args = (argsJson ? JSON.parse(argsJson) : {}) as Record<string, unknown>;
+    const args = (argsJson ? JSON.parse(argsJson) : {}) as Record<
+      string,
+      unknown
+    >;
 
     // Check if this is a Seren Gateway tool call (gateway__publisher__toolName)
     const gatewayInfo = parseGatewayToolName(name);
@@ -48,6 +55,12 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         mcpInfo.toolName,
         args,
       );
+    }
+
+    // Check if this is a Moltbot tool call (moltbot__toolName)
+    const moltbotInfo = parseMoltbotToolName(name);
+    if (moltbotInfo) {
+      return await executeMoltbotTool(toolCall.id, moltbotInfo.toolName, args);
     }
 
     // Otherwise, handle local file tools
@@ -133,6 +146,70 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
     return {
       tool_call_id: toolCall.id,
       content: `Error: ${message}`,
+      is_error: true,
+    };
+  }
+}
+
+/**
+ * Execute a Moltbot tool call via Tauri IPC.
+ */
+async function executeMoltbotTool(
+  toolCallId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  try {
+    switch (toolName) {
+      case "send_message": {
+        const channel = args.channel as string;
+        const to = args.to as string;
+        const message = args.message as string;
+        if (!channel || !to || !message) {
+          return {
+            tool_call_id: toolCallId,
+            content: "Missing required parameters: channel, to, message",
+            is_error: true,
+          };
+        }
+        const result = await invoke<string>("moltbot_send", {
+          channel,
+          to,
+          message,
+        });
+        return {
+          tool_call_id: toolCallId,
+          content: result || "Message sent successfully.",
+          is_error: false,
+        };
+      }
+      case "list_channels": {
+        const channels = await invoke<
+          Array<{
+            id: string;
+            platform: string;
+            displayName: string;
+            status: string;
+          }>
+        >("moltbot_list_channels");
+        return {
+          tool_call_id: toolCallId,
+          content: JSON.stringify(channels, null, 2),
+          is_error: false,
+        };
+      }
+      default:
+        return {
+          tool_call_id: toolCallId,
+          content: `Unknown Moltbot tool: ${toolName}`,
+          is_error: true,
+        };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      tool_call_id: toolCallId,
+      content: `Moltbot tool error: ${message}`,
       is_error: true,
     };
   }

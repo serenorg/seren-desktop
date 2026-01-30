@@ -65,6 +65,12 @@ export const GATEWAY_TOOL_PREFIX = "gateway__";
 export const MCP_TOOL_PREFIX = "mcp__";
 
 /**
+ * Prefix for Moltbot messaging tools.
+ * Format: moltbot__{toolName}
+ */
+export const MOLTBOT_TOOL_PREFIX = "moltbot__";
+
+/**
  * Parse an MCP tool name to extract server name and original tool name.
  * Returns null if the name is not an MCP tool.
  */
@@ -105,6 +111,68 @@ export function parseGatewayToolName(
     toolName: rest.slice(separatorIndex + 2),
   };
 }
+
+/**
+ * Parse a Moltbot tool name to extract the tool name.
+ * Returns null if the name is not a Moltbot tool.
+ */
+export function parseMoltbotToolName(
+  name: string,
+): { toolName: string } | null {
+  if (!name.startsWith(MOLTBOT_TOOL_PREFIX)) {
+    return null;
+  }
+  return {
+    toolName: name.slice(MOLTBOT_TOOL_PREFIX.length),
+  };
+}
+
+/**
+ * Moltbot messaging tools available to the AI agent.
+ * These route through Tauri invoke() to the Moltbot process.
+ */
+export const MOLTBOT_TOOLS: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: `${MOLTBOT_TOOL_PREFIX}send_message`,
+      description:
+        "Send a message to a contact on a connected messaging channel (WhatsApp, Telegram, Discord, etc.) via Moltbot.",
+      parameters: {
+        type: "object",
+        properties: {
+          channel: {
+            type: "string",
+            description:
+              "The channel ID to send through (e.g., 'whatsapp', 'telegram')",
+          },
+          to: {
+            type: "string",
+            description:
+              "The recipient identifier (phone number, username, etc.)",
+          },
+          message: {
+            type: "string",
+            description: "The message text to send",
+          },
+        },
+        required: ["channel", "to", "message"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: `${MOLTBOT_TOOL_PREFIX}list_channels`,
+      description:
+        "List all connected Moltbot messaging channels with their status.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+];
 
 /**
  * Convert a local MCP tool to OpenAI function calling format.
@@ -332,6 +400,16 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
 
     tools.push(toolDef);
     seenNames.add(toolName);
+  }
+
+  // Add Moltbot messaging tools (if Moltbot is available)
+  for (const moltbotTool of MOLTBOT_TOOLS) {
+    if (tools.length >= limit) break;
+    const toolName = moltbotTool.function.name;
+    if (!seenNames.has(toolName)) {
+      tools.push(moltbotTool);
+      seenNames.add(toolName);
+    }
   }
 
   // Add tools from Seren Gateway publishers - fill remaining slots
