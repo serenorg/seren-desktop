@@ -234,9 +234,7 @@ export const moltbotStore = {
 
   async refreshChannels() {
     try {
-      const channels = await invoke<MoltbotChannel[]>(
-        "moltbot_list_channels",
-      );
+      const channels = await invoke<MoltbotChannel[]>("moltbot_list_channels");
       // Preserve local agentMode and trustLevel settings
       const merged = channels.map((ch) => {
         const existing = state.channels.find((c) => c.id === ch.id);
@@ -268,6 +266,26 @@ export const moltbotStore = {
   },
 
   // --- Messaging ---
+
+  async connectChannel(platform: string, credentials: Record<string, string>) {
+    return invoke<Record<string, unknown>>("moltbot_connect_channel", {
+      platform,
+      credentials,
+    });
+  },
+
+  async getQrCode(platform: string) {
+    return invoke<string>("moltbot_get_qr", { platform });
+  },
+
+  async disconnectChannel(channelId: string) {
+    await invoke("moltbot_disconnect_channel", { channelId });
+    // Remove from local state
+    setState(
+      "channels",
+      state.channels.filter((c) => c.id !== channelId),
+    );
+  },
 
   async sendMessage(channel: string, to: string, message: string) {
     return invoke<string>("moltbot_send", { channel, to, message });

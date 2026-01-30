@@ -607,6 +607,185 @@ pub async fn moltbot_send(
     .await
 }
 
+/// Request a channel connection via Moltbot's HTTP API
+async fn request_channel_connect(
+    port: u16,
+    hook_token: &str,
+    platform: &str,
+    credentials: &HashMap<String, String>,
+) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let url = format!("http://127.0.0.1:{}/api/channels/connect", port);
+
+    let mut body = serde_json::json!({
+        "platform": platform,
+    });
+    for (key, value) in credentials {
+        body[key] = serde_json::Value::String(value.clone());
+    }
+
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", hook_token))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Channel connect request failed: {}", e))?;
+
+    let status = response.status();
+    let response_body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse connect response: {}", e))?;
+
+    if !status.is_success() {
+        let msg = response_body
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown error");
+        return Err(format!("Channel connect failed ({}): {}", status, msg));
+    }
+
+    Ok(response_body)
+}
+
+/// Request a QR code for WhatsApp-style channel connection
+async fn request_qr_code(port: u16, hook_token: &str, platform: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let url = format!(
+        "http://127.0.0.1:{}/api/channels/{}/qr",
+        port, platform
+    );
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", hook_token))
+        .send()
+        .await
+        .map_err(|e| format!("QR code request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("QR code request failed ({}): {}", status, body));
+    }
+
+    // Response is either a data URI or base64 string
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse QR response: {}", e))?;
+
+    body.get("qr")
+        .or(body.get("data"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "QR code not found in response".to_string())
+}
+
+/// Connect a messaging channel (Tauri command)
+#[tauri::command]
+pub async fn moltbot_connect_channel(
+    state: State<'_, MoltbotState>,
+    platform: String,
+    credentials: HashMap<String, String>,
+) -> Result<serde_json::Value, String> {
+    let status = *state.status.lock().await;
+    if status != ProcessStatus::Running {
+        return Err("Moltbot is not running. Start it first.".to_string());
+    }
+
+    let port = *state.port.lock().await;
+    let hook_token = state
+        .hook_token
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Hook token not configured".to_string())?;
+
+    request_channel_connect(port, &hook_token, &platform, &credentials).await
+}
+
+/// Get QR code for WhatsApp-style connections (Tauri command)
+#[tauri::command]
+pub async fn moltbot_get_qr(
+    state: State<'_, MoltbotState>,
+    platform: String,
+) -> Result<String, String> {
+    let status = *state.status.lock().await;
+    if status != ProcessStatus::Running {
+        return Err("Moltbot is not running. Start it first.".to_string());
+    }
+
+    let port = *state.port.lock().await;
+    let hook_token = state
+        .hook_token
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Hook token not configured".to_string())?;
+
+    request_qr_code(port, &hook_token, &platform).await
+}
+
+/// Disconnect a channel (Tauri command)
+#[tauri::command]
+pub async fn moltbot_disconnect_channel(
+    state: State<'_, MoltbotState>,
+    channel_id: String,
+) -> Result<(), String> {
+    let status = *state.status.lock().await;
+    if status != ProcessStatus::Running {
+        return Err("Moltbot is not running.".to_string());
+    }
+
+    let port = *state.port.lock().await;
+    let hook_token = state
+        .hook_token
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Hook token not configured".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let url = format!(
+        "http://127.0.0.1:{}/api/channels/{}",
+        port, channel_id
+    );
+
+    let response = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", hook_token))
+        .send()
+        .await
+        .map_err(|e| format!("Disconnect request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Disconnect failed: {}", body));
+    }
+
+    // Remove from cached channels
+    {
+        let mut channels = state.channels.lock().await;
+        channels.retain(|c| c.id != channel_id);
+    }
+
+    Ok(())
+}
+
 /// List connected channels (Tauri command)
 #[tauri::command]
 pub async fn moltbot_list_channels(

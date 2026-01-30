@@ -1,17 +1,19 @@
 // ABOUTME: Settings tab for Moltbot messaging integration — process control, channels, and config.
 // ABOUTME: Renders as wizard on first visit, config panel after setup is complete.
 
-import { type Component, For, Show, createSignal, onMount } from "solid-js";
+import { type Component, createSignal, For, onMount, Show } from "solid-js";
 import {
-  moltbotStore,
   type AgentMode,
   type MoltbotChannel,
+  moltbotStore,
   type TrustLevel,
 } from "@/stores/moltbot.store";
+import { MoltbotChannelConnect } from "./MoltbotChannelConnect";
 
 export const MoltbotSettings: Component = () => {
   const [error, setError] = createSignal<string | null>(null);
   const [isToggling, setIsToggling] = createSignal(false);
+  const [showConnectModal, setShowConnectModal] = createSignal(false);
 
   onMount(() => {
     moltbotStore.init();
@@ -121,18 +123,12 @@ export const MoltbotSettings: Component = () => {
           <button
             type="button"
             class={`px-3 py-1.5 border-none rounded-md text-[0.8rem] text-white cursor-pointer transition-all duration-150 hover:opacity-80 ${
-              moltbotStore.isRunning
-                ? "bg-[#ef4444]"
-                : "bg-[#22c55e]"
+              moltbotStore.isRunning ? "bg-[#ef4444]" : "bg-[#22c55e]"
             }`}
             onClick={handleToggleProcess}
             disabled={isToggling()}
           >
-            {isToggling()
-              ? "..."
-              : moltbotStore.isRunning
-                ? "Stop"
-                : "Start"}
+            {isToggling() ? "..." : moltbotStore.isRunning ? "Stop" : "Start"}
           </button>
         </div>
       </div>
@@ -182,13 +178,44 @@ export const MoltbotSettings: Component = () => {
           </For>
         </div>
 
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="px-3 py-1.5 bg-accent border-none rounded-md text-[0.8rem] text-white cursor-pointer transition-all duration-150 hover:opacity-80"
+            onClick={() => setShowConnectModal(true)}
+          >
+            Connect Channel
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-[0.8rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
+            onClick={handleRefreshChannels}
+          >
+            Refresh Channels
+          </button>
+        </div>
+      </Show>
+
+      {/* Connect Channel Button (when no channels) */}
+      <Show when={moltbotStore.isRunning && moltbotStore.channels.length === 0}>
         <button
           type="button"
-          class="px-3 py-1.5 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-[0.8rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
-          onClick={handleRefreshChannels}
+          class="mt-2 px-4 py-2 bg-accent border-none rounded-md text-white text-[0.85rem] cursor-pointer transition-all duration-150 hover:opacity-80"
+          onClick={() => setShowConnectModal(true)}
         >
-          Refresh Channels
+          Connect a Channel
         </button>
+      </Show>
+
+      {/* Channel Connect Modal */}
+      <Show when={showConnectModal()}>
+        <MoltbotChannelConnect
+          onClose={() => setShowConnectModal(false)}
+          onConnected={() => {
+            setShowConnectModal(false);
+            moltbotStore.refreshChannels();
+          }}
+        />
       </Show>
     </section>
   );
@@ -238,6 +265,7 @@ const ChannelRow: Component<{
       <div class="flex items-center gap-3">
         {/* Agent Mode */}
         <select
+          title="Agent mode"
           class="px-2 py-1 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.2)] rounded text-[0.8rem] text-foreground cursor-pointer"
           value={props.channel.agentMode}
           onChange={(e) =>
@@ -252,6 +280,7 @@ const ChannelRow: Component<{
 
         {/* Trust Level */}
         <select
+          title="Trust level"
           class="px-2 py-1 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.2)] rounded text-[0.8rem] text-foreground cursor-pointer"
           value={props.channel.trustLevel}
           onChange={(e) =>
