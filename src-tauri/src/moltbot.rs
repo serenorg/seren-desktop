@@ -638,7 +638,6 @@ async fn webhook_send(
 
     let mut body = serde_json::json!({
         "message": message,
-        "token": hook_token,
     });
     if let Some(ch) = channel {
         body["channel"] = serde_json::Value::String(ch.to_string());
@@ -651,6 +650,7 @@ async fn webhook_send(
 
     let response = client
         .post(&url)
+        .header("Authorization", format!("Bearer {}", hook_token))
         .json(&body)
         .send()
         .await
@@ -673,61 +673,79 @@ async fn webhook_send(
 }
 
 /// Query Moltbot for connected channels via its HTTP API
-async fn query_channels(port: u16, hook_token: &str) -> Result<Vec<ChannelInfo>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+/// Query channel status via the openclaw CLI (`channels status`).
+async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
+    let binary_path = find_moltbot_binary()?;
+    let script_dir = binary_path
+        .parent()
+        .ok_or_else(|| "Cannot resolve moltbot bin directory".to_string())?;
+    let moltbot_pkg = script_dir.join("../moltbot/openclaw.mjs");
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
 
-    let url = format!("http://127.0.0.1:{}/api/channels", port);
+    let mut cmd = tokio::process::Command::new("node");
+    cmd.arg(&moltbot_pkg)
+        .arg("channels")
+        .arg("status")
+        .arg("--json")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", hook_token))
-        .send()
-        .await
-        .map_err(|e| format!("Moltbot channels request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Moltbot channels returned {}: {}", status, body));
+    if !embedded_path.is_empty() {
+        cmd.env("PATH", &embedded_path);
     }
 
-    // Parse the response — adapt to Moltbot's actual API shape
-    let body: serde_json::Value = response
-        .json()
+    let output = cmd
+        .output()
         .await
-        .map_err(|e| format!("Failed to parse channels response: {}", e))?;
+        .map_err(|e| format!("Failed to run channels status: {}", e))?;
 
-    let channels = if let Some(arr) = body.as_array() {
-        arr.iter()
-            .filter_map(|item| {
-                Some(ChannelInfo {
-                    id: item.get("id")?.as_str()?.to_string(),
-                    platform: item.get("platform")?.as_str()?.to_string(),
-                    display_name: item
-                        .get("displayName")
-                        .or(item.get("display_name"))
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let msg = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(format!("Channel status failed: {}", msg.trim()));
+    }
+
+    // Parse JSON output from openclaw channels status --json
+    let body: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Failed to parse channels status JSON: {}", e))?;
+
+    // The output is a map of channel IDs to account snapshots
+    let mut channels = Vec::new();
+    if let Some(channel_accounts) = body.get("channelAccounts").and_then(|v| v.as_object()) {
+        for (channel_id, accounts) in channel_accounts {
+            if let Some(arr) = accounts.as_array() {
+                for account in arr {
+                    let connected = account.get("connected").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let running = account.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let has_error = account.get("lastError").and_then(|v| v.as_str()).is_some();
+                    let account_id = account.get("accountId").and_then(|v| v.as_str()).unwrap_or("default");
+                    let label = account.get("label").or(account.get("name"))
                         .and_then(|v| v.as_str())
-                        .unwrap_or("Unknown")
-                        .to_string(),
-                    status: match item
-                        .get("status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("disconnected")
-                    {
-                        "connected" => ChannelStatus::Connected,
-                        "connecting" => ChannelStatus::Connecting,
-                        "error" => ChannelStatus::Error,
-                        _ => ChannelStatus::Disconnected,
-                    },
-                })
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+                        .unwrap_or(channel_id.as_str());
+
+                    let status = if connected {
+                        ChannelStatus::Connected
+                    } else if running {
+                        ChannelStatus::Connecting
+                    } else if has_error {
+                        ChannelStatus::Error
+                    } else {
+                        ChannelStatus::Disconnected
+                    };
+
+                    channels.push(ChannelInfo {
+                        id: format!("{}:{}", channel_id, account_id),
+                        platform: channel_id.clone(),
+                        display_name: label.to_string(),
+                        status,
+                    });
+                }
+            }
+        }
+    }
 
     Ok(channels)
 }
@@ -887,88 +905,81 @@ fn load_trust_settings(app: &AppHandle) -> HashMap<String, ChannelTrustConfig> {
     HashMap::new()
 }
 
-/// Request a channel connection via Moltbot's HTTP API
+/// Connect a channel via the openclaw CLI (`channels add` command).
+/// The running gateway detects the config change and hot-reloads the channel.
 async fn request_channel_connect(
-    port: u16,
-    hook_token: &str,
     platform: &str,
     credentials: &HashMap<String, String>,
 ) -> Result<serde_json::Value, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    let binary_path = find_moltbot_binary()?;
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
 
-    let url = format!("http://127.0.0.1:{}/api/channels/connect", port);
+    // The moltbot wrapper invokes `openclaw.mjs gateway` by default,
+    // but we need to call `openclaw.mjs channels add` instead.
+    // Build the node command directly to call the CLI.
+    let script_dir = binary_path
+        .parent()
+        .ok_or_else(|| "Cannot resolve moltbot bin directory".to_string())?;
+    let moltbot_pkg = script_dir.join("../moltbot/openclaw.mjs");
 
-    let mut body = serde_json::json!({
+    let mut cmd = tokio::process::Command::new("node");
+    cmd.arg(&moltbot_pkg)
+        .arg("channels")
+        .arg("add")
+        .arg("--channel")
+        .arg(platform);
+
+    // Map credential keys to CLI flags
+    if let Some(token) = credentials.get("token") {
+        cmd.arg("--token").arg(token);
+    }
+    if let Some(bot_token) = credentials.get("botToken") {
+        cmd.arg("--bot-token").arg(bot_token);
+    }
+    if let Some(app_token) = credentials.get("appToken") {
+        cmd.arg("--app-token").arg(app_token);
+    }
+    if let Some(phone) = credentials.get("phone") {
+        cmd.arg("--signal-number").arg(phone);
+    }
+
+    if !embedded_path.is_empty() {
+        cmd.env("PATH", &embedded_path);
+    }
+
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run channels add: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        let msg = if !stderr.is_empty() { &stderr } else { &stdout };
+        return Err(format!("Channel add failed: {}", msg.trim()));
+    }
+
+    eprintln!("[Moltbot] Channel add stdout: {}", stdout.trim());
+    Ok(serde_json::json!({
+        "ok": true,
         "platform": platform,
-    });
-    for (key, value) in credentials {
-        body[key] = serde_json::Value::String(value.clone());
-    }
-
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", hook_token))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Channel connect request failed: {}", e))?;
-
-    let status = response.status();
-    let response_body: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse connect response: {}", e))?;
-
-    if !status.is_success() {
-        let msg = response_body
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown error");
-        return Err(format!("Channel connect failed ({}): {}", status, msg));
-    }
-
-    Ok(response_body)
+        "message": stdout.trim(),
+    }))
 }
 
-/// Request a QR code for WhatsApp-style channel connection
-async fn request_qr_code(port: u16, hook_token: &str, platform: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
-    let url = format!(
-        "http://127.0.0.1:{}/api/channels/{}/qr",
-        port, platform
-    );
-
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", hook_token))
-        .send()
-        .await
-        .map_err(|e| format!("QR code request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("QR code request failed ({}): {}", status, body));
-    }
-
-    // Response is either a data URI or base64 string
-    let body: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse QR response: {}", e))?;
-
-    body.get("qr")
-        .or(body.get("data"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| "QR code not found in response".to_string())
+/// Request a QR code for WhatsApp-style channel connection.
+/// WhatsApp pairing requires an interactive CLI session; QR-based login
+/// is not yet supported through the Seren UI.
+async fn request_qr_code(_port: u16, _hook_token: &str, platform: &str) -> Result<String, String> {
+    Err(format!(
+        "QR-based login for {} is not yet supported. Use the openclaw CLI: openclaw channels login --channel {}",
+        platform, platform
+    ))
 }
 
 /// Connect a messaging channel (Tauri command)
@@ -983,15 +994,7 @@ pub async fn moltbot_connect_channel(
         return Err("Moltbot is not running. Start it first.".to_string());
     }
 
-    let port = *state.port.lock().await;
-    let hook_token = state
-        .hook_token
-        .lock()
-        .await
-        .clone()
-        .ok_or_else(|| "Hook token not configured".to_string())?;
-
-    request_channel_connect(port, &hook_token, &platform, &credentials).await
+    request_channel_connect(&platform, &credentials).await
 }
 
 /// Get QR code for WhatsApp-style connections (Tauri command)
@@ -1027,34 +1030,39 @@ pub async fn moltbot_disconnect_channel(
         return Err("Moltbot is not running.".to_string());
     }
 
-    let port = *state.port.lock().await;
-    let hook_token = state
-        .hook_token
-        .lock()
+    // Use openclaw CLI to remove the channel
+    let binary_path = find_moltbot_binary().map_err(|e| format!("Cannot find moltbot: {}", e))?;
+    let script_dir = binary_path
+        .parent()
+        .ok_or_else(|| "Cannot resolve moltbot bin directory".to_string())?;
+    let moltbot_pkg = script_dir.join("../moltbot/openclaw.mjs");
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+
+    let mut cmd = tokio::process::Command::new("node");
+    cmd.arg(&moltbot_pkg)
+        .arg("channels")
+        .arg("remove")
+        .arg("--channel")
+        .arg(&channel_id)
+        .arg("--delete")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    if !embedded_path.is_empty() {
+        cmd.env("PATH", &embedded_path);
+    }
+
+    let output = cmd
+        .output()
         .await
-        .clone()
-        .ok_or_else(|| "Hook token not configured".to_string())?;
+        .map_err(|e| format!("Failed to run channels remove: {}", e))?;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
-    let url = format!(
-        "http://127.0.0.1:{}/api/channels/{}",
-        port, channel_id
-    );
-
-    let response = client
-        .delete(&url)
-        .header("Authorization", format!("Bearer {}", hook_token))
-        .send()
-        .await
-        .map_err(|e| format!("Disconnect request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Disconnect failed: {}", body));
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let msg = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(format!("Channel remove failed: {}", msg.trim()));
     }
 
     // Remove from cached channels
@@ -1076,15 +1084,7 @@ pub async fn moltbot_list_channels(
         return Err("Moltbot is not running. Start it in Settings → Moltbot.".to_string());
     }
 
-    let port = *state.port.lock().await;
-    let hook_token = state
-        .hook_token
-        .lock()
-        .await
-        .clone()
-        .ok_or_else(|| "Hook token not configured".to_string())?;
-
-    let channels = query_channels(port, &hook_token).await?;
+    let channels = query_channels().await?;
 
     // Update cached channel list
     {
