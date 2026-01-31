@@ -677,6 +677,8 @@ pub async fn acp_spawn(
     let cwd_clone = cwd.clone();
     let session_arc_clone = session_arc.clone();
 
+    let session_arc_for_worker = session_arc_clone.clone();
+
     let worker_handle = thread::spawn(move || {
         // Create a new single-threaded runtime for this session
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -701,6 +703,11 @@ pub async fn acp_spawn(
             {
                 Ok(_) => {}
                 Err(e) => {
+                    // Update session state so acp_list_sessions reflects the error
+                    {
+                        let mut session = session_arc_for_worker.lock().await;
+                        session.status = SessionStatus::Error;
+                    }
                     let _ = app_handle.emit(
                         events::ERROR,
                         serde_json::json!({

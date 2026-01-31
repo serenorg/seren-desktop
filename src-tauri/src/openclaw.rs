@@ -150,17 +150,31 @@ fn find_openclaw_mjs() -> Result<PathBuf, String> {
         .parent()
         .ok_or_else(|| "Failed to get exe directory".to_string())?;
 
+    let platform_subdir = crate::embedded_runtime::platform_subdir();
+
     let candidates = [
-        // 1. Production macOS: In Resources/embedded-runtime/openclaw/
+        // 1. Production macOS: In Resources/embedded-runtime/<platform>/openclaw/
+        exe_dir
+            .join("../Resources/embedded-runtime")
+            .join(&platform_subdir)
+            .join("openclaw")
+            .join("openclaw.mjs"),
+        // 2. Production macOS: In Resources/embedded-runtime/openclaw/ (flat layout)
         exe_dir
             .join("../Resources/embedded-runtime/openclaw")
             .join("openclaw.mjs"),
-        // 2. Production Linux/Windows: In embedded-runtime next to exe
+        // 3. Production Linux/Windows: In embedded-runtime/<platform>/openclaw/
+        exe_dir
+            .join("embedded-runtime")
+            .join(&platform_subdir)
+            .join("openclaw")
+            .join("openclaw.mjs"),
+        // 4. Production Linux/Windows: In embedded-runtime/openclaw/ (flat layout)
         exe_dir
             .join("embedded-runtime")
             .join("openclaw")
             .join("openclaw.mjs"),
-        // 3. Development: In src-tauri/embedded-runtime/openclaw/
+        // 5. Development: In src-tauri/embedded-runtime/openclaw/
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("embedded-runtime")
             .join("openclaw")
@@ -523,7 +537,9 @@ fn spawn_process_monitor(app: AppHandle) {
                 }
                 Err(e) => {
                     eprintln!("[OpenClaw Monitor] Restart failed: {}", e);
-                    // Loop will check restart count on next iteration
+                    // Exit this monitor to prevent duplicate monitors if a later
+                    // restart succeeds (openclaw_start spawns its own monitor).
+                    return;
                 }
             }
         }
@@ -573,6 +589,12 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
                         eprintln!(
                             "[OpenClaw WS] Failed to connect after {} attempts: {}",
                             max_retries, e
+                        );
+                        let _ = app.emit(
+                            "openclaw://error",
+                            serde_json::json!({
+                                "error": format!("WebSocket connection failed after {} attempts: {}", max_retries, e)
+                            }),
                         );
                         return;
                     }
@@ -974,7 +996,15 @@ fn write_openclaw_config(config: &serde_json::Value) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
     // Atomic write: temp file + rename
-    let tmp_path = config_path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let unique_id = format!(
+        "{}.{:?}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        std::thread::current().id()
+    );
+    let tmp_path = config_path.with_extension(format!("json.{}.tmp", unique_id));
     std::fs::write(&tmp_path, &json_str)
         .map_err(|e| format!("Failed to write temp config: {}", e))?;
 

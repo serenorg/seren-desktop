@@ -238,6 +238,7 @@ export const acpStore = {
           await acpService.ensureClaudeCli();
         } catch (error) {
           progressUnsub();
+          tempUnsubscribe();
           const message =
             error instanceof Error
               ? error.message
