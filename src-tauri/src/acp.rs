@@ -81,7 +81,7 @@ impl AgentType {
 
                 for candidate in &candidates {
                     if candidate.exists() {
-                        eprintln!("[ACP] Found agent binary at: {:?}", candidate);
+                        log::info!("[ACP] Found agent binary at: {:?}", candidate);
                         return Ok(candidate.clone());
                     }
                 }
@@ -482,7 +482,7 @@ fn handle_session_notification(
     session_id: &str,
     notification: SessionNotification,
 ) {
-    eprintln!("[ACP] Received notification: {:?}", notification.update);
+    log::debug!("[ACP] Received notification: {:?}", notification.update);
     match notification.update {
         SessionUpdate::AgentMessageChunk(chunk) => {
             // Extract text from ContentBlock if it's a text block
@@ -490,7 +490,7 @@ fn handle_session_notification(
                 ContentBlock::Text(text_content) => text_content.text.clone(),
                 _ => format!("{:?}", chunk.content),
             };
-            eprintln!(
+            log::debug!(
                 "[ACP] Emitting MESSAGE_CHUNK to frontend: sessionId={}, text_len={}",
                 session_id,
                 text.len()
@@ -502,7 +502,7 @@ fn handle_session_notification(
                     "text": text
                 }),
             );
-            eprintln!("[ACP] MESSAGE_CHUNK emit result: {:?}", emit_result);
+            log::debug!("[ACP] MESSAGE_CHUNK emit result: {:?}", emit_result);
         }
         SessionUpdate::ToolCall(tool_call) => {
             let _ = app.emit(
@@ -569,7 +569,7 @@ fn handle_session_notification(
                 ContentBlock::Text(text_content) => text_content.text.clone(),
                 _ => format!("{:?}", chunk.content),
             };
-            eprintln!(
+            log::debug!(
                 "[ACP] Emitting THOUGHT_CHUNK to frontend: sessionId={}, text_len={}",
                 session_id,
                 text.len()
@@ -582,7 +582,7 @@ fn handle_session_notification(
                     "isThought": true
                 }),
             );
-            eprintln!("[ACP] THOUGHT_CHUNK emit result: {:?}", emit_result);
+            log::debug!("[ACP] THOUGHT_CHUNK emit result: {:?}", emit_result);
         }
         _ => {
             // Handle other notification types as needed
@@ -756,7 +756,7 @@ async fn run_session_worker(
     let command = agent_type.command()?;
     let args = agent_type.args();
 
-    eprintln!("[ACP] Spawning agent: {:?} {:?} in {}", command, args, cwd);
+    log::info!("[ACP] Spawning agent: {:?} {:?} in {}", command, args, cwd);
 
     // Spawn the agent process
     let mut cmd = Command::new(&command);
@@ -802,7 +802,7 @@ async fn run_session_worker(
         let reader = tokio::io::BufReader::new(stderr);
         let mut lines = reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            eprintln!("[ACP Agent stderr] {}", line);
+            log::debug!("[ACP Agent stderr] {}", line);
         }
     });
 
@@ -830,21 +830,21 @@ async fn run_session_worker(
         });
 
     // Spawn the IO task locally
-    eprintln!("[ACP] Spawning IO task...");
+    log::info!("[ACP] Spawning IO task...");
     tokio::task::spawn_local(async move {
-        eprintln!("[ACP] IO task started");
+        log::info!("[ACP] IO task started");
         if let Err(e) = io_task.await {
-            eprintln!("[ACP] IO task error: {:?}", e);
+            log::error!("[ACP] IO task error: {:?}", e);
         }
-        eprintln!("[ACP] IO task finished");
+        log::info!("[ACP] IO task finished");
     });
 
     // Give the IO task a moment to start
     tokio::task::yield_now().await;
-    eprintln!("[ACP] IO task spawned, proceeding with initialization...");
+    log::info!("[ACP] IO task spawned, proceeding with initialization...");
 
     // Initialize the agent
-    eprintln!("[ACP] Sending initialize request...");
+    log::info!("[ACP] Sending initialize request...");
     let init_request = InitializeRequest::new(ProtocolVersion::LATEST)
         .client_info(Implementation::new(
             "seren-desktop",
@@ -856,17 +856,17 @@ async fn run_session_worker(
         .initialize(init_request)
         .await
         .map_err(|e| format!("Failed to initialize agent: {:?}", e))?;
-    eprintln!("[ACP] Initialize response received");
+    log::info!("[ACP] Initialize response received");
 
     // Create a new session with the agent
-    eprintln!("[ACP] Creating new session...");
+    log::info!("[ACP] Creating new session...");
     let new_session_request = NewSessionRequest::new(&cwd);
 
     let new_session_response = connection
         .new_session(new_session_request)
         .await
         .map_err(|e| format!("Failed to create agent session: {:?}", e))?;
-    eprintln!(
+    log::info!(
         "[ACP] Session created: {:?}",
         new_session_response.session_id
     );
@@ -875,7 +875,7 @@ async fn run_session_worker(
 
     // Emit ready status with agent info
     let agent_info = init_response.agent_info.as_ref();
-    eprintln!(
+    log::info!(
         "[ACP] Emitting ready status for session {} (agent: {:?})",
         session_id,
         agent_info.map(|i| i.name.as_str())
@@ -891,7 +891,7 @@ async fn run_session_worker(
             }
         }),
     );
-    eprintln!("[ACP] Emit result: {:?}", emit_result);
+    log::debug!("[ACP] Emit result: {:?}", emit_result);
 
     // Command processing loop
     while let Some(cmd) = command_rx.recv().await {
@@ -922,13 +922,13 @@ async fn run_session_worker(
 
                 let prompt_request = PromptRequest::new(agent_session_id.clone(), content_blocks);
 
-                eprintln!(
+                log::info!(
                     "[ACP] Sending prompt to agent session: {}",
                     agent_session_id
                 );
                 match connection.prompt(prompt_request).await {
                     Ok(response) => {
-                        eprintln!(
+                        log::info!(
                             "[ACP] Prompt completed successfully: {:?}",
                             response.stop_reason
                         );
@@ -942,7 +942,7 @@ async fn run_session_worker(
                         let _ = response_tx.send(Ok(()));
                     }
                     Err(e) => {
-                        eprintln!("[ACP] Prompt error: {:?}", e);
+                        log::error!("[ACP] Prompt error: {:?}", e);
                         let _ = app.emit(
                             events::ERROR,
                             serde_json::json!({
@@ -1241,7 +1241,7 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
 
     // Already installed locally?
     if claude_bin.exists() {
-        eprintln!("[ACP] Claude CLI already installed at: {}", claude_bin.display());
+        log::info!("[ACP] Claude CLI already installed at: {}", claude_bin.display());
         return Ok(bin_dir.to_string_lossy().to_string());
     }
 
@@ -1252,13 +1252,13 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Some(parent) = std::path::Path::new(&path).parent() {
-                eprintln!("[ACP] Found claude on system PATH: {}", path);
+                log::info!("[ACP] Found claude on system PATH: {}", path);
                 return Ok(parent.to_string_lossy().to_string());
             }
         }
     }
 
-    eprintln!("[ACP] Claude CLI not found, installing via npm...");
+    log::info!("[ACP] Claude CLI not found, installing via npm...");
 
     let _ = app.emit(
         "acp://cli-install-progress",
@@ -1328,7 +1328,7 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         return Err("Install completed but claude binary not found".to_string());
     }
 
-    eprintln!("[ACP] Claude CLI installed successfully at: {}", claude_bin.display());
+    log::info!("[ACP] Claude CLI installed successfully at: {}", claude_bin.display());
 
     let _ = app.emit(
         "acp://cli-install-progress",

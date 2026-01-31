@@ -9,6 +9,7 @@
     "core:window:default",
     "dialog:default",
     "updater:default",
+    "log:default",
     {
       "identifier": "opener:default",
       "allow": [

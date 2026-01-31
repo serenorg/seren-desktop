@@ -170,11 +170,8 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     // Store the computed PATH for later use
     let _ = EMBEDDED_PATH.set(new_path.clone());
 
-    // Log for debugging if SEREN_DEBUG_RUNTIME is set
-    if env::var("SEREN_DEBUG_RUNTIME").is_ok() {
-        println!("[EmbeddedRuntime] Configured paths: {:?}", paths_to_add);
-        println!("[EmbeddedRuntime] Full PATH: {}", new_path);
-    }
+    log::info!("[EmbeddedRuntime] Configured paths: {:?}", paths_to_add);
+    log::debug!("[EmbeddedRuntime] Full PATH: {}", new_path);
 
     paths
 }

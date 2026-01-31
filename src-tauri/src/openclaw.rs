@@ -183,7 +183,7 @@ fn find_openclaw_mjs() -> Result<PathBuf, String> {
 
     for candidate in &candidates {
         if candidate.exists() {
-            eprintln!("[OpenClaw] Found openclaw.mjs at: {:?}", candidate);
+            log::info!("[OpenClaw] Found openclaw.mjs at: {:?}", candidate);
             return Ok(candidate.clone());
         }
     }
@@ -322,7 +322,7 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
     })?;
 
     let pid = child.id();
-    eprintln!(
+    log::info!(
         "[OpenClaw] Process spawned: pid={:?}, port={}, openclaw_mjs={:?}",
         pid, port, openclaw_mjs
     );
@@ -360,7 +360,7 @@ pub async fn openclaw_stop(app: AppHandle, state: State<'_, OpenClawState>) -> R
     let mut process_lock = state.process.lock().await;
 
     if let Some(mut proc) = process_lock.take() {
-        eprintln!("[OpenClaw] Stopping process...");
+        log::info!("[OpenClaw] Stopping process...");
 
         // Try graceful shutdown first (SIGTERM on Unix)
         #[cfg(unix)]
@@ -375,11 +375,11 @@ pub async fn openclaw_stop(app: AppHandle, state: State<'_, OpenClawState>) -> R
         // Wait up to 5 seconds for graceful shutdown
         match tokio::time::timeout(std::time::Duration::from_secs(5), proc.child.wait()).await {
             Ok(Ok(status)) => {
-                eprintln!("[OpenClaw] Process exited gracefully: {:?}", status);
+                log::info!("[OpenClaw] Process exited gracefully: {:?}", status);
             }
             _ => {
                 // Force kill
-                eprintln!("[OpenClaw] Force killing process...");
+                log::info!("[OpenClaw] Force killing process...");
                 let _ = proc.child.kill().await;
             }
         }
@@ -484,7 +484,7 @@ fn spawn_process_monitor(app: AppHandle) {
                 continue;
             }
 
-            eprintln!("[OpenClaw Monitor] Process exited unexpectedly");
+            log::info!("[OpenClaw Monitor] Process exited unexpectedly");
 
             // Update status to Crashed
             {
@@ -500,7 +500,7 @@ fn spawn_process_monitor(app: AppHandle) {
             };
 
             if restart_count >= MAX_RESTART_ATTEMPTS {
-                eprintln!(
+                log::info!(
                     "[OpenClaw Monitor] Max restart attempts ({}) reached, giving up",
                     MAX_RESTART_ATTEMPTS
                 );
@@ -508,7 +508,7 @@ fn spawn_process_monitor(app: AppHandle) {
             }
 
             // Attempt restart
-            eprintln!(
+            log::info!(
                 "[OpenClaw Monitor] Attempting restart ({}/{})",
                 restart_count + 1,
                 MAX_RESTART_ATTEMPTS
@@ -531,12 +531,12 @@ fn spawn_process_monitor(app: AppHandle) {
             // Restart via the command (re-uses the full startup logic)
             match openclaw_start(app.clone(), app.state::<OpenClawState>()).await {
                 Ok(()) => {
-                    eprintln!("[OpenClaw Monitor] Restart succeeded");
+                    log::info!("[OpenClaw Monitor] Restart succeeded");
                     // The new openclaw_start will spawn its own monitor, so exit this one
                     return;
                 }
                 Err(e) => {
-                    eprintln!("[OpenClaw Monitor] Restart failed: {}", e);
+                    log::error!("[OpenClaw Monitor] Restart failed: {}", e);
                     // Exit this monitor to prevent duplicate monitors if a later
                     // restart succeeds (openclaw_start spawns its own monitor).
                     return;
@@ -561,7 +561,7 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
 
             match tokio_tungstenite::connect_async(&url).await {
                 Ok((ws_stream, _)) => {
-                    eprintln!("[OpenClaw WS] Connected to gateway on port {}", port);
+                    log::info!("[OpenClaw WS] Connected to gateway on port {}", port);
                     attempt = 0; // Reset on successful connect
 
                     use futures::StreamExt;
@@ -573,11 +573,11 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
                                 handle_ws_message(&app, &text);
                             }
                             Ok(tokio_tungstenite::tungstenite::Message::Close(_)) => {
-                                eprintln!("[OpenClaw WS] Connection closed by server");
+                                log::info!("[OpenClaw WS] Connection closed by server");
                                 break;
                             }
                             Err(e) => {
-                                eprintln!("[OpenClaw WS] Error: {}", e);
+                                log::error!("[OpenClaw WS] Error: {}", e);
                                 break;
                             }
                             _ => {}
@@ -586,7 +586,7 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
                 }
                 Err(e) => {
                     if attempt >= max_retries {
-                        eprintln!(
+                        log::info!(
                             "[OpenClaw WS] Failed to connect after {} attempts: {}",
                             max_retries, e
                         );
@@ -598,7 +598,7 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
                         );
                         return;
                     }
-                    eprintln!(
+                    log::info!(
                         "[OpenClaw WS] Connection attempt {}/{} failed: {}",
                         attempt, max_retries, e
                     );
@@ -616,7 +616,7 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
 fn handle_ws_message(app: &AppHandle, text: &str) {
     let parsed: Result<serde_json::Value, _> = serde_json::from_str(text);
     let Ok(msg) = parsed else {
-        eprintln!("[OpenClaw WS] Failed to parse message: {}", text);
+        log::error!("[OpenClaw WS] Failed to parse message: {}", text);
         return;
     };
 
@@ -633,7 +633,7 @@ fn handle_ws_message(app: &AppHandle, text: &str) {
             let _ = app.emit(events::MESSAGE_RECEIVED, &msg);
         }
         _ => {
-            eprintln!("[OpenClaw WS] Unhandled event type: {}", event_type);
+            log::debug!("[OpenClaw WS] Unhandled event type: {}", event_type);
         }
     }
 }
@@ -1020,7 +1020,7 @@ fn write_openclaw_config(config: &serde_json::Value) -> Result<(), String> {
     std::fs::rename(&tmp_path, &config_path)
         .map_err(|e| format!("Failed to rename temp config: {}", e))?;
 
-    eprintln!("[OpenClaw] Config written to {}", config_path.display());
+    log::info!("[OpenClaw] Config written to {}", config_path.display());
     Ok(())
 }
 
@@ -1031,7 +1031,7 @@ async fn request_channel_connect(
     platform: &str,
     credentials: &HashMap<String, String>,
 ) -> Result<serde_json::Value, String> {
-    eprintln!(
+    log::info!(
         "[OpenClaw] Channel connect via config write: platform={}",
         platform
     );
