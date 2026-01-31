@@ -25,10 +25,13 @@ export async function connectPublisher(providerSlug: string): Promise<void> {
     throw new Error("Not authenticated. Please log in first.");
   }
 
-  // Use localhost callback server — works on all platforms including Windows
-  // where deep links (seren://) are unavailable due to WiX bundler issues.
-  // Gateway whitelists http://localhost:8787 (serenorg/serencore#46).
-  const redirectUri = "http://localhost:8787/oauth/callback";
+  // Use deep links on macOS/Linux where seren:// URL scheme is registered.
+  // Fall back to localhost callback server on Windows where deep links are
+  // unavailable due to WiX bundler issues (tauri-apps/tauri#10453).
+  const isWindows = navigator.userAgent.includes("Windows");
+  const redirectUri = isWindows
+    ? "http://localhost:8787/oauth/callback"
+    : "seren://oauth/callback";
 
   const authUrl = `${apiBase}/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
 
