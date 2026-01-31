@@ -2,6 +2,7 @@
 // ABOUTME: Shows available tools across all connected servers with execution UI.
 
 import { type Component, createSignal, For, Show } from "solid-js";
+import { formatToolResultText } from "@/lib/format-tool-result";
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool, McpToolResult } from "@/lib/mcp/types";
 
@@ -116,7 +117,9 @@ export const McpToolsPanel: Component = () => {
     return result.content
       .map((c) => {
         if (c.type === "text") {
-          return (c as { type: "text"; text: string }).text;
+          return formatToolResultText(
+            (c as { type: "text"; text: string }).text,
+          );
         }
         return JSON.stringify(c, null, 2);
       })

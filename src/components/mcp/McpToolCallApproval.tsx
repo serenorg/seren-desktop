@@ -9,6 +9,7 @@ import {
   onCleanup,
   Show,
 } from "solid-js";
+import { formatToolResultText } from "@/lib/format-tool-result";
 import { isRecoverableError } from "@/lib/mcp";
 import { mcpClient } from "@/lib/mcp/client";
 import { getRiskLabel, getToolRiskLevel } from "@/lib/mcp/risk";
@@ -187,7 +188,9 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
     return res.content
       .map((c) => {
         if (c.type === "text") {
-          return (c as { type: "text"; text: string }).text;
+          return formatToolResultText(
+            (c as { type: "text"; text: string }).text,
+          );
         }
         return JSON.stringify(c, null, 2);
       })
