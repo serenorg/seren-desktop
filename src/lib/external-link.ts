@@ -30,9 +30,30 @@ export async function openExternalLink(url: string): Promise<void> {
         console.error("Failed to open external link via Tauri", error);
       }
     }
+    // In Tauri, never fall back to window.open — it navigates the webview
+    // and traps the user with no way to return to the app.
+    console.warn("Tauri opener unavailable, cannot open:", url);
+    return;
   }
 
   if (typeof window !== "undefined") {
     window.open(url, "_blank", "noopener,noreferrer");
   }
+}
+
+/**
+ * Installs a global safety net that intercepts any anchor click navigating
+ * to an external URL and routes it through openExternalLink instead.
+ * Call once at app startup.
+ */
+export function installExternalLinkInterceptor(): void {
+  document.addEventListener("click", (e) => {
+    const anchor = (e.target as HTMLElement).closest("a[href]");
+    if (!anchor) return;
+    const href = (anchor as HTMLAnchorElement).href;
+    if (href && /^https?:\/\//i.test(href)) {
+      e.preventDefault();
+      openExternalLink(href);
+    }
+  });
 }
