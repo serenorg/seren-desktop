@@ -201,7 +201,7 @@ pub fn wait_for_oauth_callback_on_port(
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
         .map_err(|e| format!("Failed to bind to port {}: {}", port, e))?;
 
-    println!("[OAuth] Callback server listening on port {}", port);
+    log::info!("[OAuth] Callback server listening on port {}", port);
 
     // Set blocking mode
     listener

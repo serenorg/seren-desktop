@@ -1,7 +1,9 @@
 // ABOUTME: Core library for the Seren Desktop Tauri application.
 // ABOUTME: Contains Tauri commands and the application run function.
 
+use log::info;
 use tauri::Emitter;
+use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_store::StoreExt;
 
 pub mod commands {
@@ -264,8 +266,8 @@ async fn start_oauth_browser_flow(
     // The frontend already registered the client with this redirect_uri, so we must use the same port
     let port = extract_port_from_redirect_uri(&auth_url)?;
 
-    println!("[OAuth] Starting browser flow on port: {}", port);
-    println!("[OAuth] Auth URL: {}", auth_url);
+    info!("[OAuth] Starting browser flow on port: {}", port);
+    info!("[OAuth] Auth URL: {}", auth_url);
 
     // Open the browser with the original auth URL (don't modify it)
     app.opener()
@@ -390,6 +392,22 @@ fn os_version() -> String {
 pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::LogDir { file_name: None }),
+                    Target::new(TargetKind::Webview),
+                ])
+                .max_file_size(5_000_000) // 5 MB per log file
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .level(if cfg!(debug_assertions) {
+                    log::LevelFilter::Debug
+                } else {
+                    log::LevelFilter::Info
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -496,7 +514,7 @@ pub fn run() {
             // This prepends bundled Node.js and Git to PATH
             let paths = embedded_runtime::configure_embedded_runtime(app.handle());
             if paths.node_dir.is_some() || paths.git_dir.is_some() {
-                println!(
+                info!(
                     "[Seren] Embedded runtime configured: node={:?}, git={:?}",
                     paths.node_dir.is_some(),
                     paths.git_dir.is_some()
@@ -515,21 +533,21 @@ pub fn run() {
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
-                    println!("[Deep Link] Received open URL event with {} URLs: {:?}", urls.len(), urls);
+                    log::info!("[Deep Link] Received open URL event with {} URLs: {:?}", urls.len(), urls);
                     for url in urls {
-                        println!("[Deep Link] Processing URL: {}", url);
-                        println!("[Deep Link] - scheme: {}", url.scheme());
-                        println!("[Deep Link] - path: {}", url.path());
+                        log::debug!("[Deep Link] Processing URL: {}", url);
+                        log::debug!("[Deep Link] - scheme: {}", url.scheme());
+                        log::debug!("[Deep Link] - path: {}", url.path());
                         if url.scheme() == "seren" && url.path() == "/oauth/callback" {
-                            println!("[Deep Link] Match! Emitting oauth-callback event with URL: {}", url.to_string());
+                            log::info!("[Deep Link] Match! Emitting oauth-callback event");
                             // Emit event to frontend with OAuth callback data
                             if let Err(e) = handle.emit("oauth-callback", url.to_string()) {
-                                eprintln!("[Deep Link] Failed to emit oauth-callback event: {}", e);
+                                log::error!("[Deep Link] Failed to emit oauth-callback event: {}", e);
                             } else {
-                                println!("[Deep Link] Successfully emitted oauth-callback event");
+                                log::info!("[Deep Link] Successfully emitted oauth-callback event");
                             }
                         } else {
-                            println!("[Deep Link] No match - scheme: {}, path: {}", url.scheme(), url.path());
+                            log::debug!("[Deep Link] No match - scheme: {}, path: {}", url.scheme(), url.path());
                         }
                     }
                 });

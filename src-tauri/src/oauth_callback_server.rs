@@ -13,26 +13,26 @@ pub fn start_oauth_callback_server(app_handle: AppHandle) {
         let server = match Server::http("127.0.0.1:8787") {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[OAuth Server] Failed to start: {}", e);
+                log::error!("[OAuth Server] Failed to start: {}", e);
                 return;
             }
         };
 
-        println!("[OAuth Server] Listening on http://localhost:8787/oauth/callback");
+        log::info!("[OAuth Server] Listening on http://localhost:8787/oauth/callback");
 
         for request in server.incoming_requests() {
             let url = request.url();
 
             // Only handle /oauth/callback path
             if url.starts_with("/oauth/callback") {
-                println!("[OAuth Server] Received callback: {}", url);
+                log::info!("[OAuth Server] Received callback: {}", url);
 
                 // Build full callback URL (localhost:8787 + path + query)
                 let callback_url = format!("http://localhost:8787{}", url);
 
                 // Emit oauth-callback event to frontend
                 if let Err(e) = app_handle.emit("oauth-callback", callback_url.clone()) {
-                    eprintln!("[OAuth Server] Failed to emit event: {}", e);
+                    log::error!("[OAuth Server] Failed to emit event: {}", e);
                 }
 
                 // Send success response to browser
@@ -79,7 +79,7 @@ pub fn start_oauth_callback_server(app_handle: AppHandle) {
                     .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap());
 
                 if let Err(e) = request.respond(response) {
-                    eprintln!("[OAuth Server] Failed to send response: {}", e);
+                    log::error!("[OAuth Server] Failed to send response: {}", e);
                 }
             } else {
                 // Return 404 for other paths
