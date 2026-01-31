@@ -4,6 +4,7 @@
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { formatToolResultText } from "@/lib/format-tool-result";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { renderMarkdown } from "@/lib/render-markdown";
 import type { ToolIterationState, ToolStreamEvent } from "@/services/chat";
@@ -182,7 +183,7 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
                       Result
                     </summary>
                     <pre class="mt-1.5 mb-0 p-2 bg-[rgba(0,0,0,0.3)] rounded text-[11px] overflow-x-auto max-h-[200px] whitespace-pre-wrap break-words">
-                      {exec.result?.content}
+                      {formatToolResultText(exec.result?.content ?? "")}
                     </pre>
                   </details>
                 </Show>
