@@ -88,6 +88,9 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
   onMount(async () => {
     console.log("[OAuthLogins] Setting up OAuth callback listener");
     const unlisten = await listenForOAuthCallback(async (url) => {
+      // Only process if we initiated a publisher OAuth flow
+      if (!connectingProvider()) return;
+
       console.log("[OAuthLogins] Received OAuth callback URL:", url);
       try {
         const urlObj = new URL(url);
