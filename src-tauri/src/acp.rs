@@ -1272,16 +1272,35 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
     std::fs::create_dir_all(&cli_tools_dir)
         .map_err(|e| format!("Failed to create cli-tools dir: {e}"))?;
 
-    // Run npm install using embedded Node PATH
+    // Run npm install using embedded Node runtime.
+    // We invoke node directly with the npm CLI script because the top-level
+    // `npm` shim has a broken require path in the extracted Node tarball.
     let embedded_path = crate::embedded_runtime::get_embedded_path();
-    let npm_cmd = if cfg!(target_os = "windows") {
-        "npm.cmd"
-    } else {
-        "npm"
-    };
+    let paths = crate::embedded_runtime::discover_embedded_runtime(&app);
+    let node_bin = paths
+        .node_dir
+        .as_ref()
+        .map(|d| {
+            if cfg!(target_os = "windows") {
+                d.join("node.exe")
+            } else {
+                d.join("node")
+            }
+        })
+        .ok_or_else(|| "Embedded Node.js not found".to_string())?;
 
-    let output = tokio::process::Command::new(npm_cmd)
+    // Find the npm CLI script relative to the node binary
+    let npm_cli = node_bin
+        .parent()
+        .unwrap()
+        .join("../lib/node_modules/npm/bin/npm-cli.js");
+    let npm_cli = npm_cli
+        .canonicalize()
+        .map_err(|e| format!("npm CLI script not found at {:?}: {}", npm_cli, e))?;
+
+    let output = tokio::process::Command::new(&node_bin)
         .args([
+            npm_cli.to_string_lossy().as_ref(),
             "install",
             "--prefix",
             &cli_tools_dir.to_string_lossy(),
