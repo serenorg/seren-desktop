@@ -20,42 +20,48 @@ pub struct EmbeddedRuntimePaths {
 /// Gets the path to the embedded runtime directory based on the application location.
 /// The embedded runtime is stored in the resources folder of the application.
 fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
+    let platform = if cfg!(target_os = "windows") {
+        "win32"
+    } else if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        "linux"
+    };
+
+    let arch = if cfg!(target_arch = "x86_64") {
+        "x64"
+    } else if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x64"
+    };
+
+    let platform_subdir = format!("{}-{}", platform, arch);
+
     // Use Tauri's resource resolver to find the embedded-runtime directory
     let resource_path = app.path().resource_dir().ok()?;
     let runtime_dir = resource_path.join("embedded-runtime");
 
     if runtime_dir.exists() {
-        Some(runtime_dir)
-    } else {
-        // In development mode, check src-tauri/embedded-runtime
-        if cfg!(debug_assertions) {
-            // Try to find it relative to the source directory
-            let dev_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
-
-            // Detect current platform/arch
-            let platform = if cfg!(target_os = "windows") {
-                "win32"
-            } else if cfg!(target_os = "macos") {
-                "darwin"
-            } else {
-                "linux"
-            };
-
-            let arch = if cfg!(target_arch = "x86_64") {
-                "x64"
-            } else if cfg!(target_arch = "aarch64") {
-                "arm64"
-            } else {
-                "x64"
-            };
-
-            let platform_runtime = dev_runtime.join(format!("{}-{}", platform, arch));
-            if platform_runtime.exists() {
-                return Some(platform_runtime);
-            }
+        // Check for platform-specific subdirectory first
+        let platform_dir = runtime_dir.join(&platform_subdir);
+        if platform_dir.exists() {
+            return Some(platform_dir);
         }
-        None
+        // Fall back to flat layout (node/bin directly in embedded-runtime)
+        return Some(runtime_dir);
     }
+
+    // In development mode, check src-tauri/embedded-runtime
+    if cfg!(debug_assertions) {
+        let dev_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
+        let platform_runtime = dev_runtime.join(&platform_subdir);
+        if platform_runtime.exists() {
+            return Some(platform_runtime);
+        }
+    }
+
+    None
 }
 
 /// Discovers the paths to embedded Node.js and Git installations.
