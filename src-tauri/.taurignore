@@ -1,0 +1,4 @@
+# Prevent dev watcher from rebuilding on openclaw/sidecar file changes.
+# These directories are populated by beforeDevCommand (build:sidecar, build:openclaw)
+# and should not trigger Rust rebuilds.
+embedded-runtime/
