@@ -926,12 +926,64 @@ async fn run_session_worker(
                     "[ACP] Sending prompt to agent session: {}",
                     agent_session_id
                 );
-                match connection.prompt(prompt_request).await {
+
+                // Run the prompt while remaining responsive to Cancel/Terminate commands.
+                // Without select!, the loop blocks on connection.prompt() and cannot
+                // process cancel requests until the prompt finishes.
+                let mut prompt_fut = std::pin::pin!(connection.prompt(prompt_request));
+                let mut cancelled = false;
+
+                let prompt_result = loop {
+                    tokio::select! {
+                        result = &mut prompt_fut => {
+                            break result;
+                        }
+                        cmd = command_rx.recv() => {
+                            match cmd {
+                                Some(AcpCommand::Cancel { response_tx: cancel_tx }) => {
+                                    log::info!("[ACP] Cancel received during active prompt");
+                                    let cancel = CancelNotification::new(agent_session_id.clone());
+                                    let cancel_result = connection.cancel(cancel).await;
+                                    let _ = cancel_tx.send(cancel_result.map_err(|e| format!("{:?}", e)));
+                                    cancelled = true;
+                                    // Continue looping — the prompt future will resolve
+                                    // (with an error or completion) after the agent processes the cancel
+                                }
+                                Some(AcpCommand::Terminate) => {
+                                    log::info!("[ACP] Terminate received during active prompt");
+                                    let _ = response_tx.send(Err("Session terminated".to_string()));
+                                    drop(child);
+                                    return Ok(());
+                                }
+                                Some(other) => {
+                                    // Queue other commands — for now, reject them while prompting
+                                    log::info!("[ACP] Rejecting command while prompt is active");
+                                    if let AcpCommand::Prompt { response_tx: tx, .. } = other {
+                                        let _ = tx.send(Err("Another prompt is already active".to_string()));
+                                    } else if let AcpCommand::SetMode { response_tx: tx, .. } = other {
+                                        let _ = tx.send(Err("Cannot change mode while prompt is active".to_string()));
+                                    }
+                                }
+                                None => {
+                                    // Channel closed
+                                    let _ = response_tx.send(Err("Command channel closed".to_string()));
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                };
+
+                match prompt_result {
                     Ok(response) => {
-                        log::info!(
-                            "[ACP] Prompt completed successfully: {:?}",
-                            response.stop_reason
-                        );
+                        if cancelled {
+                            log::info!("[ACP] Prompt completed after cancellation: {:?}", response.stop_reason);
+                        } else {
+                            log::info!(
+                                "[ACP] Prompt completed successfully: {:?}",
+                                response.stop_reason
+                            );
+                        }
                         let _ = app.emit(
                             events::PROMPT_COMPLETE,
                             serde_json::json!({
@@ -963,6 +1015,7 @@ async fn run_session_worker(
                 );
             }
             AcpCommand::Cancel { response_tx } => {
+                // Cancel received when no prompt is active — still send it to the agent
                 let cancel = CancelNotification::new(agent_session_id.clone());
                 match connection.cancel(cancel).await {
                     Ok(_) => {
