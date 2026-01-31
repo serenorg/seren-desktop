@@ -17,9 +17,8 @@ pub struct EmbeddedRuntimePaths {
     pub git_dir: Option<PathBuf>,
 }
 
-/// Gets the path to the embedded runtime directory based on the application location.
-/// The embedded runtime is stored in the resources folder of the application.
-fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
+/// Returns the platform-specific subdirectory name (e.g., "darwin-arm64", "win32-x64").
+pub fn platform_subdir() -> String {
     let platform = if cfg!(target_os = "windows") {
         "win32"
     } else if cfg!(target_os = "macos") {
@@ -36,7 +35,13 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
         "x64"
     };
 
-    let platform_subdir = format!("{}-{}", platform, arch);
+    format!("{}-{}", platform, arch)
+}
+
+/// Gets the path to the embedded runtime directory based on the application location.
+/// The embedded runtime is stored in the resources folder of the application.
+fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
+    let subdir = platform_subdir();
 
     // Use Tauri's resource resolver to find the embedded-runtime directory
     let resource_path = app.path().resource_dir().ok()?;
@@ -44,7 +49,7 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
 
     if runtime_dir.exists() {
         // Check for platform-specific subdirectory first
-        let platform_dir = runtime_dir.join(&platform_subdir);
+        let platform_dir = runtime_dir.join(&subdir);
         if platform_dir.exists() {
             return Some(platform_dir);
         }
@@ -55,7 +60,7 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
     // In development mode, check src-tauri/embedded-runtime
     if cfg!(debug_assertions) {
         let dev_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
-        let platform_runtime = dev_runtime.join(&platform_subdir);
+        let platform_runtime = dev_runtime.join(&subdir);
         if platform_runtime.exists() {
             return Some(platform_runtime);
         }

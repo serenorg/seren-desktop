@@ -300,7 +300,10 @@ async function requestApproval(
 
     // Listen for approval/rejection
     let unlisten: UnlistenFn | undefined;
+    let resolved = false;
     const timeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
       unlisten?.();
       resolve(false);
     }, APPROVAL_TIMEOUT_MS);
@@ -308,14 +311,19 @@ async function requestApproval(
     listen<{ id: string; approved: boolean }>(
       "openclaw://approval-response",
       (event) => {
-        if (event.payload.id === approvalId) {
+        if (event.payload.id === approvalId && !resolved) {
+          resolved = true;
           clearTimeout(timeout);
           unlisten?.();
           resolve(event.payload.approved);
         }
       },
-    ).then((fn) => {
-      unlisten = fn;
+    ).then((unlistenFn) => {
+      unlisten = unlistenFn;
+      // If timeout already fired before listen() resolved, clean up immediately
+      if (resolved) {
+        unlistenFn();
+      }
     });
   });
 }
