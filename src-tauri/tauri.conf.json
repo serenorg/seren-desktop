@@ -41,6 +41,11 @@
     },
     "shell": {
       "open": true
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["seren"]
+      }
     }
   },
   "bundle": {

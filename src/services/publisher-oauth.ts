@@ -42,6 +42,11 @@ export async function connectPublisher(providerSlug: string): Promise<void> {
     bearerToken: token,
   });
 
+  // Validate the URL before opening to prevent malicious redirects
+  if (!location.startsWith("https://")) {
+    throw new Error(`Unexpected authorization URL scheme: ${location}`);
+  }
+
   console.log(`[PublisherOAuth] Opening authorization URL: ${location}`);
   await openUrl(location);
 }

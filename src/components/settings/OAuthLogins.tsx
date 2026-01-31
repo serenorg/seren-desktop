@@ -120,6 +120,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
 
     onCleanup(() => {
       unlisten();
+      if (connectTimeout) clearTimeout(connectTimeout);
     });
   });
 
@@ -134,6 +135,9 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
   let connectTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const handleConnect = async (provider: PublisherOAuthProviderResponse) => {
+    // Guard against double-clicks while already connecting
+    if (connectingProvider()) return;
+
     console.log("[OAuthLogins] Starting OAuth flow for provider:", provider.slug);
     setError(null);
     setConnectingProvider(provider.slug);
