@@ -85,7 +85,10 @@ async fn get_oauth_redirect_url(url: String, bearer_token: String) -> Result<Str
         }
     }
 
-    Err(format!("Unexpected response status: {}", status))
+    // Log the response body for error responses to aid debugging
+    let body_text = response.text().await.unwrap_or_default();
+    log::error!("[OAuth] {} response from Gateway: {}", status, body_text);
+    Err(format!("Unexpected response status: {} - {}", status, body_text))
 }
 
 #[tauri::command]

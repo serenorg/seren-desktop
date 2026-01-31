@@ -10,7 +10,7 @@ interface ThinkingBlockProps {
 }
 
 export const ThinkingBlock: Component<ThinkingBlockProps> = (props) => {
-  const [isExpanded, setIsExpanded] = createSignal(false);
+  const [isExpanded, setIsExpanded] = createSignal(props.isStreaming ?? false);
 
   return (
     <div class="mb-3 border border-[#30363d] rounded-lg overflow-hidden bg-[#161b22]">
