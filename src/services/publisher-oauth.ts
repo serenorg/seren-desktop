@@ -25,11 +25,10 @@ export async function connectPublisher(providerSlug: string): Promise<void> {
     throw new Error("Not authenticated. Please log in first.");
   }
 
-  // TEMPORARY: Using deep link for testing until backend supports localhost
-  // TODO: Revert to localhost in dev after backend whitelists http://localhost:8787
-  const redirectUri = "seren://oauth/callback";
-
-  console.log(`[PublisherOAuth] Using redirect URI: ${redirectUri}`);
+  // Use localhost callback server — works on all platforms including Windows
+  // where deep links (seren://) are unavailable due to WiX bundler issues.
+  // Gateway whitelists http://localhost:8787 (serenorg/serencore#46).
+  const redirectUri = "http://localhost:8787/oauth/callback";
 
   const authUrl = `${apiBase}/oauth/${providerSlug}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
 
