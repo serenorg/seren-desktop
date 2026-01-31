@@ -16,12 +16,14 @@ import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
+import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
+import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import type { DiffEvent } from "@/services/acp";
-import { settingsStore } from "@/stores/settings.store";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { settingsStore } from "@/stores/settings.store";
 import { AgentSelector } from "./AgentSelector";
 import { AgentTabBar } from "./AgentTabBar";
 import { DiffCard } from "./DiffCard";
@@ -255,18 +257,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       case "user":
         return (
           <article class="px-5 py-4 bg-[#161b22] border-b border-[#21262d]">
-            <div class="text-sm leading-relaxed text-[#e6edf3] whitespace-pre-wrap">
-              {message.content}
-            </div>
+            <div
+              class="text-sm leading-relaxed text-[#e6edf3] whitespace-pre-wrap"
+              innerHTML={escapeHtmlWithLinks(message.content)}
+            />
           </article>
         );
 
       case "assistant":
         return (
           <article class="px-5 py-4 border-b border-[#21262d]">
-            <div class="text-sm leading-relaxed text-[#e6edf3] whitespace-pre-wrap">
-              {message.content}
-            </div>
+            <div
+              class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
+              innerHTML={renderMarkdown(message.content)}
+            />
           </article>
         );
 
@@ -319,6 +323,30 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       <div
         ref={messagesRef}
         class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded"
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          const link = target.closest(".external-link") as HTMLAnchorElement;
+          if (link) {
+            e.preventDefault();
+            const url = link.dataset.externalUrl;
+            if (url) openExternalLink(url);
+            return;
+          }
+          const copyBtn = target.closest(".code-copy-btn") as HTMLElement;
+          if (copyBtn) {
+            const code = copyBtn.dataset.code;
+            if (code) {
+              navigator.clipboard.writeText(code);
+              const original = copyBtn.innerHTML;
+              copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg> Copied!`;
+              copyBtn.classList.add("copied");
+              setTimeout(() => {
+                copyBtn.innerHTML = original;
+                copyBtn.classList.remove("copied");
+              }, 2000);
+            }
+          }
+        }}
       >
         <Show
           when={hasSession()}
