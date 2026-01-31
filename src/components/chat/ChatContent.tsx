@@ -16,10 +16,10 @@ import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
-import { escapeHtml } from "@/lib/escape-html";
+import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
-import { renderMarkdown } from "@/lib/render-markdown";
+import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
   areToolsAvailable,
@@ -117,9 +117,21 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   const handlePickImages = () => handleAttachImages();
 
-  // Copy button click handler (event delegation)
+  // Click handler for copy buttons and external links (event delegation)
   const handleCopyClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
+
+    // Handle external link clicks
+    const externalLink = target.closest(".external-link") as HTMLAnchorElement;
+    if (externalLink) {
+      event.preventDefault();
+      const url = externalLink.dataset.externalUrl;
+      if (url) {
+        openExternalLink(url);
+      }
+      return;
+    }
+
     const copyBtn = target.closest(".code-copy-btn") as HTMLButtonElement;
 
     if (copyBtn) {
@@ -746,7 +758,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                           innerHTML={
                             message.role === "assistant"
                               ? renderMarkdown(message.content)
-                              : escapeHtml(message.content)
+                              : escapeHtmlWithLinks(message.content)
                           }
                         />
                         <Show when={message.status === "error"}>

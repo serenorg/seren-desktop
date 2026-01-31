@@ -76,3 +76,14 @@
   font-size: 13px;
   line-height: 1.6;
 }
+
+/* External links in chat messages */
+.external-link {
+  color: #58a6ff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.external-link:hover {
+  text-decoration: underline;
+}

@@ -12,13 +12,13 @@ import {
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { FileTree } from "@/components/sidebar/FileTree";
-import { escapeHtml } from "@/lib/escape-html";
+import { openExternalLink } from "@/lib/external-link";
 import {
   loadDirectoryChildren,
   openFileInTab,
   openFolder,
 } from "@/lib/files/service";
-import { renderMarkdown } from "@/lib/render-markdown";
+import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
   areToolsAvailable,
@@ -117,9 +117,21 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Copy button click handler (event delegation)
+  // Click handler for copy buttons and external links (event delegation)
   const handleCopyClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
+
+    // Handle external link clicks
+    const externalLink = target.closest(".external-link") as HTMLAnchorElement;
+    if (externalLink) {
+      event.preventDefault();
+      const url = externalLink.dataset.externalUrl;
+      if (url) {
+        openExternalLink(url);
+      }
+      return;
+    }
+
     const copyBtn = target.closest(".code-copy-btn") as HTMLButtonElement;
 
     if (copyBtn) {
@@ -659,7 +671,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                             innerHTML={
                               message.role === "assistant"
                                 ? renderMarkdown(message.content)
-                                : escapeHtml(message.content)
+                                : escapeHtmlWithLinks(message.content)
                             }
                           />
                           <Show when={message.status === "error"}>

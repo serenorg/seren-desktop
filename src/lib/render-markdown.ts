@@ -11,6 +11,17 @@ renderer.html = (token: Tokens.HTML | Tokens.Tag): string => {
   return escapeHtml(token.text);
 };
 
+// Override links to open in external browser via event delegation
+renderer.link = (token: Tokens.Link): string => {
+  const href = token.href;
+  if (!href || /^(javascript|data|vbscript):/i.test(href)) {
+    return escapeHtml(token.text);
+  }
+  const safeHref = escapeHtml(href);
+  const title = token.title ? ` title="${escapeHtml(token.title)}"` : "";
+  return `<a href="${safeHref}"${title} class="external-link" data-external-url="${safeHref}">${escapeHtml(token.text)}</a>`;
+};
+
 // Override code blocks to add syntax highlighting and copy button
 renderer.code = (token: Tokens.Code): string => {
   const { text, lang } = token;
@@ -50,4 +61,18 @@ marked.setOptions({
 export function renderMarkdown(markdown: string): string {
   const result = marked.parse(markdown);
   return typeof result === "string" ? result : "";
+}
+
+const URL_REGEX = /https?:\/\/[^\s<>"'`)\]]+/g;
+
+/**
+ * Escapes HTML and converts plain URLs to clickable links.
+ * Use for user messages where markdown rendering is not applied.
+ */
+export function escapeHtmlWithLinks(text: string): string {
+  const escaped = escapeHtml(text);
+  return escaped.replace(URL_REGEX, (url) => {
+    const safeUrl = escapeHtml(url);
+    return `<a href="${safeUrl}" class="external-link" data-external-url="${safeUrl}">${safeUrl}</a>`;
+  });
 }
