@@ -259,10 +259,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
   });
 
-  // Auto-scroll to bottom when messages change or streaming starts
+  // Auto-scroll to bottom when messages change, streaming starts, or switching channels
   createEffect(() => {
     void chatStore.messages;
     void streamingSession();
+    void acpStore.agentModeEnabled;
     requestAnimationFrame(scrollToBottom);
   });
 
