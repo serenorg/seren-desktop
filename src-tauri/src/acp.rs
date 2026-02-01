@@ -37,7 +37,7 @@ impl AgentType {
     fn sidecar_name(&self) -> &'static str {
         match self {
             AgentType::ClaudeCode => "seren-claude-acp-agent",
-            AgentType::Codex => "seren-codex-acp-agent",
+            AgentType::Codex => "seren-acp-codex",
         }
     }
 
@@ -45,7 +45,7 @@ impl AgentType {
     ///
     /// Agent binaries are bundled in embedded-runtime/bin/ and named:
     /// - seren-claude-acp-agent (wraps claude-code-acp-rs)
-    /// - seren-codex-acp-agent (wraps seren-acp-codex)
+    /// - seren-acp-codex (Codex ACP sidecar)
     ///
     /// The binaries are located at:
     /// - Development: src-tauri/embedded-runtime/bin/
@@ -1255,7 +1255,7 @@ pub async fn acp_get_available_agents(app: AppHandle) -> Vec<serde_json::Value> 
         "type": "claude-code",
         "name": "Claude Code",
         "description": "AI coding assistant powered by Claude",
-        "command": "claude-code-acp-rs",
+        "command": "seren-claude-acp-agent",
         "available": claude_available,
     });
 
@@ -1268,7 +1268,7 @@ pub async fn acp_get_available_agents(app: AppHandle) -> Vec<serde_json::Value> 
         "type": "codex",
         "name": "Codex",
         "description": "AI coding assistant powered by OpenAI Codex",
-        "command": "seren-codex-acp-agent",
+        "command": "seren-acp-codex",
         "available": codex_available,
     });
 

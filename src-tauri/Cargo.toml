@@ -15,16 +15,6 @@ default-run = "Seren"
 name = "Seren"
 path = "src/main.rs"
 
-[[bin]]
-name = "seren-claude-acp-agent"
-path = "src/bin/claude_agent.rs"
-required-features = ["acp"]
-
-[[bin]]
-name = "seren-codex-acp-agent"
-path = "src/bin/codex_agent.rs"
-required-features = ["acp"]
-
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
@@ -80,8 +70,6 @@ anyhow = "1"
 
 # ACP (Agent Client Protocol) support
 agent-client-protocol = { version = "=0.9.3", features = ["unstable"], optional = true }
-claude-code-acp-rs = { git = "https://github.com/serenorg/claude-code-acp-rs", optional = true }
-seren-acp-codex = { path = "../../seren-acp-codex", optional = true }
 tokio-tungstenite = { version = "0.24", optional = true }
 
 
@@ -93,5 +81,5 @@ tauri-plugin-deep-link = "2"
 
 [features]
 default = ["acp", "openclaw"]
-acp = ["agent-client-protocol", "claude-code-acp-rs", "seren-acp-codex"]
+acp = ["agent-client-protocol"]
 openclaw = ["tokio-tungstenite"]
