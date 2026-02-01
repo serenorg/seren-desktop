@@ -16,8 +16,13 @@ name = "Seren"
 path = "src/main.rs"
 
 [[bin]]
-name = "acp_agent"
-path = "src/bin/acp_agent.rs"
+name = "seren-claude-acp-agent"
+path = "src/bin/claude_agent.rs"
+required-features = ["acp"]
+
+[[bin]]
+name = "seren-codex-acp-agent"
+path = "src/bin/codex_agent.rs"
 required-features = ["acp"]
 
 [lib]
@@ -70,15 +75,15 @@ url = "2"
 tiny_http = "0.12"
 log = "0.4"
 tauri-plugin-log = "2"
+anyhow = "1"
+
 
 # ACP (Agent Client Protocol) support
-agent-client-protocol = { version = "0.9", features = ["unstable"], optional = true }
+agent-client-protocol = { version = "=0.9.3", features = ["unstable"], optional = true }
 claude-code-acp-rs = { git = "https://github.com/serenorg/claude-code-acp-rs", optional = true }
-anyhow = "1"
+seren-acp-codex = { path = "../../seren-acp-codex", optional = true }
 tokio-tungstenite = { version = "0.24", optional = true }
-# Note: codex-acp has unresolved dependency issues (ssh auth for tungstenite fork)
-# Will add Codex support when upstream issues are resolved
-# codex-acp = { git = "https://github.com/zed-industries/codex-acp" }
+
 
 # Platform-specific dependencies
 # Deep-link plugin excluded on Windows due to WiX bundler ICE03 registry errors
@@ -88,5 +93,5 @@ tauri-plugin-deep-link = "2"
 
 [features]
 default = ["acp", "openclaw"]
-acp = ["agent-client-protocol", "claude-code-acp-rs"]
+acp = ["agent-client-protocol", "claude-code-acp-rs", "seren-acp-codex"]
 openclaw = ["tokio-tungstenite"]

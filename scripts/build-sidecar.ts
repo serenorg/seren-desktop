@@ -6,9 +6,24 @@ import { fileURLToPath } from "node:url";
 
 type Profile = "debug" | "release";
 
+interface SidecarConfig {
+  name: string;
+  /** Binary name (cargo build output) */
+  binName: string;
+  /** Destination filename in embedded-runtime/bin */
+  destName: string;
+  /** Cargo feature to enable */
+  feature: string;
+  optional?: boolean;
+}
+
 function usage(): void {
   console.log(`
 Usage: pnpm build:sidecar [debug|release] [--target <triple>]
+
+Builds ACP agent sidecars:
+  - Claude Code: built from source via cargo feature
+  - Codex: built from source via cargo feature
 
 Examples:
   pnpm build:sidecar
@@ -116,45 +131,59 @@ function resolveTargetTriple(cliTarget?: string): string {
   return deriveTargetFromTauriEnv() ?? "";
 }
 
-function main(): void {
-  const { profile, target: cliTarget } = parseArgs(process.argv.slice(2));
+function buildSidecar(
+  config: SidecarConfig,
+  profile: Profile,
+  targetTriple: string,
+  hostTriple: string,
+  srcTauriDir: string,
+  binDir: string,
+): boolean {
+  const { name, binName, destName, feature, optional } = config;
 
-  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const rootDir = path.resolve(scriptDir, "..");
-  const srcTauriDir = path.join(rootDir, "src-tauri");
-
-  const hostTriple = execText("rustc", ["--print", "host-tuple"]);
-
-  const targetTriple = resolveTargetTriple(cliTarget) || hostTriple;
-
-  console.log("Building acp_agent sidecar:");
+  console.log(`\nBuilding ${name}:`);
+  console.log(`  feature: ${feature}`);
   console.log(`  target:  ${targetTriple}`);
-  console.log(`  host:    ${hostTriple}`);
   console.log(`  profile: ${profile}`);
 
   const ext = targetTriple.includes("windows") ? ".exe" : "";
   const profileDir = profile === "release" ? "release" : "debug";
 
-  const cargoArgs = ["build", "--bin", "acp_agent"];
+  // Build with the specific feature enabled
+  const cargoArgs = [
+    "build",
+    "--bin", binName,
+    "--no-default-features",
+    "--features", feature,
+  ];
   if (profile === "release") cargoArgs.push("--release");
   if (targetTriple !== hostTriple) cargoArgs.push("--target", targetTriple);
 
-  run("cargo", cargoArgs, srcTauriDir);
+  try {
+    run("cargo", cargoArgs, srcTauriDir);
+  } catch (err) {
+    if (optional) {
+      console.log(`  Warning: ${name} build failed; agent will be unavailable`);
+      return true;
+    }
+    throw err;
+  }
 
   const cargoTargetDir =
     targetTriple === hostTriple
       ? path.join(srcTauriDir, "target")
       : path.join(srcTauriDir, "target", targetTriple);
 
-  const srcBin = path.join(cargoTargetDir, profileDir, `acp_agent${ext}`);
+  const srcBin = path.join(cargoTargetDir, profileDir, `${binName}${ext}`);
   if (!existsSync(srcBin)) {
+    if (optional) {
+      console.log(`  Warning: Built binary not found at ${srcBin}`);
+      return true;
+    }
     throw new Error(`Built binary not found at: ${srcBin}`);
   }
 
-  const binDir = path.join(srcTauriDir, "embedded-runtime", "bin");
-  mkdirSync(binDir, { recursive: true });
-
-  const destBin = path.join(binDir, `acp_agent${ext}`);
+  const destBin = path.join(binDir, `${destName}${ext}`);
   copyFileSync(srcBin, destBin);
 
   try {
@@ -163,7 +192,51 @@ function main(): void {
     // Ignore chmod failures on Windows/filesystems that don't support it.
   }
 
-  console.log(`Copied to ${destBin}`);
+  console.log(`  Copied to ${destBin}`);
+  return true;
+}
+
+function main(): void {
+  const { profile, target: cliTarget } = parseArgs(process.argv.slice(2));
+
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const rootDir = path.resolve(scriptDir, "..");
+  const srcTauriDir = path.join(rootDir, "src-tauri");
+
+  const hostTriple = execText("rustc", ["--print", "host-tuple"]);
+  const targetTriple = resolveTargetTriple(cliTarget) || hostTriple;
+
+  console.log("Building sidecars:");
+  console.log(`  host:    ${hostTriple}`);
+  console.log(`  target:  ${targetTriple}`);
+  console.log(`  profile: ${profile}`);
+
+  const binDir = path.join(srcTauriDir, "embedded-runtime", "bin");
+  mkdirSync(binDir, { recursive: true });
+
+  // Agent sidecars built with cargo features
+  const sidecars: SidecarConfig[] = [
+    {
+      name: "Claude Code",
+      binName: "seren-claude-acp-agent",
+      destName: "seren-claude-acp-agent",
+      feature: "acp",
+      optional: false,
+    },
+    {
+      name: "Codex",
+      binName: "seren-codex-acp-agent",
+      destName: "seren-codex-acp-agent",
+      feature: "acp",
+      optional: false,
+    },
+  ];
+
+  for (const sidecar of sidecars) {
+    buildSidecar(sidecar, profile, targetTriple, hostTriple, srcTauriDir, binDir);
+  }
+
+  console.log("\nDone.");
 }
 
 try {

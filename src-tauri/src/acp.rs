@@ -33,71 +33,68 @@ pub enum AgentType {
 }
 
 impl AgentType {
-    /// Get the sidecar name for this agent (used with Tauri's externalBin)
+    /// Get the sidecar binary name for this agent
     fn sidecar_name(&self) -> &'static str {
         match self {
-            AgentType::ClaudeCode => "acp_agent",
-            AgentType::Codex => "codex",
+            AgentType::ClaudeCode => "seren-claude-acp-agent",
+            AgentType::Codex => "seren-codex-acp-agent",
         }
     }
 
     /// Get the command to spawn this agent
     ///
-    /// For ClaudeCode, we use the bundled acp_agent binary which wraps
-    /// claude-code-acp-rs. The binary is bundled as a resource in
-    /// embedded-runtime/bin/ (not as a Tauri externalBin sidecar).
+    /// Agent binaries are bundled in embedded-runtime/bin/ and named:
+    /// - seren-claude-acp-agent (wraps claude-code-acp-rs)
+    /// - seren-codex-acp-agent (wraps seren-acp-codex)
     ///
-    /// The binary is located at:
-    /// - Development: src-tauri/embedded-runtime/bin/acp_agent
+    /// The binaries are located at:
+    /// - Development: src-tauri/embedded-runtime/bin/
     /// - Production: bundled in the app's resource directory
     fn command(&self) -> Result<std::path::PathBuf, String> {
-        match self {
-            AgentType::ClaudeCode => {
-                let bin_name = self.sidecar_name();
+        let bin_name = self.sidecar_name();
 
-                // Check various locations for the binary
-                let exe_path = std::env::current_exe()
-                    .map_err(|e| format!("Failed to get current exe path: {}", e))?;
-                let exe_dir = exe_path
-                    .parent()
-                    .ok_or_else(|| "Failed to get exe directory".to_string())?;
+        // Check various locations for the binary
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get current exe path: {}", e))?;
+        let exe_dir = exe_path
+            .parent()
+            .ok_or_else(|| "Failed to get exe directory".to_string())?;
 
-                // Platform-specific extension
-                let ext = if cfg!(windows) { ".exe" } else { "" };
-                let bin_filename = format!("{}{}", bin_name, ext);
+        // Platform-specific extension
+        let ext = if cfg!(windows) { ".exe" } else { "" };
+        let bin_filename = format!("{}{}", bin_name, ext);
 
-                // Locations to check (in order of priority):
-                let candidates = [
-                    // 1. Production macOS: In Resources/embedded-runtime/bin/
-                    exe_dir.join("../Resources/embedded-runtime/bin").join(&bin_filename),
-                    // 2. Production Linux/Windows: In resource dir next to exe
-                    exe_dir.join("embedded-runtime/bin").join(&bin_filename),
-                    // 3. Development: In src-tauri/embedded-runtime/bin/
-                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("embedded-runtime")
-                        .join("bin")
-                        .join(&bin_filename),
-                ];
+        // Locations to check (in order of priority):
+        let candidates = [
+            // 1. Production macOS: In Resources/embedded-runtime/bin/
+            exe_dir
+                .join("../Resources/embedded-runtime/bin")
+                .join(&bin_filename),
+            // 2. Production Linux/Windows: In resource dir next to exe
+            exe_dir.join("embedded-runtime/bin").join(&bin_filename),
+            // 3. Development: In src-tauri/embedded-runtime/bin/
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("embedded-runtime")
+                .join("bin")
+                .join(&bin_filename),
+        ];
 
-                for candidate in &candidates {
-                    if candidate.exists() {
-                        log::info!("[ACP] Found agent binary at: {:?}", candidate);
-                        return Ok(candidate.clone());
-                    }
-                }
-
-                Err(format!(
-                    "Agent binary '{}' not found. Checked locations:\n{}",
-                    bin_name,
-                    candidates
-                        .iter()
-                        .map(|p| format!("  - {:?}", p))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                ))
+        for candidate in &candidates {
+            if candidate.exists() {
+                log::info!("[ACP] Found {} binary at: {:?}", bin_name, candidate);
+                return Ok(candidate.clone());
             }
-            AgentType::Codex => Err("Codex agent not yet supported".to_string()),
         }
+
+        Err(format!(
+            "Agent binary '{}' not found. Checked locations:\n{}",
+            bin_name,
+            candidates
+                .iter()
+                .map(|p| format!("  - {:?}", p))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ))
     }
 
     /// Get additional arguments for the command
@@ -244,18 +241,16 @@ impl Client for ClientDelegate {
                 Ok(Err(_)) => {
                     // Channel dropped — permission request was dismissed
                     self.pending_permissions.lock().await.remove(&request_id);
-                    return Err(agent_client_protocol::Error::internal_error()
-                        .data(serde_json::Value::String(
-                            "Permission request cancelled".into(),
-                        )));
+                    return Err(agent_client_protocol::Error::internal_error().data(
+                        serde_json::Value::String("Permission request cancelled".into()),
+                    ));
                 }
                 Err(_) => {
                     // Timeout
                     self.pending_permissions.lock().await.remove(&request_id);
-                    return Err(agent_client_protocol::Error::internal_error()
-                        .data(serde_json::Value::String(
-                            "Permission request timed out".into(),
-                        )));
+                    return Err(agent_client_protocol::Error::internal_error().data(
+                        serde_json::Value::String("Permission request timed out".into()),
+                    ));
                 }
             };
 
@@ -309,18 +304,16 @@ impl Client for ClientDelegate {
                         .lock()
                         .await
                         .remove(&proposal_id);
-                    return Err(agent_client_protocol::Error::internal_error().data(
-                        serde_json::Value::String("Diff proposal dismissed".into()),
-                    ));
+                    return Err(agent_client_protocol::Error::internal_error()
+                        .data(serde_json::Value::String("Diff proposal dismissed".into())));
                 }
                 Err(_) => {
                     self.pending_diff_proposals
                         .lock()
                         .await
                         .remove(&proposal_id);
-                    return Err(agent_client_protocol::Error::internal_error().data(
-                        serde_json::Value::String("Diff proposal timed out".into()),
-                    ));
+                    return Err(agent_client_protocol::Error::internal_error()
+                        .data(serde_json::Value::String("Diff proposal timed out".into())));
                 }
             };
 
@@ -360,8 +353,7 @@ impl Client for ClientDelegate {
             .cwd
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new(&self.cwd));
-        let sandbox_config =
-            crate::sandbox::SandboxConfig::from_mode(self.sandbox_mode, cwd_path);
+        let sandbox_config = crate::sandbox::SandboxConfig::from_mode(self.sandbox_mode, cwd_path);
 
         // Build env vars from request
         let env_vars: Vec<(String, String)> = args
@@ -387,8 +379,7 @@ impl Client for ClientDelegate {
             )
             .await
             .map_err(|e| {
-                agent_client_protocol::Error::internal_error()
-                    .data(serde_json::Value::String(e))
+                agent_client_protocol::Error::internal_error().data(serde_json::Value::String(e))
             })?;
 
         Ok(CreateTerminalResponse::new(
@@ -401,10 +392,11 @@ impl Client for ClientDelegate {
         args: TerminalOutputRequest,
     ) -> AcpResult<TerminalOutputResponse> {
         let terminals = self.terminals.lock().await;
-        let (output, truncated, exit_status) =
-            terminals.get_output(&args.terminal_id.0).await.map_err(|e| {
-                agent_client_protocol::Error::internal_error()
-                    .data(serde_json::Value::String(e))
+        let (output, truncated, exit_status) = terminals
+            .get_output(&args.terminal_id.0)
+            .await
+            .map_err(|e| {
+                agent_client_protocol::Error::internal_error().data(serde_json::Value::String(e))
             })?;
 
         let mut response = TerminalOutputResponse::new(output, truncated);
@@ -439,8 +431,7 @@ impl Client for ClientDelegate {
             .wait_for_exit(&args.terminal_id.0)
             .await
             .map_err(|e| {
-                agent_client_protocol::Error::internal_error()
-                    .data(serde_json::Value::String(e))
+                agent_client_protocol::Error::internal_error().data(serde_json::Value::String(e))
             })?;
 
         let mut acp_status = agent_client_protocol::TerminalExitStatus::new();
@@ -774,7 +765,11 @@ async fn run_session_worker(
 
     let full_path = match (&cli_tools_bin, embedded_path.is_empty()) {
         (Some(bin), false) => {
-            let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+            let sep = if cfg!(target_os = "windows") {
+                ";"
+            } else {
+                ":"
+            };
             format!("{}{}{}", bin.display(), sep, embedded_path)
         }
         (Some(bin), true) => bin.to_string_lossy().to_string(),
@@ -977,7 +972,10 @@ async fn run_session_worker(
                 match prompt_result {
                     Ok(response) => {
                         if cancelled {
-                            log::info!("[ACP] Prompt completed after cancellation: {:?}", response.stop_reason);
+                            log::info!(
+                                "[ACP] Prompt completed after cancellation: {:?}",
+                                response.stop_reason
+                            );
                         } else {
                             log::info!(
                                 "[ACP] Prompt completed successfully: {:?}",
@@ -1234,8 +1232,9 @@ pub async fn acp_respond_to_diff_proposal(
 /// Get available agents with actual availability checks.
 #[tauri::command]
 pub async fn acp_get_available_agents(app: AppHandle) -> Vec<serde_json::Value> {
-    let agent_available =
-        acp_check_agent_available(AgentType::ClaudeCode).await.unwrap_or(false);
+    let claude_binary_available = acp_check_agent_available(AgentType::ClaudeCode)
+        .await
+        .unwrap_or(false);
     let cli_tools_available = get_cli_tools_bin_dir(&app)
         .map(|bin| {
             let claude = if cfg!(target_os = "windows") {
@@ -1246,24 +1245,39 @@ pub async fn acp_get_available_agents(app: AppHandle) -> Vec<serde_json::Value> 
             claude.exists()
         })
         .unwrap_or(false);
+    let claude_available = claude_binary_available || cli_tools_available;
 
-    vec![
-        serde_json::json!({
-            "type": "claude-code",
-            "name": "Claude Code",
-            "description": "AI coding assistant powered by Claude",
-            "command": "claude-code-acp-rs",
-            "available": agent_available || cli_tools_available
-        }),
-        serde_json::json!({
-            "type": "codex",
-            "name": "Codex",
-            "description": "AI coding assistant powered by OpenAI Codex",
-            "command": "codex-acp",
-            "available": false,
-            "unavailableReason": "Codex ACP has dependency issues - coming soon"
-        }),
-    ]
+    let codex_available = acp_check_agent_available(AgentType::Codex)
+        .await
+        .unwrap_or(false);
+
+    let mut claude = serde_json::json!({
+        "type": "claude-code",
+        "name": "Claude Code",
+        "description": "AI coding assistant powered by Claude",
+        "command": "claude-code-acp-rs",
+        "available": claude_available,
+    });
+
+    if !claude_available {
+        claude["unavailableReason"] =
+            serde_json::Value::String("Claude Code agent binary not found".to_string());
+    }
+
+    let mut codex = serde_json::json!({
+        "type": "codex",
+        "name": "Codex",
+        "description": "AI coding assistant powered by OpenAI Codex",
+        "command": "seren-codex-acp-agent",
+        "available": codex_available,
+    });
+
+    if !codex_available {
+        codex["unavailableReason"] =
+            serde_json::Value::String("Codex agent binary not found".to_string());
+    }
+
+    vec![claude, codex]
 }
 
 /// Check if an agent binary is available
@@ -1294,14 +1308,28 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
 
     // Already installed locally?
     if claude_bin.exists() {
-        log::info!("[ACP] Claude CLI already installed at: {}", claude_bin.display());
+        log::info!(
+            "[ACP] Claude CLI already installed at: {}",
+            claude_bin.display()
+        );
         return Ok(bin_dir.to_string_lossy().to_string());
     }
 
     // Check if claude is available on the system PATH
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let which_arg = if cfg!(target_os = "windows") { "claude.cmd" } else { "claude" };
-    if let Ok(output) = std::process::Command::new(which_cmd).arg(which_arg).output() {
+    let which_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    let which_arg = if cfg!(target_os = "windows") {
+        "claude.cmd"
+    } else {
+        "claude"
+    };
+    if let Ok(output) = std::process::Command::new(which_cmd)
+        .arg(which_arg)
+        .output()
+    {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Some(parent) = std::path::Path::new(&path).parent() {
@@ -1381,7 +1409,10 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         return Err("Install completed but claude binary not found".to_string());
     }
 
-    log::info!("[ACP] Claude CLI installed successfully at: {}", claude_bin.display());
+    log::info!(
+        "[ACP] Claude CLI installed successfully at: {}",
+        claude_bin.display()
+    );
 
     let _ = app.emit(
         "acp://cli-install-progress",
