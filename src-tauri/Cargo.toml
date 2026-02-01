@@ -69,7 +69,7 @@ anyhow = "1"
 
 
 # ACP (Agent Client Protocol) support
-agent-client-protocol = { version = "=0.9.3", features = ["unstable"], optional = true }
+agent-client-protocol = { version = "0.9", features = ["unstable"], optional = true }
 tokio-tungstenite = { version = "0.24", optional = true }
 
 
