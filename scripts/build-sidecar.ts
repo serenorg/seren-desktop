@@ -1,4 +1,4 @@
-// ABOUTME: Builds ACP agent sidecars from git repositories
+// ABOUTME: Builds ACP agent sidecars from git repositories or local paths
 // ABOUTME: Reads configuration from sidecars section in package.json
 
 import { spawnSync } from "node:child_process";
@@ -17,7 +17,8 @@ type Profile = "debug" | "release";
 
 interface SidecarEntry {
   name: string;
-  git: string;
+  git?: string;
+  path?: string;
   rev?: string;
   tag?: string;
   branch?: string;
@@ -30,13 +31,14 @@ interface PackageJson {
   sidecars?: Record<string, SidecarEntry>;
 }
 
+type SidecarSource =
+  | { type: "git"; url: string; rev?: string; tag?: string; branch?: string }
+  | { type: "path"; dir: string };
+
 interface SidecarConfig {
   key: string;
   name: string;
-  gitUrl: string;
-  gitRev?: string;
-  gitTag?: string;
-  gitBranch?: string;
+  source: SidecarSource;
   binName: string;
   destName: string;
   optional: boolean;
@@ -47,7 +49,9 @@ function usage(): void {
 Usage: pnpm build:sidecar [debug|release] [--target <triple>]
 
 Builds ACP agent sidecars defined in package.json "sidecars" section.
-Each entry must specify exactly one git reference: "rev", "tag", or "branch".
+Each entry must specify either:
+  - "git" with one of "rev", "tag", or "branch"
+  - "path" for local development
 
 Examples:
   pnpm build:sidecar
@@ -55,7 +59,7 @@ Examples:
   pnpm build:sidecar --target x86_64-apple-darwin
 
 Environment overrides:
-  ACP_SIDECAR_FORCE_REINSTALL=1 (force cargo install)
+  ACP_SIDECAR_FORCE_REINSTALL=1 (force cargo install/rebuild)
   ACP_SIDECAR_TARGET_TRIPLE
   TAURI_ENV_TARGET_TRIPLE
   TAURI_SIDECAR_TARGET_TRIPLE
@@ -174,23 +178,40 @@ function loadSidecarsFromPackageJson(rootDir: string): SidecarConfig[] {
 
   const configs: SidecarConfig[] = [];
   for (const [key, entry] of Object.entries(pkg.sidecars)) {
-    const gitRev = entry.rev?.trim();
-    const gitTag = entry.tag?.trim();
-    const gitBranch = entry.branch?.trim();
-    const numPins = [gitRev, gitTag, gitBranch].filter(Boolean).length;
-    if (numPins !== 1) {
-      throw new Error(
-        `Sidecar "${key}" must specify exactly one of "rev", "tag", or "branch" in package.json`,
-      );
+    let source: SidecarSource;
+
+    if (entry.path) {
+      // Local path source
+      if (entry.git || entry.rev || entry.tag || entry.branch) {
+        throw new Error(
+          `Sidecar "${key}" has "path" but also git fields. Use either "path" or "git", not both.`,
+        );
+      }
+      const resolvedPath = path.resolve(rootDir, entry.path);
+      if (!existsSync(resolvedPath)) {
+        throw new Error(`Sidecar "${key}" path does not exist: ${resolvedPath}`);
+      }
+      source = { type: "path", dir: resolvedPath };
+    } else if (entry.git) {
+      // Git source
+      const gitRev = entry.rev?.trim();
+      const gitTag = entry.tag?.trim();
+      const gitBranch = entry.branch?.trim();
+      const numPins = [gitRev, gitTag, gitBranch].filter(Boolean).length;
+      if (numPins !== 1) {
+        throw new Error(
+          `Sidecar "${key}" must specify exactly one of "rev", "tag", or "branch" when using "git"`,
+        );
+      }
+      source = { type: "git", url: entry.git, rev: gitRev, tag: gitTag, branch: gitBranch };
+    } else {
+      throw new Error(`Sidecar "${key}" must specify either "git" or "path"`);
     }
 
     configs.push({
       key,
       name: entry.name,
-      gitUrl: entry.git,
-      gitRev,
-      gitTag,
-      gitBranch,
+      source,
       binName: entry.bin,
       destName: entry.dest,
       optional: entry.optional ?? false,
@@ -198,6 +219,15 @@ function loadSidecarsFromPackageJson(rootDir: string): SidecarConfig[] {
   }
 
   return configs;
+}
+
+function cargoTargetDir(cwd: string): string {
+  const jsonText = execText("cargo", ["metadata", "--format-version", "1", "--no-deps"], cwd);
+  const parsed = JSON.parse(jsonText) as { target_directory?: unknown };
+  if (typeof parsed.target_directory !== "string" || !parsed.target_directory.trim()) {
+    throw new Error(`cargo metadata did not return target_directory for ${cwd}`);
+  }
+  return parsed.target_directory;
 }
 
 function buildSidecar(
@@ -208,68 +238,96 @@ function buildSidecar(
   srcTauriDir: string,
   binDir: string,
 ): boolean {
-  const { name, gitUrl, gitRev, gitTag, gitBranch, binName, destName, optional } = config;
+  const { name, source, binName, destName, optional } = config;
 
   console.log(`\nBuilding ${name}:`);
-  console.log(`  git:     ${gitUrl}`);
-  if (gitRev) console.log(`  rev:     ${gitRev.slice(0, 12)}...`);
-  if (!gitRev && gitTag) console.log(`  tag:     ${gitTag}`);
-  if (!gitRev && !gitTag && gitBranch) console.log(`  branch:  ${gitBranch}`);
+  if (source.type === "path") {
+    console.log(`  path:    ${source.dir}`);
+  } else {
+    console.log(`  git:     ${source.url}`);
+    if (source.rev) console.log(`  rev:     ${source.rev.slice(0, 12)}...`);
+    if (source.tag) console.log(`  tag:     ${source.tag}`);
+    if (source.branch) console.log(`  branch:  ${source.branch}`);
+  }
   console.log(`  target:  ${targetTriple}`);
   console.log(`  profile: ${profile}`);
 
   const ext = targetTriple.includes("windows") ? ".exe" : "";
   const forceInstall = process.env.ACP_SIDECAR_FORCE_REINSTALL?.trim() === "1";
+  const profileDir = profile === "release" ? "release" : "debug";
 
-  const versionKey = gitRev
-    ? `rev-${gitRev.slice(0, 12)}`
-    : gitTag
-      ? `tag-${gitTag}`
-      : gitBranch
-        ? `branch-${gitBranch}`
-        : "unpinned";
-  const versionSegment = sanitizePathSegment(versionKey);
-  const installRoot = path.join(
-    srcTauriDir,
-    "target",
-    "sidecar-install",
-    `${destName}-${versionSegment}-${targetTriple}-${profile}`,
-  );
+  let srcBin: string;
 
-  const srcBin = path.join(installRoot, "bin", `${binName}${ext}`);
-
-  if (!forceInstall && existsSync(srcBin)) {
-    console.log(`  Using cached install at ${srcBin}`);
-  } else {
-    mkdirSync(installRoot, { recursive: true });
-
-    const baseArgs = ["install", "--git", gitUrl];
-    if (gitRev) {
-      baseArgs.push("--rev", gitRev);
-    } else if (gitTag) {
-      baseArgs.push("--tag", gitTag);
-    } else if (gitBranch) {
-      baseArgs.push("--branch", gitBranch);
-    } else {
-      throw new Error(`Sidecar "${config.key}" has no git ref (rev/tag/branch)`);
-    }
-    baseArgs.push("--bin", binName, "--root", installRoot);
-    if (profile === "debug") baseArgs.push("--debug");
-    if (targetTriple !== hostTriple) baseArgs.push("--target", targetTriple);
-    if (forceInstall) baseArgs.push("--force");
+  if (source.type === "path") {
+    // Build from local path using cargo build
+    const cargoArgs = ["build", "--bin", binName];
+    if (profile === "release") cargoArgs.push("--release");
+    if (targetTriple !== hostTriple) cargoArgs.push("--target", targetTriple);
 
     try {
-      run("cargo", [...baseArgs, "--locked"]);
-    } catch {
-      // Fallback: some repos may not ship a lockfile or may require updating it.
+      run("cargo", cargoArgs, source.dir);
+    } catch (err) {
+      if (optional) {
+        console.log(`  Warning: ${name} build failed; agent will be unavailable`);
+        return true;
+      }
+      throw err;
+    }
+
+    const targetDir = cargoTargetDir(source.dir);
+    const cargoTargetDirPath =
+      targetTriple === hostTriple ? targetDir : path.join(targetDir, targetTriple);
+    srcBin = path.join(cargoTargetDirPath, profileDir, `${binName}${ext}`);
+  } else {
+    // Build from git using cargo install
+    const versionKey = source.rev
+      ? `rev-${source.rev.slice(0, 12)}`
+      : source.tag
+        ? `tag-${source.tag}`
+        : source.branch
+          ? `branch-${source.branch}`
+          : "unpinned";
+    const versionSegment = sanitizePathSegment(versionKey);
+    const installRoot = path.join(
+      srcTauriDir,
+      "target",
+      "sidecar-install",
+      `${destName}-${versionSegment}-${targetTriple}-${profile}`,
+    );
+
+    srcBin = path.join(installRoot, "bin", `${binName}${ext}`);
+
+    if (!forceInstall && existsSync(srcBin)) {
+      console.log(`  Using cached install at ${srcBin}`);
+    } else {
+      mkdirSync(installRoot, { recursive: true });
+
+      const baseArgs = ["install", "--git", source.url];
+      if (source.rev) {
+        baseArgs.push("--rev", source.rev);
+      } else if (source.tag) {
+        baseArgs.push("--tag", source.tag);
+      } else if (source.branch) {
+        baseArgs.push("--branch", source.branch);
+      }
+      baseArgs.push("--bin", binName, "--root", installRoot);
+      if (profile === "debug") baseArgs.push("--debug");
+      if (targetTriple !== hostTriple) baseArgs.push("--target", targetTriple);
+      if (forceInstall) baseArgs.push("--force");
+
       try {
-        run("cargo", baseArgs);
-      } catch (err) {
-        if (optional) {
-          console.log(`  Warning: ${name} build failed; agent will be unavailable`);
-          return true;
+        run("cargo", [...baseArgs, "--locked"]);
+      } catch {
+        // Fallback: some repos may not ship a lockfile or may require updating it.
+        try {
+          run("cargo", baseArgs);
+        } catch (err) {
+          if (optional) {
+            console.log(`  Warning: ${name} build failed; agent will be unavailable`);
+            return true;
+          }
+          throw err;
         }
-        throw err;
       }
     }
   }
