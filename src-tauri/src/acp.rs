@@ -14,7 +14,7 @@ use agent_client_protocol::{
     WriteTextFileResponse,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -36,7 +36,7 @@ impl AgentType {
     /// Get the sidecar binary name for this agent
     fn sidecar_name(&self) -> &'static str {
         match self {
-            AgentType::ClaudeCode => "seren-claude-acp-agent",
+            AgentType::ClaudeCode => "seren-acp-claude",
             AgentType::Codex => "seren-acp-codex",
         }
     }
@@ -44,7 +44,7 @@ impl AgentType {
     /// Get the command to spawn this agent
     ///
     /// Agent binaries are bundled in embedded-runtime/bin/ and named:
-    /// - seren-claude-acp-agent (wraps claude-code-acp-rs)
+    /// - seren-acp-claude (Claude ACP sidecar)
     /// - seren-acp-codex (Codex ACP sidecar)
     ///
     /// The binaries are located at:
@@ -792,11 +792,23 @@ async fn run_session_worker(
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
 
-    // Spawn a task to log stderr from the agent
+    const STDERR_TAIL_MAX_LINES: usize = 200;
+    const STDERR_TAIL_ON_ERROR: usize = 50;
+    let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+
+    // Spawn a task to log stderr from the agent and keep a small tail for error reporting.
+    let stderr_tail_for_task = Arc::clone(&stderr_tail);
     tokio::task::spawn_local(async move {
         let reader = tokio::io::BufReader::new(stderr);
         let mut lines = reader.lines();
         while let Ok(Some(line)) = lines.next_line().await {
+            {
+                let mut buf = stderr_tail_for_task.lock().await;
+                if buf.len() >= STDERR_TAIL_MAX_LINES {
+                    buf.pop_front();
+                }
+                buf.push_back(line.clone());
+            }
             log::debug!("[ACP Agent stderr] {}", line);
         }
     });
@@ -847,20 +859,66 @@ async fn run_session_worker(
         ))
         .client_capabilities(ClientCapabilities::default());
 
-    let init_response = connection
-        .initialize(init_request)
-        .await
-        .map_err(|e| format!("Failed to initialize agent: {:?}", e))?;
+    let init_response = match connection.initialize(init_request).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            let exit_status = child.try_wait().ok().flatten();
+            let stderr_lines = {
+                let buf = stderr_tail.lock().await;
+                buf.iter()
+                    .rev()
+                    .take(STDERR_TAIL_ON_ERROR)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+            };
+
+            let mut msg = format!("Failed to initialize agent: {:?}", e);
+            if let Some(status) = exit_status {
+                msg.push_str(&format!("\nAgent exit status: {status}"));
+            }
+            if !stderr_lines.is_empty() {
+                msg.push_str("\nACP agent stderr (tail):\n");
+                msg.push_str(&stderr_lines.join("\n"));
+            }
+            return Err(msg);
+        }
+    };
     log::info!("[ACP] Initialize response received");
 
     // Create a new session with the agent
     log::info!("[ACP] Creating new session...");
     let new_session_request = NewSessionRequest::new(&cwd);
 
-    let new_session_response = connection
-        .new_session(new_session_request)
-        .await
-        .map_err(|e| format!("Failed to create agent session: {:?}", e))?;
+    let new_session_response = match connection.new_session(new_session_request).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            let exit_status = child.try_wait().ok().flatten();
+            let stderr_lines = {
+                let buf = stderr_tail.lock().await;
+                buf.iter()
+                    .rev()
+                    .take(STDERR_TAIL_ON_ERROR)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+            };
+
+            let mut msg = format!("Failed to create agent session: {:?}", e);
+            if let Some(status) = exit_status {
+                msg.push_str(&format!("\nAgent exit status: {status}"));
+            }
+            if !stderr_lines.is_empty() {
+                msg.push_str("\nACP agent stderr (tail):\n");
+                msg.push_str(&stderr_lines.join("\n"));
+            }
+            return Err(msg);
+        }
+    };
     log::info!(
         "[ACP] Session created: {:?}",
         new_session_response.session_id
@@ -1255,7 +1313,7 @@ pub async fn acp_get_available_agents(app: AppHandle) -> Vec<serde_json::Value> 
         "type": "claude-code",
         "name": "Claude Code",
         "description": "AI coding assistant powered by Claude",
-        "command": "seren-claude-acp-agent",
+        "command": "seren-acp-claude",
         "available": claude_available,
     });
 

@@ -69,12 +69,12 @@
     "vitest": "^4.0.18"
   },
   "sidecars": {
-    "claude-code-acp": {
+    "seren-acp-claude": {
       "name": "Claude Code",
-      "git": "https://github.com/serenorg/claude-code-acp-rs",
-      "rev": "67404f405b6a7e288c80a0291f3e496f21da84b8",
-      "bin": "claude-code-acp-rs",
-      "dest": "seren-claude-acp-agent"
+      "git": "https://github.com/serenorg/seren-acp-claude",
+      "tag": "v0.1.0",
+      "bin": "seren-acp-claude",
+      "dest": "seren-acp-claude"
     },
     "seren-acp-codex": {
       "name": "Codex",
