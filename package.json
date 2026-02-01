@@ -13,6 +13,7 @@
     "build:openclaw": "tsx scripts/build-openclaw.ts",
     "build:sidecar": "tsx scripts/build-sidecar.ts",
     "build:sidecar:release": "tsx scripts/build-sidecar.ts release",
+    "sidecar:update": "tsx scripts/update-sidecar.ts",
     "generate:api": "openapi-ts -f openapi/openapi-ts.config.ts",
     "lint": "biome lint",
     "lint:fix": "biome lint --fix",
@@ -66,5 +67,21 @@
     "vite": "^6.0.3",
     "vite-plugin-solid": "^2.11.0",
     "vitest": "^4.0.18"
+  },
+  "sidecars": {
+    "claude-code-acp": {
+      "name": "Claude Code",
+      "git": "https://github.com/serenorg/claude-code-acp-rs",
+      "rev": "67404f405b6a7e288c80a0291f3e496f21da84b8",
+      "bin": "claude-code-acp-rs",
+      "dest": "seren-claude-acp-agent"
+    },
+    "seren-acp-codex": {
+      "name": "Codex",
+      "git": "https://github.com/serenorg/seren-acp-codex",
+      "tag": "v0.1.0",
+      "bin": "seren-acp-codex",
+      "dest": "seren-acp-codex"
+    }
   }
 }

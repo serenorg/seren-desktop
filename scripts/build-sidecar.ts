@@ -1,41 +1,61 @@
+// ABOUTME: Builds ACP agent sidecars from git repositories
+// ABOUTME: Reads configuration from sidecars section in package.json
+
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+} from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 type Profile = "debug" | "release";
 
-type SidecarSource =
-  | { type: "path"; cargoDir: string }
-  | { type: "git"; gitUrl: string; gitRev?: string; gitTag?: string };
+interface SidecarEntry {
+  name: string;
+  git: string;
+  rev?: string;
+  tag?: string;
+  branch?: string;
+  bin: string;
+  dest: string;
+  optional?: boolean;
+}
+
+interface PackageJson {
+  sidecars?: Record<string, SidecarEntry>;
+}
 
 interface SidecarConfig {
+  key: string;
   name: string;
-  source: SidecarSource;
-  /** Binary name (cargo build output) */
+  gitUrl: string;
+  gitRev?: string;
+  gitTag?: string;
+  gitBranch?: string;
   binName: string;
-  /** Destination filename in embedded-runtime/bin */
   destName: string;
-  optional?: boolean;
+  optional: boolean;
 }
 
 function usage(): void {
   console.log(`
 Usage: pnpm build:sidecar [debug|release] [--target <triple>]
 
-Builds ACP agent sidecars:
-  - Claude Code: serenorg/claude-code-acp-rs
-  - Codex: serenorg/seren-acp-codex
+Builds ACP agent sidecars defined in package.json "sidecars" section.
+Each entry must specify exactly one git reference: "rev", "tag", or "branch".
 
 Examples:
   pnpm build:sidecar
   pnpm build:sidecar release
   pnpm build:sidecar --target x86_64-apple-darwin
 
-Environment overrides (highest priority first):
-  CLAUDE_ACP_GIT_REV (optional; pin git revision)
-  ACP_SIDECAR_FORCE_REINSTALL=1 (optional; force cargo install)
+Environment overrides:
+  ACP_SIDECAR_FORCE_REINSTALL=1 (force cargo install)
   ACP_SIDECAR_TARGET_TRIPLE
   TAURI_ENV_TARGET_TRIPLE
   TAURI_SIDECAR_TARGET_TRIPLE
@@ -91,7 +111,6 @@ function deriveTargetFromTauriEnv(): string | undefined {
     case "linux":
       return `${arch}-unknown-linux-gnu`;
     case "windows":
-      // Hook commands no longer receive TAURI_ENV_PLATFORM_TYPE; assume MSVC.
       return `${arch}-pc-windows-msvc`;
     default:
       return undefined;
@@ -140,13 +159,45 @@ function resolveTargetTriple(cliTarget?: string): string {
   return deriveTargetFromTauriEnv() ?? "";
 }
 
-function cargoTargetDir(cwd: string): string {
-  const jsonText = execText("cargo", ["metadata", "--format-version", "1", "--no-deps"], cwd);
-  const parsed = JSON.parse(jsonText) as { target_directory?: unknown };
-  if (typeof parsed.target_directory !== "string" || !parsed.target_directory.trim()) {
-    throw new Error(`cargo metadata did not return target_directory for ${cwd}`);
+function loadSidecarsFromPackageJson(rootDir: string): SidecarConfig[] {
+  const packageJsonPath = path.join(rootDir, "package.json");
+  if (!existsSync(packageJsonPath)) {
+    throw new Error(`package.json not found at ${packageJsonPath}`);
   }
-  return parsed.target_directory;
+
+  const content = readFileSync(packageJsonPath, "utf8");
+  const pkg = JSON.parse(content) as PackageJson;
+
+  if (!pkg.sidecars) {
+    throw new Error('No "sidecars" section found in package.json');
+  }
+
+  const configs: SidecarConfig[] = [];
+  for (const [key, entry] of Object.entries(pkg.sidecars)) {
+    const gitRev = entry.rev?.trim();
+    const gitTag = entry.tag?.trim();
+    const gitBranch = entry.branch?.trim();
+    const numPins = [gitRev, gitTag, gitBranch].filter(Boolean).length;
+    if (numPins !== 1) {
+      throw new Error(
+        `Sidecar "${key}" must specify exactly one of "rev", "tag", or "branch" in package.json`,
+      );
+    }
+
+    configs.push({
+      key,
+      name: entry.name,
+      gitUrl: entry.git,
+      gitRev,
+      gitTag,
+      gitBranch,
+      binName: entry.bin,
+      destName: entry.dest,
+      optional: entry.optional ?? false,
+    });
+  }
+
+  return configs;
 }
 
 function buildSidecar(
@@ -157,83 +208,68 @@ function buildSidecar(
   srcTauriDir: string,
   binDir: string,
 ): boolean {
-  const { name, source, binName, destName, optional } = config;
+  const { name, gitUrl, gitRev, gitTag, gitBranch, binName, destName, optional } = config;
 
   console.log(`\nBuilding ${name}:`);
-  if (source.type === "path") {
-    console.log(`  cargo:   ${source.cargoDir}`);
-  } else {
-    console.log(`  git:     ${source.gitUrl}`);
-    if (source.gitRev) console.log(`  rev:     ${source.gitRev}`);
-    if (!source.gitRev && source.gitTag) console.log(`  tag:     ${source.gitTag}`);
-  }
+  console.log(`  git:     ${gitUrl}`);
+  if (gitRev) console.log(`  rev:     ${gitRev.slice(0, 12)}...`);
+  if (!gitRev && gitTag) console.log(`  tag:     ${gitTag}`);
+  if (!gitRev && !gitTag && gitBranch) console.log(`  branch:  ${gitBranch}`);
   console.log(`  target:  ${targetTriple}`);
   console.log(`  profile: ${profile}`);
 
   const ext = targetTriple.includes("windows") ? ".exe" : "";
-  const profileDir = profile === "release" ? "release" : "debug";
+  const forceInstall = process.env.ACP_SIDECAR_FORCE_REINSTALL?.trim() === "1";
 
-  let srcBin: string;
+  const versionKey = gitRev
+    ? `rev-${gitRev.slice(0, 12)}`
+    : gitTag
+      ? `tag-${gitTag}`
+      : gitBranch
+        ? `branch-${gitBranch}`
+        : "unpinned";
+  const versionSegment = sanitizePathSegment(versionKey);
+  const installRoot = path.join(
+    srcTauriDir,
+    "target",
+    "sidecar-install",
+    `${destName}-${versionSegment}-${targetTriple}-${profile}`,
+  );
 
-  if (source.type === "path") {
-    const cargoArgs = ["build", "--bin", binName];
-    if (profile === "release") cargoArgs.push("--release");
-    if (targetTriple !== hostTriple) cargoArgs.push("--target", targetTriple);
+  const srcBin = path.join(installRoot, "bin", `${binName}${ext}`);
+
+  if (!forceInstall && existsSync(srcBin)) {
+    console.log(`  Using cached install at ${srcBin}`);
+  } else {
+    mkdirSync(installRoot, { recursive: true });
+
+    const baseArgs = ["install", "--git", gitUrl];
+    if (gitRev) {
+      baseArgs.push("--rev", gitRev);
+    } else if (gitTag) {
+      baseArgs.push("--tag", gitTag);
+    } else if (gitBranch) {
+      baseArgs.push("--branch", gitBranch);
+    } else {
+      throw new Error(`Sidecar "${config.key}" has no git ref (rev/tag/branch)`);
+    }
+    baseArgs.push("--bin", binName, "--root", installRoot);
+    if (profile === "debug") baseArgs.push("--debug");
+    if (targetTriple !== hostTriple) baseArgs.push("--target", targetTriple);
+    if (forceInstall) baseArgs.push("--force");
 
     try {
-      run("cargo", cargoArgs, source.cargoDir);
-    } catch (err) {
-      if (optional) {
-        console.log(`  Warning: ${name} build failed; agent will be unavailable`);
-        return true;
-      }
-      throw err;
-    }
-
-    const targetDir = cargoTargetDir(source.cargoDir);
-    const cargoTargetDirPath =
-      targetTriple === hostTriple ? targetDir : path.join(targetDir, targetTriple);
-
-    srcBin = path.join(cargoTargetDirPath, profileDir, `${binName}${ext}`);
-  } else {
-    const forceInstall = process.env.ACP_SIDECAR_FORCE_REINSTALL?.trim() === "1";
-    const versionKey = source.gitRev
-      ? `rev-${source.gitRev.slice(0, 12)}`
-      : source.gitTag
-        ? `tag-${source.gitTag}`
-        : "unpinned";
-    const versionSegment = sanitizePathSegment(versionKey);
-    const installRoot = path.join(
-      srcTauriDir,
-      "target",
-      "sidecar-install",
-      `${destName}-${versionSegment}-${targetTriple}-${profile}`,
-    );
-
-    // cargo install always installs to <root>/bin regardless of profile/target
-    srcBin = path.join(installRoot, "bin", `${binName}${ext}`);
-
-    if (!forceInstall && existsSync(srcBin)) {
-      console.log(`  Using cached install at ${srcBin}`);
-    } else {
-      mkdirSync(installRoot, { recursive: true });
-
-      const baseArgs = ["install", "--git", source.gitUrl];
-      if (source.gitRev) {
-        baseArgs.push("--rev", source.gitRev);
-      } else if (source.gitTag) {
-        baseArgs.push("--tag", source.gitTag);
-      }
-      baseArgs.push("--bin", binName, "--root", installRoot);
-      if (profile === "debug") baseArgs.push("--debug");
-      if (targetTriple !== hostTriple) baseArgs.push("--target", targetTriple);
-      if (forceInstall) baseArgs.push("--force");
-
+      run("cargo", [...baseArgs, "--locked"]);
+    } catch {
+      // Fallback: some repos may not ship a lockfile or may require updating it.
       try {
-        run("cargo", [...baseArgs, "--locked"]);
-      } catch (err) {
-        // Fallback: some repos may not ship a lockfile or may require updating it.
         run("cargo", baseArgs);
+      } catch (err) {
+        if (optional) {
+          console.log(`  Warning: ${name} build failed; agent will be unavailable`);
+          return true;
+        }
+        throw err;
       }
     }
   }
@@ -269,37 +305,16 @@ function main(): void {
   const hostTriple = execText("rustc", ["--print", "host-tuple"]);
   const targetTriple = resolveTargetTriple(cliTarget) || hostTriple;
 
-  console.log("Building sidecars:");
+  const sidecars = loadSidecarsFromPackageJson(rootDir);
+
+  console.log("Building sidecars from package.json:");
   console.log(`  host:    ${hostTriple}`);
   console.log(`  target:  ${targetTriple}`);
   console.log(`  profile: ${profile}`);
+  console.log(`  count:   ${sidecars.length}`);
 
   const binDir = path.join(srcTauriDir, "embedded-runtime", "bin");
   mkdirSync(binDir, { recursive: true });
-
-  // Agent sidecars built out-of-tree (keeps Seren Desktop's Cargo graph lean)
-  const claudeGitUrl = "https://github.com/serenorg/claude-code-acp-rs";
-  const claudeGitRev = process.env.CLAUDE_ACP_GIT_REV?.trim();
-  const codexGitUrl = "https://github.com/serenorg/seren-acp-codex";
-  // Bump this tag when cutting a new seren-acp-codex release.
-  const codexGitTag = "v0.1.0";
-
-  const sidecars: SidecarConfig[] = [
-    {
-      name: "Claude Code",
-      source: { type: "git", gitUrl: claudeGitUrl, gitRev: claudeGitRev },
-      binName: "claude-code-acp-rs",
-      destName: "seren-claude-acp-agent",
-      optional: false,
-    },
-    {
-      name: "Codex",
-      source: { type: "git", gitUrl: codexGitUrl, gitTag: codexGitTag },
-      binName: "seren-acp-codex",
-      destName: "seren-acp-codex",
-      optional: false,
-    },
-  ];
 
   for (const sidecar of sidecars) {
     buildSidecar(sidecar, profile, targetTriple, hostTriple, srcTauriDir, binDir);
