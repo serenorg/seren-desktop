@@ -265,6 +265,16 @@ impl TerminalManager {
         self.terminals.remove(terminal_id);
         Ok(())
     }
+
+    /// Release all terminals, freeing all resources.
+    /// Called when a session terminates to prevent orphaned processes.
+    pub fn release_all(&mut self) {
+        let count = self.terminals.len();
+        self.terminals.clear();
+        if count > 0 {
+            log::info!("[TerminalManager] Released {} terminal(s) on session cleanup", count);
+        }
+    }
 }
 
 #[cfg(test)]

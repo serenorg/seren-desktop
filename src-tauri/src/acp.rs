@@ -715,6 +715,13 @@ pub async fn acp_spawn(
                     );
                 }
             }
+
+            // Clean up session from map when worker exits (prevents ghost sessions)
+            let cleanup_session_id = session_id_clone.clone();
+            let state = app_handle.state::<AcpState>();
+            let mut sessions = state.sessions.write().await;
+            sessions.remove(&cleanup_session_id);
+            log::info!("[ACP] Session {} removed from map after worker exit", cleanup_session_id);
         });
     });
 
@@ -796,8 +803,10 @@ async fn run_session_worker(
     const STDERR_TAIL_ON_ERROR: usize = 50;
     let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
 
-    // Spawn a task to log stderr from the agent and keep a small tail for error reporting.
+    // Spawn a task to log stderr from the agent, keep a tail buffer, and emit to frontend.
     let stderr_tail_for_task = Arc::clone(&stderr_tail);
+    let stderr_app = app.clone();
+    let stderr_session_id = session_id.clone();
     tokio::task::spawn_local(async move {
         let reader = tokio::io::BufReader::new(stderr);
         let mut lines = reader.lines();
@@ -809,7 +818,14 @@ async fn run_session_worker(
                 }
                 buf.push_back(line.clone());
             }
-            log::debug!("[ACP Agent stderr] {}", line);
+            log::warn!("[ACP Agent stderr] {}", line);
+            let _ = stderr_app.emit(
+                "acp://agent-stderr",
+                serde_json::json!({
+                    "sessionId": stderr_session_id,
+                    "line": line
+                }),
+            );
         }
     });
 
@@ -817,12 +833,13 @@ async fn run_session_worker(
     let stdout_compat = stdout.compat();
     let stdin_compat = stdin.compat_write();
 
-    // Create client delegate
+    // Create client delegate (keep terminals ref for cleanup on session exit)
+    let terminals = Arc::new(Mutex::new(crate::terminal::TerminalManager::new()));
     let delegate = ClientDelegate {
         app: app.clone(),
         session_id: session_id.clone(),
         cwd: cwd.clone(),
-        terminals: Arc::new(Mutex::new(crate::terminal::TerminalManager::new())),
+        terminals: Arc::clone(&terminals),
         sandbox_mode,
         pending_permissions,
         pending_diff_proposals,
@@ -850,7 +867,7 @@ async fn run_session_worker(
     tokio::task::yield_now().await;
     log::info!("[ACP] IO task spawned, proceeding with initialization...");
 
-    // Initialize the agent
+    // Initialize the agent (with 30-second timeout to prevent infinite hang)
     log::info!("[ACP] Sending initialize request...");
     let init_request = InitializeRequest::new(ProtocolVersion::LATEST)
         .client_info(Implementation::new(
@@ -859,31 +876,39 @@ async fn run_session_worker(
         ))
         .client_capabilities(ClientCapabilities::default());
 
-    let init_response = match connection.initialize(init_request).await {
-        Ok(resp) => resp,
-        Err(e) => {
-            let exit_status = child.try_wait().ok().flatten();
-            let stderr_lines = {
-                let buf = stderr_tail.lock().await;
-                buf.iter()
-                    .rev()
-                    .take(STDERR_TAIL_ON_ERROR)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-            };
+    let init_future = connection.initialize(init_request);
+    let init_result = tokio::time::timeout(std::time::Duration::from_secs(30), init_future).await;
 
-            let mut msg = format!("Failed to initialize agent: {:?}", e);
-            if let Some(status) = exit_status {
-                msg.push_str(&format!("\nAgent exit status: {status}"));
+    let init_response = match init_result {
+        Err(_elapsed) => {
+            return Err("Agent initialization timed out after 30 seconds. The agent binary may be hung.".to_string());
+        }
+        Ok(result) => match result {
+            Ok(resp) => resp,
+            Err(e) => {
+                let exit_status = child.try_wait().ok().flatten();
+                let stderr_lines = {
+                    let buf = stderr_tail.lock().await;
+                    buf.iter()
+                        .rev()
+                        .take(STDERR_TAIL_ON_ERROR)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                };
+
+                let mut msg = format!("Failed to initialize agent: {:?}", e);
+                if let Some(status) = exit_status {
+                    msg.push_str(&format!("\nAgent exit status: {status}"));
+                }
+                if !stderr_lines.is_empty() {
+                    msg.push_str("\nACP agent stderr (tail):\n");
+                    msg.push_str(&stderr_lines.join("\n"));
+                }
+                return Err(msg);
             }
-            if !stderr_lines.is_empty() {
-                msg.push_str("\nACP agent stderr (tail):\n");
-                msg.push_str(&stderr_lines.join("\n"));
-            }
-            return Err(msg);
         }
     };
     log::info!("[ACP] Initialize response received");
@@ -1099,6 +1124,9 @@ async fn run_session_worker(
             }
         }
     }
+
+    // Cleanup: release all terminals to prevent orphaned processes
+    terminals.lock().await.release_all();
 
     // Cleanup: child process will be dropped
     drop(child);

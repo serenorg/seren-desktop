@@ -97,6 +97,10 @@ pub struct OpenClawState {
     /// Approval IDs granted by the frontend approval dialog.
     /// Consumed on use to prevent replay.
     approved_ids: Mutex<HashSet<String>>,
+    /// Handle to the WebSocket listener task (cancelled on stop/restart)
+    ws_listener_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Handle to the process monitor task (cancelled on stop/restart)
+    monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl OpenClawState {
@@ -110,6 +114,8 @@ impl OpenClawState {
             channels: Mutex::new(Vec::new()),
             trust_settings: Mutex::new(HashMap::new()),
             approved_ids: Mutex::new(HashSet::new()),
+            ws_listener_handle: Mutex::new(None),
+            monitor_handle: Mutex::new(None),
         }
     }
 }
@@ -304,8 +310,8 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
         .env("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
         .env("OPENCLAW_SKIP_CHANNELS", "1")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     cmd.kill_on_drop(true);
 
     // Add embedded runtime to PATH
@@ -346,10 +352,18 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
     emit_status(&app, ProcessStatus::Running);
 
     // Start WebSocket listener to receive real-time events from OpenClaw
-    spawn_ws_listener(app.clone(), port, token);
+    let ws_handle = spawn_ws_listener(app.clone(), port, token);
+    {
+        let mut h = state.ws_listener_handle.lock().await;
+        *h = Some(ws_handle);
+    }
 
     // Start process monitor for crash detection and auto-restart
-    spawn_process_monitor(app);
+    let monitor_handle = spawn_process_monitor(app);
+    {
+        let mut h = state.monitor_handle.lock().await;
+        *h = Some(monitor_handle);
+    }
 
     Ok(())
 }
@@ -357,6 +371,16 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
 /// Stop the OpenClaw background process
 #[tauri::command]
 pub async fn openclaw_stop(app: AppHandle, state: State<'_, OpenClawState>) -> Result<(), String> {
+    // Cancel background tasks before stopping the process
+    if let Some(handle) = state.ws_listener_handle.lock().await.take() {
+        handle.abort();
+        log::info!("[OpenClaw] WebSocket listener task cancelled");
+    }
+    if let Some(handle) = state.monitor_handle.lock().await.take() {
+        handle.abort();
+        log::info!("[OpenClaw] Process monitor task cancelled");
+    }
+
     let mut process_lock = state.process.lock().await;
 
     if let Some(mut proc) = process_lock.take() {
@@ -451,7 +475,7 @@ pub async fn openclaw_status(
 
 /// Monitors the OpenClaw child process. If it exits unexpectedly,
 /// updates status to Crashed and attempts restart up to MAX_RESTART_ATTEMPTS.
-fn spawn_process_monitor(app: AppHandle) {
+fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let state = app.state::<OpenClawState>();
 
@@ -543,14 +567,14 @@ fn spawn_process_monitor(app: AppHandle) {
                 }
             }
         }
-    });
+    })
 }
 
 // --- WebSocket Listener for OpenClaw Gateway Events ---
 
 /// Connect to OpenClaw's WebSocket gateway and forward events to the frontend.
 /// Retries connection with backoff since OpenClaw takes a few seconds to initialize.
-pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
+pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let max_retries = 10;
         let mut attempt = 0;
@@ -609,7 +633,7 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) {
             let delay = std::cmp::min(1 << attempt, 30);
             tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
         }
-    });
+    })
 }
 
 /// Parse and forward a WebSocket message from OpenClaw to the frontend
