@@ -442,12 +442,21 @@ export const acpStore = {
    */
   async cancelPrompt() {
     const sessionId = state.activeSessionId;
-    if (!sessionId) return;
+    if (!sessionId) {
+      console.warn("[AcpStore] cancelPrompt: no active session");
+      return;
+    }
+
+    const session = state.sessions[sessionId];
+    console.info(
+      `[AcpStore] cancelPrompt: session=${sessionId}, status=${session?.info.status}`,
+    );
 
     try {
       await acpService.cancelPrompt(sessionId);
+      console.info("[AcpStore] cancelPrompt: backend acknowledged cancel");
     } catch (error) {
-      console.error("Failed to cancel prompt:", error);
+      console.error("[AcpStore] cancelPrompt failed:", error);
     }
   },
 

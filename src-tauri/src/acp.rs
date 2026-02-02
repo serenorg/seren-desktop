@@ -1114,42 +1114,64 @@ async fn run_session_worker(
                 // process cancel requests until the prompt finishes.
                 let mut prompt_fut = std::pin::pin!(connection.prompt(prompt_request));
                 let mut cancelled = false;
+                let mut cancel_deadline: Option<tokio::time::Instant> = None;
 
                 let prompt_result = loop {
-                    tokio::select! {
-                        result = &mut prompt_fut => {
-                            break result;
-                        }
-                        cmd = command_rx.recv() => {
-                            match cmd {
-                                Some(AcpCommand::Cancel { response_tx: cancel_tx }) => {
-                                    log::info!("[ACP] Cancel received during active prompt");
-                                    let cancel = CancelNotification::new(agent_session_id.clone());
-                                    let cancel_result = connection.cancel(cancel).await;
-                                    let _ = cancel_tx.send(cancel_result.map_err(|e| format!("{:?}", e)));
-                                    cancelled = true;
-                                    // Continue looping — the prompt future will resolve
-                                    // (with an error or completion) after the agent processes the cancel
-                                }
-                                Some(AcpCommand::Terminate) => {
-                                    log::info!("[ACP] Terminate received during active prompt");
+                    // If cancel was sent, enforce a deadline for the prompt to finish
+                    if let Some(deadline) = cancel_deadline {
+                        tokio::select! {
+                            result = &mut prompt_fut => {
+                                break result;
+                            }
+                            _ = tokio::time::sleep_until(deadline) => {
+                                log::warn!("[ACP] Prompt did not resolve within 5s after cancel — forcing stop");
+                                break Err(agent_client_protocol::Error::internal_error().data(
+                                    serde_json::Value::String("Cancelled (agent did not stop in time)".into()),
+                                ));
+                            }
+                            cmd = command_rx.recv() => {
+                                if let Some(AcpCommand::Terminate) = cmd {
+                                    log::info!("[ACP] Terminate received after cancel");
                                     let _ = response_tx.send(Err("Session terminated".to_string()));
                                     drop(child);
                                     return Ok(());
                                 }
-                                Some(other) => {
-                                    // Queue other commands — for now, reject them while prompting
-                                    log::info!("[ACP] Rejecting command while prompt is active");
-                                    if let AcpCommand::Prompt { response_tx: tx, .. } = other {
-                                        let _ = tx.send(Err("Another prompt is already active".to_string()));
-                                    } else if let AcpCommand::SetMode { response_tx: tx, .. } = other {
-                                        let _ = tx.send(Err("Cannot change mode while prompt is active".to_string()));
+                                // Ignore other commands while waiting for cancel to take effect
+                            }
+                        }
+                    } else {
+                        tokio::select! {
+                            result = &mut prompt_fut => {
+                                break result;
+                            }
+                            cmd = command_rx.recv() => {
+                                match cmd {
+                                    Some(AcpCommand::Cancel { response_tx: cancel_tx }) => {
+                                        log::info!("[ACP] Cancel received during active prompt");
+                                        let cancel = CancelNotification::new(agent_session_id.clone());
+                                        let cancel_result = connection.cancel(cancel).await;
+                                        let _ = cancel_tx.send(cancel_result.map_err(|e| format!("{:?}", e)));
+                                        cancelled = true;
+                                        cancel_deadline = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
                                     }
-                                }
-                                None => {
-                                    // Channel closed
-                                    let _ = response_tx.send(Err("Command channel closed".to_string()));
-                                    return Ok(());
+                                    Some(AcpCommand::Terminate) => {
+                                        log::info!("[ACP] Terminate received during active prompt");
+                                        let _ = response_tx.send(Err("Session terminated".to_string()));
+                                        drop(child);
+                                        return Ok(());
+                                    }
+                                    Some(other) => {
+                                        log::info!("[ACP] Rejecting command while prompt is active");
+                                        if let AcpCommand::Prompt { response_tx: tx, .. } = other {
+                                            let _ = tx.send(Err("Another prompt is already active".to_string()));
+                                        } else if let AcpCommand::SetMode { response_tx: tx, .. } = other {
+                                            let _ = tx.send(Err("Cannot change mode while prompt is active".to_string()));
+                                        }
+                                    }
+                                    None => {
+                                        let _ = response_tx.send(Err("Command channel closed".to_string()));
+                                        return Ok(());
+                                    }
                                 }
                             }
                         }

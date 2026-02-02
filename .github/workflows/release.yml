@@ -98,7 +98,7 @@ jobs:
           release_name: Seren Desktop ${{ github.ref_name }}
           body_path: release_notes.md
           draft: true
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+          prerelease: false
 
       - name: Set release ID output
         id: set_release_id
