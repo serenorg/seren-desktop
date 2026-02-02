@@ -57,7 +57,13 @@ export const AgentModeToggle: Component = () => {
       {/* Agent Status Indicator */}
       <Show when={isAgentMode() && hasActiveSession()}>
         <div class="flex items-center gap-1.5">
-          <span class={`w-2 h-2 rounded-full ${statusColor()}`} />
+          <span
+            class={`w-2 h-2 rounded-full ${statusColor()} ${
+              sessionStatus() === "prompting" || sessionStatus() === "initializing"
+                ? "animate-pulse"
+                : ""
+            }`}
+          />
           <span class="text-xs text-[#8b949e] capitalize">
             {sessionStatus()}
           </span>
