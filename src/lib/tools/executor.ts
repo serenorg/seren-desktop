@@ -24,6 +24,55 @@ interface FileEntry {
 }
 
 const OPENCLAW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_RESULT_SIZE = 50_000; // 50KB cap
+const MAX_ARRAY_ITEMS = 25;
+
+/**
+ * Truncate large tool results to prevent overwhelming the AI context and database.
+ * For JSON arrays (e.g. email lists), extracts key summary fields per item.
+ */
+function truncateToolResult(content: string): string {
+  if (content.length <= MAX_RESULT_SIZE) return content;
+
+  // Try to detect JSON array results (emails, records, etc.)
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (Array.isArray(parsed) && parsed.length > MAX_ARRAY_ITEMS) {
+      const total = parsed.length;
+      const summary = parsed.slice(0, MAX_ARRAY_ITEMS).map((item: unknown) => {
+        if (typeof item === "object" && item !== null) {
+          const record = item as Record<string, unknown>;
+          const keys = Object.keys(record);
+          const summaryKeys = [
+            "id", "subject", "title", "name", "from", "sender",
+            "date", "timestamp", "created_at", "snippet", "status", "type",
+          ];
+          const kept: Record<string, unknown> = {};
+          for (const k of keys) {
+            const val = record[k];
+            if (
+              summaryKeys.includes(k.toLowerCase()) ||
+              typeof val !== "string" ||
+              val.length < 200
+            ) {
+              kept[k] =
+                typeof val === "string" && val.length > 200
+                  ? `${val.slice(0, 200)}...`
+                  : val;
+            }
+          }
+          return Object.keys(kept).length > 0 ? kept : item;
+        }
+        return item;
+      });
+      return `${JSON.stringify(summary, null, 2)}\n\n[Showing ${MAX_ARRAY_ITEMS} of ${total} items. Full results truncated.]`;
+    }
+  } catch {
+    // Not JSON, fall through to plain text truncation
+  }
+
+  return `${content.slice(0, MAX_RESULT_SIZE)}\n\n[Truncated: result was ${content.length.toLocaleString()} characters]`;
+}
 
 function parseOpenClawApprovalError(
   message: string,
@@ -196,10 +245,11 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         throw new Error(`Unknown tool: ${name}`);
     }
 
+    const resultContent =
+        typeof result === "string" ? result : JSON.stringify(result, null, 2);
     return {
       tool_call_id: toolCall.id,
-      content:
-        typeof result === "string" ? result : JSON.stringify(result, null, 2),
+      content: truncateToolResult(resultContent),
       is_error: false,
     };
   } catch (error) {
@@ -359,7 +409,7 @@ async function executeMcpTool(
 
     return {
       tool_call_id: toolCallId,
-      content: content || "Tool executed successfully",
+      content: truncateToolResult(content || "Tool executed successfully"),
       is_error: result.isError ?? false,
     };
   } catch (error) {
@@ -469,7 +519,7 @@ async function executeGatewayTool(
 
         return {
           tool_call_id: toolCallId,
-          content: retryContent || "Tool executed successfully with payment",
+          content: truncateToolResult(retryContent || "Tool executed successfully with payment"),
           is_error: retryResponse.is_error,
         };
       }
@@ -496,7 +546,7 @@ async function executeGatewayTool(
 
         return {
           tool_call_id: toolCallId,
-          content: retryContent || "Tool executed successfully",
+          content: truncateToolResult(retryContent || "Tool executed successfully"),
           is_error: retryResponse.is_error,
         };
       }
@@ -510,7 +560,7 @@ async function executeGatewayTool(
 
     return {
       tool_call_id: toolCallId,
-      content: content || "Tool executed successfully",
+      content: truncateToolResult(content || "Tool executed successfully"),
       is_error: response.is_error,
     };
   } catch (error) {

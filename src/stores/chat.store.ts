@@ -23,7 +23,7 @@ import type { Message } from "@/services/chat";
 import { sendMessage } from "@/services/chat";
 
 const DEFAULT_MODEL = "anthropic/claude-sonnet-4";
-const MAX_MESSAGES_PER_CONVERSATION = 100;
+const MAX_MESSAGES_PER_CONVERSATION = 1000;
 
 /**
  * A compacted summary of older messages.
@@ -418,7 +418,8 @@ export const chatStore = {
         message.timestamp,
       );
     } catch (error) {
-      console.warn("Unable to persist message", error);
+      console.error("[chatStore] Failed to persist message:", error);
+      setState("error", "Failed to save message. Chat history may be incomplete.");
     }
   },
 
