@@ -225,6 +225,26 @@ code {
   }
 }
 
+/* Thinking dots bounce animation */
+@keyframes bounce-dot {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+.thinking-dot {
+  animation: bounce-dot 1.4s infinite ease-in-out;
+}
+
+.thinking-dot-1 { animation-delay: 0s; }
+.thinking-dot-2 { animation-delay: 0.2s; }
+.thinking-dot-3 { animation-delay: 0.4s; }
+
 /* Tool execution pulse */
 @keyframes pulse {
   0%,
