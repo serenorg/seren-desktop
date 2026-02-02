@@ -2,7 +2,7 @@
 // ABOUTME: Contains Tauri commands and the application run function.
 
 use log::info;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_store::StoreExt;
 
@@ -544,6 +544,11 @@ pub fn run() {
                                 log::error!("[Deep Link] Failed to emit oauth-callback event: {}", e);
                             } else {
                                 log::info!("[Deep Link] Successfully emitted oauth-callback event");
+                            }
+                            // Focus the main window so user returns to the app
+                            if let Some(window) = handle.get_webview_window("main") {
+                                let _ = window.set_focus();
+                                log::info!("[Deep Link] Focused main window after OAuth callback");
                             }
                         } else {
                             log::debug!("[Deep Link] No match - scheme: {}, path: {}", url.scheme(), url.path());

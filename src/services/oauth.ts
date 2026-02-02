@@ -41,13 +41,19 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
 
 /**
  * Get the OAuth redirect URI for this app.
+ * In dev mode, use localhost callback server to avoid launching the production app.
+ * In production, use the seren:// deep link scheme.
  */
 function getRedirectUri(): string {
   if (isTauriRuntime()) {
-    // Tauri deep link
+    if (import.meta.env.DEV) {
+      // Dev mode: use localhost callback server (avoids launching production app)
+      return "http://localhost:8787/oauth/callback";
+    }
+    // Production: use deep link scheme
     return "seren://oauth/callback";
   }
-  // Browser fallback (for development)
+  // Browser fallback
   return `${window.location.origin}/oauth/callback`;
 }
 
