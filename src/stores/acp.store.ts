@@ -4,6 +4,12 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
 import { settingsStore } from "@/stores/settings.store";
+
+/** Per-session ready promises — resolved when backend emits "ready" status */
+const sessionReadyPromises = new Map<
+  string,
+  { promise: Promise<void>; resolve: () => void }
+>();
 import type {
   AcpEvent,
   AcpSessionInfo,
@@ -278,6 +284,16 @@ export const acpStore = {
       setState("sessions", info.id, session);
       setState("activeSessionId", info.id);
 
+      // Create a ready promise that sendPrompt can await
+      let readyResolve: () => void;
+      const readyPromiseObj = {
+        promise: new Promise<void>((resolve) => {
+          readyResolve = resolve;
+        }),
+        resolve: () => readyResolve(),
+      };
+      sessionReadyPromises.set(info.id, readyPromiseObj);
+
       // Subscribe once to all ACP events and route by sessionId.
       // This avoids missing chunks due to filtering and scales better across sessions.
       if (!globalUnsubscribe) {
@@ -316,7 +332,12 @@ export const acpStore = {
         }
       } catch (_timeoutError) {
         console.warn("[AcpStore] Timeout waiting for ready, proceeding anyway");
-        // The session might still work, just proceed
+        // Resolve the ready promise so sendPrompt doesn't block forever
+        const entry = sessionReadyPromises.get(info.id);
+        if (entry) {
+          entry.resolve();
+          sessionReadyPromises.delete(info.id);
+        }
       }
 
       setState("isLoading", false);
@@ -346,6 +367,9 @@ export const acpStore = {
     } catch (error) {
       console.error("Failed to terminate session:", error);
     }
+
+    // Clean up ready promise if still pending
+    sessionReadyPromises.delete(sessionId);
 
     // Remove from state using produce to properly delete the key
     setState(
@@ -398,6 +422,16 @@ export const acpStore = {
     if (!session || session.info.status === "error") {
       setState("error", "Session has ended. Please start a new session.");
       return;
+    }
+
+    // Wait for session to be ready before sending prompt
+    const readyEntry = sessionReadyPromises.get(sessionId);
+    if (readyEntry) {
+      console.info(
+        `[AcpStore] sendPrompt: waiting for session ${sessionId} to be ready...`,
+      );
+      await readyEntry.promise;
+      console.info("[AcpStore] sendPrompt: session is now ready");
     }
 
     // Optimistically mark as prompting so the UI can show a loading state
@@ -764,6 +798,14 @@ export const acpStore = {
 
   handleStatusChange(sessionId: string, status: SessionStatus) {
     setState("sessions", sessionId, "info", "status", status);
+
+    if (status === "ready") {
+      const entry = sessionReadyPromises.get(sessionId);
+      if (entry) {
+        entry.resolve();
+        sessionReadyPromises.delete(sessionId);
+      }
+    }
   },
 
   finalizeStreamingContent(sessionId: string) {
