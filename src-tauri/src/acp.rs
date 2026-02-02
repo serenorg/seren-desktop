@@ -262,14 +262,29 @@ impl Client for ClientDelegate {
         let request_id = Uuid::new_v4().to_string();
         let (response_tx, response_rx) = oneshot::channel::<String>();
 
+        let tool_name = serde_json::to_value(&args.tool_call)
+            .ok()
+            .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(String::from))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        log::info!(
+            "[ACP] Permission request {} for session {}: tool={}",
+            request_id, self.session_id, tool_name
+        );
+
         // Store the response channel so the frontend can send back a decision
-        self.pending_permissions
-            .lock()
-            .await
-            .insert(request_id.clone(), response_tx);
+        let pending_count = {
+            let mut perms = self.pending_permissions.lock().await;
+            perms.insert(request_id.clone(), response_tx);
+            perms.len()
+        };
+        log::debug!(
+            "[ACP] Permission request {} stored (total pending: {})",
+            request_id, pending_count
+        );
 
         // Emit permission request to frontend with request_id for correlation
-        let _ = self.app.emit(
+        let emit_result = self.app.emit(
             events::PERMISSION_REQUEST,
             serde_json::json!({
                 "sessionId": self.session_id,
@@ -278,20 +293,39 @@ impl Client for ClientDelegate {
                 "options": serde_json::to_value(&args.options).ok(),
             }),
         );
+        if let Err(ref e) = emit_result {
+            log::error!(
+                "[ACP] Failed to emit permission request {} to frontend: {}",
+                request_id, e
+            );
+        }
 
         // Wait for user response (5-minute timeout)
+        log::debug!("[ACP] Waiting for permission response {} ...", request_id);
         let option_id_str =
             match tokio::time::timeout(std::time::Duration::from_secs(300), response_rx).await {
-                Ok(Ok(id)) => id,
+                Ok(Ok(id)) => {
+                    log::info!(
+                        "[ACP] Permission {} responded with option: {}",
+                        request_id, id
+                    );
+                    id
+                }
                 Ok(Err(_)) => {
-                    // Channel dropped — permission request was dismissed
+                    log::warn!(
+                        "[ACP] Permission {} channel dropped (session may have been cleaned up)",
+                        request_id
+                    );
                     self.pending_permissions.lock().await.remove(&request_id);
                     return Err(agent_client_protocol::Error::internal_error().data(
                         serde_json::Value::String("Permission request cancelled".into()),
                     ));
                 }
                 Err(_) => {
-                    // Timeout
+                    log::warn!(
+                        "[ACP] Permission {} timed out after 5 minutes",
+                        request_id
+                    );
                     self.pending_permissions.lock().await.remove(&request_id);
                     return Err(agent_client_protocol::Error::internal_error().data(
                         serde_json::Value::String("Permission request timed out".into()),
@@ -772,6 +806,23 @@ pub async fn acp_spawn(
             // Clean up session from map when worker exits (prevents ghost sessions)
             let cleanup_session_id = session_id_clone.clone();
             let state = app_handle.state::<AcpState>();
+
+            // Check if there are pending permissions before cleanup
+            {
+                let sessions_read = state.sessions.read().await;
+                if let Some(session_arc) = sessions_read.get(&cleanup_session_id) {
+                    let session = session_arc.lock().await;
+                    let pending = session.pending_permissions.lock().await;
+                    if !pending.is_empty() {
+                        log::warn!(
+                            "[ACP] Session {} worker exiting with {} pending permission requests: {:?}",
+                            cleanup_session_id, pending.len(),
+                            pending.keys().collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+
             let mut sessions = state.sessions.write().await;
             sessions.remove(&cleanup_session_id);
             log::info!("[ACP] Session {} removed from map after worker exit", cleanup_session_id);
@@ -1337,20 +1388,56 @@ pub async fn acp_respond_to_permission(
     request_id: String,
     option_id: String,
 ) -> Result<(), String> {
+    log::info!(
+        "[ACP] Frontend responding to permission {}: session={}, option={}",
+        request_id, session_id, option_id
+    );
+
     let sessions = state.sessions.read().await;
-    let session_arc = sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+    let session_arc = sessions.get(&session_id).ok_or_else(|| {
+        let msg = format!(
+            "Session '{}' not found (may have been cleaned up). Active sessions: {:?}",
+            session_id,
+            sessions.keys().collect::<Vec<_>>()
+        );
+        log::error!("[ACP] {}", msg);
+        msg
+    })?;
     let session = session_arc.lock().await;
 
-    let mut permissions = session.pending_permissions.lock().await;
-    let sender = permissions
-        .remove(&request_id)
-        .ok_or_else(|| format!("Permission request '{}' not found", request_id))?;
+    log::debug!(
+        "[ACP] Session {} status: {:?}",
+        session_id, session.status
+    );
 
-    sender
-        .send(option_id)
-        .map_err(|_| "Permission request channel closed".to_string())
+    let mut permissions = session.pending_permissions.lock().await;
+    log::debug!(
+        "[ACP] Pending permissions for session {}: {:?}",
+        session_id,
+        permissions.keys().collect::<Vec<_>>()
+    );
+
+    let sender = permissions.remove(&request_id).ok_or_else(|| {
+        let msg = format!(
+            "Permission request '{}' not found in session '{}'. Pending: {:?}",
+            request_id, session_id,
+            permissions.keys().collect::<Vec<_>>()
+        );
+        log::error!("[ACP] {}", msg);
+        msg
+    })?;
+
+    sender.send(option_id.clone()).map_err(|_| {
+        let msg = format!(
+            "Permission request {} channel closed (worker may have exited)",
+            request_id
+        );
+        log::error!("[ACP] {}", msg);
+        msg
+    })?;
+
+    log::info!("[ACP] Permission {} delivered successfully", request_id);
+    Ok(())
 }
 
 /// Respond to a diff proposal from the frontend (accept or reject)

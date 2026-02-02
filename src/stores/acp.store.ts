@@ -469,7 +469,16 @@ export const acpStore = {
     const permission = state.pendingPermissions.find(
       (p) => p.requestId === requestId,
     );
-    if (!permission) return;
+    if (!permission) {
+      console.warn(
+        `[AcpStore] respondToPermission: request ${requestId} not found in pending list`,
+      );
+      return;
+    }
+
+    console.info(
+      `[AcpStore] Responding to permission ${requestId}: session=${permission.sessionId}, option=${optionId}`,
+    );
 
     try {
       await acpService.respondToPermission(
@@ -477,8 +486,14 @@ export const acpStore = {
         requestId,
         optionId,
       );
+      console.info(
+        `[AcpStore] Permission ${requestId} response delivered to backend`,
+      );
     } catch (error) {
-      console.error("Failed to respond to permission:", error);
+      console.error(
+        `[AcpStore] Failed to respond to permission ${requestId}:`,
+        error,
+      );
     }
 
     setState(
@@ -492,6 +507,9 @@ export const acpStore = {
       (p) => p.requestId === requestId,
     );
     if (permission) {
+      console.info(
+        `[AcpStore] Dismissing permission ${requestId}: session=${permission.sessionId}`,
+      );
       try {
         await acpService.respondToPermission(
           permission.sessionId,
@@ -499,8 +517,15 @@ export const acpStore = {
           "deny",
         );
       } catch (error) {
-        console.error("Failed to send deny response:", error);
+        console.error(
+          `[AcpStore] Failed to send deny for permission ${requestId}:`,
+          error,
+        );
       }
+    } else {
+      console.warn(
+        `[AcpStore] dismissPermission: request ${requestId} not found in pending list`,
+      );
     }
     setState(
       "pendingPermissions",
@@ -627,6 +652,9 @@ export const acpStore = {
       case "permissionRequest": {
         const permEvent =
           event.data as import("@/services/acp").PermissionRequestEvent;
+        console.info(
+          `[AcpStore] Permission request received: requestId=${permEvent.requestId}, session=${permEvent.sessionId}, tool=${JSON.stringify((permEvent.toolCall as Record<string, unknown>)?.name ?? "unknown")}`,
+        );
         setState("pendingPermissions", [
           ...state.pendingPermissions,
           permEvent,
