@@ -408,7 +408,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   <button
                     type="button"
                     class="px-4 py-2 bg-[#238636] text-white rounded-md text-sm font-medium hover:bg-[#2ea043] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={startSession}
+                    onClick={() => startSession()}
                     disabled={acpStore.isLoading || !hasFolderOpen()}
                   >
                     {acpStore.isLoading
