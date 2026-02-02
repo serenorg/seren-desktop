@@ -495,13 +495,31 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       <Show when={sessionError()}>
         <div class="mx-4 mb-2 px-3 py-2 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded-md text-sm text-[#f85149] flex items-center justify-between">
           <span>{sessionError()}</span>
-          <button
-            type="button"
-            class="text-xs underline hover:no-underline"
-            onClick={() => acpStore.clearError()}
-          >
-            Dismiss
-          </button>
+          <div class="flex items-center gap-2">
+            <Show when={acpStore.activeSession?.info.status === "error"}>
+              <button
+                type="button"
+                class="text-xs underline hover:no-underline"
+                onClick={async () => {
+                  const sid = acpStore.activeSessionId;
+                  if (sid) {
+                    await acpStore.terminateSession(sid);
+                  }
+                  acpStore.clearError();
+                  startSession();
+                }}
+              >
+                Restart Session
+              </button>
+            </Show>
+            <button
+              type="button"
+              class="text-xs underline hover:no-underline"
+              onClick={() => acpStore.clearError()}
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       </Show>
 
