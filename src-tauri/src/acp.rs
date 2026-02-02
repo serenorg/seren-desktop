@@ -24,6 +24,51 @@ use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use uuid::Uuid;
 
+/// Check if an error message indicates an authentication/login failure
+fn is_auth_error(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("invalid api key")
+        || lower.contains("authentication required")
+        || lower.contains("auth required")
+        || lower.contains("please run /login")
+        || lower.contains("authrequired")
+        || lower.contains("not logged in")
+        || lower.contains("login required")
+}
+
+/// Return a user-friendly auth error message for the given agent type
+fn auth_error_message(agent_type: &str) -> String {
+    format!(
+        "{} login required. A terminal window has been opened — please complete authentication there, then retry.",
+        agent_type
+    )
+}
+
+/// Open a terminal running `claude login` so the user can authenticate
+fn launch_claude_login() {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("osascript")
+            .args([
+                "-e",
+                r#"tell application "Terminal" to do script "claude login""#,
+            ])
+            .spawn()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "cmd", "/c", "claude login"])
+            .spawn()
+    } else {
+        std::process::Command::new("x-terminal-emulator")
+            .args(["-e", "claude login"])
+            .spawn()
+    };
+
+    match result {
+        Ok(_) => log::info!("[ACP] Launched claude login terminal"),
+        Err(e) => log::warn!("[ACP] Failed to launch claude login terminal: {}", e),
+    }
+}
+
 /// Agent types supported by the ACP integration
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -699,11 +744,19 @@ pub async fn acp_spawn(
                         let mut session = session_arc_for_worker.lock().await;
                         session.status = SessionStatus::Error;
                     }
+
+                    let error_msg = if is_auth_error(&e) {
+                        launch_claude_login();
+                        auth_error_message(&format!("{:?}", agent_type))
+                    } else {
+                        e
+                    };
+
                     let _ = app_handle.emit(
                         events::ERROR,
                         serde_json::json!({
                             "sessionId": session_id_clone,
-                            "error": e
+                            "error": error_msg
                         }),
                     );
                     let _ = app_handle.emit(
@@ -1165,9 +1218,18 @@ pub async fn acp_prompt(
         .map_err(|_| "Failed to send prompt command".to_string())?;
 
     // Wait for the prompt to complete
-    response_rx
+    let result = response_rx
         .await
-        .map_err(|_| "Worker thread dropped".to_string())?
+        .map_err(|_| "Worker thread dropped".to_string())?;
+
+    if let Err(ref e) = result {
+        if is_auth_error(e) {
+            launch_claude_login();
+            return Err(auth_error_message("Claude Code"));
+        }
+    }
+
+    result
 }
 
 /// Cancel an ongoing prompt

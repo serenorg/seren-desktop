@@ -34,6 +34,17 @@ import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ToolCallCard } from "./ToolCallCard";
 
+/** Check if an error message indicates an auth/login issue */
+function isAuthError(msg: string | null | undefined): boolean {
+  if (!msg) return false;
+  return (
+    /login required/i.test(msg) ||
+    /claude login/i.test(msg) ||
+    /not logged in/i.test(msg) ||
+    /authentication required/i.test(msg)
+  );
+}
+
 interface AgentChatProps {
   onViewDiff?: (diff: DiffEvent) => void;
 }
@@ -298,7 +309,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       case "error":
         return (
           <article class="px-5 py-3 border-b border-[#21262d]">
-            <div class="px-3 py-2 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded-md text-sm text-[#f85149]">
+            <div
+              class={`px-3 py-2 border rounded-md text-sm ${
+                isAuthError(message.content)
+                  ? "bg-[rgba(210,153,34,0.1)] border-[rgba(210,153,34,0.4)] text-[#d2992a]"
+                  : "bg-[rgba(248,81,73,0.1)] border-[rgba(248,81,73,0.4)] text-[#f85149]"
+              }`}
+            >
               {message.content}
             </div>
           </article>
@@ -395,7 +412,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                         </svg>
                         <span>
                           <strong>Claude Code Required:</strong> Make sure
-                          Claude Code CLI is installed on your computer.
+                          Claude Code CLI is installed and run{" "}
+                          <code>claude login</code> to authenticate.
                         </span>
                       </div>
                     </div>
@@ -493,7 +511,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       {/* Error Display */}
       <Show when={sessionError()}>
-        <div class="mx-4 mb-2 px-3 py-2 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded-md text-sm text-[#f85149] flex items-center justify-between">
+        <div
+          class={`mx-4 mb-2 px-3 py-2 border rounded-md text-sm flex items-center justify-between ${
+            isAuthError(sessionError())
+              ? "bg-[rgba(210,153,34,0.1)] border-[rgba(210,153,34,0.4)] text-[#d2992a]"
+              : "bg-[rgba(248,81,73,0.1)] border-[rgba(248,81,73,0.4)] text-[#f85149]"
+          }`}
+        >
           <span>{sessionError()}</span>
           <div class="flex items-center gap-2">
             <Show when={acpStore.activeSession?.info.status === "error"}>
