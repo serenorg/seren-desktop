@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-const MAX_MESSAGES_PER_CONVERSATION: i32 = 100;
+const MAX_MESSAGES_PER_CONVERSATION: i32 = 1000;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Conversation {
@@ -202,13 +202,20 @@ pub async fn save_message(
             params![id, conversation_id, role, content, model, timestamp],
         )?;
 
-        // Prune old messages for this conversation
-        conn.execute(
-            "DELETE FROM messages WHERE conversation_id = ?1 AND id NOT IN (
-                SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY timestamp DESC LIMIT ?2
-            )",
-            params![conversation_id, MAX_MESSAGES_PER_CONVERSATION],
+        // Prune old messages only when count exceeds limit
+        let count: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1",
+            params![conversation_id],
+            |row| row.get(0),
         )?;
+        if count > MAX_MESSAGES_PER_CONVERSATION {
+            conn.execute(
+                "DELETE FROM messages WHERE conversation_id = ?1 AND id NOT IN (
+                    SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY timestamp DESC LIMIT ?2
+                )",
+                params![conversation_id, MAX_MESSAGES_PER_CONVERSATION],
+            )?;
+        }
         Ok(())
     })
     .await
@@ -231,7 +238,7 @@ pub async fn get_messages(
 
         let rows = stmt
             .query_map(
-                params![conversation_id, limit.min(MAX_MESSAGES_PER_CONVERSATION)],
+                params![conversation_id, limit],
                 |row| {
                     Ok(StoredMessage {
                         id: row.get(0)?,
