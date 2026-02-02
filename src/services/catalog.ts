@@ -193,6 +193,23 @@ export function formatNumber(num: number): string {
 }
 
 /**
+ * Extract a human-readable message from an SDK error.
+ */
+function formatApiError(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (typeof error === "object" && error !== null) {
+    const obj = error as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    if (typeof obj.detail === "string") return obj.detail;
+    if (typeof obj.error === "string") return obj.error;
+    // Try status code
+    if (typeof obj.status === "number") return `HTTP ${obj.status}`;
+  }
+  return fallback;
+}
+
+/**
  * Publisher catalog service for Seren API operations.
  * Uses generated SDK with full type safety.
  */
@@ -208,7 +225,7 @@ export const catalog = {
     });
     if (error) {
       console.error("[Catalog] Error fetching publishers:", error);
-      throw new Error("Failed to list publishers");
+      throw new Error(`Failed to list publishers: ${formatApiError(error, "unknown error")}`);
     }
     const rawPublishers = data?.data || [];
     console.log("[Catalog] Found", rawPublishers.length, "publishers");
@@ -224,7 +241,8 @@ export const catalog = {
       throwOnError: false,
     });
     if (error || !data?.data) {
-      throw new Error("Failed to get publisher");
+      console.error("[Catalog] Error fetching publisher:", error);
+      throw new Error(`Failed to get publisher: ${formatApiError(error, "not found")}`);
     }
     return transformPublisher(data.data);
   },
@@ -242,7 +260,8 @@ export const catalog = {
       throwOnError: false,
     });
     if (error) {
-      throw new Error("Failed to search publishers");
+      console.error("[Catalog] Error searching publishers:", error);
+      throw new Error(`Failed to search publishers: ${formatApiError(error, "unknown error")}`);
     }
     const rawPublishers = data?.data || [];
     return rawPublishers.map(transformPublisher);
@@ -300,7 +319,8 @@ export const catalog = {
       throwOnError: false,
     });
     if (error) {
-      throw new Error("Failed to list publishers by category");
+      console.error("[Catalog] Error listing by category:", error);
+      throw new Error(`Failed to list publishers by category: ${formatApiError(error, "unknown error")}`);
     }
     const rawPublishers = data?.data || [];
     return rawPublishers.map(transformPublisher);
