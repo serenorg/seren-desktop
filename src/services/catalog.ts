@@ -8,6 +8,7 @@ import {
   suggestPublishers,
 } from "@/api";
 import { apiBase } from "@/lib/config";
+import { log } from "@/lib/logger";
 
 /**
  * Publisher type (database, api, mcp, compute).
@@ -218,17 +219,17 @@ export const catalog = {
    * List all active publishers.
    */
   async list(): Promise<Publisher[]> {
-    console.log("[Catalog] Fetching publishers");
+    log.info("[Catalog] Fetching publishers");
     const { data, error } = await listStorePublishers({
       query: { limit: 100 },
       throwOnError: false,
     });
     if (error) {
-      console.error("[Catalog] Error fetching publishers:", error);
+      log.error("[Catalog] Error fetching publishers:", error);
       throw new Error(`Failed to list publishers: ${formatApiError(error, "unknown error")}`);
     }
     const rawPublishers = data?.data || [];
-    console.log("[Catalog] Found", rawPublishers.length, "publishers");
+    log.info("[Catalog] Found", rawPublishers.length, "publishers");
     return rawPublishers.map(transformPublisher);
   },
 
@@ -241,7 +242,7 @@ export const catalog = {
       throwOnError: false,
     });
     if (error || !data?.data) {
-      console.error("[Catalog] Error fetching publisher:", error);
+      log.error("[Catalog] Error fetching publisher:", error);
       throw new Error(`Failed to get publisher: ${formatApiError(error, "not found")}`);
     }
     return transformPublisher(data.data);
@@ -260,7 +261,7 @@ export const catalog = {
       throwOnError: false,
     });
     if (error) {
-      console.error("[Catalog] Error searching publishers:", error);
+      log.error("[Catalog] Error searching publishers:", error);
       throw new Error(`Failed to search publishers: ${formatApiError(error, "unknown error")}`);
     }
     const rawPublishers = data?.data || [];
@@ -319,7 +320,7 @@ export const catalog = {
       throwOnError: false,
     });
     if (error) {
-      console.error("[Catalog] Error listing by category:", error);
+      log.error("[Catalog] Error listing by category:", error);
       throw new Error(`Failed to list publishers by category: ${formatApiError(error, "unknown error")}`);
     }
     const rawPublishers = data?.data || [];
