@@ -20,7 +20,7 @@ import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
-import type { DiffEvent } from "@/services/acp";
+import type { AgentType, DiffEvent } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
@@ -100,7 +100,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     ),
   );
 
-  const startSession = async () => {
+  const startSession = async (agentType?: AgentType) => {
     const cwd = getCwd();
     if (!cwd) {
       console.warn("[AgentChat] No folder open, cannot start session");
@@ -108,7 +108,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
     console.log("[AgentChat] Starting session with cwd:", cwd);
     try {
-      const sessionId = await acpStore.spawnSession(cwd);
+      const sessionId = await acpStore.spawnSession(cwd, agentType);
       console.log("[AgentChat] Session started:", sessionId);
     } catch (error) {
       console.error("[AgentChat] Failed to start session:", error);
