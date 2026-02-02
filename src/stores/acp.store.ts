@@ -196,12 +196,16 @@ export const acpStore = {
   /**
    * Spawn a new agent session.
    */
-  async spawnSession(cwd: string): Promise<string | null> {
+  async spawnSession(
+    cwd: string,
+    agentType?: AgentType,
+  ): Promise<string | null> {
+    const resolvedAgentType = agentType ?? state.selectedAgentType;
     setState("isLoading", true);
     setState("error", null);
 
     console.log("[AcpStore] Spawning session:", {
-      agentType: state.selectedAgentType,
+      agentType: resolvedAgentType,
       cwd,
     });
 
@@ -225,7 +229,7 @@ export const acpStore = {
 
     try {
       // Ensure Claude CLI is installed before spawning
-      if (state.selectedAgentType === "claude-code") {
+      if (resolvedAgentType === "claude-code") {
         const { listen } = await import("@tauri-apps/api/event");
         const progressUnsub = await listen<{ stage: string; message: string }>(
           "acp://cli-install-progress",
@@ -254,7 +258,7 @@ export const acpStore = {
       }
 
       const info = await acpService.spawnAgent(
-        state.selectedAgentType,
+        resolvedAgentType,
         cwd,
         settingsStore.settings.agentSandboxMode,
       );
