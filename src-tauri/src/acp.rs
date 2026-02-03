@@ -29,11 +29,18 @@ fn is_auth_error(msg: &str) -> bool {
     let lower = msg.to_lowercase();
     lower.contains("invalid api key")
         || lower.contains("authentication required")
+        || lower.contains("authentication_error")
         || lower.contains("auth required")
         || lower.contains("please run /login")
         || lower.contains("authrequired")
         || lower.contains("not logged in")
         || lower.contains("login required")
+        || lower.contains("oauth token has expired")
+        || lower.contains("token has expired")
+        || lower.contains("token expired")
+        || lower.contains("please obtain a new token")
+        || lower.contains("refresh your existing token")
+        || lower.contains("401")
 }
 
 /// Return a user-friendly auth error message for the given agent type
@@ -1543,6 +1550,19 @@ pub async fn acp_check_agent_available(agent_type: AgentType) -> Result<bool, St
     match agent_type.command() {
         Ok(path) => Ok(path.exists()),
         Err(_) => Ok(false),
+    }
+}
+
+/// Launch the authentication flow for an agent.
+/// For Claude, this opens a terminal running `claude login`.
+#[tauri::command]
+pub fn acp_launch_login(agent_type: AgentType) {
+    match agent_type {
+        AgentType::ClaudeCode => launch_claude_login(),
+        AgentType::Codex => {
+            // Codex uses OpenAI API keys, no OAuth login flow
+            log::info!("[ACP] Codex uses API keys, no login flow available");
+        }
     }
 }
 

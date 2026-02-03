@@ -666,6 +666,8 @@ pub fn run() {
             #[cfg(feature = "acp")]
             acp::acp_check_agent_available,
             #[cfg(feature = "acp")]
+            acp::acp_launch_login,
+            #[cfg(feature = "acp")]
             acp::acp_ensure_claude_cli,
             #[cfg(feature = "acp")]
             acp::acp_respond_to_diff_proposal,
