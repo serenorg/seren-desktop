@@ -155,7 +155,7 @@ fn launch_codex_login() {
             ];
             for (terminal, args) in terminal_commands {
                 let spawn_result = std::process::Command::new(terminal)
-                    .args(*args)
+                    .args(args)
                     .arg(&script)
                     .spawn();
                 match spawn_result {
