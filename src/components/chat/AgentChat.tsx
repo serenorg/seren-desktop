@@ -20,7 +20,7 @@ import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
-import type { AgentType, DiffEvent } from "@/services/acp";
+import { launchLogin, type AgentType, type DiffEvent } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
@@ -41,7 +41,14 @@ function isAuthError(msg: string | null | undefined): boolean {
     /login required/i.test(msg) ||
     /claude login/i.test(msg) ||
     /not logged in/i.test(msg) ||
-    /authentication required/i.test(msg)
+    /authentication required/i.test(msg) ||
+    /authentication_error/i.test(msg) ||
+    /oauth token has expired/i.test(msg) ||
+    /token has expired/i.test(msg) ||
+    /token expired/i.test(msg) ||
+    /please obtain a new token/i.test(msg) ||
+    /refresh your existing token/i.test(msg) ||
+    /401/i.test(msg)
   );
 }
 
@@ -316,7 +323,24 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   : "bg-[rgba(248,81,73,0.1)] border-[rgba(248,81,73,0.4)] text-[#f85149]"
               }`}
             >
-              {message.content}
+              <Show
+                when={isAuthError(message.content)}
+                fallback={<span>{message.content}</span>}
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span>Authentication expired. Please log in to continue.</span>
+                  <button
+                    type="button"
+                    class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d] flex-shrink-0"
+                    onClick={() => {
+                      const agentType = acpStore.activeSession?.info.agentType ?? "claude-code";
+                      launchLogin(agentType);
+                    }}
+                  >
+                    Login
+                  </button>
+                </div>
+              </Show>
             </div>
           </article>
         );
@@ -512,38 +536,57 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       {/* Error Display */}
       <Show when={sessionError()}>
         <div
-          class={`mx-4 mb-2 px-3 py-2 border rounded-md text-sm flex items-center justify-between ${
+          class={`mx-4 mb-2 px-3 py-2 border rounded-md text-sm ${
             isAuthError(sessionError())
               ? "bg-[rgba(210,153,34,0.1)] border-[rgba(210,153,34,0.4)] text-[#d2992a]"
               : "bg-[rgba(248,81,73,0.1)] border-[rgba(248,81,73,0.4)] text-[#f85149]"
           }`}
         >
-          <span>{sessionError()}</span>
-          <div class="flex items-center gap-2">
-            <Show when={acpStore.activeSession?.info.status === "error"}>
+          <div class="flex items-center justify-between">
+            <span class="flex-1">{isAuthError(sessionError()) ? "Authentication expired. Please log in again to continue." : sessionError()}</span>
+            <div class="flex items-center gap-2 ml-2">
+              <Show when={isAuthError(sessionError())}>
+                <button
+                  type="button"
+                  class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d]"
+                  onClick={() => {
+                    const agentType = acpStore.activeSession?.info.agentType ?? "claude-code";
+                    launchLogin(agentType);
+                  }}
+                >
+                  Login
+                </button>
+              </Show>
+              <Show when={acpStore.activeSession?.info.status === "error"}>
+                <button
+                  type="button"
+                  class="text-xs underline hover:no-underline"
+                  onClick={async () => {
+                    const sid = acpStore.activeSessionId;
+                    if (sid) {
+                      await acpStore.terminateSession(sid);
+                    }
+                    acpStore.clearError();
+                    startSession();
+                  }}
+                >
+                  Restart Session
+                </button>
+              </Show>
               <button
                 type="button"
                 class="text-xs underline hover:no-underline"
-                onClick={async () => {
-                  const sid = acpStore.activeSessionId;
-                  if (sid) {
-                    await acpStore.terminateSession(sid);
-                  }
-                  acpStore.clearError();
-                  startSession();
-                }}
+                onClick={() => acpStore.clearError()}
               >
-                Restart Session
+                Dismiss
               </button>
-            </Show>
-            <button
-              type="button"
-              class="text-xs underline hover:no-underline"
-              onClick={() => acpStore.clearError()}
-            >
-              Dismiss
-            </button>
+            </div>
           </div>
+          <Show when={isAuthError(sessionError())}>
+            <p class="mt-1 text-xs opacity-80">
+              Click "Login" to authenticate with {acpStore.activeSession?.info.agentType === "codex" ? "OpenAI" : "Anthropic"}, then restart the session.
+            </p>
+          </Show>
         </div>
       </Show>
 

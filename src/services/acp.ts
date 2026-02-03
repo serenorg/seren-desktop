@@ -243,6 +243,14 @@ export async function checkAgentAvailable(
   });
 }
 
+/**
+ * Launch the authentication flow for an agent.
+ * For Claude, this opens a terminal running `claude login`.
+ */
+export async function launchLogin(agentType: AgentType): Promise<void> {
+  return invoke("acp_launch_login", { agentType });
+}
+
 // ============================================================================
 // Event Subscription
 // ============================================================================
