@@ -14,6 +14,7 @@
     "build:openclaw:optional": "tsx scripts/build-openclaw.ts --optional",
     "build:sidecar": "tsx scripts/build-sidecar.ts",
     "build:sidecar:release": "tsx scripts/build-sidecar.ts release",
+    "sign:embedded-runtime": "tsx scripts/sign-embedded-runtime.ts",
     "sidecar:update": "tsx scripts/update-sidecar.ts",
     "generate:api": "openapi-ts -f openapi/openapi-ts.config.ts",
     "lint": "biome lint",

@@ -350,28 +350,6 @@ function buildSidecar(
   }
 
   console.log(`  Copied to ${destBin}`);
-
-  // Sign on macOS when APPLE_SIGNING_IDENTITY is set (for notarization)
-  const signingIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim();
-  if (signingIdentity && process.platform === "darwin") {
-    console.log(`  Signing with identity: ${signingIdentity.slice(0, 20)}...`);
-    try {
-      run("codesign", [
-        "--sign",
-        signingIdentity,
-        "--options",
-        "runtime",
-        "--timestamp",
-        "--force",
-        destBin,
-      ]);
-      console.log(`  Signed: ${destBin}`);
-    } catch (err) {
-      console.error(`  Warning: Failed to sign ${destBin}:`, err);
-      // Don't fail the build - Tauri may still handle signing
-    }
-  }
-
   return true;
 }
 
