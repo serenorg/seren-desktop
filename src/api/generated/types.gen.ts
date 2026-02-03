@@ -571,86 +571,6 @@ export type ApiKeysResponse = {
 };
 
 /**
- * API request body for paid HTTP calls
- */
-export type ApiRequestBody = {
-    /**
-     * Optional asset id to pay with (defaults to publisher primary asset)
-     */
-    asset_id?: string | null;
-    /**
-     * Optional JSON body to send
-     */
-    body?: unknown;
-    /**
-     * Optional estimated rows for pricing (default: 1000)
-     */
-    estimated_rows?: number | null;
-    /**
-     * Optional request headers (will not override publisher headers)
-     */
-    headers?: {
-        [key: string]: string;
-    } | null;
-    /**
-     * HTTP method (default: POST)
-     */
-    method?: string | null;
-    /**
-     * Optional relative path to append to the publisher base URL
-     */
-    path?: string | null;
-    pre_authorization?: PreAuthorization | null;
-    /**
-     * Publisher slug (alternative to `publisher_id`)
-     */
-    publisher?: string | null;
-    /**
-     * Publisher UUID (required if `publisher` slug not provided)
-     */
-    publisher_id?: string | null;
-    /**
-     * Optional idempotency key (UUID) for deduplication
-     */
-    request_id?: string | null;
-};
-
-/**
- * API result response
- */
-export type ApiResultResponse = {
-    /**
-     * Asset symbol (e.g., USDC, USDT)
-     */
-    asset_symbol: string;
-    /**
-     * Response body (JSON if available, otherwise raw text)
-     */
-    body: unknown;
-    /**
-     * Actual cost charged in configured asset
-     */
-    cost: string;
-    cost_breakdown?: CostBreakdown | null;
-    /**
-     * Execution time in milliseconds
-     */
-    execution_time_ms: number;
-    /**
-     * Payment source used
-     */
-    payment_source: string;
-    /**
-     * Size of the publisher response body in bytes (raw, before JSON parsing).
-     */
-    response_bytes: number;
-    /**
-     * HTTP status from publisher
-     */
-    status: number;
-};
-
-/**
  * Request to apply a referral code
  */
 export type ApplyReferralRequest = {
@@ -9672,66 +9592,6 @@ export type QueryParamDefinition = {
 };
 
 /**
- * Query request body
- */
-export type QueryRequestBody = {
-    /**
-     * Optional asset id to pay with (defaults to publisher primary asset)
-     */
-    asset_id?: string | null;
-    /**
-     * Optional database name
-     */
-    database?: string | null;
-    /**
-     * Publisher slug (alternative to `publisher_id`)
-     */
-    publisher?: string | null;
-    /**
-     * Publisher UUID (required if `publisher` slug not provided)
-     */
-    publisher_id?: string | null;
-    /**
-     * SQL query to execute
-     */
-    query: string;
-    /**
-     * Optional idempotency key (UUID) for deduplication
-     */
-    request_id?: string | null;
-};
-
-/**
- * Query result response
- */
-export type QueryResultResponse = {
-    /**
-     * Asset symbol (e.g., USDC, USDT)
-     */
-    asset_symbol: string;
-    /**
-     * Actual cost charged in configured asset
-     */
-    cost: string;
-    /**
-     * Execution time in milliseconds
-     */
-    execution_time_ms: number;
-    /**
-     * Payment source used
-     */
-    payment_source: string;
-    /**
-     * Number of rows returned
-     */
-    row_count: number;
-    /**
-     * Query result rows as JSON
-     */
-    rows: Array<unknown>;
-};
-
-/**
  * Enum for quota check results
  */
 export type QuotaCheckResult = 'Allowed' | {
@@ -12942,80 +12802,6 @@ export type WebhooksResponse = {
     pagination?: PaginationMeta | null;
 };
 
-export type ExecuteApiData = {
-    body: ApiRequestBody;
-    path?: never;
-    query?: never;
-    url: '/agent/api';
-};
-
-export type ExecuteApiErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Payment required
-     */
-    402: PaymentRequiredResponseWithInfo;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ExecuteApiError = ExecuteApiErrors[keyof ExecuteApiErrors];
-
-export type ExecuteApiResponses = {
-    /**
-     * API request executed successfully
-     */
-    200: ApiResultResponse;
-};
-
-export type ExecuteApiResponse = ExecuteApiResponses[keyof ExecuteApiResponses];
-
-export type ExecuteQueryData = {
-    body: QueryRequestBody;
-    path?: never;
-    query?: never;
-    url: '/agent/database';
-};
-
-export type ExecuteQueryErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Payment required
-     */
-    402: PaymentRequiredResponseWithInfo;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ExecuteQueryError = ExecuteQueryErrors[keyof ExecuteQueryErrors];
-
-export type ExecuteQueryResponses = {
-    /**
-     * Query executed successfully
-     */
-    200: QueryResultResponse;
-};
-
-export type ExecuteQueryResponse = ExecuteQueryResponses[keyof ExecuteQueryResponses];
-
 export type OnchainDepositData = {
     body: OnchainDepositRequest;
     path?: never;
@@ -13553,43 +13339,6 @@ export type AgentRegisterResponses = {
 };
 
 export type AgentRegisterResponse2 = AgentRegisterResponses[keyof AgentRegisterResponses];
-
-export type ExecuteApiStreamData = {
-    body: ApiRequestBody;
-    path?: never;
-    query?: never;
-    url: '/agent/stream';
-};
-
-export type ExecuteApiStreamErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Payment required
-     */
-    402: PaymentRequiredResponseWithInfo;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ExecuteApiStreamError = ExecuteApiStreamErrors[keyof ExecuteApiStreamErrors];
-
-export type ExecuteApiStreamResponses = {
-    /**
-     * API response streamed successfully
-     */
-    200: string;
-};
-
-export type ExecuteApiStreamResponse = ExecuteApiStreamResponses[keyof ExecuteApiStreamResponses];
 
 export type GetSupportedData = {
     body?: never;

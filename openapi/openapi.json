@@ -19,108 +19,6 @@
     }
   ],
   "paths": {
-    "/agent/api": {
-      "post": {
-        "tags": [
-          "agent"
-        ],
-        "summary": "Execute a paid HTTP API request",
-        "description": "This unified endpoint supports two payment methods:\n\n1. **Prepaid Balance** (Authorization header): Authenticated users can pay with their\nprepaid balance. Include `Authorization: Bearer <token>` header.\n\n2. **On-Chain Payment** (payment protocol headers): Agents can pay with cryptocurrency.\nIf no payment is provided, returns HTTP 402 Payment Required with payment options.\n\nThe endpoint auto-detects which payment method to use based on headers present.\n\n**DEPRECATED**: This endpoint is deprecated and will be removed on August 1, 2026.\nUse `ANY /publishers/{slug}/{*path}` instead.",
-        "operationId": "execute_api",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiRequestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "API request executed successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResultResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request"
-          },
-          "402": {
-            "description": "Payment required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentRequiredResponseWithInfo"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Publisher not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
-    "/agent/database": {
-      "post": {
-        "tags": [
-          "agent"
-        ],
-        "summary": "Execute a paid database query",
-        "description": "This unified endpoint supports two payment methods:\n\n1. **Prepaid Balance** (Authorization header): Authenticated users can pay with their\nprepaid balance. Include `Authorization: Bearer <token>` header.\n\n2. **On-Chain Payment** (payment protocol headers): Agents can pay with cryptocurrency.\nIf no payment is provided, returns HTTP 402 Payment Required with payment options.\n\nThe endpoint auto-detects which payment method to use based on headers present.\n\n**DEPRECATED**: This endpoint is deprecated and will be removed on August 1, 2026.\nUse `POST /publishers/{slug}` with query body instead.",
-        "operationId": "execute_query",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/QueryRequestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Query executed successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/QueryResultResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request"
-          },
-          "402": {
-            "description": "Payment required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentRequiredResponseWithInfo"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Publisher not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
     "/agent/deposit": {
       "post": {
         "tags": [
@@ -824,57 +722,6 @@
           },
           "409": {
             "description": "Email already registered"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
-    "/agent/stream": {
-      "post": {
-        "tags": [
-          "agent"
-        ],
-        "summary": "Execute a paid HTTP API request and stream the publisher response back to the client.",
-        "description": "This endpoint is intended for large responses where buffering the entire payload in memory\nis undesirable. Cost/settlement metadata is returned via headers.\n\nSupports x402 v1/v2 headers.",
-        "operationId": "execute_api_stream",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiRequestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "API response streamed successfully",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request"
-          },
-          "402": {
-            "description": "Payment required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentRequiredResponseWithInfo"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Publisher not found"
           },
           "500": {
             "description": "Internal server error"
@@ -10413,7 +10260,12 @@
         },
         "responses": {
           "200": {
-            "description": "Request processed successfully"
+            "description": "Request processed successfully",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "402": {
             "description": "Payment required"
@@ -10879,7 +10731,12 @@
         },
         "responses": {
           "200": {
-            "description": "Request proxied successfully"
+            "description": "Request proxied successfully",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "402": {
             "description": "Payment required"
@@ -11764,126 +11621,6 @@
               }
             ],
             "nullable": true
-          }
-        }
-      },
-      "ApiRequestBody": {
-        "type": "object",
-        "description": "API request body for paid HTTP calls",
-        "properties": {
-          "asset_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Optional asset id to pay with (defaults to publisher primary asset)",
-            "nullable": true
-          },
-          "body": {
-            "description": "Optional JSON body to send",
-            "nullable": true
-          },
-          "estimated_rows": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Optional estimated rows for pricing (default: 1000)",
-            "nullable": true
-          },
-          "headers": {
-            "type": "object",
-            "description": "Optional request headers (will not override publisher headers)",
-            "additionalProperties": {
-              "type": "string"
-            },
-            "nullable": true
-          },
-          "method": {
-            "type": "string",
-            "description": "HTTP method (default: POST)",
-            "nullable": true
-          },
-          "path": {
-            "type": "string",
-            "description": "Optional relative path to append to the publisher base URL",
-            "nullable": true
-          },
-          "pre_authorization": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PreAuthorization"
-              }
-            ],
-            "nullable": true
-          },
-          "publisher": {
-            "type": "string",
-            "description": "Publisher slug (alternative to `publisher_id`)",
-            "nullable": true
-          },
-          "publisher_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Publisher UUID (required if `publisher` slug not provided)",
-            "nullable": true
-          },
-          "request_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Optional idempotency key (UUID) for deduplication",
-            "nullable": true
-          }
-        }
-      },
-      "ApiResultResponse": {
-        "type": "object",
-        "description": "API result response",
-        "required": [
-          "status",
-          "body",
-          "response_bytes",
-          "execution_time_ms",
-          "cost",
-          "asset_symbol",
-          "payment_source"
-        ],
-        "properties": {
-          "asset_symbol": {
-            "type": "string",
-            "description": "Asset symbol (e.g., USDC, USDT)"
-          },
-          "body": {
-            "description": "Response body (JSON if available, otherwise raw text)"
-          },
-          "cost": {
-            "type": "string",
-            "description": "Actual cost charged in configured asset"
-          },
-          "cost_breakdown": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CostBreakdown"
-              }
-            ],
-            "nullable": true
-          },
-          "execution_time_ms": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Execution time in milliseconds"
-          },
-          "payment_source": {
-            "type": "string",
-            "description": "Payment source used"
-          },
-          "response_bytes": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Size of the publisher response body in bytes (raw, before JSON parsing).",
-            "minimum": 0
-          },
-          "status": {
-            "type": "integer",
-            "format": "int32",
-            "description": "HTTP status from publisher",
-            "minimum": 0
           }
         }
       },
@@ -21394,88 +21131,6 @@
           "required": {
             "type": "boolean",
             "description": "Whether this parameter is required"
-          }
-        }
-      },
-      "QueryRequestBody": {
-        "type": "object",
-        "description": "Query request body",
-        "required": [
-          "query"
-        ],
-        "properties": {
-          "asset_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Optional asset id to pay with (defaults to publisher primary asset)",
-            "nullable": true
-          },
-          "database": {
-            "type": "string",
-            "description": "Optional database name",
-            "nullable": true
-          },
-          "publisher": {
-            "type": "string",
-            "description": "Publisher slug (alternative to `publisher_id`)",
-            "nullable": true
-          },
-          "publisher_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Publisher UUID (required if `publisher` slug not provided)",
-            "nullable": true
-          },
-          "query": {
-            "type": "string",
-            "description": "SQL query to execute"
-          },
-          "request_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Optional idempotency key (UUID) for deduplication",
-            "nullable": true
-          }
-        }
-      },
-      "QueryResultResponse": {
-        "type": "object",
-        "description": "Query result response",
-        "required": [
-          "rows",
-          "row_count",
-          "execution_time_ms",
-          "cost",
-          "asset_symbol",
-          "payment_source"
-        ],
-        "properties": {
-          "asset_symbol": {
-            "type": "string",
-            "description": "Asset symbol (e.g., USDC, USDT)"
-          },
-          "cost": {
-            "type": "string",
-            "description": "Actual cost charged in configured asset"
-          },
-          "execution_time_ms": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Execution time in milliseconds"
-          },
-          "payment_source": {
-            "type": "string",
-            "description": "Payment source used"
-          },
-          "row_count": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Number of rows returned"
-          },
-          "rows": {
-            "type": "array",
-            "items": {},
-            "description": "Query result rows as JSON"
           }
         }
       },
