@@ -64,7 +64,7 @@ export const AgentSelector: Component = () => {
       </button>
 
       <Show when={isOpen()}>
-        <div class="absolute top-full left-0 mt-1 w-64 bg-[#161b22] border border-[#30363d] rounded-lg shadow-lg z-50 overflow-hidden">
+        <div class="absolute bottom-full left-0 mb-1 w-64 bg-[#161b22] border border-[#30363d] rounded-lg shadow-lg z-50 overflow-hidden">
           <For each={acpStore.availableAgents}>
             {(agent) => (
               <button
