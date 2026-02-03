@@ -263,20 +263,6 @@ jobs:
           malware_block: true
           override: true
 
-      - name: Sign Windows MSI installer
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        uses: sslcom/esigner-codesign@develop
-        with:
-          command: batch_sign
-          username: ${{ secrets.ES_USERNAME }}
-          password: ${{ secrets.ES_PASSWORD }}
-          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
-          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
-          dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/msi
-          environment_name: PROD
-          malware_block: true
-          override: true
-
       # Upload artifacts
       - name: Upload macOS DMG
         if: matrix.os == 'macos-latest'
@@ -291,13 +277,6 @@ jobs:
         with:
           name: Seren-Desktop-${{ matrix.name }}.exe
           path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
-
-      - name: Upload Windows MSI
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Seren-Desktop-${{ matrix.name }}.msi
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
 
       - name: Upload Linux DEB
         if: matrix.os == 'ubuntu-latest'
