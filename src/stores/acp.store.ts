@@ -215,6 +215,19 @@ export const acpStore = {
       cwd,
     });
 
+    const agentAvailable = await acpService.checkAgentAvailable(
+      resolvedAgentType,
+    );
+    if (!agentAvailable) {
+      const helper =
+        resolvedAgentType === "codex"
+          ? "Codex agent binary not found. Run `pnpm build:sidecar seren-acp-codex` (or reinstall Seren Desktop) and try again."
+          : "Claude Code agent binary not found. Run `pnpm build:sidecar seren-acp-claude` and try again.";
+      setState("error", helper);
+      setState("isLoading", false);
+      return null;
+    }
+
     // Set up a global listener for session status events BEFORE spawning
     // This ensures we don't miss the "ready" event due to race conditions
     let resolveReady: ((sessionId: string) => void) | null = null;

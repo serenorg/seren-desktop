@@ -149,7 +149,7 @@ fn generate_hook_token() -> String {
 ///
 /// This supports "mjs bundling": we bundle the OpenClaw package (dist + node_modules + openclaw.mjs)
 /// into `embedded-runtime/openclaw/` and spawn it with Node.js from our embedded runtime.
-fn find_openclaw_mjs() -> Result<PathBuf, String> {
+pub(crate) fn find_openclaw_mjs() -> Result<PathBuf, String> {
     let exe_path =
         std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
     let exe_dir = exe_path
