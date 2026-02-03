@@ -27,8 +27,7 @@ pub struct WebFetchResult {
 #[tauri::command]
 pub async fn web_fetch(url: String, timeout_ms: Option<u64>) -> Result<WebFetchResult, String> {
     // Validate URL
-    let parsed_url =
-        url::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let parsed_url = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
 
     // Only allow http/https
     if !["http", "https"].contains(&parsed_url.scheme()) {

@@ -1,7 +1,7 @@
 // ABOUTME: Local vector storage for semantic code search using sqlite-vec.
 // ABOUTME: Stores code embeddings locally for instant retrieval without network latency.
 
-use rusqlite::{ffi::sqlite3_auto_extension, params, Connection, Result};
+use rusqlite::{Connection, Result, ffi::sqlite3_auto_extension, params};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -16,12 +16,10 @@ static INIT_VEC: Once = Once::new();
 
 /// Initialize sqlite-vec extension globally (call once at app startup).
 pub fn init_sqlite_vec() {
-    INIT_VEC.call_once(|| {
-        unsafe {
-            sqlite3_auto_extension(Some(std::mem::transmute(
-                sqlite_vec::sqlite3_vec_init as *const (),
-            )));
-        }
+    INIT_VEC.call_once(|| unsafe {
+        sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const (),
+        )));
     });
 }
 
@@ -207,7 +205,10 @@ pub fn delete_file_chunks(conn: &Connection, file_path: &str) -> Result<usize> {
     }
 
     // Delete chunks
-    let deleted = conn.execute("DELETE FROM code_chunks WHERE file_path = ?1", params![file_path])?;
+    let deleted = conn.execute(
+        "DELETE FROM code_chunks WHERE file_path = ?1",
+        params![file_path],
+    )?;
 
     Ok(deleted)
 }
@@ -288,11 +289,9 @@ pub fn get_index_stats(conn: &Connection) -> Result<IndexStats> {
     )?;
 
     let last_indexed: Option<i64> = conn
-        .query_row(
-            "SELECT MAX(indexed_at) FROM code_chunks",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT MAX(indexed_at) FROM code_chunks", [], |row| {
+            row.get(0)
+        })
         .ok();
 
     Ok(IndexStats {
@@ -304,10 +303,7 @@ pub fn get_index_stats(conn: &Connection) -> Result<IndexStats> {
 
 /// Convert f32 embedding to blob for storage.
 fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
-    embedding
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect()
+    embedding.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
 #[cfg(test)]

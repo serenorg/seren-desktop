@@ -75,8 +75,13 @@ pub fn start_oauth_callback_server(app_handle: AppHandle) {
                     </html>
                 "#;
 
-                let response = Response::from_string(html)
-                    .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap());
+                let response = Response::from_string(html).with_header(
+                    tiny_http::Header::from_bytes(
+                        &b"Content-Type"[..],
+                        &b"text/html; charset=utf-8"[..],
+                    )
+                    .unwrap(),
+                );
 
                 if let Err(e) = request.respond(response) {
                     log::error!("[OAuth Server] Failed to send response: {}", e);

@@ -130,7 +130,9 @@ fn parse_oauth_callback(query: &str) -> Result<OAuthCallbackResult, OAuthError> 
     if let Some(error) = params.get("error") {
         return Err(OAuthError {
             error: urlencoding_decode(error),
-            error_description: params.get("error_description").map(|s| urlencoding_decode(s)),
+            error_description: params
+                .get("error_description")
+                .map(|s| urlencoding_decode(s)),
         });
     }
 

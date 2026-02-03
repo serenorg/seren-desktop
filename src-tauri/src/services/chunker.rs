@@ -210,11 +210,7 @@ fn extract_identifier_after(line: &str, keyword: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
         .collect();
-    if ident.is_empty() {
-        None
-    } else {
-        Some(ident)
-    }
+    if ident.is_empty() { None } else { Some(ident) }
 }
 
 fn extract_impl_name(line: &str) -> Option<String> {
@@ -224,7 +220,11 @@ fn extract_impl_name(line: &str) -> Option<String> {
         // Check for "for" keyword
         if let Some(pos) = parts.iter().position(|&s| s == "for") {
             if pos + 1 < parts.len() {
-                return Some(parts[pos + 1].trim_matches(|c| c == '<' || c == '{').to_string());
+                return Some(
+                    parts[pos + 1]
+                        .trim_matches(|c| c == '<' || c == '{')
+                        .to_string(),
+                );
             }
         }
         // Just "impl Type"
@@ -337,11 +337,7 @@ fn extract_js_function_name(line: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
         .collect();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
+    if name.is_empty() { None } else { Some(name) }
 }
 
 fn extract_const_name(line: &str) -> Option<String> {
@@ -350,11 +346,7 @@ fn extract_const_name(line: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
         .collect();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
+    if name.is_empty() { None } else { Some(name) }
 }
 
 /// Chunk Python files by def/class blocks using indentation.
@@ -454,11 +446,7 @@ fn extract_python_name(line: &str, keyword: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
         .collect();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
+    if name.is_empty() { None } else { Some(name) }
 }
 
 /// Generic chunking - splits file into fixed-size chunks.
@@ -506,9 +494,18 @@ mod tests {
 
     #[test]
     fn test_detect_language() {
-        assert_eq!(detect_language(Path::new("foo.rs")), Some("rust".to_string()));
-        assert_eq!(detect_language(Path::new("bar.ts")), Some("typescript".to_string()));
-        assert_eq!(detect_language(Path::new("baz.py")), Some("python".to_string()));
+        assert_eq!(
+            detect_language(Path::new("foo.rs")),
+            Some("rust".to_string())
+        );
+        assert_eq!(
+            detect_language(Path::new("bar.ts")),
+            Some("typescript".to_string())
+        );
+        assert_eq!(
+            detect_language(Path::new("baz.py")),
+            Some("python".to_string())
+        );
         assert_eq!(detect_language(Path::new("unknown.xyz")), None);
     }
 

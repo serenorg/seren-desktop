@@ -114,7 +114,9 @@ impl TerminalManager {
             cmd.env(key, value);
         }
 
-        let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn terminal: {}", e))?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn terminal: {}", e))?;
 
         let child_id = child.id();
         let output = Arc::new(Mutex::new(OutputBuffer::new(output_byte_limit)));
@@ -272,7 +274,10 @@ impl TerminalManager {
         let count = self.terminals.len();
         self.terminals.clear();
         if count > 0 {
-            log::info!("[TerminalManager] Released {} terminal(s) on session cleanup", count);
+            log::info!(
+                "[TerminalManager] Released {} terminal(s) on session cleanup",
+                count
+            );
         }
     }
 }

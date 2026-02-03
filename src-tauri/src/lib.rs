@@ -84,7 +84,10 @@ async fn get_oauth_redirect_url(url: String, bearer_token: String) -> Result<Str
     }
 
     log::error!("[OAuth] {} response from Gateway: {}", status, body_text);
-    Err(format!("Unexpected response status: {} - {}", status, body_text))
+    Err(format!(
+        "Unexpected response status: {} - {}",
+        status, body_text
+    ))
 }
 
 #[tauri::command]
@@ -532,7 +535,11 @@ pub fn run() {
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
                     let urls = event.urls();
-                    log::info!("[Deep Link] Received open URL event with {} URLs: {:?}", urls.len(), urls);
+                    log::info!(
+                        "[Deep Link] Received open URL event with {} URLs: {:?}",
+                        urls.len(),
+                        urls
+                    );
                     for url in urls {
                         log::debug!("[Deep Link] Processing URL: {}", url);
                         log::debug!("[Deep Link] - scheme: {}", url.scheme());
@@ -541,7 +548,10 @@ pub fn run() {
                             log::info!("[Deep Link] Match! Emitting oauth-callback event");
                             // Emit event to frontend with OAuth callback data
                             if let Err(e) = handle.emit("oauth-callback", url.to_string()) {
-                                log::error!("[Deep Link] Failed to emit oauth-callback event: {}", e);
+                                log::error!(
+                                    "[Deep Link] Failed to emit oauth-callback event: {}",
+                                    e
+                                );
                             } else {
                                 log::info!("[Deep Link] Successfully emitted oauth-callback event");
                             }
@@ -551,7 +561,11 @@ pub fn run() {
                                 log::info!("[Deep Link] Focused main window after OAuth callback");
                             }
                         } else {
-                            log::debug!("[Deep Link] No match - scheme: {}, path: {}", url.scheme(), url.path());
+                            log::debug!(
+                                "[Deep Link] No match - scheme: {}, path: {}",
+                                url.scheme(),
+                                url.path()
+                            );
                         }
                     }
                 });

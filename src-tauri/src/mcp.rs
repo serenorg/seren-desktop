@@ -376,7 +376,9 @@ pub fn mcp_list_connected(state: State<'_, McpState>) -> Result<Vec<String>, Str
 // ============================================================================
 
 use rmcp::ServiceExt;
-use rmcp::transport::streamable_http_client::{StreamableHttpClientTransport, StreamableHttpClientTransportConfig};
+use rmcp::transport::streamable_http_client::{
+    StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -437,7 +439,8 @@ pub async fn mcp_connect_http(
     let transport = StreamableHttpClientTransport::with_client(client, config);
 
     // Connect using rmcp - () implements ClientHandler
-    let client = ().serve(transport)
+    let client = ()
+        .serve(transport)
         .await
         .map_err(|e| format!("Failed to connect to MCP server: {}", e))?;
 
@@ -538,7 +541,11 @@ pub async fn mcp_call_tool_http(
         .map_err(|e| format!("Failed to call tool: {}", e))?;
 
     Ok(McpToolResult {
-        content: result.content.into_iter().map(|c| serde_json::to_value(&c).unwrap_or_default()).collect(),
+        content: result
+            .content
+            .into_iter()
+            .map(|c| serde_json::to_value(&c).unwrap_or_default())
+            .collect(),
         is_error: result.is_error.unwrap_or(false),
     })
 }

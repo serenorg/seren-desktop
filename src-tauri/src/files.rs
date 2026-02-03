@@ -1,7 +1,7 @@
 // ABOUTME: File system operations for the editor.
 // ABOUTME: Provides commands for reading, writing, and listing files/directories.
 
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;

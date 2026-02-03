@@ -237,19 +237,16 @@ pub async fn get_messages(
         )?;
 
         let rows = stmt
-            .query_map(
-                params![conversation_id, limit],
-                |row| {
-                    Ok(StoredMessage {
-                        id: row.get(0)?,
-                        conversation_id: row.get(1)?,
-                        role: row.get(2)?,
-                        content: row.get(3)?,
-                        model: row.get(4)?,
-                        timestamp: row.get(5)?,
-                    })
-                },
-            )?
+            .query_map(params![conversation_id, limit], |row| {
+                Ok(StoredMessage {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    model: row.get(4)?,
+                    timestamp: row.get(5)?,
+                })
+            })?
             .collect::<Result<Vec<_>, _>>()?;
 
         // Reverse to get chronological order

@@ -251,13 +251,17 @@ mod tests {
 
     #[test]
     fn test_full_access_not_sandboxed() {
-        let (cmd, args) = wrap_command("echo", &["hello".to_string()], &SandboxConfig {
-            mode: SandboxMode::FullAccess,
-            workspace: PathBuf::from("/workspace"),
-            writable_paths: vec![],
-            sensitive_read_paths: vec![],
-            network_allowed: true,
-        });
+        let (cmd, args) = wrap_command(
+            "echo",
+            &["hello".to_string()],
+            &SandboxConfig {
+                mode: SandboxMode::FullAccess,
+                workspace: PathBuf::from("/workspace"),
+                writable_paths: vec![],
+                sensitive_read_paths: vec![],
+                network_allowed: true,
+            },
+        );
 
         assert_eq!(cmd, "echo");
         assert_eq!(args, vec!["hello"]);

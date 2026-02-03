@@ -2,7 +2,7 @@
 // ABOUTME: Exposes vector store operations to the frontend for code search.
 
 use crate::services::indexer::{self, ChunkedFile, DiscoveredFile};
-use crate::services::vector_store::{self, IndexStats, SearchResult, EMBEDDING_DIM};
+use crate::services::vector_store::{self, EMBEDDING_DIM, IndexStats, SearchResult};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tauri::AppHandle;
