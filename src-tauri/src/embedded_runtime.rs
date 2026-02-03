@@ -155,7 +155,11 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     #[cfg(not(target_os = "windows"))]
     let path_separator = ":";
 
+    // In GUI app contexts (especially macOS), the process PATH can be missing common tool locations
+    // like Homebrew (/opt/homebrew/bin) or /usr/local/bin. Ensure those are present so spawned
+    // sidecars can find installed CLIs (e.g., `codex`).
     let current_path = env::var("PATH").unwrap_or_default();
+    let current_path = extend_path_with_common_bins(&current_path, path_separator);
     let new_path = if paths_to_add.is_empty() {
         current_path
     } else {
@@ -174,6 +178,45 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     log::debug!("[EmbeddedRuntime] Full PATH: {}", new_path);
 
     paths
+}
+
+fn extend_path_with_common_bins(current_path: &str, path_separator: &str) -> String {
+    let mut entries: Vec<String> = current_path
+        .split(path_separator)
+        .filter(|p| !p.is_empty())
+        .map(|p| p.to_string())
+        .collect();
+
+    // Keep the user's order, but append missing common locations.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        use std::collections::HashSet;
+
+        let mut seen: HashSet<String> = entries.iter().cloned().collect();
+
+        #[cfg(target_os = "macos")]
+        let common_bins: [&str; 6] = [
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ];
+
+        #[cfg(target_os = "linux")]
+        let common_bins: [&str; 5] = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+
+        for bin in common_bins {
+            if !seen.contains(bin) {
+                let bin = bin.to_string();
+                entries.push(bin.clone());
+                seen.insert(bin);
+            }
+        }
+    }
+
+    entries.join(path_separator)
 }
 
 /// Returns the PATH value with embedded runtime directories prepended.
