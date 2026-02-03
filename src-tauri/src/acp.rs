@@ -44,14 +44,6 @@ fn is_auth_error(msg: &str) -> bool {
 }
 
 /// Return a user-friendly auth error message for the given agent type
-fn auth_error_message(agent_type: &str) -> String {
-    format!(
-        "{} login required. A terminal window has been opened — please complete authentication there, then retry.",
-        agent_type
-    )
-}
-
-/// Open a terminal running `claude login` so the user can authenticate
 fn launch_claude_login() {
     let result = if cfg!(target_os = "macos") {
         std::process::Command::new("osascript")
@@ -73,6 +65,156 @@ fn launch_claude_login() {
     match result {
         Ok(_) => log::info!("[ACP] Launched claude login terminal"),
         Err(e) => log::warn!("[ACP] Failed to launch claude login terminal: {}", e),
+    }
+}
+
+/// Open a terminal running the OpenClaw Codex OAuth flow so the user can authenticate
+fn launch_codex_login() {
+    #[cfg(not(feature = "openclaw"))]
+    {
+        log::warn!("[ACP] Codex login requested but openclaw feature is disabled");
+        return;
+    }
+
+    #[cfg(feature = "openclaw")]
+    {
+        use std::path::Path;
+
+        fn escape_unix(value: &str) -> String {
+            value.replace('\'', "'\\''")
+        }
+        fn quote_unix_path(path: &Path) -> String {
+            format!("'{}'", escape_unix(&path.to_string_lossy()))
+        }
+        fn quote_unix_str(value: &str) -> String {
+            format!("'{}'", escape_unix(value))
+        }
+
+        let openclaw_entry = match crate::openclaw::find_openclaw_mjs() {
+            Ok(path) => path,
+            Err(err) => {
+                log::warn!(
+                    "[ACP] Unable to locate openclaw.mjs for Codex login: {}",
+                    err
+                );
+                return;
+            }
+        };
+        let openclaw_dir = match openclaw_entry.parent() {
+            Some(dir) => dir.to_path_buf(),
+            None => {
+                log::warn!("[ACP] Invalid openclaw.mjs path: {:?}", openclaw_entry);
+                return;
+            }
+        };
+        let embedded_path = crate::embedded_runtime::get_embedded_path();
+
+        #[cfg(target_os = "macos")]
+        {
+            let mut script_parts: Vec<String> = Vec::new();
+            if !embedded_path.is_empty() {
+                script_parts.push(format!("export PATH={}", quote_unix_str(embedded_path),));
+            }
+            script_parts.push(format!("cd {}", quote_unix_path(&openclaw_dir)));
+            script_parts.push(format!(
+                "node {} models auth login --provider openai-codex",
+                quote_unix_path(&openclaw_entry)
+            ));
+            let script = script_parts.join(" && ");
+            let apple_script = format!(
+                "tell application \"Terminal\" to do script \"{}\"",
+                script.replace('\\', "\\\\").replace('"', "\\\"")
+            );
+            match std::process::Command::new("osascript")
+                .args(["-e", &apple_script])
+                .spawn()
+            {
+                Ok(_) => log::info!("[ACP] Launched Codex OAuth flow in Terminal"),
+                Err(err) => log::warn!("[ACP] Failed to launch Codex login terminal: {}", err),
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let mut script_parts: Vec<String> = Vec::new();
+            if !embedded_path.is_empty() {
+                script_parts.push(format!("export PATH={}", quote_unix_str(embedded_path),));
+            }
+            script_parts.push(format!("cd {}", quote_unix_path(&openclaw_dir)));
+            script_parts.push(format!(
+                "node {} models auth login --provider openai-codex",
+                quote_unix_path(&openclaw_entry)
+            ));
+            let script = script_parts.join(" && ");
+
+            let mut launched = false;
+            let terminal_commands: [(&str, &[&str]); 3] = [
+                ("x-terminal-emulator", &["-e", "bash", "-lc"]),
+                ("gnome-terminal", &["--", "bash", "-lc"]),
+                ("konsole", &["-e", "bash", "-lc"]),
+            ];
+            for (terminal, args) in terminal_commands {
+                let spawn_result = std::process::Command::new(terminal)
+                    .args(args)
+                    .arg(&script)
+                    .spawn();
+                match spawn_result {
+                    Ok(_) => {
+                        launched = true;
+                        log::info!("[ACP] Launched Codex OAuth flow via {}", terminal);
+                        break;
+                    }
+                    Err(err) => {
+                        log::debug!(
+                            "[ACP] Failed to launch {} for Codex login: {}",
+                            terminal,
+                            err
+                        );
+                    }
+                }
+            }
+
+            if !launched {
+                if let Err(err) = std::process::Command::new("bash")
+                    .args(["-lc", &script])
+                    .spawn()
+                {
+                    log::warn!(
+                        "[ACP] Failed to launch Codex login fallback shell session: {}",
+                        err
+                    );
+                } else {
+                    log::info!(
+                        "[ACP] Started Codex OAuth flow in background bash session (no GUI terminal found)"
+                    );
+                }
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let mut script_parts: Vec<String> = Vec::new();
+            if !embedded_path.is_empty() {
+                let escaped = embedded_path.replace('"', "\"\"");
+                script_parts.push(format!("set \"PATH={}\"", escaped));
+            }
+            script_parts.push(format!(
+                "cd /d \"{}\"",
+                openclaw_dir.to_string_lossy().replace('"', "\"\"")
+            ));
+            script_parts.push(format!(
+                "node \"{}\" models auth login --provider openai-codex",
+                openclaw_entry.to_string_lossy().replace('"', "\"\"")
+            ));
+            let script = script_parts.join(" && ");
+            match std::process::Command::new("cmd")
+                .args(["/c", "start", "cmd", "/k", &script])
+                .spawn()
+            {
+                Ok(_) => log::info!("[ACP] Launched Codex OAuth flow (Windows cmd)"),
+                Err(err) => log::warn!("[ACP] Failed to launch Codex login cmd: {}", err),
+            }
+        }
     }
 }
 
@@ -155,6 +297,22 @@ impl AgentType {
             AgentType::ClaudeCode => vec![],
             AgentType::Codex => vec![],
         }
+    }
+}
+
+fn auth_error_message(agent_type: AgentType) -> String {
+    match agent_type {
+        AgentType::ClaudeCode => "Claude login required. A terminal window has been opened to run `claude login`. Complete authentication there and retry."
+            .to_string(),
+        AgentType::Codex => "OpenAI Codex login required. We opened an OpenClaw terminal to run `openclaw models auth login --provider openai-codex`. Complete the browser flow, then retry."
+            .to_string(),
+    }
+}
+
+fn launch_agent_login(agent_type: AgentType) {
+    match agent_type {
+        AgentType::ClaudeCode => launch_claude_login(),
+        AgentType::Codex => launch_codex_login(),
     }
 }
 
@@ -276,7 +434,9 @@ impl Client for ClientDelegate {
 
         log::info!(
             "[ACP] Permission request {} for session {}: tool={}",
-            request_id, self.session_id, tool_name
+            request_id,
+            self.session_id,
+            tool_name
         );
 
         // Store the response channel so the frontend can send back a decision
@@ -287,7 +447,8 @@ impl Client for ClientDelegate {
         };
         log::debug!(
             "[ACP] Permission request {} stored (total pending: {})",
-            request_id, pending_count
+            request_id,
+            pending_count
         );
 
         // Emit permission request to frontend with request_id for correlation
@@ -303,7 +464,8 @@ impl Client for ClientDelegate {
         if let Err(ref e) = emit_result {
             log::error!(
                 "[ACP] Failed to emit permission request {} to frontend: {}",
-                request_id, e
+                request_id,
+                e
             );
         }
 
@@ -314,7 +476,8 @@ impl Client for ClientDelegate {
                 Ok(Ok(id)) => {
                     log::info!(
                         "[ACP] Permission {} responded with option: {}",
-                        request_id, id
+                        request_id,
+                        id
                     );
                     id
                 }
@@ -329,10 +492,7 @@ impl Client for ClientDelegate {
                     ));
                 }
                 Err(_) => {
-                    log::warn!(
-                        "[ACP] Permission {} timed out after 5 minutes",
-                        request_id
-                    );
+                    log::warn!("[ACP] Permission {} timed out after 5 minutes", request_id);
                     self.pending_permissions.lock().await.remove(&request_id);
                     return Err(agent_client_protocol::Error::internal_error().data(
                         serde_json::Value::String("Permission request timed out".into()),
@@ -787,8 +947,8 @@ pub async fn acp_spawn(
                     }
 
                     let error_msg = if is_auth_error(&e) {
-                        launch_claude_login();
-                        auth_error_message(&format!("{:?}", agent_type))
+                        launch_agent_login(agent_type);
+                        auth_error_message(agent_type)
                     } else {
                         e
                     };
@@ -992,7 +1152,10 @@ async fn run_session_worker(
 
     let init_response = match init_result {
         Err(_elapsed) => {
-            return Err("Agent initialization timed out after 30 seconds. The agent binary may be hung.".to_string());
+            return Err(
+                "Agent initialization timed out after 30 seconds. The agent binary may be hung."
+                    .to_string(),
+            );
         }
         Ok(result) => match result {
             Ok(resp) => resp,
@@ -1020,7 +1183,7 @@ async fn run_session_worker(
                 }
                 return Err(msg);
             }
-        }
+        },
     };
     log::info!("[ACP] Initialize response received");
 
@@ -1274,16 +1437,18 @@ pub async fn acp_prompt(
     prompt: String,
     context: Option<Vec<serde_json::Value>>,
 ) -> Result<(), String> {
-    let command_tx = {
+    let (command_tx, agent_type) = {
         let sessions = state.sessions.read().await;
         let session_arc = sessions
             .get(&session_id)
             .ok_or_else(|| format!("Session '{}' not found", session_id))?;
         let session = session_arc.lock().await;
-        session
+        let agent_type = session.agent_type;
+        let tx = session
             .command_tx
             .clone()
-            .ok_or_else(|| "Session not initialized".to_string())?
+            .ok_or_else(|| "Session not initialized".to_string())?;
+        (tx, agent_type)
     };
 
     let (response_tx, response_rx) = oneshot::channel();
@@ -1304,8 +1469,8 @@ pub async fn acp_prompt(
 
     if let Err(ref e) = result {
         if is_auth_error(e) {
-            launch_claude_login();
-            return Err(auth_error_message("Claude Code"));
+            launch_agent_login(agent_type);
+            return Err(auth_error_message(agent_type));
         }
     }
 
@@ -1419,7 +1584,9 @@ pub async fn acp_respond_to_permission(
 ) -> Result<(), String> {
     log::info!(
         "[ACP] Frontend responding to permission {}: session={}, option={}",
-        request_id, session_id, option_id
+        request_id,
+        session_id,
+        option_id
     );
 
     let sessions = state.sessions.read().await;
@@ -1434,10 +1601,7 @@ pub async fn acp_respond_to_permission(
     })?;
     let session = session_arc.lock().await;
 
-    log::debug!(
-        "[ACP] Session {} status: {:?}",
-        session_id, session.status
-    );
+    log::debug!("[ACP] Session {} status: {:?}", session_id, session.status);
 
     let mut permissions = session.pending_permissions.lock().await;
     log::debug!(
@@ -1449,7 +1613,8 @@ pub async fn acp_respond_to_permission(
     let sender = permissions.remove(&request_id).ok_or_else(|| {
         let msg = format!(
             "Permission request '{}' not found in session '{}'. Pending: {:?}",
-            request_id, session_id,
+            request_id,
+            session_id,
             permissions.keys().collect::<Vec<_>>()
         );
         log::error!("[ACP] {}", msg);
@@ -1553,17 +1718,10 @@ pub async fn acp_check_agent_available(agent_type: AgentType) -> Result<bool, St
     }
 }
 
-/// Launch the authentication flow for an agent.
-/// For Claude, this opens a terminal running `claude login`.
+/// Launch the authentication flow for an agent (Claude login or Codex OAuth).
 #[tauri::command]
 pub fn acp_launch_login(agent_type: AgentType) {
-    match agent_type {
-        AgentType::ClaudeCode => launch_claude_login(),
-        AgentType::Codex => {
-            // Codex uses OpenAI API keys, no OAuth login flow
-            log::info!("[ACP] Codex uses API keys, no login flow available");
-        }
-    }
+    launch_agent_login(agent_type);
 }
 
 /// Ensure Claude Code CLI is installed, auto-installing via npm if needed.
