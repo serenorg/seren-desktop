@@ -16,7 +16,8 @@ env:
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
   # Signing availability flags (for conditional steps)
   HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
-  HAS_WINDOWS_SIGNING: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+  # SSL.com eSigner cloud signing for Windows EV code signing
+  HAS_WINDOWS_SIGNING: ${{ secrets.ES_USERNAME != '' }}
 
 jobs:
   create-release:
@@ -59,7 +60,7 @@ jobs:
             echo ""
             echo "## Note"
             echo ""
-            echo "This is an alpha release. macOS and Windows builds are unsigned - you may need to bypass security warnings to run the app."
+            echo "This is an alpha release. macOS builds are signed and notarized. Windows builds are EV code signed."
           } > release_notes.md
 
           echo "Generated release notes:"
@@ -201,18 +202,6 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-      # Windows: Setup certificate for signing (skip if no certificate)
-      - name: Setup Windows signing
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        shell: powershell
-        run: |
-          $certificatePath = "$env:RUNNER_TEMP\certificate.pfx"
-          [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE) | Set-Content -Path $certificatePath -AsByteStream
-          Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
-
       # Build the app (with signing for macOS when certificates available)
       - name: Build Tauri app (signed)
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
@@ -259,6 +248,33 @@ jobs:
             xcrun stapler staple "$DMG_PATH"
           fi
 
+      # Windows: Sign executables with SSL.com eSigner (cloud EV code signing)
+      - name: Sign Windows NSIS installer
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: sslcom/esigner-codesign@develop
+        with:
+          command: sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
+          environment_name: PROD
+          override: true
+
+      - name: Sign Windows MSI installer
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: sslcom/esigner-codesign@develop
+        with:
+          command: sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/msi
+          environment_name: PROD
+          override: true
+
       # Upload artifacts
       - name: Upload macOS DMG
         if: matrix.os == 'macos-latest'
@@ -273,6 +289,13 @@ jobs:
         with:
           name: Seren-Desktop-${{ matrix.name }}.exe
           path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+
+      - name: Upload Windows MSI
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seren-Desktop-${{ matrix.name }}.msi
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
 
       - name: Upload Linux DEB
         if: matrix.os == 'ubuntu-latest'
