@@ -211,7 +211,135 @@ export type AgentBalanceSummaryResponse = {
 /**
  * Source of an agent credit grant (fiat-only, no on-chain deposits)
  */
-export type AgentCreditSource = 'fiat_purchase' | 'signup_bonus' | 'payment_method_bonus' | 'daily_claim' | 'referral_reward' | 'admin_grant' | 'promo_code' | 'tier_bonus' | 'refund';
+export type AgentCreditSource = 'fiat_purchase' | 'signup_bonus' | 'payment_method_bonus' | 'daily_claim' | 'referral_reward' | 'admin_grant' | 'promo_code' | 'tier_bonus' | 'refund' | 'publisher_payout';
+
+/**
+ * Agent information returned on successful registration (Moltbook-style)
+ */
+export type AgentInfo = {
+    /**
+     * The full API key (seren_<key_id>_<secret>) - shown ONCE, save it immediately!
+     */
+    api_key: string;
+    /**
+     * When the account was created
+     */
+    created_at: string;
+    /**
+     * The agent's unique ID
+     */
+    id: string;
+    /**
+     * The agent's display name (auto-generated celestial name like "radiant-sirius-a1b2")
+     */
+    name: string;
+    /**
+     * The organization ID for API calls
+     */
+    organization_id: string;
+    /**
+     * Account status (always "active" for new agents)
+     */
+    status: string;
+    /**
+     * Agent type (always "agent")
+     */
+    user_type: string;
+};
+
+/**
+ * DataResponse wrapper for agent recovery (for OpenAPI schema)
+ */
+export type AgentRecoverDataResponse = {
+    data: AgentRecoverResponse;
+};
+
+/**
+ * Request to recover an agent account after losing the API key.
+ *
+ * Requires only the recovery code (returned once when first funding your wallet
+ * or when calling `/agent/wallet/recovery`).
+ */
+export type AgentRecoverRequest = {
+    /**
+     * Recovery code (24 characters). Dashes/whitespace are allowed; letters are case-insensitive.
+     */
+    recovery_code: string;
+};
+
+/**
+ * Response from agent recovery endpoint.
+ */
+export type AgentRecoverResponse = {
+    agent: AgentInfo;
+    /**
+     * Message about recovery result
+     */
+    message: string;
+    recovery: AgentRecoveryInfo;
+    setup: SetupInstructions;
+    skill_files: SkillFiles;
+    /**
+     * Whether recovery was successful
+     */
+    success: boolean;
+};
+
+/**
+ * Recovery info returned during agent recovery.
+ */
+export type AgentRecoveryInfo = {
+    /**
+     * Message about recovery rotation.
+     */
+    message: string;
+    /**
+     * New recovery code (shown once). Save it securely.
+     */
+    recovery_code: string;
+};
+
+/**
+ * DataResponse wrapper for agent registration (for OpenAPI schema)
+ */
+export type AgentRegisterDataResponse = {
+    data: AgentRegisterResponse;
+};
+
+/**
+ * Request to register a new AI agent account.
+ * This endpoint is designed for AI agents to self-register without human verification.
+ * The agent receives an API key immediately upon registration.
+ *
+ * A unique celestial-themed name is automatically generated (e.g., "radiant-sirius").
+ * You can optionally provide a custom name instead.
+ *
+ * No password required - agents authenticate via API key only.
+ */
+export type AgentRegisterRequest = {
+    /**
+     * Optional custom display name for the agent.
+     * If not provided, a unique celestial-themed name will be generated (e.g., "radiant-sirius").
+     */
+    name?: string | null;
+};
+
+/**
+ * Response from agent registration endpoint (Moltbook-style)
+ */
+export type AgentRegisterResponse = {
+    agent: AgentInfo;
+    /**
+     * Welcome message
+     */
+    message: string;
+    setup: SetupInstructions;
+    skill_files: SkillFiles;
+    /**
+     * Whether registration was successful
+     */
+    success: boolean;
+};
 
 /**
  * Agent template - executable code that runs in compute backends (Daytona, Modal, etc.)
@@ -1586,6 +1714,13 @@ export type ChangePlanRequest = {
     stripe_payment_method_id?: StripePaymentMethodId | null;
 };
 
+export type ChargeResponse = {
+    agent_wallet: string;
+    amount_atomic: number;
+    id: string;
+    status: string;
+};
+
 /**
  * Compute type - specific compute offering when publisher_category = Compute
  */
@@ -1857,6 +1992,13 @@ export type CreateBranchRequest = {
     schema_only?: boolean;
 };
 
+export type CreateChargeRequest = {
+    agent_wallet: string;
+    amount_atomic: number;
+    description: string;
+    idempotency_key?: string | null;
+};
+
 /**
  * Request to create a new database
  */
@@ -1988,6 +2130,13 @@ export type CreateOrganizationVpcEndpointRequest = {
     region: string;
 };
 
+export type CreatePayoutRequest = {
+    amount_atomic: number;
+    description: string;
+    destination_wallet: string;
+    idempotency_key?: string | null;
+};
+
 /**
  * Request to create a new project
  */
@@ -2100,7 +2249,7 @@ export type CreatePublisherRequest = {
     auth_type?: string | null;
     base_price_per_1000_rows?: string | null;
     /**
-     * Billing model ("x402_per_request", "prepaid_credits", "x402_passthrough")
+     * Billing model ("x402_per_request", "prepaid_credits", "x402_passthrough", "pay_per_use")
      */
     billing_model?: string | null;
     /**
@@ -2259,7 +2408,7 @@ export type CreatePublisherRequest = {
      */
     upstream_api_key?: string | null;
     /**
-     * Dot-separated path to upstream cost in response body (for prepaid passthrough billing).
+     * Dot-separated path to upstream cost in response body (for pay_per_use and prepaid passthrough billing).
      * Example: "usage.cost"
      */
     upstream_cost_response_path?: string | null;
@@ -2951,6 +3100,24 @@ export type DatabaseCreatedResponse = {
 export type DatabaseProvider = 'neon' | 'supabase' | 'planetscale' | 'turso' | 'mongodb';
 
 /**
+ * Request body for database queries
+ */
+export type DatabaseQueryRequest = {
+    /**
+     * Optional database name (primarily for SerenDB publishers)
+     */
+    database?: string | null;
+    /**
+     * Query parameters
+     */
+    params?: Array<unknown>;
+    /**
+     * SQL query to execute
+     */
+    query: string;
+};
+
+/**
  * Generic API response wrapper with optional pagination
  *
  * This wrapper provides a consistent structure for all API responses,
@@ -3393,6 +3560,10 @@ export type DepositRequest = {
      * Amount in USD cents (minimum 500 = $5.00)
      */
     amount_cents: number;
+    /**
+     * Optional affiliate referral code for tracking
+     */
+    referral_code?: string | null;
 };
 
 /**
@@ -3414,6 +3585,14 @@ export type DepositResponse = {
      */
     checkout_url: string;
     deposit_id: string;
+    /**
+     * Recovery code (only shown on first deposit, save it securely!)
+     */
+    recovery_code?: string | null;
+    /**
+     * Warning about recovery setup
+     */
+    recovery_warning?: string | null;
     /**
      * Total to be credited in atomic units
      */
@@ -3840,6 +4019,28 @@ export type EndpointDefinition = {
      * Response schema (JSON Schema or simplified description)
      */
     response?: unknown;
+};
+
+/**
+ * Information about an API endpoint
+ */
+export type EndpointInfo = {
+    /**
+     * Endpoint description
+     */
+    description?: string | null;
+    /**
+     * HTTP method (GET, POST, PUT, DELETE, etc.)
+     */
+    method: string;
+    /**
+     * Endpoint path relative to publisher base URL
+     */
+    path: string;
+    /**
+     * Price for this specific endpoint (in atomic units)
+     */
+    price?: number | null;
 };
 
 /**
@@ -4354,7 +4555,7 @@ export type InternalAuthorizeRequest = {
      *
      * - For on-chain credentials: this must be the agent's real wallet address.
      * - For account-based credentials (JWT/API key): this can be any placeholder;
-     * SerenCore derives the canonical wallet from the validated identity.
+     * Seren derives the canonical wallet from the validated identity.
      */
     agent_wallet?: string | null;
     /**
@@ -4364,7 +4565,7 @@ export type InternalAuthorizeRequest = {
     /**
      * Authorization proof.
      *
-     * - For account-based (fiat/prepaid): SerenCore user JWT or API key (`seren_...`)
+     * - For account-based (fiat/prepaid): Seren user JWT or API key (`seren_...`)
      * - For real on-chain wallets: EIP-191 personal_sign of
      * `agent:<publisher_slug>:<agent_wallet>`
      * - For streaming payments (EIP-3009): JSON payload string
@@ -4379,7 +4580,7 @@ export type InternalAuthorizeResponse = {
     /**
      * Canonical agent wallet address for the authorized session.
      *
-     * - For virtual wallets: derived from the provided SerenCore credential (JWT/API key).
+     * - For virtual wallets: derived from the provided Seren credential (JWT/API key).
      * - For on-chain wallets: the wallet address provided by the agent.
      */
     agent_wallet?: string | null;
@@ -5478,9 +5679,21 @@ export type McpResourceContent = {
  * Information about an MCP resource
  */
 export type McpResourceInfo = {
+    /**
+     * Resource description
+     */
     description?: string | null;
+    /**
+     * MIME type of the resource
+     */
     mime_type?: string | null;
+    /**
+     * Resource name
+     */
     name: string;
+    /**
+     * Resource URI
+     */
     uri: string;
 };
 
@@ -5515,8 +5728,17 @@ export type McpToolCallResponse = {
  * Information about an MCP tool
  */
 export type McpToolInfo = {
+    /**
+     * Tool description
+     */
     description?: string | null;
+    /**
+     * JSON Schema for tool input parameters
+     */
     input_schema?: unknown;
+    /**
+     * Tool name
+     */
     name: string;
 };
 
@@ -7255,6 +7477,15 @@ export type PaymentRequirementsV1 = {
  */
 export type PaymentSource = 'onchain' | 'prepaid_balance' | 'credits';
 
+export type PayoutResponse = {
+    amount_atomic: number;
+    destination_wallet: string;
+    error_message?: string | null;
+    id: string;
+    status: string;
+    tx_hash?: string | null;
+};
+
 /**
  * Status of a publisher payout request.
  */
@@ -7658,6 +7889,32 @@ export type PricingConfigResponse = {
 };
 
 /**
+ * Pricing information for a publisher
+ */
+export type PricingInfo = {
+    /**
+     * Base price per 1000 rows for database publishers
+     */
+    base_price_per_1000_rows?: string | null;
+    /**
+     * Pricing model (per_row, per_byte, per_call, per_request)
+     */
+    model: string;
+    /**
+     * Price per API call
+     */
+    price_per_call?: string | null;
+    /**
+     * Price per GET request
+     */
+    price_per_get?: string | null;
+    /**
+     * Price per POST request
+     */
+    price_per_post?: string | null;
+};
+
+/**
  * Pricing model used to interpret pricing units.
  */
 export type PricingModel = 'per_row' | 'per_request' | 'per_byte' | 'tiered' | 'passthrough';
@@ -7691,6 +7948,10 @@ export type Project = {
     hipaa: boolean;
     history_retention_seconds?: number;
     id: string;
+    /**
+     * Whether this is a service project (hidden from normal listings, contains seren_* databases)
+     */
+    is_service_project?: boolean;
     name: string;
     organization_id: string;
     postgres_version?: string;
@@ -7829,6 +8090,10 @@ export type ProjectCreated = {
     enable_logical_replication?: boolean;
     hipaa: boolean;
     id: string;
+    /**
+     * Whether this is a service project (hidden from normal listings, contains seren_* databases)
+     */
+    is_service_project?: boolean;
     name: string;
     organization_id: string;
     postgres_version?: string;
@@ -8664,6 +8929,12 @@ export type PublicationsResponse = {
     pagination?: PaginationMeta | null;
 };
 
+export type PublisherAgentBalanceResponse = {
+    onchain_atomic?: number | null;
+    serenbucks_atomic: number;
+    total_available_atomic: number;
+};
+
 /**
  * Response for publisher analytics
  */
@@ -8853,6 +9124,59 @@ export type PublisherEarningsResponse = {
     total_withdrawn: number;
     total_withdrawn_atomic: number;
     wallet_address: WalletAddress;
+};
+
+/**
+ * Detailed information about a publisher including capabilities and pricing
+ */
+export type PublisherInfoResponse = {
+    /**
+     * Publisher category (database, integration, compute)
+     */
+    category: string;
+    /**
+     * Database type for database publishers (serendb, neon, supabase, mongodb)
+     */
+    database_type?: string | null;
+    /**
+     * Full description of the publisher
+     */
+    description?: string | null;
+    /**
+     * Available API endpoints (for API publishers)
+     */
+    endpoints?: Array<EndpointInfo> | null;
+    /**
+     * Integration type for integration publishers (api, mcp)
+     */
+    integration_type?: string | null;
+    /**
+     * Display name of the publisher
+     */
+    name: string;
+    pricing: PricingInfo;
+    /**
+     * Available MCP resources (for MCP publishers)
+     */
+    resources?: Array<McpResourceInfo> | null;
+    /**
+     * Unique slug identifier for the publisher
+     */
+    slug: string;
+    /**
+     * Available MCP tools (for MCP publishers)
+     */
+    tools?: Array<McpToolInfo> | null;
+};
+
+/**
+ * Response containing a list of publishers
+ */
+export type PublisherListResponse = {
+    /**
+     * List of publisher summaries
+     */
+    publishers: Array<PublisherSummary>;
 };
 
 /**
@@ -9149,7 +9473,7 @@ export type PublisherResponse = {
     unique_agents_served: number;
     updated_at: string;
     /**
-     * Dot-separated path to upstream cost in response body (for prepaid passthrough billing).
+     * Dot-separated path to upstream cost in response body (for pay_per_use and prepaid passthrough billing).
      * Example: "usage.cost"
      */
     upstream_cost_response_path?: string | null;
@@ -9177,6 +9501,14 @@ export type PublisherResponse = {
 };
 
 /**
+ * Request body for publisher root `POST /publishers/{slug}`.
+ *
+ * - For database publishers: use `DatabaseQueryRequest`
+ * - For API publishers: any JSON body will be proxied to the upstream API root (`/`)
+ */
+export type PublisherRootRequest = DatabaseQueryRequest | unknown;
+
+/**
  * A publisher suggestion with match score and reason
  */
 export type PublisherSuggestion = {
@@ -9199,9 +9531,49 @@ export type PublisherSuggestion = {
 };
 
 /**
+ * Summary information about a publisher
+ */
+export type PublisherSummary = {
+    /**
+     * Publisher category (database, integration, compute)
+     */
+    category: string;
+    /**
+     * Short description of what the publisher offers
+     */
+    description?: string | null;
+    /**
+     * Display name of the publisher
+     */
+    name: string;
+    /**
+     * Unique slug identifier for the publisher
+     */
+    slug: string;
+};
+
+/**
  * Type of publisher in the store
  */
 export type PublisherType = 'individual' | 'organization' | 'verified_partner';
+
+/**
+ * Instructions for using different publisher types
+ */
+export type PublisherTypeInstructions = {
+    /**
+     * For API publishers
+     */
+    api: string;
+    /**
+     * For database publishers
+     */
+    database: string;
+    /**
+     * For MCP publishers
+     */
+    mcp: string;
+};
 
 /**
  * Generic API response wrapper with optional pagination
@@ -9636,6 +10008,36 @@ export type ReadMcpResourceRequest = {
 };
 
 /**
+ * Wrapped recovery response for OpenAPI
+ */
+export type RecoveryDataResponse = {
+    data: RecoveryResponse;
+};
+
+/**
+ * Response for recovery setup
+ */
+export type RecoveryResponse = {
+    /**
+     * Whether recovery is now set up
+     */
+    has_recovery: boolean;
+    /**
+     * Whether a recovery email is set
+     */
+    has_recovery_email: boolean;
+    /**
+     * Message about recovery status
+     */
+    message: string;
+    /**
+     * Recovery code (only shown once, save it securely!)
+     * This is a 24-character code that can be used to recover your account.
+     */
+    recovery_code?: string | null;
+};
+
+/**
  * Request to redeem a promo code (user)
  */
 export type RedeemPromoCodeRequest = {
@@ -9660,6 +10062,10 @@ export type ReferralInfoResponse = {
     total_earnings_atomic: number;
     total_earnings_usd: string;
     total_referrals: number;
+};
+
+export type RefundChargeRequest = {
+    reason: string;
 };
 
 export type RefundTransactionRequest = {
@@ -10543,6 +10949,16 @@ export type SetBranchExpirationRequest = {
 };
 
 /**
+ * Request to set up account recovery
+ */
+export type SetRecoveryRequest = {
+    /**
+     * Email address for account recovery (optional, for human contact)
+     */
+    email?: string | null;
+};
+
+/**
  * Settlement response - returned in PAYMENT-RESPONSE (v2) / X-PAYMENT-RESPONSE (v1) headers (base64 encoded)
  */
 export type SettlementResponse = {
@@ -10566,6 +10982,44 @@ export type SettlementResponse = {
      * Blockchain transaction hash (empty string if settlement failed)
      */
     transaction: string;
+};
+
+/**
+ * Setup instructions for new agents
+ */
+export type SetupInstructions = {
+    /**
+     * Step 1: Save your API key
+     */
+    step_1: string;
+    /**
+     * Step 2: Set up authentication header
+     */
+    step_2: string;
+    /**
+     * Step 3: Browse publishers
+     */
+    step_3: string;
+    step_4: PublisherTypeInstructions;
+};
+
+/**
+ * Skill files and documentation links
+ */
+export type SkillFiles = {
+    /**
+     * Link to the documentation
+     */
+    docs: string;
+    /**
+     * Link to the main skill.md file
+     */
+    skill_md: string;
+};
+
+export type SlashChargeRequest = {
+    reason: string;
+    slash_amount_atomic: number;
 };
 
 /**
@@ -11334,6 +11788,10 @@ export type UpdateOAuthProviderRequest = {
      */
     logo_url?: string | null;
     name?: string | null;
+    /**
+     * If omitted, leave unchanged. If null, make global. If set, scope to organization.
+     */
+    organization_id?: string | null;
     pkce_required?: boolean | null;
     /**
      * If omitted, leave unchanged. If null, clear.
@@ -11489,7 +11947,7 @@ export type UpdatePublisherRequest = {
     auth_type?: string | null;
     base_price_per_1000_rows?: string | null;
     /**
-     * Billing model ("x402_per_request", "prepaid_credits", "x402_passthrough")
+     * Billing model ("x402_per_request", "prepaid_credits", "x402_passthrough", "pay_per_use")
      */
     billing_model?: string | null;
     /**
@@ -11649,7 +12107,7 @@ export type UpdatePublisherRequest = {
      */
     upstream_api_key?: string | null;
     /**
-     * Dot-separated path to upstream cost in response body (for prepaid passthrough billing).
+     * Dot-separated path to upstream cost in response body (for pay_per_use and prepaid passthrough billing).
      * Example: "usage.cost"
      */
     upstream_cost_response_path?: string | null;
@@ -11908,6 +12366,87 @@ export type UserInfoResponse = {
 };
 
 /**
+ * Response for GET /auth/me - current user info with default organization
+ */
+export type UserMe = UserInfo & {
+    /**
+     * The user's default organization ID for API calls requiring an organization context.
+     * This is typically the first organization the user joined (their personal org).
+     */
+    default_organization_id: string;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type UserMeResponse = {
+    data: UserMe;
+    pagination?: PaginationMeta | null;
+};
+
+/**
  * Response type for user OAuth connection (excludes tokens)
  */
 export type UserOAuthConnectionResponse = {
@@ -12074,10 +12613,18 @@ export type WalletBalanceResponse = {
     funded_balance_atomic: number;
     funded_balance_usd: string;
     /**
+     * Whether recovery is set up for this account
+     */
+    has_recovery: boolean;
+    /**
      * Total promotional balance (bonuses, daily claims, referrals, admin grants)
      */
     promotional_balance_atomic: number;
     promotional_balance_usd: string;
+    /**
+     * Warning if funds exist but no recovery is set up
+     */
+    recovery_warning?: string | null;
     /**
      * Total lifetime SerenBucks purchases in cents (for plan upgrade tracking)
      */
@@ -12945,6 +13492,68 @@ export type UploadPublisherLogoApiKeyResponses = {
 
 export type UploadPublisherLogoApiKeyResponse = UploadPublisherLogoApiKeyResponses[keyof UploadPublisherLogoApiKeyResponses];
 
+export type AgentRecoverData = {
+    body: AgentRecoverRequest;
+    path?: never;
+    query?: never;
+    url: '/agent/recover';
+};
+
+export type AgentRecoverErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Invalid recovery code
+     */
+    401: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type AgentRecoverResponses = {
+    /**
+     * Agent account recovered
+     */
+    200: AgentRecoverDataResponse;
+};
+
+export type AgentRecoverResponse2 = AgentRecoverResponses[keyof AgentRecoverResponses];
+
+export type AgentRegisterData = {
+    body: AgentRegisterRequest;
+    path?: never;
+    query?: never;
+    url: '/agent/register';
+};
+
+export type AgentRegisterErrors = {
+    /**
+     * Invalid request (validation error)
+     */
+    400: unknown;
+    /**
+     * Email already registered
+     */
+    409: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type AgentRegisterResponses = {
+    /**
+     * Agent registered successfully
+     */
+    201: AgentRegisterDataResponse;
+};
+
+export type AgentRegisterResponse2 = AgentRegisterResponses[keyof AgentRegisterResponses];
+
 export type ExecuteApiStreamData = {
     body: ApiRequestBody;
     path?: never;
@@ -13330,6 +13939,29 @@ export type CreateDepositResponses = {
 
 export type CreateDepositResponse = CreateDepositResponses[keyof CreateDepositResponses];
 
+export type SetRecoveryData = {
+    body: SetRecoveryRequest;
+    path?: never;
+    query?: never;
+    url: '/agent/wallet/recovery';
+};
+
+export type SetRecoveryErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type SetRecoveryResponses = {
+    /**
+     * Recovery set up
+     */
+    200: RecoveryDataResponse;
+};
+
+export type SetRecoveryResponse = SetRecoveryResponses[keyof SetRecoveryResponses];
+
 export type GetReferralInfoData = {
     body?: never;
     path?: never;
@@ -13453,9 +14085,9 @@ export type GetCurrentUserErrors = {
 
 export type GetCurrentUserResponses = {
     /**
-     * Current user information
+     * Current user information with default organization
      */
-    200: UserInfoResponse;
+    200: UserMeResponse;
 };
 
 export type GetCurrentUserResponse = GetCurrentUserResponses[keyof GetCurrentUserResponses];
@@ -16367,6 +16999,10 @@ export type ListProjectsData = {
          * Number of items to skip (default: 0)
          */
         offset?: number | null;
+        /**
+         * Show the organization service project (`seren-services`) in the results.
+         */
+        show_service?: boolean;
     };
     url: '/projects';
 };
@@ -19332,6 +19968,426 @@ export type AssignProjectVpcEndpointByIdResponses = {
 };
 
 export type AssignProjectVpcEndpointByIdResponse = AssignProjectVpcEndpointByIdResponses[keyof AssignProjectVpcEndpointByIdResponses];
+
+export type ListPublishersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter by category (database, integration, compute)
+         */
+        category?: string | null;
+        /**
+         * Maximum number of results
+         */
+        limit?: number | null;
+        /**
+         * Pagination offset
+         */
+        offset?: number | null;
+    };
+    url: '/publishers';
+};
+
+export type ListPublishersErrors = {
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ListPublishersResponses = {
+    /**
+     * List of publishers
+     */
+    200: PublisherListResponse;
+};
+
+export type ListPublishersResponse = ListPublishersResponses[keyof ListPublishersResponses];
+
+export type GetPublisherInfoData = {
+    body?: never;
+    path: {
+        /**
+         * Publisher slug identifier
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}';
+};
+
+export type GetPublisherInfoErrors = {
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type GetPublisherInfoResponses = {
+    /**
+     * Publisher details
+     */
+    200: PublisherInfoResponse;
+};
+
+export type GetPublisherInfoResponse = GetPublisherInfoResponses[keyof GetPublisherInfoResponses];
+
+export type PublisherRootHandlerData = {
+    body: PublisherRootRequest;
+    path: {
+        /**
+         * Publisher slug identifier
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}';
+};
+
+export type PublisherRootHandlerErrors = {
+    /**
+     * Payment required
+     */
+    402: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type PublisherRootHandlerResponses = {
+    /**
+     * Request processed successfully
+     */
+    200: unknown;
+};
+
+export type GetAgentBalanceData = {
+    body?: never;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Agent wallet address
+         */
+        agent_wallet: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/agents/{agent_wallet}/balance';
+};
+
+export type GetAgentBalanceErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+};
+
+export type GetAgentBalanceResponses = {
+    /**
+     * Balance retrieved
+     */
+    200: PublisherAgentBalanceResponse;
+};
+
+export type GetAgentBalanceResponse = GetAgentBalanceResponses[keyof GetAgentBalanceResponses];
+
+export type CreateChargeData = {
+    body: CreateChargeRequest;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/charges';
+};
+
+export type CreateChargeErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Insufficient balance
+     */
+    402: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+};
+
+export type CreateChargeResponses = {
+    /**
+     * Charge created
+     */
+    200: ChargeResponse;
+};
+
+export type CreateChargeResponse = CreateChargeResponses[keyof CreateChargeResponses];
+
+export type GetChargeStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Charge ID
+         */
+        charge_id: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/charges/{charge_id}';
+};
+
+export type GetChargeStatusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Charge not found
+     */
+    404: unknown;
+};
+
+export type GetChargeStatusResponses = {
+    /**
+     * Charge retrieved
+     */
+    200: ChargeResponse;
+};
+
+export type GetChargeStatusResponse = GetChargeStatusResponses[keyof GetChargeStatusResponses];
+
+export type RefundChargeData = {
+    body: RefundChargeRequest;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Charge ID
+         */
+        charge_id: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/charges/{charge_id}/refund';
+};
+
+export type RefundChargeErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Charge not found
+     */
+    404: unknown;
+};
+
+export type RefundChargeResponses = {
+    /**
+     * Charge refunded
+     */
+    200: ChargeResponse;
+};
+
+export type RefundChargeResponse = RefundChargeResponses[keyof RefundChargeResponses];
+
+export type SlashChargeData = {
+    body: SlashChargeRequest;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Original charge ID
+         */
+        charge_id: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/charges/{charge_id}/slash';
+};
+
+export type SlashChargeErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Insufficient balance
+     */
+    402: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Charge not found
+     */
+    404: unknown;
+};
+
+export type SlashChargeResponses = {
+    /**
+     * Slash applied
+     */
+    204: void;
+};
+
+export type SlashChargeResponse = SlashChargeResponses[keyof SlashChargeResponses];
+
+export type CreatePayoutData = {
+    body: CreatePayoutRequest;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/payouts';
+};
+
+export type CreatePayoutErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+};
+
+export type CreatePayoutResponses = {
+    /**
+     * Payout created
+     */
+    200: PayoutResponse;
+};
+
+export type CreatePayoutResponse = CreatePayoutResponses[keyof CreatePayoutResponses];
+
+export type GetPayoutStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Payout ID
+         */
+        payout_id: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/payouts/{payout_id}';
+};
+
+export type GetPayoutStatusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Payout not found
+     */
+    404: unknown;
+};
+
+export type GetPayoutStatusResponses = {
+    /**
+     * Payout retrieved
+     */
+    200: PayoutResponse;
+};
+
+export type GetPayoutStatusResponse = GetPayoutStatusResponses[keyof GetPayoutStatusResponses];
+
+export type ProxyToPublisherData = {
+    body: Blob | File;
+    path: {
+        /**
+         * Publisher slug identifier
+         */
+        slug: string;
+        /**
+         * Path to proxy to the publisher
+         */
+        path: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/{path}';
+};
+
+export type ProxyToPublisherErrors = {
+    /**
+     * Payment required
+     */
+    402: unknown;
+    /**
+     * Publisher or endpoint not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ProxyToPublisherResponses = {
+    /**
+     * Request proxied successfully
+     */
+    200: unknown;
+};
 
 export type ListSessionsData = {
     body?: never;
