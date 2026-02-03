@@ -2,7 +2,8 @@
 // ABOUTME: Shows the AI's chain of thought when enabled in settings.
 
 import type { Component } from "solid-js";
-import { createSignal, Show } from "solid-js";
+import { createEffect, createSignal, Show } from "solid-js";
+import { settingsStore } from "@/stores/settings.store";
 
 interface ThinkingBlockProps {
   thinking: string;
@@ -10,14 +11,32 @@ interface ThinkingBlockProps {
 }
 
 export const ThinkingBlock: Component<ThinkingBlockProps> = (props) => {
-  const [isExpanded, setIsExpanded] = createSignal(props.isStreaming ?? false);
+  const initialPreference = settingsStore.get("chatThinkingExpanded");
+  const [isExpanded, setIsExpanded] = createSignal(
+    props.isStreaming ? true : initialPreference,
+  );
+  let lastStoredPreference = initialPreference;
+
+  createEffect(() => {
+    const storedPreference = settingsStore.get("chatThinkingExpanded");
+    if (storedPreference !== lastStoredPreference) {
+      lastStoredPreference = storedPreference;
+      setIsExpanded(storedPreference);
+    }
+  });
+
+  const handleToggle = () => {
+    const next = !isExpanded();
+    setIsExpanded(next);
+    settingsStore.set("chatThinkingExpanded", next);
+  };
 
   return (
     <div class="mb-3 border border-[#30363d] rounded-lg overflow-hidden bg-[#161b22]">
       <button
         type="button"
         class="w-full flex items-center gap-2 px-3 py-2 bg-[#21262d] text-[#8b949e] text-xs font-medium cursor-pointer hover:bg-[#30363d] transition-colors border-none text-left"
-        onClick={() => setIsExpanded(!isExpanded())}
+        onClick={handleToggle}
       >
         <svg
           class={`w-3 h-3 transition-transform ${isExpanded() ? "rotate-90" : ""}`}

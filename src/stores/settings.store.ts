@@ -34,6 +34,11 @@ export interface Settings {
   chatEnterToSend: boolean;
   chatShowThinking: boolean;
   /**
+   * Whether thinking blocks should default to the expanded state.
+   * Controlled by the in-UI chevron toggle so the preference persists.
+   */
+  chatThinkingExpanded: boolean;
+  /**
    * Maximum tool call iterations per message.
    * Controls how many times the AI can use tools in a single response.
    * Higher values allow more complex multi-step tasks but use more credits.
@@ -101,6 +106,7 @@ const DEFAULT_SETTINGS: Settings = {
   chatMaxHistoryMessages: 50,
   chatEnterToSend: true,
   chatShowThinking: false,
+  chatThinkingExpanded: false,
   chatMaxToolIterations: 10,
   // Auto-compact
   autoCompactEnabled: true,
