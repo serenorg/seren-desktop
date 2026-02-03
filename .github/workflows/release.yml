@@ -253,7 +253,7 @@ jobs:
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         uses: sslcom/esigner-codesign@develop
         with:
-          command: sign
+          command: batch_sign
           username: ${{ secrets.ES_USERNAME }}
           password: ${{ secrets.ES_PASSWORD }}
           credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
@@ -266,7 +266,7 @@ jobs:
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         uses: sslcom/esigner-codesign@develop
         with:
-          command: sign
+          command: batch_sign
           username: ${{ secrets.ES_USERNAME }}
           password: ${{ secrets.ES_PASSWORD }}
           credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
