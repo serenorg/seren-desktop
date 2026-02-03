@@ -22,6 +22,7 @@ import type {
   ToolCallEvent,
 } from "@/services/acp";
 import * as acpService from "@/services/acp";
+import { getSerenApiKey } from "@/lib/tauri-bridge";
 
 // ============================================================================
 // Types
@@ -276,10 +277,13 @@ export const acpStore = {
         setState("installStatus", null);
       }
 
+      // Get Seren API key to enable MCP tools for the agent
+      const apiKey = await getSerenApiKey();
       const info = await acpService.spawnAgent(
         resolvedAgentType,
         cwd,
         settingsStore.settings.agentSandboxMode,
+        apiKey ?? undefined,
       );
       console.log("[AcpStore] Spawn result:", info);
 

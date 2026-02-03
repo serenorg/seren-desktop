@@ -25,6 +25,7 @@ interface SidecarEntry {
   bin: string;
   dest: string;
   optional?: boolean;
+  package?: string;
 }
 
 interface PackageJson {
@@ -32,7 +33,7 @@ interface PackageJson {
 }
 
 type SidecarSource =
-  | { type: "git"; url: string; rev?: string; tag?: string; branch?: string }
+  | { type: "git"; url: string; rev?: string; tag?: string; branch?: string; package?: string }
   | { type: "path"; dir: string };
 
 interface SidecarConfig {
@@ -203,7 +204,7 @@ function loadSidecarsFromPackageJson(rootDir: string): SidecarConfig[] {
           `Sidecar "${key}" must specify exactly one of "rev", "tag", or "branch" when using "git"`,
         );
       }
-      source = { type: "git", url: entry.git, rev: gitRev, tag: gitTag, branch: gitBranch };
+      source = { type: "git", url: entry.git, rev: gitRev, tag: gitTag, branch: gitBranch, package: entry.package };
     } else {
       throw new Error(`Sidecar "${key}" must specify either "git" or "path"`);
     }
@@ -314,6 +315,8 @@ function buildSidecar(
       if (profile === "debug") baseArgs.push("--debug");
       if (targetTriple !== hostTriple) baseArgs.push("--target", targetTriple);
       if (forceInstall) baseArgs.push("--force");
+      // For git repos with workspaces, the crate/package name is a positional argument at the end
+      if (source.package) baseArgs.push(source.package);
 
       try {
         run("cargo", [...baseArgs, "--locked"]);

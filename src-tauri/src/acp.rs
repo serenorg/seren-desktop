@@ -4,10 +4,10 @@
 use agent_client_protocol::{Agent, Client, ClientSideConnection, Result as AcpResult};
 use agent_client_protocol::{
     CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest,
-    CreateTerminalResponse, ExtNotification, ExtRequest, ExtResponse, Implementation,
-    InitializeRequest, KillTerminalCommandRequest, KillTerminalCommandResponse, NewSessionRequest,
-    PromptRequest, ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
+    CreateTerminalResponse, EnvVariable, ExtNotification, ExtRequest, ExtResponse, Implementation,
+    InitializeRequest, KillTerminalCommandRequest, KillTerminalCommandResponse, McpServer,
+    McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
     RequestPermissionResponse, SessionModeId, SessionNotification, SessionUpdate,
     SetSessionModeRequest, TerminalOutputRequest, TerminalOutputResponse, TextContent,
     WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
@@ -316,6 +316,70 @@ fn launch_agent_login(agent_type: AgentType) {
     }
 }
 
+/// Get the path to the seren-mcp sidecar binary.
+///
+/// The binary is located in the same embedded-runtime/bin/ directory as other sidecars.
+/// Returns None if the binary is not found (seren-mcp is optional).
+fn get_seren_mcp_path() -> Option<std::path::PathBuf> {
+    let exe_path = std::env::current_exe().ok()?;
+    let exe_dir = exe_path.parent()?;
+
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let bin_filename = format!("seren-mcp{}", ext);
+
+    // Locations to check (same as AgentType::command):
+    let candidates = [
+        // 1. Production macOS: In Resources/embedded-runtime/bin/
+        exe_dir
+            .join("../Resources/embedded-runtime/bin")
+            .join(&bin_filename),
+        // 2. Production Linux/Windows: In resource dir next to exe
+        exe_dir.join("embedded-runtime/bin").join(&bin_filename),
+        // 3. Development: In src-tauri/embedded-runtime/bin/
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("embedded-runtime")
+            .join("bin")
+            .join(&bin_filename),
+    ];
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            log::info!("[ACP] Found seren-mcp binary at: {:?}", candidate);
+            return Some(candidate.clone());
+        }
+    }
+
+    log::debug!(
+        "[ACP] seren-mcp binary not found. Checked locations:\n{}",
+        candidates
+            .iter()
+            .map(|p| format!("  - {:?}", p))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    None
+}
+
+/// Build MCP server configurations for a new ACP session.
+///
+/// If seren-mcp is available and an API key is provided, includes it as a stdio MCP server.
+fn build_mcp_servers(api_key: Option<&str>) -> Vec<McpServer> {
+    let mut servers = Vec::new();
+
+    // Add seren-mcp if binary is available and we have an API key
+    if let (Some(mcp_path), Some(key)) = (get_seren_mcp_path(), api_key) {
+        log::info!("[ACP] Adding seren-mcp to session MCP servers");
+        let mcp_server = McpServerStdio::new("seren-mcp", mcp_path)
+            .args(vec!["start".to_string()])
+            .env(vec![EnvVariable::new("API_KEY", key)]);
+        servers.push(McpServer::Stdio(mcp_server));
+    } else if api_key.is_none() {
+        log::debug!("[ACP] No API key provided, skipping seren-mcp");
+    }
+
+    servers
+}
+
 /// Information about an ACP session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -429,7 +493,7 @@ impl Client for ClientDelegate {
 
         let tool_name = serde_json::to_value(&args.tool_call)
             .ok()
-            .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(String::from))
+            .and_then(|v| v.get("title").and_then(|n| n.as_str()).map(String::from))
             .unwrap_or_else(|| "unknown".to_string());
 
         log::info!(
@@ -859,6 +923,7 @@ pub async fn acp_spawn(
     agent_type: AgentType,
     cwd: String,
     sandbox_mode: Option<String>,
+    api_key: Option<String>,
 ) -> Result<AcpSessionInfo, String> {
     let cwd = normalize_cwd(&cwd)?;
     let parsed_sandbox_mode = sandbox_mode
@@ -913,6 +978,7 @@ pub async fn acp_spawn(
     let session_id_clone = session_id.clone();
     let cwd_clone = cwd.clone();
     let session_arc_clone = session_arc.clone();
+    let api_key_clone = api_key.clone();
 
     let session_arc_for_worker = session_arc_clone.clone();
 
@@ -935,6 +1001,7 @@ pub async fn acp_spawn(
                 pending_permissions,
                 pending_diff_proposals,
                 parsed_sandbox_mode,
+                api_key_clone,
             )
             .await
             {
@@ -1021,6 +1088,7 @@ async fn run_session_worker(
     pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
     pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     sandbox_mode: crate::sandbox::SandboxMode,
+    api_key: Option<String>,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
     let args = agent_type.args();
@@ -1189,7 +1257,9 @@ async fn run_session_worker(
 
     // Create a new session with the agent
     log::info!("[ACP] Creating new session...");
-    let new_session_request = NewSessionRequest::new(&cwd);
+    let mcp_servers = build_mcp_servers(api_key.as_deref());
+    log::info!("[ACP] MCP servers for session: {:?}", mcp_servers.len());
+    let new_session_request = NewSessionRequest::new(&cwd).mcp_servers(mcp_servers);
 
     let new_session_response = match connection.new_session(new_session_request).await {
         Ok(resp) => resp,

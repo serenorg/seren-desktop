@@ -13,7 +13,7 @@ export interface AcpPermissionDialogProps {
 function getRiskLevel(toolCall: unknown): "low" | "medium" | "high" {
   if (!toolCall || typeof toolCall !== "object") return "medium";
   const call = toolCall as Record<string, unknown>;
-  const name = (call.name as string) || "";
+  const name = (call.title as string) || (call.name as string) || "";
 
   if (
     name.includes("terminal") ||
@@ -35,7 +35,7 @@ function getRiskLevel(toolCall: unknown): "low" | "medium" | "high" {
 function formatToolCall(toolCall: unknown): string {
   if (!toolCall || typeof toolCall !== "object") return "Unknown action";
   const call = toolCall as Record<string, unknown>;
-  const name = (call.name as string) || "unknown";
+  const name = (call.title as string) || (call.name as string) || "unknown";
   const input = call.input || call.arguments;
   if (input && typeof input === "object") {
     const args = input as Record<string, unknown>;

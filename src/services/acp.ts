@@ -132,16 +132,23 @@ export type AcpEvent =
 
 /**
  * Spawn a new ACP agent session.
+ *
+ * @param agentType - The type of agent to spawn (claude-code or codex)
+ * @param cwd - Working directory for the agent session
+ * @param sandboxMode - Optional sandbox mode for restricting agent capabilities
+ * @param apiKey - Optional API key to enable Seren MCP tools for the agent
  */
 export async function spawnAgent(
   agentType: AgentType,
   cwd: string,
   sandboxMode?: string,
+  apiKey?: string,
 ): Promise<AcpSessionInfo> {
   return invoke<AcpSessionInfo>("acp_spawn", {
     agentType,
     cwd,
     sandboxMode: sandboxMode ?? null,
+    apiKey: apiKey ?? null,
   });
 }
 
