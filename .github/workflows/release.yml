@@ -260,6 +260,7 @@ jobs:
           totp_secret: ${{ secrets.ES_TOTP_SECRET }}
           dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
           environment_name: PROD
+          malware_block: true
           override: true
 
       - name: Sign Windows MSI installer
@@ -273,6 +274,7 @@ jobs:
           totp_secret: ${{ secrets.ES_TOTP_SECRET }}
           dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/msi
           environment_name: PROD
+          malware_block: true
           override: true
 
       # Upload artifacts
