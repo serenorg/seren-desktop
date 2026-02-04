@@ -7,6 +7,7 @@ import {
   ContextMenu,
   type ContextMenuItem,
 } from "@/components/common/ContextMenu";
+import { openFolder } from "@/lib/files/service";
 import {
   type FileNode,
   fileTreeState,
@@ -15,10 +16,13 @@ import {
   setSelectedPath,
   toggleExpanded,
 } from "@/stores/fileTree";
+import { chatStore } from "@/stores/chat.store";
+import { acpStore } from "@/stores/acp.store";
 
 interface FileTreeProps {
   onFileSelect?: (path: string) => void;
   onDirectoryToggle?: (path: string, expanded: boolean) => void;
+  onOpenFolder?: () => void;
 }
 
 interface ContextMenuState {
@@ -52,6 +56,12 @@ export const FileTree: Component<FileTreeProps> = (props) => {
     setContextMenu(null);
   };
 
+  // Clipboard state for cut/paste operations
+  const [clipboardNode, setClipboardNode] = createSignal<{
+    node: FileNode;
+    operation: "cut" | "copy";
+  } | null>(null);
+
   // Copy file content to clipboard
   const handleCopy = async (node: FileNode) => {
     if (node.isDirectory) return;
@@ -63,12 +73,104 @@ export const FileTree: Component<FileTreeProps> = (props) => {
     }
   };
 
+  // Cut file/folder (mark for move)
+  const handleCut = (node: FileNode) => {
+    setClipboardNode({ node, operation: "cut" });
+  };
+
   // Copy file path to clipboard
   const handleCopyPath = async (node: FileNode) => {
     try {
       await navigator.clipboard.writeText(node.path);
     } catch (err) {
       console.error("Failed to copy path:", err);
+    }
+  };
+
+  // Copy relative path to clipboard
+  const handleCopyRelativePath = async (node: FileNode) => {
+    try {
+      const rootPath = fileTreeState.rootPath;
+      let relativePath = node.path;
+      if (rootPath && node.path.startsWith(rootPath)) {
+        relativePath = node.path.slice(rootPath.length);
+        // Remove leading slash
+        if (relativePath.startsWith("/")) {
+          relativePath = relativePath.slice(1);
+        }
+      }
+      await navigator.clipboard.writeText(relativePath);
+    } catch (err) {
+      console.error("Failed to copy relative path:", err);
+    }
+  };
+
+  // Add file to current chat
+  const handleAddToChat = async (node: FileNode) => {
+    if (node.isDirectory) return;
+    try {
+      const content = await invoke<string>("read_file", { path: node.path });
+      const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
+      chatStore.setPendingInput(message);
+      // Navigate to chat panel
+      window.dispatchEvent(
+        new CustomEvent("seren:open-panel", { detail: "chat" }),
+      );
+    } catch (err) {
+      console.error("Failed to add file to chat:", err);
+    }
+  };
+
+  // Add file to new chat
+  const handleAddToNewChat = async (node: FileNode) => {
+    if (node.isDirectory) return;
+    try {
+      const content = await invoke<string>("read_file", { path: node.path });
+      const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
+      await chatStore.createConversation(`File: ${node.name}`);
+      chatStore.setPendingInput(message);
+      // Navigate to chat panel
+      window.dispatchEvent(
+        new CustomEvent("seren:open-panel", { detail: "chat" }),
+      );
+    } catch (err) {
+      console.error("Failed to add file to new chat:", err);
+    }
+  };
+
+  // Add file to agent
+  const handleAddToAgent = async (node: FileNode) => {
+    if (node.isDirectory) return;
+    try {
+      const content = await invoke<string>("read_file", { path: node.path });
+      const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
+      // Enable agent mode and set pending input
+      acpStore.setAgentModeEnabled(true);
+      chatStore.setPendingInput(message);
+      // Navigate to chat panel (agent is shown there when enabled)
+      window.dispatchEvent(
+        new CustomEvent("seren:open-panel", { detail: "chat" }),
+      );
+    } catch (err) {
+      console.error("Failed to add file to agent:", err);
+    }
+  };
+
+  // Add file to new agent session
+  const handleAddToNewAgent = async (node: FileNode) => {
+    if (node.isDirectory) return;
+    try {
+      const content = await invoke<string>("read_file", { path: node.path });
+      const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
+      // Enable agent mode
+      acpStore.setAgentModeEnabled(true);
+      chatStore.setPendingInput(message);
+      // Navigate to chat panel
+      window.dispatchEvent(
+        new CustomEvent("seren:open-panel", { detail: "chat" }),
+      );
+    } catch (err) {
+      console.error("Failed to add file to new agent:", err);
     }
   };
 
@@ -122,41 +224,96 @@ export const FileTree: Component<FileTreeProps> = (props) => {
 
   const getContextMenuItems = (node: FileNode): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
+    const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+
+    // Reveal in Finder/Explorer (top item like Cursor)
+    items.push({
+      label: isMac ? "Reveal in Finder" : "Reveal in Explorer",
+      icon: "📂",
+      shortcut: isMac ? "⌥⌘R" : "Shift+Alt+R",
+      onClick: () => handleRevealInFinder(node),
+    });
+
+    items.push({ label: "", separator: true, onClick: () => {} });
+
+    // Add to Chat/Agent options (only for files)
+    if (!node.isDirectory) {
+      items.push({
+        label: "Add File to Seren Chat",
+        icon: "💬",
+        onClick: () => handleAddToChat(node),
+      });
+
+      items.push({
+        label: "Add File to Seren Agent",
+        icon: "🤖",
+        onClick: () => handleAddToAgent(node),
+      });
+
+      items.push({
+        label: "Add File to New Seren Chat",
+        icon: "💬",
+        onClick: () => handleAddToNewChat(node),
+      });
+
+      items.push({
+        label: "Add File to New Seren Agent",
+        icon: "🤖",
+        onClick: () => handleAddToNewAgent(node),
+      });
+
+      items.push({ label: "", separator: true, onClick: () => {} });
+    }
+
+    // Cut/Copy operations
+    items.push({
+      label: "Cut",
+      icon: "✂️",
+      shortcut: isMac ? "⌘X" : "Ctrl+X",
+      onClick: () => handleCut(node),
+    });
 
     if (!node.isDirectory) {
       items.push({
         label: "Copy",
         icon: "📋",
+        shortcut: isMac ? "⌘C" : "Ctrl+C",
         onClick: () => handleCopy(node),
       });
     }
 
+    items.push({ label: "", separator: true, onClick: () => {} });
+
+    // Path operations
     items.push({
       label: "Copy Path",
       icon: "📎",
+      shortcut: isMac ? "⌥⌘C" : "Shift+Alt+C",
       onClick: () => handleCopyPath(node),
+    });
+
+    items.push({
+      label: "Copy Relative Path",
+      icon: "📎",
+      shortcut: isMac ? "⇧⌥⌘C" : "Ctrl+Shift+Alt+C",
+      onClick: () => handleCopyRelativePath(node),
     });
 
     items.push({ label: "", separator: true, onClick: () => {} });
 
+    // File operations
     items.push({
       label: "Rename",
       icon: "✏️",
+      shortcut: "Enter",
       onClick: () => handleRename(node),
     });
 
     items.push({
       label: "Delete",
       icon: "🗑️",
+      shortcut: isMac ? "⌘⌫" : "Delete",
       onClick: () => handleDelete(node),
-    });
-
-    items.push({ label: "", separator: true, onClick: () => {} });
-
-    items.push({
-      label: "Reveal in Finder",
-      icon: "📂",
-      onClick: () => handleRevealInFinder(node),
     });
 
     return items;
@@ -179,8 +336,17 @@ export const FileTree: Component<FileTreeProps> = (props) => {
       <Show
         when={fileTreeState.nodes.length > 0}
         fallback={
-          <div class="p-4 text-muted-foreground text-center italic">
-            No folder open
+          <div class="p-6 text-center flex flex-col items-center gap-3">
+            <p class="text-muted-foreground text-sm">No folder open</p>
+            <button
+              type="button"
+              class="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium cursor-pointer transition-colors hover:bg-primary/90"
+              onClick={() => props.onOpenFolder?.() ?? openFolder()}
+              title="Open Folder"
+            >
+              <span class="text-lg">+</span>
+              <span>Open Folder</span>
+            </button>
           </div>
         }
       >
