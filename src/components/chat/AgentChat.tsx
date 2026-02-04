@@ -14,13 +14,14 @@ import {
 import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
 import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
+import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
-import { launchLogin, type AgentType, type DiffEvent } from "@/services/acp";
+import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
@@ -328,12 +329,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 fallback={<span>{message.content}</span>}
               >
                 <div class="flex items-center justify-between gap-2">
-                  <span>Authentication expired. Please log in to continue.</span>
+                  <span>
+                    Authentication expired. Please log in to continue.
+                  </span>
                   <button
                     type="button"
                     class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d] flex-shrink-0"
                     onClick={() => {
-                      const agentType = acpStore.activeSession?.info.agentType ?? "claude-code";
+                      const agentType =
+                        acpStore.activeSession?.info.agentType ?? "claude-code";
                       launchLogin(agentType);
                     }}
                   >
@@ -543,14 +547,19 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           }`}
         >
           <div class="flex items-center justify-between">
-            <span class="flex-1">{isAuthError(sessionError()) ? "Authentication expired. Please log in again to continue." : sessionError()}</span>
+            <span class="flex-1">
+              {isAuthError(sessionError())
+                ? "Authentication expired. Please log in again to continue."
+                : sessionError()}
+            </span>
             <div class="flex items-center gap-2 ml-2">
               <Show when={isAuthError(sessionError())}>
                 <button
                   type="button"
                   class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d]"
                   onClick={() => {
-                    const agentType = acpStore.activeSession?.info.agentType ?? "claude-code";
+                    const agentType =
+                      acpStore.activeSession?.info.agentType ?? "claude-code";
                     launchLogin(agentType);
                   }}
                 >
@@ -584,7 +593,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           </div>
           <Show when={isAuthError(sessionError())}>
             <p class="mt-1 text-xs opacity-80">
-              Click "Login" to authenticate with {acpStore.activeSession?.info.agentType === "codex" ? "OpenAI" : "Anthropic"}, then restart the session.
+              Click "Login" to authenticate with{" "}
+              {acpStore.activeSession?.info.agentType === "codex"
+                ? "OpenAI"
+                : "Anthropic"}
+              , then restart the session.
             </p>
           </Show>
         </div>
@@ -640,15 +653,17 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   setCommandPopupIndex(0);
                 }}
               />
-              <textarea
-                ref={inputRef}
+              <ResizableTextarea
+                ref={(el) => (inputRef = el)}
                 value={input()}
                 placeholder={
                   isPrompting()
                     ? "Type to queue message..."
                     : "Tell the agent what to do… (type / for commands)"
                 }
-                class="w-full min-h-[80px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
+                class="w-full bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
+                minHeight={80}
+                maxHeight={window.innerHeight * 0.5}
                 onInput={(e) => {
                   setInput(e.currentTarget.value);
                   setCommandPopupIndex(0);
