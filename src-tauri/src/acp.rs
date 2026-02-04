@@ -1816,9 +1816,11 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
 
     // Already installed locally? Check version and upgrade if needed.
     if claude_bin.exists() {
-        // Check version
+        // Check version - must set PATH so the claude shebang can find Node.js
+        let embedded_path = crate::embedded_runtime::get_embedded_path();
         if let Ok(output) = std::process::Command::new(&claude_bin)
             .arg("--version")
+            .env("PATH", embedded_path)
             .output()
         {
             let version_str = String::from_utf8_lossy(&output.stdout);
