@@ -360,9 +360,10 @@ jobs:
           overwrite: true
 
       # Windows: Sign executables with SSL.com eSigner (cloud EV code signing)
+      # Sign NSIS installer (.exe)
       - name: Sign Windows NSIS installer
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        uses: sslcom/esigner-codesign@develop
+        uses: sslcom/esigner-codesign@v1.3.0
         with:
           command: batch_sign
           username: ${{ secrets.ES_USERNAME }}
@@ -374,6 +375,56 @@ jobs:
           malware_block: true
           override: true
 
+      # Sign MSI installer
+      - name: Sign Windows MSI installer
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        uses: sslcom/esigner-codesign@v1.3.0
+        with:
+          command: batch_sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/msi
+          environment_name: PROD
+          malware_block: true
+          override: true
+
+      # Verify Windows code signing
+      - name: Verify Windows code signing
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          Write-Host "Verifying code signatures..."
+
+          # Verify NSIS installer
+          $nsisFiles = Get-ChildItem -Path "src-tauri/target/${{ matrix.target }}/release/bundle/nsis" -Filter "*.exe"
+          foreach ($file in $nsisFiles) {
+            Write-Host "Checking signature for: $($file.FullName)"
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($sig.Status -eq "Valid") {
+              Write-Host "✓ Valid signature: $($sig.SignerCertificate.Subject)"
+            } else {
+              Write-Host "✗ Invalid or missing signature: $($sig.Status)"
+              exit 1
+            }
+          }
+
+          # Verify MSI installer
+          $msiFiles = Get-ChildItem -Path "src-tauri/target/${{ matrix.target }}/release/bundle/msi" -Filter "*.msi"
+          foreach ($file in $msiFiles) {
+            Write-Host "Checking signature for: $($file.FullName)"
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($sig.Status -eq "Valid") {
+              Write-Host "✓ Valid signature: $($sig.SignerCertificate.Subject)"
+            } else {
+              Write-Host "✗ Invalid or missing signature: $($sig.Status)"
+              exit 1
+            }
+          }
+
+          Write-Host "All Windows installers are properly signed!"
+
       # Upload artifacts
       - name: Upload Windows NSIS
         if: matrix.os == 'windows-latest'
@@ -381,6 +432,13 @@ jobs:
         with:
           name: Seren-Desktop-${{ matrix.name }}.exe
           path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+
+      - name: Upload Windows MSI
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seren-Desktop-${{ matrix.name }}.msi
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
 
       - name: Upload Linux DEB
         if: matrix.os == 'ubuntu-latest'
