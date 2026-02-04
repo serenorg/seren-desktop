@@ -60,7 +60,7 @@ jobs:
             echo ""
             echo "## Note"
             echo ""
-            echo "This is an alpha release. Windows builds are EV code signed. macOS builds are signed; notarization may still be processing (use right-click → Open if Gatekeeper blocks)."
+            echo "This is an alpha release. Windows builds are EV code signed. macOS builds are signed; if notarization is still processing, run: \`xattr -cr /Volumes/SerenDesktop/SerenDesktop.app\`"
           } > release_notes.md
 
           echo "Generated release notes:"
