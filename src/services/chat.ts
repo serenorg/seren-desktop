@@ -260,12 +260,24 @@ export async function* streamMessageWithTools(
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
 
-  // Build system message
-  let systemContent =
-    "You are a helpful coding assistant running inside a desktop application with full access to the user's local filesystem. " +
-    "You can read, write, and create files and directories on the user's computer using the available tools. " +
-    "When the user asks you to save, export, or write content to a file, use the write_file tool to save it to their filesystem. " +
-    "Always ask for the desired file path if the user doesn't specify one.";
+  // Build system message - conditional based on actual tool availability
+  const toolCount = enableTools ? getAllTools(model).length : 0;
+  let systemContent: string;
+
+  if (toolCount > 0) {
+    // Tools are available - describe capabilities accurately
+    systemContent =
+      `You are a helpful coding assistant running inside a desktop application with access to ${toolCount} tools. ` +
+      "You can read, write, and create files and directories on the user's computer using the available tools. " +
+      "When the user asks you to save, export, or write content to a file, use the write_file tool to save it to their filesystem. " +
+      "Always ask for the desired file path if the user doesn't specify one.";
+  } else {
+    // No tools available - don't claim tool capabilities
+    systemContent =
+      "You are a helpful coding assistant. " +
+      "Note: File system tools are currently not available. " +
+      "You can help with code questions, explanations, and provide code snippets, but cannot directly read or write files.";
+  }
 
   // Add user-provided context if available
   if (context) {
@@ -466,8 +478,26 @@ export async function* continueToolIteration(
 
 /**
  * Check if tools are available for the current provider.
- * Currently only Seren provider supports tools.
+ * Verifies both provider support AND actual tool availability.
  */
 export function areToolsAvailable(): boolean {
-  return providerStore.activeProvider === "seren";
+  // Only Seren provider supports tools
+  if (providerStore.activeProvider !== "seren") {
+    return false;
+  }
+
+  // Actually check if we have tools - this prevents making claims
+  // about tool access when tools aren't actually available
+  const tools = getAllTools();
+  return tools.length > 0;
+}
+
+/**
+ * Get the count of available tools (for conditional system prompts).
+ */
+export function getAvailableToolCount(): number {
+  if (providerStore.activeProvider !== "seren") {
+    return 0;
+  }
+  return getAllTools().length;
 }
