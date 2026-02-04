@@ -19,6 +19,25 @@ import type {
 const PUBLISHER_SLUG = "seren-models";
 
 /**
+ * User-friendly error message for credits/payment issues.
+ * Hides technical OpenRouter details from end users.
+ */
+const CREDITS_ERROR_MESSAGE =
+  "SerenModels is not available currently. Please contact the Seren team at hello@serendb.com with this alert.";
+
+/**
+ * Check if an error status indicates a credits/payment issue.
+ */
+function isCreditsError(status: number, rawError: string): boolean {
+  // 402 Payment Required
+  if (status === 402) return true;
+  // Check for credit-related keywords in error message
+  const creditKeywords = ["credits", "credit", "afford", "payment", "billing"];
+  const lowerError = rawError.toLowerCase();
+  return creditKeywords.some((kw) => lowerError.includes(kw));
+}
+
+/**
  * Normalize old model IDs to current OpenRouter format.
  * Handles migration from date-suffixed IDs to clean IDs.
  */
@@ -296,8 +315,16 @@ export const serenProvider: ProviderAdapter = {
       const error = body?.error as Record<string, unknown> | undefined;
       if (error) {
         const metadata = (error.metadata as Record<string, unknown>) || {};
+        const rawError = String(
+          metadata.raw || error.message || "Unknown error",
+        );
+
+        // Show user-friendly message for credits/payment issues
+        if (isCreditsError(data.status, rawError)) {
+          throw new Error(CREDITS_ERROR_MESSAGE);
+        }
+
         const providerName = metadata.provider_name || "Provider";
-        const rawError = metadata.raw || error.message || "Unknown error";
         throw new Error(`${providerName} error (${data.status}): ${rawError}`);
       }
       throw new Error(`Seren upstream error: ${data.status}`);
@@ -481,8 +508,16 @@ export async function sendMessageWithTools(
     const error = body?.error as Record<string, unknown> | undefined;
     if (error) {
       const metadata = (error.metadata as Record<string, unknown>) || {};
+      const rawError = String(
+        metadata.raw || error.message || "Unknown error",
+      );
+
+      // Show user-friendly message for credits/payment issues
+      if (isCreditsError(data.status, rawError)) {
+        throw new Error(CREDITS_ERROR_MESSAGE);
+      }
+
       const providerName = metadata.provider_name || "Provider";
-      const rawError = metadata.raw || error.message || "Unknown error";
       throw new Error(`${providerName} error (${data.status}): ${rawError}`);
     }
     throw new Error(`Seren upstream error: ${data.status}`);
