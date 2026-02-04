@@ -239,8 +239,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
     document.addEventListener("keydown", handleKeyDown);
 
-    // Register copy button handler (event delegation)
-    messagesRef?.addEventListener("click", handleCopyClick);
+    // Register copy button handler on document for better reliability
+    // Using document-level delegation ensures copy buttons work even if messagesRef timing is off
+    document.addEventListener("click", handleCopyClick);
 
     // Listen for slash command events
     window.addEventListener("seren:pick-images", handlePickImages);
@@ -281,7 +282,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   onCleanup(() => {
     document.removeEventListener("keydown", handleKeyDown);
-    messagesRef?.removeEventListener("click", handleCopyClick);
+    document.removeEventListener("click", handleCopyClick);
     window.removeEventListener(
       "seren:pick-images",
       handlePickImages as EventListener,

@@ -237,8 +237,9 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
     // Register keyboard shortcuts
     document.addEventListener("keydown", handleKeyDown);
 
-    // Register copy button handler (event delegation)
-    messagesRef?.addEventListener("click", handleCopyClick);
+    // Register copy button handler on document for better reliability
+    // Using document-level delegation ensures copy buttons work even if messagesRef timing is off
+    document.addEventListener("click", handleCopyClick);
 
     try {
       await chatStore.loadHistory();
@@ -258,7 +259,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
 
   onCleanup(() => {
     document.removeEventListener("keydown", handleKeyDown);
-    messagesRef?.removeEventListener("click", handleCopyClick);
+    document.removeEventListener("click", handleCopyClick);
     if (suggestionDebounceTimer) {
       clearTimeout(suggestionDebounceTimer);
     }
