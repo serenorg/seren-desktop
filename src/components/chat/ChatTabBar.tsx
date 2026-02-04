@@ -6,10 +6,21 @@ import { type Conversation, chatStore } from "@/stores/chat.store";
 
 export const ChatTabBar: Component = () => {
   const handleNewChat = async () => {
+    // Prevent creating new chat during streaming to avoid confusion
+    if (chatStore.isLoading) {
+      console.log("[ChatTabBar] Blocked new chat creation during streaming");
+      return;
+    }
     await chatStore.createConversation();
   };
 
   const handleTabClick = (id: string) => {
+    // Prevent tab switching during streaming to avoid chat history "loss"
+    // The history isn't actually lost - it's just showing a different conversation
+    if (chatStore.isLoading && id !== chatStore.activeConversationId) {
+      console.log("[ChatTabBar] Blocked tab switch during streaming");
+      return;
+    }
     chatStore.setActiveConversation(id);
   };
 
@@ -22,6 +33,10 @@ export const ChatTabBar: Component = () => {
   const visibleConversations = () =>
     chatStore.conversations.filter((c) => !c.isArchived);
 
+  // Visual indicator for blocked state
+  const isTabSwitchBlocked = () =>
+    chatStore.isLoading && visibleConversations().length > 1;
+
   return (
     <div class="flex items-center gap-1 px-3 py-2 bg-[#161b22] border-b border-[#21262d] min-h-[40px]">
       <div class="flex items-center gap-1 flex-1 overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden">
@@ -29,9 +44,19 @@ export const ChatTabBar: Component = () => {
           {(conversation: Conversation) => (
             <button
               type="button"
-              class={`group flex items-center gap-1.5 px-2.5 py-1.5 bg-transparent border border-transparent rounded-md text-[13px] text-[#8b949e] cursor-pointer whitespace-nowrap max-w-[180px] transition-all hover:bg-[rgba(139,148,158,0.1)] hover:text-[#e6edf3] ${conversation.id === chatStore.activeConversationId ? "bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.3)] text-[#58a6ff]" : ""}`}
+              class={`group flex items-center gap-1.5 px-2.5 py-1.5 bg-transparent border border-transparent rounded-md text-[13px] text-[#8b949e] whitespace-nowrap max-w-[180px] transition-all ${
+                isTabSwitchBlocked() &&
+                conversation.id !== chatStore.activeConversationId
+                  ? "cursor-not-allowed opacity-50"
+                  : "cursor-pointer hover:bg-[rgba(139,148,158,0.1)] hover:text-[#e6edf3]"
+              } ${conversation.id === chatStore.activeConversationId ? "bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.3)] text-[#58a6ff]" : ""}`}
               onClick={() => handleTabClick(conversation.id)}
-              title={conversation.title}
+              title={
+                isTabSwitchBlocked() &&
+                conversation.id !== chatStore.activeConversationId
+                  ? "Cannot switch tabs while processing"
+                  : conversation.title
+              }
             >
               <span class="overflow-hidden text-ellipsis max-w-[140px]">
                 {conversation.title}
@@ -52,9 +77,17 @@ export const ChatTabBar: Component = () => {
       </div>
       <button
         type="button"
-        class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border border-[#30363d] rounded-md text-lg leading-none text-[#8b949e] cursor-pointer shrink-0 transition-all hover:bg-[#21262d] hover:border-[#484f58] hover:text-[#e6edf3]"
+        class={`flex items-center justify-center w-7 h-7 p-0 bg-transparent border border-[#30363d] rounded-md text-lg leading-none text-[#8b949e] shrink-0 transition-all ${
+          chatStore.isLoading
+            ? "cursor-not-allowed opacity-50"
+            : "cursor-pointer hover:bg-[#21262d] hover:border-[#484f58] hover:text-[#e6edf3]"
+        }`}
         onClick={handleNewChat}
-        title="New Chat"
+        title={
+          chatStore.isLoading
+            ? "Cannot create new chat while processing"
+            : "New Chat"
+        }
       >
         +
       </button>

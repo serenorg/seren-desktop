@@ -183,16 +183,24 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
 
     const isMod = event.metaKey || event.ctrlKey;
 
-    // Ctrl/Cmd+T: New tab
+    // Ctrl/Cmd+T: New tab (blocked during streaming)
     if (isMod && event.key === "t") {
       event.preventDefault();
+      if (chatStore.isLoading) {
+        console.log("[ChatPanel] Blocked new tab during streaming");
+        return;
+      }
       chatStore.createConversation();
       return;
     }
 
-    // Ctrl/Cmd+W: Close current tab
+    // Ctrl/Cmd+W: Close current tab (blocked during streaming)
     if (isMod && event.key === "w") {
       event.preventDefault();
+      if (chatStore.isLoading) {
+        console.log("[ChatPanel] Blocked tab close during streaming");
+        return;
+      }
       const activeId = chatStore.activeConversationId;
       if (activeId) {
         chatStore.archiveConversation(activeId);
@@ -200,9 +208,13 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
       return;
     }
 
-    // Ctrl+Tab / Ctrl+Shift+Tab: Switch tabs
+    // Ctrl+Tab / Ctrl+Shift+Tab: Switch tabs (blocked during streaming)
     if (event.ctrlKey && event.key === "Tab") {
       event.preventDefault();
+      if (chatStore.isLoading) {
+        console.log("[ChatPanel] Blocked tab switch during streaming");
+        return;
+      }
       const conversations = chatStore.conversations.filter(
         (c) => !c.isArchived,
       );
