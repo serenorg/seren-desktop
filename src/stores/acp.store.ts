@@ -759,6 +759,14 @@ export const acpStore = {
 
       case "promptComplete":
         this.finalizeStreamingContent(sessionId);
+        // Transition status back to "ready" so queued messages can be processed
+        setState(
+          "sessions",
+          sessionId,
+          "info",
+          "status",
+          "ready" as SessionStatus,
+        );
         break;
 
       case "sessionStatus":
