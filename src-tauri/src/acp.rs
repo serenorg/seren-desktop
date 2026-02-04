@@ -1127,6 +1127,24 @@ async fn run_session_worker(
         cmd.env("PATH", &full_path);
     }
 
+    // Set CLAUDE_CLI_PATH so the SDK can find the Claude CLI directly without relying on PATH.
+    // This is more reliable than PATH resolution, especially when the claude binary is a Node.js
+    // script that requires finding Node.js via its shebang.
+    if let Some(ref bin) = cli_tools_bin {
+        let claude_binary = if cfg!(target_os = "windows") {
+            bin.join("claude.cmd")
+        } else {
+            bin.join("claude")
+        };
+        if claude_binary.exists() {
+            cmd.env("CLAUDE_CLI_PATH", &claude_binary);
+            log::info!(
+                "[ACP] Set CLAUDE_CLI_PATH to: {}",
+                claude_binary.display()
+            );
+        }
+    }
+
     let mut child = cmd.spawn().map_err(|e| {
         format!(
             "Failed to spawn {:?} {:?}: {}. Run 'pnpm build:sidecar' to build the acp_agent binary.",
