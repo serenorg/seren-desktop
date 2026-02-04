@@ -74,7 +74,7 @@
     "seren-acp-claude": {
       "name": "Claude Code",
       "git": "https://github.com/serenorg/seren-acp-claude",
-      "tag": "v0.1.1",
+      "tag": "v0.1.3",
       "bin": "seren-acp-claude",
       "dest": "seren-acp-claude"
     },
