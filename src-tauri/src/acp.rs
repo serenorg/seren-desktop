@@ -1811,10 +1811,52 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         bin_dir.join("claude")
     };
 
-    // Already installed locally?
+    // Minimum required CLI version for SDK compatibility
+    const MIN_CLI_VERSION: &str = "2.1.30";
+
+    // Already installed locally? Check version and upgrade if needed.
     if claude_bin.exists() {
+        // Check version
+        if let Ok(output) = std::process::Command::new(&claude_bin)
+            .arg("--version")
+            .output()
+        {
+            let version_str = String::from_utf8_lossy(&output.stdout);
+            let version = version_str
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().next())
+                .unwrap_or("")
+                .trim();
+
+            if is_version_sufficient(version, MIN_CLI_VERSION) {
+                log::info!(
+                    "[ACP] Claude CLI {} at: {}",
+                    version,
+                    claude_bin.display()
+                );
+                return Ok(bin_dir.to_string_lossy().to_string());
+            }
+
+            // Version is outdated - upgrade silently
+            log::info!(
+                "[ACP] Claude CLI {} is outdated (need {}), upgrading...",
+                version,
+                MIN_CLI_VERSION
+            );
+
+            if let Err(e) = upgrade_claude_cli_sync(&cli_tools_dir, &app) {
+                log::warn!("[ACP] Auto-upgrade failed: {}. Will retry on next launch.", e);
+            } else {
+                log::info!("[ACP] Claude CLI upgraded successfully");
+            }
+
+            return Ok(bin_dir.to_string_lossy().to_string());
+        }
+
+        // Couldn't check version, return existing path
         log::info!(
-            "[ACP] Claude CLI already installed at: {}",
+            "[ACP] Claude CLI at: {}",
             claude_bin.display()
         );
         return Ok(bin_dir.to_string_lossy().to_string());
@@ -1944,4 +1986,76 @@ fn get_cli_tools_bin_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
     } else {
         None
     }
+}
+
+/// Check if a CLI version meets the minimum requirement.
+fn is_version_sufficient(version: &str, min_version: &str) -> bool {
+    let parse = |v: &str| -> Option<(u32, u32, u32)> {
+        let parts: Vec<&str> = v.trim_start_matches('v').split('.').collect();
+        if parts.len() < 3 {
+            return None;
+        }
+        Some((
+            parts[0].parse().ok()?,
+            parts[1].parse().ok()?,
+            parts[2].parse().ok()?,
+        ))
+    };
+
+    let Some((cur_maj, cur_min, cur_patch)) = parse(version) else {
+        return false;
+    };
+    let Some((min_maj, min_min, min_patch)) = parse(min_version) else {
+        return false;
+    };
+
+    (cur_maj, cur_min, cur_patch) >= (min_maj, min_min, min_patch)
+}
+
+/// Upgrade Claude CLI synchronously (blocking).
+fn upgrade_claude_cli_sync(
+    cli_tools_dir: &std::path::Path,
+    app: &AppHandle,
+) -> Result<(), String> {
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    let paths = crate::embedded_runtime::discover_embedded_runtime(app);
+
+    let node_bin = paths
+        .node_dir
+        .as_ref()
+        .map(|d| {
+            if cfg!(target_os = "windows") {
+                d.join("node.exe")
+            } else {
+                d.join("node")
+            }
+        })
+        .ok_or_else(|| "Embedded Node.js not found".to_string())?;
+
+    let npm_cli = node_bin
+        .parent()
+        .unwrap()
+        .join("../lib/node_modules/npm/bin/npm-cli.js");
+    let npm_cli = npm_cli
+        .canonicalize()
+        .map_err(|e| format!("npm CLI not found: {e}"))?;
+
+    let output = std::process::Command::new(&node_bin)
+        .args([
+            npm_cli.to_string_lossy().as_ref(),
+            "install",
+            "--prefix",
+            &cli_tools_dir.to_string_lossy(),
+            "@anthropic-ai/claude-code@latest",
+        ])
+        .env("PATH", embedded_path)
+        .output()
+        .map_err(|e| format!("Failed to run npm: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("npm install failed: {stderr}"));
+    }
+
+    Ok(())
 }
