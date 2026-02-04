@@ -13,6 +13,7 @@ import {
 export interface ContextMenuItem {
   label: string;
   icon?: string;
+  shortcut?: string;
   onClick: () => void;
   disabled?: boolean;
   separator?: boolean;
@@ -124,6 +125,9 @@ export const ContextMenu: Component<ContextMenuProps> = (props) => {
                 <span class="w-4 text-center text-sm">{item.icon}</span>
               </Show>
               <span class="flex-1">{item.label}</span>
+              <Show when={item.shortcut}>
+                <span class="text-[11px] text-[#6e7681] ml-4">{item.shortcut}</span>
+              </Show>
             </button>
           </Show>
         )}
