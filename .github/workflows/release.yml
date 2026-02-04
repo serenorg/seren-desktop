@@ -226,6 +226,7 @@ jobs:
         run: pnpm tauri build --target ${{ matrix.target }}
 
       # macOS: Notarize the app (skip if no Apple ID configured)
+      # Uses polling instead of --wait to avoid hanging issues with Apple's notary service
       - name: Notarize macOS app
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
         env:
@@ -238,14 +239,78 @@ jobs:
 
           if [ -n "$DMG_PATH" ]; then
             echo "Notarizing $DMG_PATH"
-            xcrun notarytool submit "$DMG_PATH" \
+
+            # Submit for notarization (without --wait to avoid hanging)
+            SUBMIT_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
-              --wait
+              --output-format json)
+
+            echo "Submit output: $SUBMIT_OUTPUT"
+            SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+
+            if [ -z "$SUBMISSION_ID" ]; then
+              echo "Failed to get submission ID"
+              exit 1
+            fi
+
+            echo "Submission ID: $SUBMISSION_ID"
+            echo "Polling for notarization status..."
+
+            # Poll for status (max 30 minutes = 60 polls * 30 seconds)
+            MAX_ATTEMPTS=60
+            ATTEMPT=0
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+              ATTEMPT=$((ATTEMPT + 1))
+              echo "Status check attempt $ATTEMPT/$MAX_ATTEMPTS..."
+
+              STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" \
+                --output-format json 2>&1) || true
+
+              echo "Status: $STATUS_OUTPUT"
+
+              # Check for Accepted status
+              if echo "$STATUS_OUTPUT" | grep -q '"status"[[:space:]]*:[[:space:]]*"Accepted"'; then
+                echo "Notarization accepted!"
+                break
+              fi
+
+              # Check for Invalid/Rejected status
+              if echo "$STATUS_OUTPUT" | grep -q '"status"[[:space:]]*:[[:space:]]*"Invalid"'; then
+                echo "Notarization failed - Invalid"
+                xcrun notarytool log "$SUBMISSION_ID" \
+                  --apple-id "$APPLE_ID" \
+                  --password "$APPLE_PASSWORD" \
+                  --team-id "$APPLE_TEAM_ID" || true
+                exit 1
+              fi
+
+              if echo "$STATUS_OUTPUT" | grep -q '"status"[[:space:]]*:[[:space:]]*"Rejected"'; then
+                echo "Notarization rejected"
+                xcrun notarytool log "$SUBMISSION_ID" \
+                  --apple-id "$APPLE_ID" \
+                  --password "$APPLE_PASSWORD" \
+                  --team-id "$APPLE_TEAM_ID" || true
+                exit 1
+              fi
+
+              # Still in progress, wait 30 seconds
+              sleep 30
+            done
+
+            if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+              echo "Notarization timed out after 30 minutes"
+              exit 1
+            fi
 
             # Staple the notarization ticket
+            echo "Stapling notarization ticket..."
             xcrun stapler staple "$DMG_PATH"
+            echo "Notarization and stapling complete!"
           fi
 
       # Windows: Sign executables with SSL.com eSigner (cloud EV code signing)
