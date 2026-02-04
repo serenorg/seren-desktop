@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
+import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { FileTree } from "@/components/sidebar/FileTree";
 import { openExternalLink } from "@/lib/external-link";
 import {
@@ -795,11 +796,13 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                       onSelect={handlePublisherSelect}
                       onDismiss={dismissSuggestions}
                     />
-                    <textarea
-                      ref={inputRef}
+                    <ResizableTextarea
+                      ref={(el) => (inputRef = el)}
                       value={input()}
                       placeholder="Ask Seren anything…"
-                      class="w-full min-h-[80px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
+                      class="w-full bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
+                      minHeight={80}
+                      maxHeight={window.innerHeight * 0.5}
                       onInput={(event) => {
                         setInput(event.currentTarget.value);
                         // Reset history browsing when user types manually
