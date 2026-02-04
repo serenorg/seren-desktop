@@ -423,6 +423,7 @@ export const acpStore = {
 
   /**
    * Send a prompt to the active session.
+   * Auto-recovers from dead sessions by restarting and retrying.
    */
   async sendPrompt(prompt: string, context?: Array<{ text?: string }>) {
     const sessionId = state.activeSessionId;
@@ -482,8 +483,67 @@ export const acpStore = {
       console.log("[AcpStore] sendPrompt completed successfully");
     } catch (error) {
       console.error("[AcpStore] sendPrompt error:", error);
-      const message =
-        error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+
+      // Auto-recover from dead/zombie sessions
+      if (
+        message.includes("Worker thread dropped") ||
+        message.includes("not found") ||
+        message.includes("Session not initialized")
+      ) {
+        console.info(
+          "[AcpStore] Session appears dead, attempting auto-recovery...",
+        );
+
+        // Preserve conversation history and cwd before cleanup
+        const existingMessages = [...session.messages];
+        const cwd = session.cwd;
+        const agentType = session.info.agentType;
+
+        // Clean up the dead session
+        await this.terminateSession(sessionId);
+
+        // Spawn a fresh session
+        const newSessionId = await this.spawnSession(cwd, agentType);
+        if (newSessionId) {
+          // Restore conversation history to the new session (excluding the
+          // user message we just added, since we'll retry the prompt)
+          const historyToRestore = existingMessages.filter(
+            (m) => m.id !== userMessage.id,
+          );
+          if (historyToRestore.length > 0) {
+            setState("sessions", newSessionId, "messages", historyToRestore);
+          }
+
+          // Retry the prompt on the new session
+          console.info(
+            `[AcpStore] Retrying prompt on new session ${newSessionId}`,
+          );
+          try {
+            // Add the user message to the new session
+            setState("sessions", newSessionId, "messages", (msgs) => [
+              ...msgs,
+              userMessage,
+            ]);
+            await acpService.sendPrompt(newSessionId, prompt, context);
+            console.log("[AcpStore] Retry succeeded on new session");
+            return;
+          } catch (retryError) {
+            console.error("[AcpStore] Retry failed:", retryError);
+            const retryMessage =
+              retryError instanceof Error
+                ? retryError.message
+                : String(retryError);
+            this.addErrorMessage(newSessionId, retryMessage);
+            return;
+          }
+        }
+
+        // Spawn failed, show original error
+        setState("error", "Session died and could not be restarted.");
+        return;
+      }
+
       this.addErrorMessage(sessionId, message);
     }
   },
