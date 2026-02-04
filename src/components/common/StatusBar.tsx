@@ -18,13 +18,15 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
         {props.message || "Ready"}
       </span>
       <div class="flex items-center gap-2 [&_.mcp-status-indicator]:text-primary-foreground [&_.status-label]:text-primary-foreground/85 [&_.update-indicator]:text-primary-foreground/90">
+        {/* MCP indicator moved to left side to avoid accidental clicks near Send button */}
+        <McpStatusIndicator />
+        <span class="w-px h-3.5 bg-primary-foreground/20" />
         <AutocompleteStatus
           state={autocompleteStore.state}
           errorMessage={autocompleteStore.errorMessage ?? undefined}
           onToggle={autocompleteStore.toggle}
         />
         <UpdateIndicator />
-        <McpStatusIndicator />
       </div>
     </footer>
   );
