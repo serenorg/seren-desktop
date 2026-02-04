@@ -1919,14 +1919,26 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         })
         .ok_or_else(|| "Embedded Node.js not found".to_string())?;
 
-    // Find the npm CLI script relative to the node binary
-    let npm_cli = node_bin
-        .parent()
-        .unwrap()
-        .join("../lib/node_modules/npm/bin/npm-cli.js");
-    let npm_cli = npm_cli
-        .canonicalize()
-        .map_err(|e| format!("npm CLI script not found at {:?}: {}", npm_cli, e))?;
+    // Find the npm CLI script relative to the node binary.
+    // On macOS/Linux: node is at node/bin/node, npm at node/lib/node_modules/npm/bin/npm-cli.js
+    // On Windows: node is at node/node.exe, npm at node/node_modules/npm/bin/npm-cli.js
+    let npm_cli = if cfg!(target_os = "windows") {
+        node_bin
+            .parent()
+            .unwrap()
+            .join("node_modules/npm/bin/npm-cli.js")
+    } else {
+        node_bin
+            .parent()
+            .unwrap()
+            .join("../lib/node_modules/npm/bin/npm-cli.js")
+    };
+    let npm_cli = npm_cli.canonicalize().map_err(|e| {
+        format!(
+            "npm CLI script not found at {:?}: {}. Ensure embedded Node.js runtime is properly installed.",
+            npm_cli, e
+        )
+    })?;
 
     let output = tokio::process::Command::new(&node_bin)
         .args([
@@ -2034,10 +2046,18 @@ fn upgrade_claude_cli_sync(
         })
         .ok_or_else(|| "Embedded Node.js not found".to_string())?;
 
-    let npm_cli = node_bin
-        .parent()
-        .unwrap()
-        .join("../lib/node_modules/npm/bin/npm-cli.js");
+    // Platform-specific npm CLI path (same logic as acp_ensure_claude_cli)
+    let npm_cli = if cfg!(target_os = "windows") {
+        node_bin
+            .parent()
+            .unwrap()
+            .join("node_modules/npm/bin/npm-cli.js")
+    } else {
+        node_bin
+            .parent()
+            .unwrap()
+            .join("../lib/node_modules/npm/bin/npm-cli.js")
+    };
     let npm_cli = npm_cli
         .canonicalize()
         .map_err(|e| format!("npm CLI not found: {e}"))?;
