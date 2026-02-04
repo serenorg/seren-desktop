@@ -363,7 +363,7 @@ jobs:
       # Sign NSIS installer (.exe)
       - name: Sign Windows NSIS installer
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
-        uses: sslcom/esigner-codesign@develop
+        uses: sslcom/esigner-codesign@v1.3.2
         with:
           command: batch_sign
           username: ${{ secrets.ES_USERNAME }}
