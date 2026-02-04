@@ -203,15 +203,14 @@ jobs:
           security list-keychain -d user -s $KEYCHAIN_PATH
 
       # Build the app (with signing for macOS when certificates available)
+      # Note: APPLE_ID/PASSWORD/TEAM_ID removed to prevent Tauri's internal notarization
+      # Notarization is handled separately with polling in the "Notarize macOS app" step
       - name: Build Tauri app (signed)
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: pnpm tauri build --target ${{ matrix.target }}
 
       # Build the app (unsigned for macOS without certificates, or other platforms)
