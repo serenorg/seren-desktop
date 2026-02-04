@@ -233,7 +233,7 @@ jobs:
           path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
 
       # macOS: Notarize the app (non-blocking - continues even if notarization fails/times out)
-      # Uses polling instead of --wait to avoid hanging issues with Apple's notary service
+      # Uses polling with retries to handle Apple's notary service issues
       - name: Notarize macOS app
         id: notarize
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
@@ -246,34 +246,49 @@ jobs:
           # Find the DMG file
           DMG_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" | head -1)
 
-          if [ -n "$DMG_PATH" ]; then
-            echo "Notarizing $DMG_PATH"
+          if [ -z "$DMG_PATH" ]; then
+            echo "No DMG found"
+            exit 1
+          fi
 
-            # Submit for notarization (without --wait to avoid hanging)
+          echo "Notarizing $DMG_PATH"
+
+          # Retry logic: 3 submission attempts
+          MAX_SUBMISSION_ATTEMPTS=3
+          SUBMISSION_ATTEMPT=0
+          NOTARIZATION_SUCCESS=false
+
+          while [ $SUBMISSION_ATTEMPT -lt $MAX_SUBMISSION_ATTEMPTS ] && [ "$NOTARIZATION_SUCCESS" = "false" ]; do
+            SUBMISSION_ATTEMPT=$((SUBMISSION_ATTEMPT + 1))
+            echo "=== Submission attempt $SUBMISSION_ATTEMPT/$MAX_SUBMISSION_ATTEMPTS ==="
+
+            # Submit for notarization
             SUBMIT_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
-              --output-format json)
+              --output-format json 2>&1) || true
 
             echo "Submit output: $SUBMIT_OUTPUT"
             SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
 
             if [ -z "$SUBMISSION_ID" ]; then
-              echo "Failed to get submission ID"
-              exit 1
+              echo "Failed to get submission ID, retrying in 30 seconds..."
+              sleep 30
+              continue
             fi
 
             echo "Submission ID: $SUBMISSION_ID"
             echo "Polling for notarization status..."
 
-            # Poll for status (max 6 hours = 360 polls * 60 seconds)
-            # Apple notarization can take 3-4+ hours during peak times
-            MAX_ATTEMPTS=360
-            ATTEMPT=0
-            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-              ATTEMPT=$((ATTEMPT + 1))
-              echo "Status check attempt $ATTEMPT/$MAX_ATTEMPTS (up to 6 hours)..."
+            # Poll for status (max 2 hours per attempt = 120 polls * 60 seconds)
+            MAX_POLL_ATTEMPTS=120
+            POLL_ATTEMPT=0
+            POLL_RESULT="timeout"
+
+            while [ $POLL_ATTEMPT -lt $MAX_POLL_ATTEMPTS ]; do
+              POLL_ATTEMPT=$((POLL_ATTEMPT + 1))
+              echo "Status check $POLL_ATTEMPT/$MAX_POLL_ATTEMPTS (attempt $SUBMISSION_ATTEMPT)..."
 
               STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
                 --apple-id "$APPLE_ID" \
@@ -281,22 +296,22 @@ jobs:
                 --team-id "$APPLE_TEAM_ID" \
                 --output-format json 2>&1) || true
 
-              echo "Status: $STATUS_OUTPUT"
-
               # Check for Accepted status
               if echo "$STATUS_OUTPUT" | grep -q '"status"[[:space:]]*:[[:space:]]*"Accepted"'; then
                 echo "Notarization accepted!"
+                POLL_RESULT="accepted"
                 break
               fi
 
-              # Check for Invalid/Rejected status
+              # Check for Invalid/Rejected status (don't retry these - they need fixes)
               if echo "$STATUS_OUTPUT" | grep -q '"status"[[:space:]]*:[[:space:]]*"Invalid"'; then
                 echo "Notarization failed - Invalid"
                 xcrun notarytool log "$SUBMISSION_ID" \
                   --apple-id "$APPLE_ID" \
                   --password "$APPLE_PASSWORD" \
                   --team-id "$APPLE_TEAM_ID" || true
-                exit 1
+                POLL_RESULT="rejected"
+                break
               fi
 
               if echo "$STATUS_OUTPUT" | grep -q '"status"[[:space:]]*:[[:space:]]*"Rejected"'; then
@@ -305,23 +320,35 @@ jobs:
                   --apple-id "$APPLE_ID" \
                   --password "$APPLE_PASSWORD" \
                   --team-id "$APPLE_TEAM_ID" || true
-                exit 1
+                POLL_RESULT="rejected"
+                break
               fi
 
               # Still in progress, wait 60 seconds
               sleep 60
             done
 
-            if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-              echo "Notarization timed out after 6 hours"
+            if [ "$POLL_RESULT" = "accepted" ]; then
+              NOTARIZATION_SUCCESS=true
+            elif [ "$POLL_RESULT" = "rejected" ]; then
+              # Don't retry rejections - they need code fixes
+              echo "Notarization was rejected by Apple - not retrying"
               exit 1
+            else
+              echo "Polling timed out after 2 hours, will retry submission..."
+              sleep 60
             fi
+          done
 
-            # Staple the notarization ticket
-            echo "Stapling notarization ticket..."
-            xcrun stapler staple "$DMG_PATH"
-            echo "Notarization and stapling complete!"
+          if [ "$NOTARIZATION_SUCCESS" = "false" ]; then
+            echo "Notarization failed after $MAX_SUBMISSION_ATTEMPTS attempts"
+            exit 1
           fi
+
+          # Staple the notarization ticket
+          echo "Stapling notarization ticket..."
+          xcrun stapler staple "$DMG_PATH"
+          echo "Notarization and stapling complete!"
 
       # Upload notarized DMG if notarization succeeded (overwrites the pre-notarization artifact)
       - name: Upload macOS DMG (notarized)

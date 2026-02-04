@@ -1,0 +1,193 @@
+# ABOUTME: Retries Apple notarization for releases with unsigned DMGs.
+# ABOUTME: Can be triggered manually or runs on schedule to auto-heal releases.
+
+name: Retry Notarization
+
+on:
+  # Manual trigger with release tag input
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to retry notarization for (e.g., v0.1.0-alpha.64)'
+        required: true
+        type: string
+  # Run every 6 hours to check for releases needing notarization
+  schedule:
+    - cron: '0 */6 * * *'
+
+permissions:
+  contents: write
+
+env:
+  HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' }}
+
+jobs:
+  find-releases:
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.find.outputs.releases }}
+    steps:
+      - name: Find releases needing notarization
+        id: find
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const inputTag = '${{ github.event.inputs.release_tag }}';
+
+            let releases = [];
+
+            if (inputTag) {
+              // Manual trigger - use specified tag
+              try {
+                const release = await github.rest.repos.getReleaseByTag({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag: inputTag
+                });
+                releases.push({
+                  tag: release.data.tag_name,
+                  id: release.data.id
+                });
+              } catch (e) {
+                core.setFailed(`Release ${inputTag} not found`);
+                return;
+              }
+            } else {
+              // Scheduled run - find recent releases (last 5)
+              const allReleases = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 5
+              });
+
+              for (const release of allReleases.data) {
+                // Only check non-draft releases from the last 7 days
+                const releaseDate = new Date(release.published_at);
+                const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                if (!release.draft && releaseDate > weekAgo) {
+                  releases.push({
+                    tag: release.tag_name,
+                    id: release.id
+                  });
+                }
+              }
+            }
+
+            console.log(`Found ${releases.length} releases to check`);
+            core.setOutput('releases', JSON.stringify(releases));
+
+  retry-notarization:
+    needs: find-releases
+    if: needs.find-releases.outputs.releases != '[]'
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64, x64]
+    steps:
+      - name: Process releases
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ env.HAS_APPLE_SIGNING }}" != "true" ]; then
+            echo "No Apple signing credentials configured"
+            exit 0
+          fi
+
+          RELEASES='${{ needs.find-releases.outputs.releases }}'
+          ARCH="${{ matrix.arch }}"
+
+          # Set up keychain for signing
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/notarize.keychain-db
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode > $CERTIFICATE_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          echo "$RELEASES" | jq -c '.[]' | while read -r release; do
+            TAG=$(echo "$release" | jq -r '.tag')
+            RELEASE_ID=$(echo "$release" | jq -r '.id')
+
+            echo "=== Checking release $TAG ==="
+
+            # Determine asset name based on arch
+            if [ "$ARCH" = "aarch64" ]; then
+              ASSET_NAME="SerenDesktop_0.1.0_aarch64.dmg"
+            else
+              ASSET_NAME="SerenDesktop_0.1.0_x64.dmg"
+            fi
+
+            # Download the DMG
+            echo "Downloading $ASSET_NAME..."
+            gh release download "$TAG" --pattern "$ASSET_NAME" --dir . --clobber || {
+              echo "Asset $ASSET_NAME not found in release $TAG, skipping"
+              continue
+            }
+
+            # Check if already notarized
+            echo "Checking if already notarized..."
+            if xcrun stapler validate "$ASSET_NAME" 2>/dev/null; then
+              echo "$ASSET_NAME is already notarized, skipping"
+              rm -f "$ASSET_NAME"
+              continue
+            fi
+
+            echo "$ASSET_NAME needs notarization"
+
+            # Submit for notarization with retries
+            MAX_ATTEMPTS=3
+            ATTEMPT=0
+            SUCCESS=false
+
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ] && [ "$SUCCESS" = "false" ]; do
+              ATTEMPT=$((ATTEMPT + 1))
+              echo "Notarization attempt $ATTEMPT/$MAX_ATTEMPTS..."
+
+              SUBMIT_OUTPUT=$(xcrun notarytool submit "$ASSET_NAME" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" \
+                --wait \
+                --timeout 2h 2>&1) || true
+
+              echo "$SUBMIT_OUTPUT"
+
+              if echo "$SUBMIT_OUTPUT" | grep -q "status: Accepted"; then
+                SUCCESS=true
+              elif echo "$SUBMIT_OUTPUT" | grep -q "status: Invalid\|status: Rejected"; then
+                echo "Notarization rejected - not retrying"
+                break
+              else
+                echo "Notarization failed or timed out, retrying..."
+                sleep 60
+              fi
+            done
+
+            if [ "$SUCCESS" = "true" ]; then
+              echo "Stapling notarization ticket..."
+              xcrun stapler staple "$ASSET_NAME"
+
+              echo "Uploading notarized DMG to release..."
+              gh release upload "$TAG" "$ASSET_NAME" --clobber
+
+              echo "Successfully notarized and updated $ASSET_NAME in $TAG"
+            else
+              echo "Failed to notarize $ASSET_NAME after $MAX_ATTEMPTS attempts"
+            fi
+
+            rm -f "$ASSET_NAME"
+          done
+
+          # Cleanup keychain
+          security delete-keychain $KEYCHAIN_PATH || true
