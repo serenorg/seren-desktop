@@ -254,6 +254,7 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Tool Executor] Tool "${name}" failed:`, message);
     return {
       tool_call_id: toolCall.id,
       content: `Error: ${message}`,
@@ -372,6 +373,7 @@ async function executeOpenClawTool(
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Tool Executor] OpenClaw tool "${toolName}" failed:`, message);
     return {
       tool_call_id: toolCallId,
       content: `OpenClaw tool error: ${message}`,
@@ -414,6 +416,7 @@ async function executeMcpTool(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Tool Executor] MCP tool "${serverName}/${toolName}" failed:`, message);
     return {
       tool_call_id: toolCallId,
       content: `MCP tool error: ${message}`,
@@ -565,6 +568,7 @@ async function executeGatewayTool(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Tool Executor] Gateway tool "${publisherSlug}/${toolName}" failed:`, message);
     return {
       tool_call_id: toolCallId,
       content: `Gateway tool error: ${message}`,
