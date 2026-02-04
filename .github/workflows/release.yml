@@ -60,7 +60,7 @@ jobs:
             echo ""
             echo "## Note"
             echo ""
-            echo "This is an alpha release. macOS builds are signed and notarized. Windows builds are EV code signed."
+            echo "This is an alpha release. Windows builds are EV code signed. macOS builds are signed; notarization may still be processing (use right-click → Open if Gatekeeper blocks)."
           } > release_notes.md
 
           echo "Generated release notes:"
@@ -224,10 +224,20 @@ jobs:
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING != 'true'
         run: pnpm tauri build --target ${{ matrix.target }}
 
-      # macOS: Notarize the app (skip if no Apple ID configured)
+      # Upload macOS DMG immediately (before notarization so we always have an artifact)
+      - name: Upload macOS DMG (pre-notarization)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seren-Desktop-${{ matrix.name }}.dmg
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+
+      # macOS: Notarize the app (non-blocking - continues even if notarization fails/times out)
       # Uses polling instead of --wait to avoid hanging issues with Apple's notary service
       - name: Notarize macOS app
+        id: notarize
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
+        continue-on-error: true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -257,13 +267,13 @@ jobs:
             echo "Submission ID: $SUBMISSION_ID"
             echo "Polling for notarization status..."
 
-            # Poll for status (max 4 hours = 240 polls * 60 seconds)
-            # Apple notarization can take 3-4 hours during peak times
-            MAX_ATTEMPTS=240
+            # Poll for status (max 6 hours = 360 polls * 60 seconds)
+            # Apple notarization can take 3-4+ hours during peak times
+            MAX_ATTEMPTS=360
             ATTEMPT=0
             while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
               ATTEMPT=$((ATTEMPT + 1))
-              echo "Status check attempt $ATTEMPT/$MAX_ATTEMPTS (up to 4 hours)..."
+              echo "Status check attempt $ATTEMPT/$MAX_ATTEMPTS (up to 6 hours)..."
 
               STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
                 --apple-id "$APPLE_ID" \
@@ -303,7 +313,7 @@ jobs:
             done
 
             if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-              echo "Notarization timed out after 4 hours"
+              echo "Notarization timed out after 6 hours"
               exit 1
             fi
 
@@ -312,6 +322,15 @@ jobs:
             xcrun stapler staple "$DMG_PATH"
             echo "Notarization and stapling complete!"
           fi
+
+      # Upload notarized DMG if notarization succeeded (overwrites the pre-notarization artifact)
+      - name: Upload macOS DMG (notarized)
+        if: matrix.os == 'macos-latest' && steps.notarize.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seren-Desktop-${{ matrix.name }}.dmg
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          overwrite: true
 
       # Windows: Sign executables with SSL.com eSigner (cloud EV code signing)
       - name: Sign Windows NSIS installer
@@ -329,13 +348,6 @@ jobs:
           override: true
 
       # Upload artifacts
-      - name: Upload macOS DMG
-        if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Seren-Desktop-${{ matrix.name }}.dmg
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-
       - name: Upload Windows NSIS
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
