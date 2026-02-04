@@ -260,6 +260,16 @@ export async function* streamMessageWithTools(
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
 
+  // Seren MCP publishers context - added to all prompts to prevent confusion
+  const serenPublishersContext =
+    "\n\nIMPORTANT - Seren MCP Publishers Context:\n" +
+    "This application connects to Seren MCP publishers - third-party data services accessible through Seren. " +
+    "When users mention publisher names like 'Apollo', 'Perplexity', 'Firecrawl', etc., they are referring to Seren MCP publishers, NOT general technologies with similar names:\n" +
+    "- Apollo = Sales intelligence platform for contacts/leads (NOT Apollo GraphQL)\n" +
+    "- Perplexity = AI-powered search and research tool\n" +
+    "- Firecrawl = Web scraping and crawling service\n" +
+    "Always interpret publisher references in the Seren MCP context unless the user explicitly asks about the technology/framework itself.";
+
   // Build system message - conditional based on actual tool availability
   const toolCount = enableTools ? getAllTools(model).length : 0;
   let systemContent: string;
@@ -267,16 +277,18 @@ export async function* streamMessageWithTools(
   if (toolCount > 0) {
     // Tools are available - describe capabilities accurately
     systemContent =
-      `You are a helpful coding assistant running inside a desktop application with access to ${toolCount} tools. ` +
+      `You are a helpful coding assistant running inside Seren Desktop with access to ${toolCount} tools. ` +
       "You can read, write, and create files and directories on the user's computer using the available tools. " +
       "When the user asks you to save, export, or write content to a file, use the write_file tool to save it to their filesystem. " +
-      "Always ask for the desired file path if the user doesn't specify one.";
+      "Always ask for the desired file path if the user doesn't specify one." +
+      serenPublishersContext;
   } else {
     // No tools available - don't claim tool capabilities
     systemContent =
-      "You are a helpful coding assistant. " +
+      "You are a helpful coding assistant running inside Seren Desktop. " +
       "Note: File system tools are currently not available. " +
-      "You can help with code questions, explanations, and provide code snippets, but cannot directly read or write files.";
+      "You can help with code questions, explanations, and provide code snippets, but cannot directly read or write files." +
+      serenPublishersContext;
   }
 
   // Add user-provided context if available
