@@ -258,12 +258,13 @@ jobs:
             echo "Submission ID: $SUBMISSION_ID"
             echo "Polling for notarization status..."
 
-            # Poll for status (max 30 minutes = 60 polls * 30 seconds)
-            MAX_ATTEMPTS=60
+            # Poll for status (max 4 hours = 240 polls * 60 seconds)
+            # Apple notarization can take 3-4 hours during peak times
+            MAX_ATTEMPTS=240
             ATTEMPT=0
             while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
               ATTEMPT=$((ATTEMPT + 1))
-              echo "Status check attempt $ATTEMPT/$MAX_ATTEMPTS..."
+              echo "Status check attempt $ATTEMPT/$MAX_ATTEMPTS (up to 4 hours)..."
 
               STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
                 --apple-id "$APPLE_ID" \
@@ -298,12 +299,12 @@ jobs:
                 exit 1
               fi
 
-              # Still in progress, wait 30 seconds
-              sleep 30
+              # Still in progress, wait 60 seconds
+              sleep 60
             done
 
             if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-              echo "Notarization timed out after 30 minutes"
+              echo "Notarization timed out after 4 hours"
               exit 1
             fi
 
