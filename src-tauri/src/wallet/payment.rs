@@ -687,7 +687,7 @@ mod tests {
         let response_body = r#"{
             "x402Version": 2,
             "resource": {
-                "url": "/agent/database",
+                "url": "/publishers/test-publisher/query",
                 "description": "SQL query on Test Publisher",
                 "mimeType": "application/json"
             },
@@ -731,7 +731,7 @@ mod tests {
         let response_body = r#"{
             "x402Version": 2,
             "resource": {
-                "url": "/agent/database",
+                "url": "/publishers/test-publisher/query",
                 "description": "SQL query on Test Publisher",
                 "mimeType": "application/json"
             },
@@ -765,7 +765,7 @@ mod tests {
         let response_body = r#"{
             "x402Version": 2,
             "resource": {
-                "url": "/agent/database",
+                "url": "/publishers/test-publisher/query",
                 "description": "SQL query on Test Publisher",
                 "mimeType": "application/json"
             },

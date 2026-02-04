@@ -1,12 +1,11 @@
 // ABOUTME: SerenEmbed API client for generating text embeddings.
-// ABOUTME: Uses SerenBucks via /agent/api endpoint for paid embedding generation.
+// ABOUTME: Uses SerenBucks via /publishers endpoint for paid embedding generation.
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
 
 const PUBLISHER_SLUG = "seren-embed";
-const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
 
 /** Default model for embeddings */
 const DEFAULT_MODEL = "text-embedding-3-small";
@@ -35,11 +34,11 @@ interface EmbeddingResponse {
   };
 }
 
-interface AgentApiPayload {
-  publisher: string;
-  path: string;
-  method: string;
-  body?: EmbeddingRequest;
+/** Wrapped response from the /publishers endpoint */
+interface GatewayResponse {
+  status: number;
+  body: EmbeddingResponse;
+  cost: string;
 }
 
 /**
@@ -64,33 +63,37 @@ export async function embedTexts(
     throw new Error("Not authenticated - please log in");
   }
 
-  const payload: AgentApiPayload = {
-    publisher: PUBLISHER_SLUG,
-    path: "/embeddings",
-    method: "POST",
-    body: {
-      input: texts,
-      model: model || DEFAULT_MODEL,
-    },
+  const payload: EmbeddingRequest = {
+    input: texts,
+    model: model || DEFAULT_MODEL,
   };
 
-  const response = await appFetch(AGENT_API_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      "X-AGENT-WALLET": "prepaid",
+  // Use unified /publishers endpoint
+  const response = await appFetch(
+    `${apiBase}/publishers/${PUBLISHER_SLUG}/embeddings`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`SerenEmbed API error: ${response.status} - ${errorText}`);
   }
 
-  const result = (await response.json()) as EmbeddingResponse;
-  return result;
+  const result = (await response.json()) as GatewayResponse;
+
+  // Gateway wraps upstream errors in a 200 response with a status field
+  if (result.status && result.status !== 200) {
+    throw new Error(`SerenEmbed upstream error: ${result.status}`);
+  }
+
+  return result.body;
 }
 
 /**

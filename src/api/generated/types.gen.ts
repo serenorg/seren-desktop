@@ -214,7 +214,7 @@ export type AgentBalanceSummaryResponse = {
 export type AgentCreditSource = 'fiat_purchase' | 'signup_bonus' | 'payment_method_bonus' | 'daily_claim' | 'referral_reward' | 'admin_grant' | 'promo_code' | 'tier_bonus' | 'refund' | 'publisher_payout';
 
 /**
- * Agent information returned on successful registration (Moltbook-style)
+ * Agent information returned on successful registration
  */
 export type AgentInfo = {
     /**
@@ -248,58 +248,6 @@ export type AgentInfo = {
 };
 
 /**
- * DataResponse wrapper for agent recovery (for OpenAPI schema)
- */
-export type AgentRecoverDataResponse = {
-    data: AgentRecoverResponse;
-};
-
-/**
- * Request to recover an agent account after losing the API key.
- *
- * Requires only the recovery code (returned once when first funding your wallet
- * or when calling `/agent/wallet/recovery`).
- */
-export type AgentRecoverRequest = {
-    /**
-     * Recovery code (24 characters). Dashes/whitespace are allowed; letters are case-insensitive.
-     */
-    recovery_code: string;
-};
-
-/**
- * Response from agent recovery endpoint.
- */
-export type AgentRecoverResponse = {
-    agent: AgentInfo;
-    /**
-     * Message about recovery result
-     */
-    message: string;
-    recovery: AgentRecoveryInfo;
-    setup: SetupInstructions;
-    skill_files: SkillFiles;
-    /**
-     * Whether recovery was successful
-     */
-    success: boolean;
-};
-
-/**
- * Recovery info returned during agent recovery.
- */
-export type AgentRecoveryInfo = {
-    /**
-     * Message about recovery rotation.
-     */
-    message: string;
-    /**
-     * New recovery code (shown once). Save it securely.
-     */
-    recovery_code: string;
-};
-
-/**
  * DataResponse wrapper for agent registration (for OpenAPI schema)
  */
 export type AgentRegisterDataResponse = {
@@ -308,13 +256,7 @@ export type AgentRegisterDataResponse = {
 
 /**
  * Request to register a new AI agent account.
- * This endpoint is designed for AI agents to self-register without human verification.
- * The agent receives an API key immediately upon registration.
- *
- * A unique celestial-themed name is automatically generated (e.g., "radiant-sirius").
- * You can optionally provide a custom name instead.
- *
- * No password required - agents authenticate via API key only.
+ * All fields are optional - an empty body is valid.
  */
 export type AgentRegisterRequest = {
     /**
@@ -325,7 +267,7 @@ export type AgentRegisterRequest = {
 };
 
 /**
- * Response from agent registration endpoint (Moltbook-style)
+ * Response from agent registration endpoint
  */
 export type AgentRegisterResponse = {
     agent: AgentInfo;
@@ -1600,30 +1542,6 @@ export type BranchesResponse = {
      */
     data: Array<Branch>;
     pagination?: PaginationMeta | null;
-};
-
-/**
- * Request to call a tool on an MCP publisher
- */
-export type CallMcpToolRequest = {
-    /**
-     * Arguments to pass to the tool (optional)
-     */
-    arguments?: {
-        [key: string]: unknown;
-    } | null;
-    /**
-     * Publisher slug or ID
-     */
-    publisher?: string | null;
-    /**
-     * Publisher UUID (alternative to slug)
-     */
-    publisher_id?: string | null;
-    /**
-     * Name of the tool to call
-     */
-    tool_name: string;
 };
 
 /**
@@ -3521,20 +3439,6 @@ export type DepositResponse = {
 };
 
 /**
- * Request to discover capabilities of an MCP publisher
- */
-export type DiscoverMcpCapabilitiesRequest = {
-    /**
-     * Publisher slug or ID
-     */
-    publisher?: string | null;
-    /**
-     * Publisher UUID (alternative to slug)
-     */
-    publisher_id?: string | null;
-};
-
-/**
  * EIP-712 domain (matches ethereum.rs Eip712Domain)
  */
 export type Eip712Domain = {
@@ -5120,31 +5024,23 @@ export type ListFiatDepositsParams = {
 };
 
 /**
- * Request to list resources on an MCP publisher
+ * Response for listing MCP resources from a publisher
  */
-export type ListMcpResourcesRequest = {
+export type ListMcpResourcesResponse = {
     /**
-     * Publisher slug or ID
+     * List of available MCP resources
      */
-    publisher?: string | null;
-    /**
-     * Publisher UUID (alternative to slug)
-     */
-    publisher_id?: string | null;
+    resources: Array<McpResourceInfo>;
 };
 
 /**
- * Request to list tools on an MCP publisher
+ * Response for listing MCP tools from a publisher
  */
-export type ListMcpToolsRequest = {
+export type ListMcpToolsResponse = {
     /**
-     * Publisher slug or ID
+     * List of available MCP tools
      */
-    publisher?: string | null;
-    /**
-     * Publisher UUID (alternative to slug)
-     */
-    publisher_id?: string | null;
+    tools: Array<McpToolInfo>;
 };
 
 /**
@@ -5162,9 +5058,10 @@ export type ListPublisherPayoutsParams = {
 };
 
 /**
- * Query parameters for listing publishers
+ * Query parameters for listing publishers (store view with full details)
  */
 export type ListPublishersParams = {
+    category?: PublisherCategory | null;
     /**
      * Filter by verification status
      */
@@ -5560,14 +5457,6 @@ export type McpCapabilities = {
 };
 
 /**
- * Response containing MCP capabilities
- */
-export type McpCapabilitiesResponse = {
-    capabilities: McpCapabilities;
-    execution_time_ms: number;
-};
-
-/**
  * Argument for an MCP prompt
  */
 export type McpPromptArgument = {
@@ -5618,33 +5507,6 @@ export type McpResourceInfo = {
 };
 
 /**
- * Response from reading an MCP resource
- */
-export type McpResourceReadResponse = {
-    contents: Array<McpResourceContent>;
-    execution_time_ms: number;
-    response_bytes: number;
-};
-
-/**
- * Response containing MCP resources
- */
-export type McpResourcesResponse = {
-    execution_time_ms: number;
-    resources: Array<McpResourceInfo>;
-};
-
-/**
- * Response from an MCP tool call
- */
-export type McpToolCallResponse = {
-    execution_time_ms: number;
-    is_error: boolean;
-    response_bytes: number;
-    result: unknown;
-};
-
-/**
  * Information about an MCP tool
  */
 export type McpToolInfo = {
@@ -5660,14 +5522,6 @@ export type McpToolInfo = {
      * Tool name
      */
     name: string;
-};
-
-/**
- * Response containing MCP tools
- */
-export type McpToolsResponse = {
-    execution_time_ms: number;
-    tools: Array<McpToolInfo>;
 };
 
 /**
@@ -7658,7 +7512,7 @@ export type PreAuthorization = {
     /**
      * Target publisher this pre-authorization applies to.
      *
-     * Must match the `publisher_id` in the surrounding `/agent/api` request.
+     * Must match the publisher in the `/publishers/{slug}/{*path}` request.
      */
     publisher_id: string;
     /**
@@ -7809,7 +7663,7 @@ export type PricingConfigResponse = {
 };
 
 /**
- * Pricing information for a publisher
+ * Pricing information for a publisher (simple view)
  */
 export type PricingInfo = {
     /**
@@ -9090,7 +8944,7 @@ export type PublisherInfoResponse = {
 };
 
 /**
- * Response containing a list of publishers
+ * Response containing a list of publishers (simple summary view)
  */
 export type PublisherListResponse = {
     /**
@@ -9847,24 +9701,6 @@ export type RbacRolesResponse = {
      */
     data: Array<RbacRole>;
     pagination?: PaginationMeta | null;
-};
-
-/**
- * Request to read a resource from an MCP publisher
- */
-export type ReadMcpResourceRequest = {
-    /**
-     * Publisher slug or ID
-     */
-    publisher?: string | null;
-    /**
-     * Publisher UUID (alternative to slug)
-     */
-    publisher_id?: string | null;
-    /**
-     * URI of the resource to read
-     */
-    uri: string;
 };
 
 /**
@@ -10904,117 +10740,6 @@ export type SlashChargeRequest = {
 export type Slug = string;
 
 /**
- * Supported asset for streaming authorization
- */
-export type StreamingAsset = {
-    /**
-     * Asset contract address
-     */
-    address: string;
-    /**
-     * Internal asset ID (for clients that want to request a specific asset)
-     */
-    asset_id?: string | null;
-    /**
-     * Asset decimals
-     */
-    decimals: number;
-    eip712?: Eip712Domain | null;
-    /**
-     * Whether this is the publisher's primary streaming asset.
-     */
-    is_primary?: boolean | null;
-    /**
-     * Network identifier (CAIP-2, e.g., "eip155:8453")
-     */
-    network: string;
-    /**
-     * Asset symbol (e.g., "USDC")
-     */
-    symbol: string;
-};
-
-/**
- * Extra metadata for streaming authorization (x402-aligned)
- */
-export type StreamingAuthExtra = {
-    eip712: Eip712Domain;
-    /**
-     * Unique request ID for tracking this authorization request
-     */
-    request_id: string;
-    /**
-     * Token name for EIP-712 domain
-     */
-    token_name: string;
-    /**
-     * Token version for EIP-712 domain
-     */
-    token_version: string;
-};
-
-/**
- * DataResponse wrapper for streaming auth requirements (for OpenAPI schema)
- */
-export type StreamingAuthRequirementsDataResponse = {
-    data: StreamingAuthRequirementsResponse;
-};
-
-/**
- * Response for streaming authorization requirements
- *
- * This endpoint returns the information agents need to create their
- * EIP-3009 `TransferWithAuthorization` signature for streaming payments.
- */
-export type StreamingAuthRequirementsResponse = {
-    /**
-     * Chain ID for EIP-712 signing
-     */
-    chain_id: number;
-    extra: StreamingAuthExtra;
-    /**
-     * Minimum authorization amount in atomic units
-     */
-    min_authorization: string;
-    /**
-     * Address to authorize payment TO (Seren's settlement wallet)
-     * This is the `to` address in EIP-3009 TransferWithAuthorization
-     */
-    pay_to: string;
-    pricing: StreamingPricing;
-    /**
-     * Publisher slug
-     */
-    publisher_slug: string;
-    /**
-     * Suggested authorization amount in atomic units
-     */
-    suggested_authorization: string;
-    /**
-     * Supported payment assets
-     */
-    supported_assets: Array<StreamingAsset>;
-};
-
-/**
- * Pricing information for streaming authorization
- */
-export type StreamingPricing = {
-    /**
-     * Base cost per query in atomic units
-     */
-    base_cost_per_query: string;
-    /**
-     * Cost per byte in atomic units
-     */
-    cost_per_byte: string;
-    /**
-     * Cost per row in atomic units
-     */
-    cost_per_row: string;
-};
-
-/**
  * A Stripe Charge ID (ch_xxx).
  */
 export type StripeChargeId = string;
@@ -11427,24 +11152,6 @@ export type TopAgentsQueryParams = {
 export type TransactionDataResponse = {
     data: TransactionResponse;
     pagination?: PaginationMeta | null;
-};
-
-/**
- * Query parameters for transaction history
- */
-export type TransactionHistoryParams = {
-    /**
-     * Maximum number of results (default: 50, max: 100)
-     */
-    limit?: number;
-    /**
-     * Offset for pagination
-     */
-    offset?: number;
-    /**
-     * Filter by publisher
-     */
-    publisher_id?: string | null;
 };
 
 /**
@@ -12494,6 +12201,47 @@ export type WalletBalanceResponse = {
 };
 
 /**
+ * Wrapped wallet recover response for OpenAPI
+ */
+export type WalletRecoverDataResponse = {
+    data: WalletRecoverResponse;
+};
+
+/**
+ * Request to recover an agent account using a recovery code.
+ *
+ * Use this endpoint when you've lost access to your API key but have your
+ * recovery code (provided when setting up wallet recovery or on first deposit).
+ */
+export type WalletRecoverRequest = {
+    /**
+     * Recovery code (24 characters). Dashes/whitespace are allowed; letters are case-insensitive.
+     */
+    recovery_code: string;
+};
+
+/**
+ * Response from wallet recovery endpoint.
+ */
+export type WalletRecoverResponse = {
+    agent: AgentInfo;
+    /**
+     * Message about recovery result
+     */
+    message: string;
+    /**
+     * New recovery code (the old one has been rotated). Save this securely!
+     */
+    new_recovery_code: string;
+    setup: SetupInstructions;
+    skill_files: SkillFiles;
+    /**
+     * Whether recovery was successful
+     */
+    success: boolean;
+};
+
+/**
  * Balance by source type
  */
 export type WalletSourceBalance = {
@@ -12802,518 +12550,11 @@ export type WebhooksResponse = {
     pagination?: PaginationMeta | null;
 };
 
-export type OnchainDepositData = {
-    body: OnchainDepositRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/deposit';
-};
-
-export type OnchainDepositErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Payment required
-     */
-    402: PaymentRequiredResponseWithInfo;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type OnchainDepositError = OnchainDepositErrors[keyof OnchainDepositErrors];
-
-export type OnchainDepositResponses = {
-    /**
-     * Deposit successful
-     */
-    200: OnchainDepositResponse;
-};
-
-export type OnchainDepositResponse2 = OnchainDepositResponses[keyof OnchainDepositResponses];
-
-export type EstimateQueryData = {
-    body: EstimateRequestBody;
-    path?: never;
-    query?: never;
-    url: '/agent/estimate';
-};
-
-export type EstimateQueryErrors = {
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type EstimateQueryResponses = {
-    /**
-     * Cost estimate
-     */
-    200: EstimateResponse;
-};
-
-export type EstimateQueryResponse = EstimateQueryResponses[keyof EstimateQueryResponses];
-
-export type CallMcpToolData = {
-    body: CallMcpToolRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/call';
-};
-
-export type CallMcpToolErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher or tool not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type CallMcpToolResponses = {
-    /**
-     * Tool called successfully
-     */
-    200: McpToolCallResponse;
-};
-
-export type CallMcpToolResponse = CallMcpToolResponses[keyof CallMcpToolResponses];
-
-export type DiscoverMcpCapabilitiesData = {
-    body: DiscoverMcpCapabilitiesRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/capabilities';
-};
-
-export type DiscoverMcpCapabilitiesErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type DiscoverMcpCapabilitiesResponses = {
-    /**
-     * Capabilities discovered successfully
-     */
-    200: McpCapabilitiesResponse;
-};
-
-export type DiscoverMcpCapabilitiesResponse = DiscoverMcpCapabilitiesResponses[keyof DiscoverMcpCapabilitiesResponses];
-
-export type ReadMcpResourceData = {
-    body: ReadMcpResourceRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/resource';
-};
-
-export type ReadMcpResourceErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher or resource not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ReadMcpResourceResponses = {
-    /**
-     * Resource read successfully
-     */
-    200: McpResourceReadResponse;
-};
-
-export type ReadMcpResourceResponse = ReadMcpResourceResponses[keyof ReadMcpResourceResponses];
-
-export type ListMcpResourcesData = {
-    body: ListMcpResourcesRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/resources';
-};
-
-export type ListMcpResourcesErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ListMcpResourcesResponses = {
-    /**
-     * Resources listed successfully
-     */
-    200: McpResourcesResponse;
-};
-
-export type ListMcpResourcesResponse = ListMcpResourcesResponses[keyof ListMcpResourcesResponses];
-
-export type ListMcpToolsData = {
-    body: ListMcpToolsRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/mcp/tools';
-};
-
-export type ListMcpToolsErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * OAuth connection required for BYOC publisher
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ListMcpToolsResponses = {
-    /**
-     * Tools listed successfully
-     */
-    200: McpToolsResponse;
-};
-
-export type ListMcpToolsResponse = ListMcpToolsResponses[keyof ListMcpToolsResponses];
-
-export type ListStorePublishersData = {
-    body?: never;
-    path?: never;
-    query?: {
-        /**
-         * Filter by verification status
-         */
-        is_verified?: boolean | null;
-        /**
-         * Search by name or slug
-         */
-        search?: string | null;
-        /**
-         * Maximum number of results (default: 50, max: 100)
-         */
-        limit?: number;
-        /**
-         * Offset for pagination
-         */
-        offset?: number;
-    };
-    url: '/agent/publishers';
-};
-
-export type ListStorePublishersErrors = {
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ListStorePublishersResponses = {
-    /**
-     * Publishers retrieved successfully
-     */
-    200: PaginatedPublishersResponse;
-};
-
-export type ListStorePublishersResponse = ListStorePublishersResponses[keyof ListStorePublishersResponses];
-
-export type CreatePublisherApiKeyData = {
-    body: CreatePublisherRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/publishers';
-};
-
-export type CreatePublisherApiKeyErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * API key required
-     */
-    401: unknown;
-    /**
-     * Publisher slug already exists
-     */
-    409: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type CreatePublisherApiKeyResponses = {
-    /**
-     * Publisher created successfully
-     */
-    201: PublisherDataResponse;
-};
-
-export type CreatePublisherApiKeyResponse = CreatePublisherApiKeyResponses[keyof CreatePublisherApiKeyResponses];
-
-export type SuggestPublishersData = {
-    body?: never;
-    path?: never;
-    query: {
-        /**
-         * The task or query to match against publisher capabilities.
-         * Examples: "scrape website", "AI research", "PDF extraction"
-         */
-        query: string;
-        /**
-         * Type of suggestions: "publisher", "agent", or "both" (default: "both")
-         * Note: Agent suggestions are planned but not yet implemented.
-         */
-        type?: string;
-        /**
-         * Maximum number of results (default: 5, max: 20)
-         */
-        limit?: number;
-    };
-    url: '/agent/publishers/suggest';
-};
-
-export type SuggestPublishersErrors = {
-    /**
-     * Invalid query parameters
-     */
-    400: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type SuggestPublishersResponses = {
-    /**
-     * Publisher suggestions retrieved successfully
-     */
-    200: SuggestDataResponse;
-};
-
-export type SuggestPublishersResponse = SuggestPublishersResponses[keyof SuggestPublishersResponses];
-
-export type GetStorePublisherData = {
-    body?: never;
-    path: {
-        /**
-         * Publisher slug
-         */
-        slug: string;
-    };
-    query?: never;
-    url: '/agent/publishers/{slug}';
-};
-
-export type GetStorePublisherErrors = {
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type GetStorePublisherResponses = {
-    /**
-     * Publisher retrieved successfully
-     */
-    200: PublisherDataResponse;
-};
-
-export type GetStorePublisherResponse = GetStorePublisherResponses[keyof GetStorePublisherResponses];
-
-export type UpdatePublisherApiKeyData = {
-    body: UpdatePublisherRequest;
-    path: {
-        /**
-         * Publisher slug
-         */
-        slug: string;
-    };
-    query?: never;
-    url: '/agent/publishers/{slug}';
-};
-
-export type UpdatePublisherApiKeyErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Authentication required
-     */
-    401: unknown;
-    /**
-     * Not authorized to update this publisher
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type UpdatePublisherApiKeyResponses = {
-    /**
-     * Publisher updated successfully
-     */
-    200: PublisherDataResponse;
-};
-
-export type UpdatePublisherApiKeyResponse = UpdatePublisherApiKeyResponses[keyof UpdatePublisherApiKeyResponses];
-
-export type UploadPublisherLogoApiKeyData = {
-    body: LogoUploadRequest;
-    path: {
-        /**
-         * Publisher slug
-         */
-        slug: string;
-    };
-    query?: never;
-    url: '/agent/publishers/{slug}/logo';
-};
-
-export type UploadPublisherLogoApiKeyErrors = {
-    /**
-     * Invalid image format or size
-     */
-    400: unknown;
-    /**
-     * Authentication required
-     */
-    401: unknown;
-    /**
-     * Not authorized to update this publisher
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type UploadPublisherLogoApiKeyResponses = {
-    /**
-     * Logo uploaded successfully
-     */
-    200: LogoUploadDataResponse;
-};
-
-export type UploadPublisherLogoApiKeyResponse = UploadPublisherLogoApiKeyResponses[keyof UploadPublisherLogoApiKeyResponses];
-
-export type AgentRecoverData = {
-    body: AgentRecoverRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/recover';
-};
-
-export type AgentRecoverErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Invalid recovery code
-     */
-    401: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type AgentRecoverResponses = {
-    /**
-     * Agent account recovered
-     */
-    200: AgentRecoverDataResponse;
-};
-
-export type AgentRecoverResponse2 = AgentRecoverResponses[keyof AgentRecoverResponses];
-
 export type AgentRegisterData = {
     body: AgentRegisterRequest;
     path?: never;
     query?: never;
-    url: '/agent/register';
+    url: '/auth/agent';
 };
 
 export type AgentRegisterErrors = {
@@ -13321,10 +12562,6 @@ export type AgentRegisterErrors = {
      * Invalid request (validation error)
      */
     400: unknown;
-    /**
-     * Email already registered
-     */
-    409: unknown;
     /**
      * Internal server error
      */
@@ -13339,461 +12576,6 @@ export type AgentRegisterResponses = {
 };
 
 export type AgentRegisterResponse2 = AgentRegisterResponses[keyof AgentRegisterResponses];
-
-export type GetSupportedData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/agent/supported';
-};
-
-export type GetSupportedErrors = {
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type GetSupportedResponses = {
-    /**
-     * Supported payment kinds
-     */
-    200: SupportedResponse;
-};
-
-export type GetSupportedResponse = GetSupportedResponses[keyof GetSupportedResponses];
-
-export type ListTemplatesData = {
-    body?: never;
-    path?: never;
-    query?: {
-        /**
-         * Filter to verified templates only
-         */
-        verified_only?: boolean | null;
-        /**
-         * Filter by language (python, typescript, rust)
-         */
-        language?: string | null;
-        /**
-         * Minimum price in atomic units
-         */
-        min_price?: number | null;
-        /**
-         * Maximum price in atomic units
-         */
-        max_price?: number | null;
-        /**
-         * Search in name and description
-         */
-        search?: string | null;
-        /**
-         * Sort order (popularity, price_asc, price_desc, newest, oldest)
-         */
-        sort_by?: TemplateSortBy | null;
-        /**
-         * Maximum number of templates to return (default: 50)
-         */
-        limit?: number | null;
-        /**
-         * Offset for pagination (default: 0)
-         */
-        offset?: number | null;
-    };
-    url: '/agent/templates';
-};
-
-export type ListTemplatesErrors = {
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type ListTemplatesResponses = {
-    /**
-     * Templates retrieved successfully
-     */
-    200: TemplateListResponse;
-};
-
-export type ListTemplatesResponse = ListTemplatesResponses[keyof ListTemplatesResponses];
-
-export type PublishTemplateData = {
-    body: CreateTemplateRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/templates/publish';
-};
-
-export type PublishTemplateErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Authentication required
-     */
-    401: unknown;
-    /**
-     * Template slug already exists
-     */
-    409: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type PublishTemplateResponses = {
-    /**
-     * Template published successfully
-     */
-    201: TemplateDataResponse;
-};
-
-export type PublishTemplateResponse = PublishTemplateResponses[keyof PublishTemplateResponses];
-
-export type GetTemplateData = {
-    body?: never;
-    path: {
-        /**
-         * Template slug
-         */
-        slug: string;
-    };
-    query?: never;
-    url: '/agent/templates/{slug}';
-};
-
-export type GetTemplateErrors = {
-    /**
-     * Template not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type GetTemplateResponses = {
-    /**
-     * Template retrieved successfully
-     */
-    200: TemplateDataResponse;
-};
-
-export type GetTemplateResponse = GetTemplateResponses[keyof GetTemplateResponses];
-
-export type InvokeTemplateData = {
-    body: InvokeTemplateRequest;
-    path: {
-        /**
-         * Template slug
-         */
-        slug: string;
-    };
-    query?: never;
-    url: '/agent/templates/{slug}/invoke';
-};
-
-export type InvokeTemplateErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Authentication failed
-     */
-    401: unknown;
-    /**
-     * Payment required
-     */
-    402: unknown;
-    /**
-     * Template not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-    /**
-     * Sandbox execution failed
-     */
-    503: unknown;
-};
-
-export type InvokeTemplateResponses = {
-    /**
-     * Template invoked successfully
-     */
-    200: InvokeDataResponse;
-};
-
-export type InvokeTemplateResponse2 = InvokeTemplateResponses[keyof InvokeTemplateResponses];
-
-export type GetWalletBalanceData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/balance';
-};
-
-export type GetWalletBalanceErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type GetWalletBalanceResponses = {
-    /**
-     * Wallet balance retrieved
-     */
-    200: WalletBalanceDataResponse;
-};
-
-export type GetWalletBalanceResponse = GetWalletBalanceResponses[keyof GetWalletBalanceResponses];
-
-export type ClaimPaymentMethodBonusData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/bonus/payment-method';
-};
-
-export type ClaimPaymentMethodBonusErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Bonus already claimed
-     */
-    409: unknown;
-};
-
-export type ClaimPaymentMethodBonusResponses = {
-    /**
-     * Payment method bonus claimed
-     */
-    200: BonusClaimDataResponse;
-};
-
-export type ClaimPaymentMethodBonusResponse = ClaimPaymentMethodBonusResponses[keyof ClaimPaymentMethodBonusResponses];
-
-export type ClaimSignupBonusData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/bonus/signup';
-};
-
-export type ClaimSignupBonusErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Bonus already claimed
-     */
-    409: unknown;
-};
-
-export type ClaimSignupBonusResponses = {
-    /**
-     * Signup bonus claimed
-     */
-    200: BonusClaimDataResponse;
-};
-
-export type ClaimSignupBonusResponse = ClaimSignupBonusResponses[keyof ClaimSignupBonusResponses];
-
-export type ClaimDailyData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/daily/claim';
-};
-
-export type ClaimDailyErrors = {
-    /**
-     * Not eligible for daily claim
-     */
-    400: unknown;
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type ClaimDailyResponses = {
-    /**
-     * Daily credits claimed
-     */
-    200: DailyClaimDataResponse;
-};
-
-export type ClaimDailyResponse = ClaimDailyResponses[keyof ClaimDailyResponses];
-
-export type CheckDailyEligibilityData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/daily/eligibility';
-};
-
-export type CheckDailyEligibilityErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type CheckDailyEligibilityResponses = {
-    /**
-     * Eligibility checked
-     */
-    200: DailyClaimEligibilityDataResponse;
-};
-
-export type CheckDailyEligibilityResponse = CheckDailyEligibilityResponses[keyof CheckDailyEligibilityResponses];
-
-export type CreateDepositData = {
-    body: DepositRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/deposit';
-};
-
-export type CreateDepositErrors = {
-    /**
-     * Invalid request
-     */
-    400: unknown;
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type CreateDepositResponses = {
-    /**
-     * Deposit initiated
-     */
-    200: DepositDataResponse;
-};
-
-export type CreateDepositResponse = CreateDepositResponses[keyof CreateDepositResponses];
-
-export type SetRecoveryData = {
-    body: SetRecoveryRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/recovery';
-};
-
-export type SetRecoveryErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type SetRecoveryResponses = {
-    /**
-     * Recovery set up
-     */
-    200: RecoveryDataResponse;
-};
-
-export type SetRecoveryResponse = SetRecoveryResponses[keyof SetRecoveryResponses];
-
-export type GetReferralInfoData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/referral';
-};
-
-export type GetReferralInfoErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type GetReferralInfoResponses = {
-    /**
-     * Referral info retrieved
-     */
-    200: ReferralInfoDataResponse;
-};
-
-export type GetReferralInfoResponse = GetReferralInfoResponses[keyof GetReferralInfoResponses];
-
-export type ApplyReferralCodeData = {
-    body: ApplyReferralRequest;
-    path?: never;
-    query?: never;
-    url: '/agent/wallet/referral/apply';
-};
-
-export type ApplyReferralCodeErrors = {
-    /**
-     * Invalid referral code
-     */
-    400: unknown;
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Already has a referrer
-     */
-    409: unknown;
-};
-
-export type ApplyReferralCodeResponses = {
-    /**
-     * Referral code applied
-     */
-    200: unknown;
-};
-
-export type GetTransactionsData = {
-    body?: never;
-    path?: never;
-    query?: {
-        /**
-         * Maximum number of transactions to return (default 50, max 100)
-         */
-        limit?: number;
-        /**
-         * Offset for pagination
-         */
-        offset?: number;
-    };
-    url: '/agent/wallet/transactions';
-};
-
-export type GetTransactionsErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-};
-
-export type GetTransactionsResponses = {
-    /**
-     * Transaction history retrieved
-     */
-    200: WalletTransactionHistoryDataResponse;
-};
-
-export type GetTransactionsResponse = GetTransactionsResponses[keyof GetTransactionsResponses];
 
 export type ForgotPasswordData = {
     body: ForgotPasswordRequest;
@@ -14176,6 +12958,246 @@ export type DeletePaymentMethodResponses = {
 
 export type DeletePaymentMethodResponse = DeletePaymentMethodResponses[keyof DeletePaymentMethodResponses];
 
+export type CreateChargeData = {
+    body: CreateChargeRequest;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/billing/publishers/{slug}/charges';
+};
+
+export type CreateChargeErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Insufficient balance
+     */
+    402: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+};
+
+export type CreateChargeResponses = {
+    /**
+     * Charge created
+     */
+    200: ChargeResponse;
+};
+
+export type CreateChargeResponse = CreateChargeResponses[keyof CreateChargeResponses];
+
+export type GetChargeStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Charge ID
+         */
+        charge_id: string;
+    };
+    query?: never;
+    url: '/billing/publishers/{slug}/charges/{charge_id}';
+};
+
+export type GetChargeStatusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Charge not found
+     */
+    404: unknown;
+};
+
+export type GetChargeStatusResponses = {
+    /**
+     * Charge retrieved
+     */
+    200: ChargeResponse;
+};
+
+export type GetChargeStatusResponse = GetChargeStatusResponses[keyof GetChargeStatusResponses];
+
+export type RefundChargeData = {
+    body: RefundChargeRequest;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Charge ID
+         */
+        charge_id: string;
+    };
+    query?: never;
+    url: '/billing/publishers/{slug}/charges/{charge_id}/refund';
+};
+
+export type RefundChargeErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Charge not found
+     */
+    404: unknown;
+};
+
+export type RefundChargeResponses = {
+    /**
+     * Charge refunded
+     */
+    200: ChargeResponse;
+};
+
+export type RefundChargeResponse = RefundChargeResponses[keyof RefundChargeResponses];
+
+export type SlashChargeData = {
+    body: SlashChargeRequest;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Original charge ID
+         */
+        charge_id: string;
+    };
+    query?: never;
+    url: '/billing/publishers/{slug}/charges/{charge_id}/slash';
+};
+
+export type SlashChargeErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Insufficient balance
+     */
+    402: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Charge not found
+     */
+    404: unknown;
+};
+
+export type SlashChargeResponses = {
+    /**
+     * Slash applied
+     */
+    204: void;
+};
+
+export type SlashChargeResponse = SlashChargeResponses[keyof SlashChargeResponses];
+
+export type CreatePayoutData = {
+    body: CreatePayoutRequest;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/billing/publishers/{slug}/payouts';
+};
+
+export type CreatePayoutErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+};
+
+export type CreatePayoutResponses = {
+    /**
+     * Payout created
+     */
+    200: PayoutResponse;
+};
+
+export type CreatePayoutResponse = CreatePayoutResponses[keyof CreatePayoutResponses];
+
+export type GetPayoutStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Publisher slug
+         */
+        slug: string;
+        /**
+         * Payout ID
+         */
+        payout_id: string;
+    };
+    query?: never;
+    url: '/billing/publishers/{slug}/payouts/{payout_id}';
+};
+
+export type GetPayoutStatusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Payout not found
+     */
+    404: unknown;
+};
+
+export type GetPayoutStatusResponses = {
+    /**
+     * Payout retrieved
+     */
+    200: PayoutResponse;
+};
+
+export type GetPayoutStatusResponse = GetPayoutStatusResponses[keyof GetPayoutStatusResponses];
+
 export type GetUsageSummaryData = {
     body?: never;
     path: {
@@ -14540,50 +13562,6 @@ export type RevokeDefaultOrgApiKeyResponses = {
      */
     200: unknown;
 };
-
-export type GetPublisherTemplateAnalyticsData = {
-    body?: never;
-    path: {
-        /**
-         * Organization ID
-         */
-        organization_id: string;
-        /**
-         * Publisher ID
-         */
-        publisher_id: string;
-    };
-    query?: never;
-    url: '/organizations/{organization_id}/agent/templates/analytics/{publisher_id}';
-};
-
-export type GetPublisherTemplateAnalyticsErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Not authorized
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-    /**
-     * Internal server error
-     */
-    500: unknown;
-};
-
-export type GetPublisherTemplateAnalyticsResponses = {
-    /**
-     * Analytics retrieved successfully
-     */
-    200: PublisherAnalyticsResponse;
-};
-
-export type GetPublisherTemplateAnalyticsResponse = GetPublisherTemplateAnalyticsResponses[keyof GetPublisherTemplateAnalyticsResponses];
 
 export type ListOrgApiKeysData = {
     body?: never;
@@ -15736,6 +14714,50 @@ export type GetOrgPublisherEarningsResponses = {
 
 export type GetOrgPublisherEarningsResponse = GetOrgPublisherEarningsResponses[keyof GetOrgPublisherEarningsResponses];
 
+export type UploadPublisherLogoData = {
+    body: LogoUploadRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Publisher ID
+         */
+        publisher_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/publishers/{publisher_id}/logo';
+};
+
+export type UploadPublisherLogoErrors = {
+    /**
+     * Invalid image format or size
+     */
+    400: unknown;
+    /**
+     * Not authorized
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type UploadPublisherLogoResponses = {
+    /**
+     * Logo uploaded successfully
+     */
+    200: LogoUploadDataResponse;
+};
+
+export type UploadPublisherLogoResponse = UploadPublisherLogoResponses[keyof UploadPublisherLogoResponses];
+
 export type ListOrgPublisherPayoutsData = {
     body?: never;
     path: {
@@ -16100,6 +15122,50 @@ export type UpdateRoleResponses = {
 };
 
 export type UpdateRoleResponse = UpdateRoleResponses[keyof UpdateRoleResponses];
+
+export type GetPublisherTemplateAnalyticsData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Publisher ID
+         */
+        publisher_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/templates/analytics/{publisher_id}';
+};
+
+export type GetPublisherTemplateAnalyticsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Not authorized
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type GetPublisherTemplateAnalyticsResponses = {
+    /**
+     * Analytics retrieved successfully
+     */
+    200: PublisherAnalyticsResponse;
+};
+
+export type GetPublisherTemplateAnalyticsResponse = GetPublisherTemplateAnalyticsResponses[keyof GetPublisherTemplateAnalyticsResponses];
 
 export type ListOrgVpcEndpointsData = {
     body?: never;
@@ -16657,6 +15723,29 @@ export type RotateWebhookSecretResponses = {
 };
 
 export type RotateWebhookSecretResponse = RotateWebhookSecretResponses[keyof RotateWebhookSecretResponses];
+
+export type GetSupportedData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/payments/supported';
+};
+
+export type GetSupportedErrors = {
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type GetSupportedResponses = {
+    /**
+     * Supported payment kinds
+     */
+    200: SupportedResponse;
+};
+
+export type GetSupportedResponse = GetSupportedResponses[keyof GetSupportedResponses];
 
 export type ListPermissionsData = {
     body?: never;
@@ -19718,47 +18807,101 @@ export type AssignProjectVpcEndpointByIdResponses = {
 
 export type AssignProjectVpcEndpointByIdResponse = AssignProjectVpcEndpointByIdResponses[keyof AssignProjectVpcEndpointByIdResponses];
 
-export type ListPublishersData = {
+export type ListStorePublishersData = {
     body?: never;
     path?: never;
     query?: {
         /**
-         * Filter by category (database, integration, compute)
+         * Filter by verification status
          */
-        category?: string | null;
+        is_verified?: boolean | null;
         /**
-         * Maximum number of results
+         * Filter by publisher category
          */
-        limit?: number | null;
+        category?: PublisherCategory | null;
         /**
-         * Pagination offset
+         * Search by name or slug
          */
-        offset?: number | null;
+        search?: string | null;
+        /**
+         * Maximum number of results (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Offset for pagination
+         */
+        offset?: number;
     };
     url: '/publishers';
 };
 
-export type ListPublishersErrors = {
+export type ListStorePublishersErrors = {
+    /**
+     * Invalid query parameters
+     */
+    400: unknown;
     /**
      * Internal server error
      */
     500: unknown;
 };
 
-export type ListPublishersResponses = {
+export type ListStorePublishersResponses = {
     /**
-     * List of publishers
+     * Publishers retrieved successfully
      */
-    200: PublisherListResponse;
+    200: PaginatedPublishersResponse;
 };
 
-export type ListPublishersResponse = ListPublishersResponses[keyof ListPublishersResponses];
+export type ListStorePublishersResponse = ListStorePublishersResponses[keyof ListStorePublishersResponses];
 
-export type GetPublisherInfoData = {
+export type SuggestPublishersData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * The task or query to match against publisher capabilities.
+         * Examples: "scrape website", "AI research", "PDF extraction"
+         */
+        query: string;
+        /**
+         * Type of suggestions: "publisher", "agent", or "both" (default: "both")
+         * Note: Agent suggestions are planned but not yet implemented.
+         */
+        type?: string;
+        /**
+         * Maximum number of results (default: 5, max: 20)
+         */
+        limit?: number;
+    };
+    url: '/publishers/suggest';
+};
+
+export type SuggestPublishersErrors = {
+    /**
+     * Invalid query parameters
+     */
+    400: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type SuggestPublishersResponses = {
+    /**
+     * Publisher suggestions retrieved successfully
+     */
+    200: SuggestDataResponse;
+};
+
+export type SuggestPublishersResponse = SuggestPublishersResponses[keyof SuggestPublishersResponses];
+
+export type GetStorePublisherData = {
     body?: never;
     path: {
         /**
-         * Publisher slug identifier
+         * Publisher slug
          */
         slug: string;
     };
@@ -19766,7 +18909,7 @@ export type GetPublisherInfoData = {
     url: '/publishers/{slug}';
 };
 
-export type GetPublisherInfoErrors = {
+export type GetStorePublisherErrors = {
     /**
      * Publisher not found
      */
@@ -19777,14 +18920,14 @@ export type GetPublisherInfoErrors = {
     500: unknown;
 };
 
-export type GetPublisherInfoResponses = {
+export type GetStorePublisherResponses = {
     /**
-     * Publisher details
+     * Publisher retrieved successfully
      */
-    200: PublisherInfoResponse;
+    200: PublisherDataResponse;
 };
 
-export type GetPublisherInfoResponse = GetPublisherInfoResponses[keyof GetPublisherInfoResponses];
+export type GetStorePublisherResponse = GetStorePublisherResponses[keyof GetStorePublisherResponses];
 
 export type PublisherRootHandlerData = {
     body: PublisherRootRequest;
@@ -19820,287 +18963,65 @@ export type PublisherRootHandlerResponses = {
     200: unknown;
 };
 
-export type GetAgentBalanceData = {
-    body?: never;
+export type EstimateQueryData = {
+    body: EstimateRequestBody;
     path: {
         /**
          * Publisher slug
          */
         slug: string;
-        /**
-         * Agent wallet address
-         */
-        agent_wallet: string;
     };
     query?: never;
-    url: '/publishers/{slug}/agents/{agent_wallet}/balance';
+    url: '/publishers/{slug}/estimate';
 };
 
-export type GetAgentBalanceErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Forbidden
-     */
-    403: unknown;
+export type EstimateQueryErrors = {
     /**
      * Publisher not found
      */
     404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
 };
 
-export type GetAgentBalanceResponses = {
+export type EstimateQueryResponses = {
     /**
-     * Balance retrieved
+     * Cost estimate
      */
-    200: PublisherAgentBalanceResponse;
+    200: EstimateResponse;
 };
 
-export type GetAgentBalanceResponse = GetAgentBalanceResponses[keyof GetAgentBalanceResponses];
+export type EstimateQueryResponse = EstimateQueryResponses[keyof EstimateQueryResponses];
 
-export type CreateChargeData = {
-    body: CreateChargeRequest;
-    path: {
-        /**
-         * Publisher slug
-         */
-        slug: string;
-    };
-    query?: never;
-    url: '/publishers/{slug}/charges';
-};
-
-export type CreateChargeErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Insufficient balance
-     */
-    402: unknown;
-    /**
-     * Forbidden
-     */
-    403: unknown;
-    /**
-     * Publisher not found
-     */
-    404: unknown;
-};
-
-export type CreateChargeResponses = {
-    /**
-     * Charge created
-     */
-    200: ChargeResponse;
-};
-
-export type CreateChargeResponse = CreateChargeResponses[keyof CreateChargeResponses];
-
-export type GetChargeStatusData = {
+export type GetStorePublisherLogoData = {
     body?: never;
     path: {
         /**
-         * Publisher slug
-         */
-        slug: string;
-        /**
-         * Charge ID
-         */
-        charge_id: string;
-    };
-    query?: never;
-    url: '/publishers/{slug}/charges/{charge_id}';
-};
-
-export type GetChargeStatusErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Forbidden
-     */
-    403: unknown;
-    /**
-     * Charge not found
-     */
-    404: unknown;
-};
-
-export type GetChargeStatusResponses = {
-    /**
-     * Charge retrieved
-     */
-    200: ChargeResponse;
-};
-
-export type GetChargeStatusResponse = GetChargeStatusResponses[keyof GetChargeStatusResponses];
-
-export type RefundChargeData = {
-    body: RefundChargeRequest;
-    path: {
-        /**
-         * Publisher slug
-         */
-        slug: string;
-        /**
-         * Charge ID
-         */
-        charge_id: string;
-    };
-    query?: never;
-    url: '/publishers/{slug}/charges/{charge_id}/refund';
-};
-
-export type RefundChargeErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Forbidden
-     */
-    403: unknown;
-    /**
-     * Charge not found
-     */
-    404: unknown;
-};
-
-export type RefundChargeResponses = {
-    /**
-     * Charge refunded
-     */
-    200: ChargeResponse;
-};
-
-export type RefundChargeResponse = RefundChargeResponses[keyof RefundChargeResponses];
-
-export type SlashChargeData = {
-    body: SlashChargeRequest;
-    path: {
-        /**
-         * Publisher slug
-         */
-        slug: string;
-        /**
-         * Original charge ID
-         */
-        charge_id: string;
-    };
-    query?: never;
-    url: '/publishers/{slug}/charges/{charge_id}/slash';
-};
-
-export type SlashChargeErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Insufficient balance
-     */
-    402: unknown;
-    /**
-     * Forbidden
-     */
-    403: unknown;
-    /**
-     * Charge not found
-     */
-    404: unknown;
-};
-
-export type SlashChargeResponses = {
-    /**
-     * Slash applied
-     */
-    204: void;
-};
-
-export type SlashChargeResponse = SlashChargeResponses[keyof SlashChargeResponses];
-
-export type CreatePayoutData = {
-    body: CreatePayoutRequest;
-    path: {
-        /**
-         * Publisher slug
+         * Publisher slug or UUID
          */
         slug: string;
     };
     query?: never;
-    url: '/publishers/{slug}/payouts';
+    url: '/publishers/{slug}/logo';
 };
 
-export type CreatePayoutErrors = {
+export type GetStorePublisherLogoErrors = {
     /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Forbidden
-     */
-    403: unknown;
-    /**
-     * Publisher not found
+     * Logo not found
      */
     404: unknown;
 };
 
-export type CreatePayoutResponses = {
+export type GetStorePublisherLogoResponses = {
     /**
-     * Payout created
+     * Publisher logo bytes
      */
-    200: PayoutResponse;
+    200: unknown;
 };
 
-export type CreatePayoutResponse = CreatePayoutResponses[keyof CreatePayoutResponses];
-
-export type GetPayoutStatusData = {
-    body?: never;
-    path: {
-        /**
-         * Publisher slug
-         */
-        slug: string;
-        /**
-         * Payout ID
-         */
-        payout_id: string;
-    };
-    query?: never;
-    url: '/publishers/{slug}/payouts/{payout_id}';
-};
-
-export type GetPayoutStatusErrors = {
-    /**
-     * Unauthorized
-     */
-    401: unknown;
-    /**
-     * Forbidden
-     */
-    403: unknown;
-    /**
-     * Payout not found
-     */
-    404: unknown;
-};
-
-export type GetPayoutStatusResponses = {
-    /**
-     * Payout retrieved
-     */
-    200: PayoutResponse;
-};
-
-export type GetPayoutStatusResponse = GetPayoutStatusResponses[keyof GetPayoutStatusResponses];
-
-export type ProxyToPublisherData = {
+export type ProxyToPublisherGetData = {
     body: Blob | File;
     path: {
         /**
@@ -20116,7 +19037,7 @@ export type ProxyToPublisherData = {
     url: '/publishers/{slug}/{path}';
 };
 
-export type ProxyToPublisherErrors = {
+export type ProxyToPublisherGetErrors = {
     /**
      * Payment required
      */
@@ -20131,7 +19052,45 @@ export type ProxyToPublisherErrors = {
     500: unknown;
 };
 
-export type ProxyToPublisherResponses = {
+export type ProxyToPublisherGetResponses = {
+    /**
+     * Request proxied successfully
+     */
+    200: unknown;
+};
+
+export type ProxyToPublisherPostData = {
+    body: Blob | File;
+    path: {
+        /**
+         * Publisher slug identifier
+         */
+        slug: string;
+        /**
+         * Path to proxy to the publisher
+         */
+        path: string;
+    };
+    query?: never;
+    url: '/publishers/{slug}/{path}';
+};
+
+export type ProxyToPublisherPostErrors = {
+    /**
+     * Payment required
+     */
+    402: unknown;
+    /**
+     * Publisher or endpoint not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ProxyToPublisherPostResponses = {
     /**
      * Request proxied successfully
      */
@@ -20247,6 +19206,542 @@ export type RevokeOtherSessionsResponses = {
 };
 
 export type RevokeOtherSessionsResponse = RevokeOtherSessionsResponses[keyof RevokeOtherSessionsResponses];
+
+export type ListTemplatesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter to verified templates only
+         */
+        verified_only?: boolean | null;
+        /**
+         * Filter by language (python, typescript, rust)
+         */
+        language?: string | null;
+        /**
+         * Minimum price in atomic units
+         */
+        min_price?: number | null;
+        /**
+         * Maximum price in atomic units
+         */
+        max_price?: number | null;
+        /**
+         * Search in name and description
+         */
+        search?: string | null;
+        /**
+         * Sort order (popularity, price_asc, price_desc, newest, oldest)
+         */
+        sort_by?: TemplateSortBy | null;
+        /**
+         * Maximum number of templates to return (default: 50)
+         */
+        limit?: number | null;
+        /**
+         * Offset for pagination (default: 0)
+         */
+        offset?: number | null;
+    };
+    url: '/templates';
+};
+
+export type ListTemplatesErrors = {
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ListTemplatesResponses = {
+    /**
+     * Templates retrieved successfully
+     */
+    200: TemplateListResponse;
+};
+
+export type ListTemplatesResponse = ListTemplatesResponses[keyof ListTemplatesResponses];
+
+export type PublishTemplateData = {
+    body: CreateTemplateRequest;
+    path?: never;
+    query?: never;
+    url: '/templates/publish';
+};
+
+export type PublishTemplateErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Authentication required
+     */
+    401: unknown;
+    /**
+     * Template slug already exists
+     */
+    409: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type PublishTemplateResponses = {
+    /**
+     * Template published successfully
+     */
+    201: TemplateDataResponse;
+};
+
+export type PublishTemplateResponse = PublishTemplateResponses[keyof PublishTemplateResponses];
+
+export type GetTemplateData = {
+    body?: never;
+    path: {
+        /**
+         * Template slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/templates/{slug}';
+};
+
+export type GetTemplateErrors = {
+    /**
+     * Template not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type GetTemplateResponses = {
+    /**
+     * Template retrieved successfully
+     */
+    200: TemplateDataResponse;
+};
+
+export type GetTemplateResponse = GetTemplateResponses[keyof GetTemplateResponses];
+
+export type InvokeTemplateData = {
+    body: InvokeTemplateRequest;
+    path: {
+        /**
+         * Template slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/templates/{slug}/invoke';
+};
+
+export type InvokeTemplateErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Authentication failed
+     */
+    401: unknown;
+    /**
+     * Payment required
+     */
+    402: unknown;
+    /**
+     * Template not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+    /**
+     * Sandbox execution failed
+     */
+    503: unknown;
+};
+
+export type InvokeTemplateResponses = {
+    /**
+     * Template invoked successfully
+     */
+    200: InvokeDataResponse;
+};
+
+export type InvokeTemplateResponse2 = InvokeTemplateResponses[keyof InvokeTemplateResponses];
+
+export type GetWalletBalanceData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/wallet/balance';
+};
+
+export type GetWalletBalanceErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type GetWalletBalanceResponses = {
+    /**
+     * Wallet balance retrieved
+     */
+    200: WalletBalanceDataResponse;
+};
+
+export type GetWalletBalanceResponse = GetWalletBalanceResponses[keyof GetWalletBalanceResponses];
+
+export type ClaimPaymentMethodBonusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/wallet/bonus/payment-method';
+};
+
+export type ClaimPaymentMethodBonusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Bonus already claimed
+     */
+    409: unknown;
+};
+
+export type ClaimPaymentMethodBonusResponses = {
+    /**
+     * Payment method bonus claimed
+     */
+    200: BonusClaimDataResponse;
+};
+
+export type ClaimPaymentMethodBonusResponse = ClaimPaymentMethodBonusResponses[keyof ClaimPaymentMethodBonusResponses];
+
+export type ClaimSignupBonusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/wallet/bonus/signup';
+};
+
+export type ClaimSignupBonusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Bonus already claimed
+     */
+    409: unknown;
+};
+
+export type ClaimSignupBonusResponses = {
+    /**
+     * Signup bonus claimed
+     */
+    200: BonusClaimDataResponse;
+};
+
+export type ClaimSignupBonusResponse = ClaimSignupBonusResponses[keyof ClaimSignupBonusResponses];
+
+export type ClaimDailyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/wallet/daily/claim';
+};
+
+export type ClaimDailyErrors = {
+    /**
+     * Not eligible for daily claim
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type ClaimDailyResponses = {
+    /**
+     * Daily credits claimed
+     */
+    200: DailyClaimDataResponse;
+};
+
+export type ClaimDailyResponse = ClaimDailyResponses[keyof ClaimDailyResponses];
+
+export type CheckDailyEligibilityData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/wallet/daily/eligibility';
+};
+
+export type CheckDailyEligibilityErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type CheckDailyEligibilityResponses = {
+    /**
+     * Eligibility checked
+     */
+    200: DailyClaimEligibilityDataResponse;
+};
+
+export type CheckDailyEligibilityResponse = CheckDailyEligibilityResponses[keyof CheckDailyEligibilityResponses];
+
+export type CreateDepositData = {
+    body: DepositRequest;
+    path?: never;
+    query?: never;
+    url: '/wallet/deposit';
+};
+
+export type CreateDepositErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type CreateDepositResponses = {
+    /**
+     * Deposit initiated
+     */
+    200: DepositDataResponse;
+};
+
+export type CreateDepositResponse = CreateDepositResponses[keyof CreateDepositResponses];
+
+export type OnchainDepositData = {
+    body: OnchainDepositRequest;
+    path?: never;
+    query?: never;
+    url: '/wallet/deposit/crypto';
+};
+
+export type OnchainDepositErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Payment required
+     */
+    402: PaymentRequiredResponseWithInfo;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type OnchainDepositError = OnchainDepositErrors[keyof OnchainDepositErrors];
+
+export type OnchainDepositResponses = {
+    /**
+     * Deposit successful
+     */
+    200: OnchainDepositResponse;
+};
+
+export type OnchainDepositResponse2 = OnchainDepositResponses[keyof OnchainDepositResponses];
+
+export type GetAgentBalanceData = {
+    body?: never;
+    path: {
+        /**
+         * Agent wallet address
+         */
+        agent_wallet: string;
+    };
+    query?: never;
+    url: '/wallet/lookup/{agent_wallet}';
+};
+
+export type GetAgentBalanceErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Publisher not found
+     */
+    404: unknown;
+};
+
+export type GetAgentBalanceResponses = {
+    /**
+     * Balance retrieved
+     */
+    200: PublisherAgentBalanceResponse;
+};
+
+export type GetAgentBalanceResponse = GetAgentBalanceResponses[keyof GetAgentBalanceResponses];
+
+export type WalletRecoverData = {
+    body: WalletRecoverRequest;
+    path?: never;
+    query?: never;
+    url: '/wallet/recover';
+};
+
+export type WalletRecoverErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Invalid recovery code
+     */
+    401: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type WalletRecoverResponses = {
+    /**
+     * Account recovered successfully
+     */
+    200: WalletRecoverDataResponse;
+};
+
+export type WalletRecoverResponse2 = WalletRecoverResponses[keyof WalletRecoverResponses];
+
+export type SetRecoveryData = {
+    body: SetRecoveryRequest;
+    path?: never;
+    query?: never;
+    url: '/wallet/recovery';
+};
+
+export type SetRecoveryErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type SetRecoveryResponses = {
+    /**
+     * Recovery set up
+     */
+    200: RecoveryDataResponse;
+};
+
+export type SetRecoveryResponse = SetRecoveryResponses[keyof SetRecoveryResponses];
+
+export type GetReferralInfoData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/wallet/referral';
+};
+
+export type GetReferralInfoErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type GetReferralInfoResponses = {
+    /**
+     * Referral info retrieved
+     */
+    200: ReferralInfoDataResponse;
+};
+
+export type GetReferralInfoResponse = GetReferralInfoResponses[keyof GetReferralInfoResponses];
+
+export type ApplyReferralCodeData = {
+    body: ApplyReferralRequest;
+    path?: never;
+    query?: never;
+    url: '/wallet/referral/apply';
+};
+
+export type ApplyReferralCodeErrors = {
+    /**
+     * Invalid referral code
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Already has a referrer
+     */
+    409: unknown;
+};
+
+export type ApplyReferralCodeResponses = {
+    /**
+     * Referral code applied
+     */
+    200: unknown;
+};
+
+export type GetTransactionsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Maximum number of transactions to return (default 50, max 100)
+         */
+        limit?: number;
+        /**
+         * Offset for pagination
+         */
+        offset?: number;
+    };
+    url: '/wallet/transactions';
+};
+
+export type GetTransactionsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type GetTransactionsResponses = {
+    /**
+     * Transaction history retrieved
+     */
+    200: WalletTransactionHistoryDataResponse;
+};
+
+export type GetTransactionsResponse = GetTransactionsResponses[keyof GetTransactionsResponses];
 
 export type ListEventTypesData = {
     body?: never;

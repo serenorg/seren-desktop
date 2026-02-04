@@ -1,12 +1,11 @@
 // ABOUTME: SerenWhisper API client for speech-to-text transcription.
-// ABOUTME: Uses SerenBucks via /agent/api endpoint with multipart support.
+// ABOUTME: Uses SerenBucks via /publishers endpoint with multipart support.
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
 
 const PUBLISHER_SLUG = "seren-whisper";
-const AGENT_API_ENDPOINT = `${apiBase}/agent/api`;
 
 interface TranscriptionResponse {
   text: string;
@@ -20,14 +19,8 @@ interface MultipartPart {
   data?: string;
 }
 
-interface AgentApiPayload {
-  publisher: string;
-  path: string;
-  method: string;
-  content_type: string;
-  body: {
-    parts: MultipartPart[];
-  };
+interface MultipartBody {
+  parts: MultipartPart[];
 }
 
 /**
@@ -68,33 +61,30 @@ export async function transcribeAudio(
 
   const base64Audio = await blobToBase64(audioBlob);
 
-  const payload: AgentApiPayload = {
-    publisher: PUBLISHER_SLUG,
-    path: "/audio/transcriptions",
-    method: "POST",
-    content_type: "multipart/form-data",
-    body: {
-      parts: [
-        { name: "model", value: "whisper-1" },
-        {
-          name: "file",
-          filename: `audio.${MIME_EXTENSIONS[mimeType] || "webm"}`,
-          content_type: mimeType,
-          data: base64Audio,
-        },
-      ],
-    },
+  // Use unified /publishers endpoint with multipart body structure
+  const payload: MultipartBody = {
+    parts: [
+      { name: "model", value: "whisper-1" },
+      {
+        name: "file",
+        filename: `audio.${MIME_EXTENSIONS[mimeType] || "webm"}`,
+        content_type: mimeType,
+        data: base64Audio,
+      },
+    ],
   };
 
-  const response = await appFetch(AGENT_API_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      "X-AGENT-WALLET": "prepaid",
+  const response = await appFetch(
+    `${apiBase}/publishers/${PUBLISHER_SLUG}/audio/transcriptions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
