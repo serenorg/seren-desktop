@@ -19,6 +19,7 @@ import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
+import { formatDuration } from "@/lib/format-duration";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -76,6 +77,7 @@ interface StreamingSession {
   context?: ChatContext;
   stream: AsyncGenerator<string>;
   toolsEnabled: false;
+  startTime: number;
 }
 
 interface ToolStreamingSession {
@@ -86,6 +88,7 @@ interface ToolStreamingSession {
   context?: ChatContext;
   stream: AsyncGenerator<ToolStreamEvent>;
   toolsEnabled: true;
+  startTime: number;
 }
 
 type ActiveStreamingSession = StreamingSession | ToolStreamingSession;
@@ -479,6 +482,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     const assistantId = crypto.randomUUID();
 
     const useTools = areToolsAvailable();
+    const startTime = Date.now();
     const session: ActiveStreamingSession = useTools
       ? {
           id: assistantId,
@@ -495,6 +499,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             images,
           ),
           toolsEnabled: true,
+          startTime,
         }
       : {
           id: assistantId,
@@ -508,6 +513,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             context,
           ),
           toolsEnabled: false,
+          startTime,
         };
 
     chatStore.setLoading(true);
@@ -522,6 +528,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     session: ActiveStreamingSession,
     content: string,
   ) => {
+    const duration = Date.now() - session.startTime;
     const assistantMessage: Message = {
       id: session.id,
       role: "assistant",
@@ -529,6 +536,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       timestamp: Date.now(),
       model: session.model,
       status: "complete",
+      duration,
       request: { prompt: session.prompt, context: session.context },
     };
 
@@ -775,6 +783,17 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                               : escapeHtmlWithLinks(message.content)
                           }
                         />
+                        <Show
+                          when={
+                            message.role === "assistant" &&
+                            message.status === "complete" &&
+                            message.duration
+                          }
+                        >
+                          <div class="mt-2 text-xs text-[#8b949e]">
+                            ✻ Brewed for {formatDuration(message.duration!)}
+                          </div>
+                        </Show>
                         <Show when={message.status === "error"}>
                           <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
                             <span>{message.error ?? "Message failed"}</span>
