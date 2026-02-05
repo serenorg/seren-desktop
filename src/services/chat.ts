@@ -114,8 +114,9 @@ export async function sendMessage(
   content: string,
   model: string,
   context?: ChatContext,
+  history?: Message[],
 ): Promise<string> {
-  const request = buildChatRequest(content, model, context);
+  const request = buildChatRequest(content, model, context, history);
   const providerId = providerStore.activeProvider;
 
   return sendProviderMessage(providerId, request);
@@ -123,13 +124,15 @@ export async function sendMessage(
 
 /**
  * Stream a message using the active provider.
+ * Includes conversation history for multi-turn context.
  */
 export async function* streamMessage(
   content: string,
   model: string,
   context?: ChatContext,
+  history?: Message[],
 ): AsyncGenerator<string> {
-  const request = buildChatRequest(content, model, context);
+  const request = buildChatRequest(content, model, context, history);
   request.stream = true;
   const providerId = providerStore.activeProvider;
 
@@ -144,12 +147,13 @@ export async function sendMessageWithRetry(
   model: string,
   context: ChatContext | undefined,
   onRetry?: (attempt: number) => void,
+  history?: Message[],
 ): Promise<string> {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= CHAT_MAX_RETRIES; attempt++) {
     try {
-      return await sendMessage(content, model, context);
+      return await sendMessage(content, model, context, history);
     } catch (error) {
       lastError = error as Error;
 

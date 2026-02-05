@@ -48,11 +48,11 @@ import {
 import { ChatTabBar } from "./ChatTabBar";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
-import { ToolsetSelector } from "./ToolsetSelector";
 import { StreamingMessage } from "./StreamingMessage";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolStreamingMessage } from "./ToolStreamingMessage";
+import { ToolsetSelector } from "./ToolsetSelector";
 import "highlight.js/styles/github-dark.css";
 
 // Keywords that trigger publisher suggestions
@@ -456,7 +456,12 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
           prompt: trimmed,
           model: chatStore.selectedModel,
           context,
-          stream: streamMessage(trimmed, chatStore.selectedModel, context),
+          stream: streamMessage(
+            trimmed,
+            chatStore.selectedModel,
+            context,
+            chatStore.messages,
+          ),
           toolsEnabled: false,
         };
 
