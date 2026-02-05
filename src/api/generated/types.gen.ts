@@ -1100,6 +1100,52 @@ export type BonusClaimResponse = {
 };
 
 /**
+ * Metadata structure for bounty resources
+ */
+export type BountyMetadata = {
+    /**
+     * Bounty status (funding, open, in_progress, resolved, etc.)
+     */
+    bounty_status: string;
+    /**
+     * Number of contributions so far
+     */
+    contribution_count?: number;
+    /**
+     * Creator's wallet address
+     */
+    creator_wallet: string;
+    /**
+     * Optional deadline
+     */
+    deadline?: string | null;
+    /**
+     * Brief description
+     */
+    description: string;
+    /**
+     * Currently funded amount
+     */
+    funded_amount_atomic: number;
+    /**
+     * Minimum stake required to contribute
+     */
+    min_stake_to_contribute: number;
+    /**
+     * Total reward amount in atomic units
+     */
+    reward_amount_atomic: number;
+    /**
+     * Tags/categories for filtering
+     */
+    tags?: Array<string>;
+    /**
+     * Bounty title
+     */
+    title: string;
+};
+
+/**
  * Branch represents a SerenDB timeline (database copy)
  */
 export type Branch = {
@@ -4381,6 +4427,358 @@ export type EstimateResponse = {
 };
 
 /**
+ * A federated resource entry in the discovery index
+ */
+export type FederatedResource = {
+    /**
+     * When the entry was created
+     */
+    created_at: string;
+    /**
+     * Optional expiration time
+     */
+    expires_at?: string | null;
+    /**
+     * ID of the resource in the publisher's system
+     */
+    external_id: string;
+    /**
+     * Unique identifier
+     */
+    id: string;
+    /**
+     * Discoverable metadata (structure varies by resource_type)
+     */
+    metadata: unknown;
+    /**
+     * Optional: org database where full data resides
+     */
+    org_database_id?: string | null;
+    /**
+     * Publisher that owns this resource
+     */
+    publisher_id: string;
+    /**
+     * Type of resource (bounty, dataset, service, etc.)
+     */
+    resource_type: string;
+    /**
+     * Current status
+     */
+    status: string;
+    /**
+     * When the entry was last updated
+     */
+    updated_at: string;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type FederatedResourceDataResponse = {
+    data: FederatedResourceResponse;
+    pagination?: PaginationMeta | null;
+};
+
+/**
+ * Response for a single federated resource
+ */
+export type FederatedResourceResponse = {
+    created_at: string;
+    expires_at?: string | null;
+    external_id: string;
+    id: string;
+    metadata: unknown;
+    org_database_id?: string | null;
+    publisher_id: string;
+    resource_type: string;
+    status: string;
+    updated_at: string;
+};
+
+/**
+ * Response for listing federated resources with publisher info
+ */
+export type FederatedResourceWithPublisher = FederatedResource & {
+    /**
+     * Publisher name for display
+     */
+    publisher_name: string;
+    /**
+     * Publisher slug for routing
+     */
+    publisher_slug: string;
+};
+
+/**
+ * Response for a federated resource with publisher info
+ */
+export type FederatedResourceWithPublisherResponse = {
+    created_at: string;
+    expires_at?: string | null;
+    external_id: string;
+    id: string;
+    metadata: unknown;
+    org_database_id?: string | null;
+    publisher_id: string;
+    publisher_name: string;
+    publisher_slug: string;
+    resource_type: string;
+    status: string;
+    updated_at: string;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type FederatedResourcesDataResponse = {
+    /**
+     * The actual response data (can be a single object or a collection)
+     */
+    data: Array<FederatedResourceWithPublisherResponse>;
+    pagination?: PaginationMeta | null;
+};
+
+/**
+ * Summary statistics for federation
+ */
+export type FederationStats = {
+    /**
+     * Count by status
+     */
+    by_status: {
+        [key: string]: number;
+    };
+    /**
+     * Count by resource type
+     */
+    by_type: {
+        [key: string]: number;
+    };
+    /**
+     * Total active resources
+     */
+    total_active: number;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type FederationStatsDataResponse = {
+    data: FederationStatsResponse;
+    pagination?: PaginationMeta | null;
+};
+
+/**
+ * Query parameters for federation stats
+ */
+export type FederationStatsParams = {
+    /**
+     * Filter by publisher slug (optional - if omitted, returns stats across all publishers)
+     */
+    publisher_slug?: string | null;
+};
+
+/**
+ * Response for federation statistics
+ */
+export type FederationStatsResponse = {
+    by_status: {
+        [key: string]: number;
+    };
+    by_type: {
+        [key: string]: number;
+    };
+    total_active: number;
+};
+
+/**
  * Generic API response wrapper with optional pagination
  *
  * This wrapper provides a consistent structure for all API responses,
@@ -5330,6 +5728,32 @@ export type ListAgentGrantsParams = {
 };
 
 /**
+ * Query parameters for listing federated resources
+ */
+export type ListFederatedResourcesParams = {
+    /**
+     * Maximum number of results (default: 50, max: 100)
+     */
+    limit?: number;
+    /**
+     * Offset for pagination
+     */
+    offset?: number;
+    /**
+     * Filter by publisher slug
+     */
+    publisher_slug?: string | null;
+    /**
+     * Filter by resource type (e.g., "bounty", "dataset")
+     */
+    resource_type?: string | null;
+    /**
+     * Filter by status (default: "active")
+     */
+    status?: string | null;
+};
+
+/**
  * Query params for listing fiat deposits
  */
 export type ListFiatDepositsParams = {
@@ -6257,11 +6681,6 @@ export type OrganizationConsumptionResponse = {
     data: OrganizationConsumption;
     pagination?: PaginationMeta | null;
 };
-
-/**
- * Organization ID: either a UUID or 'default' for the authenticated user's default organization
- */
-export type OrganizationIdParam = string | 'default';
 
 /**
  * Response type for organization invites (token is not exposed over the API).
@@ -12533,6 +12952,36 @@ export type UpdateWebhookRequest = {
 };
 
 /**
+ * Request to upsert a federated resource
+ */
+export type UpsertFederatedResourceRequest = {
+    /**
+     * Optional expiration timestamp
+     */
+    expires_at?: string | null;
+    /**
+     * External ID of the resource (unique within publisher + type)
+     */
+    external_id: string;
+    /**
+     * Resource metadata (JSON object with type-specific fields)
+     */
+    metadata: unknown;
+    /**
+     * Optional database ID where the resource data lives
+     */
+    org_database_id?: string | null;
+    /**
+     * Type of resource being registered
+     */
+    resource_type: string;
+    /**
+     * Resource status (default: "active")
+     */
+    status?: string;
+};
+
+/**
  * Debug view: usage_events entry for an endpoint
  */
 export type UsageEventDebugRecord = {
@@ -14018,7 +14467,7 @@ export type GetUsageSummaryData = {
     body?: never;
     path: {
         /**
-         * Organization ID or 'default' for authenticated user's default organization
+         * Organization ID
          */
         organization_id: string;
     };
@@ -14071,6 +14520,193 @@ export type ListAllDatabasesResponses = {
 };
 
 export type ListAllDatabasesResponse = ListAllDatabasesResponses[keyof ListAllDatabasesResponses];
+
+export type ListResourcesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter by publisher slug
+         */
+        publisher_slug?: string | null;
+        /**
+         * Filter by resource type (e.g., "bounty", "dataset")
+         */
+        resource_type?: string | null;
+        /**
+         * Filter by status (default: "active")
+         */
+        status?: string | null;
+        /**
+         * Maximum number of results (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Offset for pagination
+         */
+        offset?: number;
+    };
+    url: '/federation';
+};
+
+export type ListResourcesErrors = {
+    /**
+     * Invalid query parameters
+     */
+    400: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ListResourcesResponses = {
+    /**
+     * Resources retrieved successfully
+     */
+    200: FederatedResourcesDataResponse;
+};
+
+export type ListResourcesResponse = ListResourcesResponses[keyof ListResourcesResponses];
+
+export type UpsertResourceData = {
+    body: UpsertFederatedResourceRequest;
+    path?: never;
+    query?: never;
+    url: '/federation';
+};
+
+export type UpsertResourceErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Authentication required
+     */
+    401: unknown;
+    /**
+     * Not authorized - must be a publisher
+     */
+    403: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type UpsertResourceResponses = {
+    /**
+     * Resource upserted successfully
+     */
+    200: FederatedResourceDataResponse;
+};
+
+export type UpsertResourceResponse = UpsertResourceResponses[keyof UpsertResourceResponses];
+
+export type GetStatsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter by publisher slug (optional - if omitted, returns stats across all publishers)
+         */
+        publisher_slug?: string | null;
+    };
+    url: '/federation/stats';
+};
+
+export type GetStatsErrors = {
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type GetStatsResponses = {
+    /**
+     * Stats retrieved successfully
+     */
+    200: FederationStatsDataResponse;
+};
+
+export type GetStatsResponse = GetStatsResponses[keyof GetStatsResponses];
+
+export type GetResourceData = {
+    body?: never;
+    path: {
+        /**
+         * Federated resource ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/federation/{id}';
+};
+
+export type GetResourceErrors = {
+    /**
+     * Resource not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type GetResourceResponses = {
+    /**
+     * Resource retrieved successfully
+     */
+    200: FederatedResourceDataResponse;
+};
+
+export type GetResourceResponse = GetResourceResponses[keyof GetResourceResponses];
+
+export type DeleteResourceData = {
+    body?: never;
+    path: {
+        /**
+         * Resource type
+         */
+        resource_type: string;
+        /**
+         * External resource ID
+         */
+        external_id: string;
+    };
+    query?: never;
+    url: '/federation/{resource_type}/{external_id}';
+};
+
+export type DeleteResourceErrors = {
+    /**
+     * Authentication required
+     */
+    401: unknown;
+    /**
+     * Not authorized to delete this resource
+     */
+    403: unknown;
+    /**
+     * Resource not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type DeleteResourceResponses = {
+    /**
+     * Resource deleted successfully
+     */
+    204: void;
+};
+
+export type DeleteResourceResponse = DeleteResourceResponses[keyof DeleteResourceResponses];
 
 export type ListConnectionsData = {
     body?: never;
@@ -15179,7 +15815,7 @@ export type ListOrgPublishersData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
     };
     query?: never;
     url: '/organizations/{organization_id}/publishers';
@@ -15211,7 +15847,7 @@ export type CreatePublisherData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
     };
     query?: never;
     url: '/organizations/{organization_id}/publishers';
@@ -15251,7 +15887,7 @@ export type DeletePublisherData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15289,7 +15925,7 @@ export type GetOrgPublisherData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15329,7 +15965,7 @@ export type UpdatePublisherData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15373,7 +16009,7 @@ export type GetRevenueMetricsData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15414,7 +16050,7 @@ export type GetRevenueByDayData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15455,7 +16091,7 @@ export type GetTopAgentsData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15496,7 +16132,7 @@ export type GetOrgPublisherEarningsData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15536,7 +16172,7 @@ export type UploadPublisherLogoData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15580,7 +16216,7 @@ export type ListOrgPublisherPayoutsData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15629,7 +16265,7 @@ export type CreateOrgPublisherPayoutData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */
@@ -15673,7 +16309,7 @@ export type UpdatePublisherPricingData = {
         /**
          * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: OrganizationIdParam;
+        organization_id: string;
         /**
          * Publisher ID
          */

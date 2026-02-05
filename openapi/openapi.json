@@ -935,7 +935,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID or 'default' for authenticated user's default organization",
+            "description": "Organization ID",
             "required": true,
             "schema": {
               "type": "string",
@@ -1009,6 +1009,252 @@
             "bearer_auth": []
           }
         ]
+      }
+    },
+    "/federation": {
+      "get": {
+        "tags": [
+          "federation"
+        ],
+        "summary": "GET /federation",
+        "description": "List federated resources with optional filtering.\nUsed for cross-publisher resource discovery.",
+        "operationId": "list_resources",
+        "parameters": [
+          {
+            "name": "publisher_slug",
+            "in": "query",
+            "description": "Filter by publisher slug",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "query",
+            "description": "Filter by resource type (e.g., \"bounty\", \"dataset\")",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by status (default: \"active\")",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of results (default: 50, max: 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Offset for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resources retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederatedResourcesDataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "federation"
+        ],
+        "summary": "POST /federation",
+        "description": "Upsert a federated resource for a publisher.\nPublishers use this to register/update their resources for cross-publisher discovery.",
+        "operationId": "upsert_resource",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertFederatedResourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Resource upserted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederatedResourceDataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Not authorized - must be a publisher"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/federation/stats": {
+      "get": {
+        "tags": [
+          "federation"
+        ],
+        "summary": "GET /federation/stats",
+        "description": "Get federation statistics, optionally filtered by publisher.",
+        "operationId": "get_stats",
+        "parameters": [
+          {
+            "name": "publisher_slug",
+            "in": "query",
+            "description": "Filter by publisher slug (optional - if omitted, returns stats across all publishers)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stats retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederationStatsDataResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/federation/{id}": {
+      "get": {
+        "tags": [
+          "federation"
+        ],
+        "summary": "GET /federation/{id}",
+        "description": "Get a specific federated resource by ID.",
+        "operationId": "get_resource",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Federated resource ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resource retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FederatedResourceDataResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/federation/{resource_type}/{external_id}": {
+      "delete": {
+        "tags": [
+          "federation"
+        ],
+        "summary": "DELETE /federation/{resource_type}/{external_id}",
+        "description": "Delete a federated resource by type and external ID.\nOnly the owning publisher can delete their resources.",
+        "operationId": "delete_resource",
+        "parameters": [
+          {
+            "name": "resource_type",
+            "in": "path",
+            "description": "Resource type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "external_id",
+            "in": "path",
+            "description": "External resource ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Resource deleted successfully"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Not authorized to delete this resource"
+          },
+          "404": {
+            "description": "Resource not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
       }
     },
     "/oauth/connections": {
@@ -2655,7 +2901,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -2692,7 +2939,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -2747,7 +2995,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -2797,7 +3046,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -2860,7 +3110,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -2905,7 +3156,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -2969,7 +3221,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3036,7 +3289,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3103,7 +3357,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3155,7 +3410,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3220,7 +3476,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3292,7 +3549,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3357,7 +3615,8 @@
             "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/OrganizationIdParam"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -11848,6 +12107,70 @@
           }
         }
       },
+      "BountyMetadata": {
+        "type": "object",
+        "description": "Metadata structure for bounty resources",
+        "required": [
+          "title",
+          "description",
+          "reward_amount_atomic",
+          "funded_amount_atomic",
+          "bounty_status",
+          "creator_wallet",
+          "min_stake_to_contribute"
+        ],
+        "properties": {
+          "bounty_status": {
+            "type": "string",
+            "description": "Bounty status (funding, open, in_progress, resolved, etc.)"
+          },
+          "contribution_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of contributions so far"
+          },
+          "creator_wallet": {
+            "type": "string",
+            "description": "Creator's wallet address"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional deadline",
+            "nullable": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Brief description"
+          },
+          "funded_amount_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Currently funded amount"
+          },
+          "min_stake_to_contribute": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Minimum stake required to contribute"
+          },
+          "reward_amount_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total reward amount in atomic units"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags/categories for filtering"
+          },
+          "title": {
+            "type": "string",
+            "description": "Bounty title"
+          }
+        }
+      },
       "Branch": {
         "type": "object",
         "description": "Branch represents a SerenDB timeline (database copy)",
@@ -15419,6 +15742,342 @@
           }
         }
       },
+      "FederatedResource": {
+        "type": "object",
+        "description": "A federated resource entry in the discovery index",
+        "required": [
+          "id",
+          "publisher_id",
+          "resource_type",
+          "external_id",
+          "metadata",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the entry was created"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional expiration time",
+            "nullable": true
+          },
+          "external_id": {
+            "type": "string",
+            "description": "ID of the resource in the publisher's system"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier"
+          },
+          "metadata": {
+            "description": "Discoverable metadata (structure varies by resource_type)"
+          },
+          "org_database_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional: org database where full data resides",
+            "nullable": true
+          },
+          "publisher_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Publisher that owns this resource"
+          },
+          "resource_type": {
+            "type": "string",
+            "description": "Type of resource (bounty, dataset, service, etc.)"
+          },
+          "status": {
+            "type": "string",
+            "description": "Current status"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the entry was last updated"
+          }
+        }
+      },
+      "FederatedResourceDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FederatedResourceResponse"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "FederatedResourceResponse": {
+        "type": "object",
+        "description": "Response for a single federated resource",
+        "required": [
+          "id",
+          "publisher_id",
+          "resource_type",
+          "external_id",
+          "metadata",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metadata": {},
+          "org_database_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "publisher_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FederatedResourceWithPublisher": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FederatedResource"
+          },
+          {
+            "type": "object",
+            "required": [
+              "publisher_slug",
+              "publisher_name"
+            ],
+            "properties": {
+              "publisher_name": {
+                "type": "string",
+                "description": "Publisher name for display"
+              },
+              "publisher_slug": {
+                "type": "string",
+                "description": "Publisher slug for routing"
+              }
+            }
+          }
+        ],
+        "description": "Response for listing federated resources with publisher info"
+      },
+      "FederatedResourceWithPublisherResponse": {
+        "type": "object",
+        "description": "Response for a federated resource with publisher info",
+        "required": [
+          "id",
+          "publisher_id",
+          "publisher_slug",
+          "publisher_name",
+          "resource_type",
+          "external_id",
+          "metadata",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metadata": {},
+          "org_database_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "publisher_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publisher_name": {
+            "type": "string"
+          },
+          "publisher_slug": {
+            "type": "string"
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FederatedResourcesDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FederatedResourceWithPublisherResponse"
+            },
+            "description": "The actual response data (can be a single object or a collection)"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "FederationStats": {
+        "type": "object",
+        "description": "Summary statistics for federation",
+        "required": [
+          "total_active",
+          "by_type",
+          "by_status"
+        ],
+        "properties": {
+          "by_status": {
+            "type": "object",
+            "description": "Count by status",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "by_type": {
+            "type": "object",
+            "description": "Count by resource type",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "total_active": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total active resources"
+          }
+        }
+      },
+      "FederationStatsDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FederationStatsResponse"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "FederationStatsParams": {
+        "type": "object",
+        "description": "Query parameters for federation stats",
+        "properties": {
+          "publisher_slug": {
+            "type": "string",
+            "description": "Filter by publisher slug (optional - if omitted, returns stats across all publishers)",
+            "nullable": true
+          }
+        }
+      },
+      "FederationStatsResponse": {
+        "type": "object",
+        "description": "Response for federation statistics",
+        "required": [
+          "total_active",
+          "by_type",
+          "by_status"
+        ],
+        "properties": {
+          "by_status": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "by_type": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "total_active": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "FiatDepositDataResponse": {
         "type": "object",
         "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
@@ -16378,6 +17037,37 @@
           }
         }
       },
+      "ListFederatedResourcesParams": {
+        "type": "object",
+        "description": "Query parameters for listing federated resources",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum number of results (default: 50, max: 100)"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Offset for pagination"
+          },
+          "publisher_slug": {
+            "type": "string",
+            "description": "Filter by publisher slug",
+            "nullable": true
+          },
+          "resource_type": {
+            "type": "string",
+            "description": "Filter by resource type (e.g., \"bounty\", \"dataset\")",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "description": "Filter by status (default: \"active\")",
+            "nullable": true
+          }
+        }
+      },
       "ListFiatDepositsParams": {
         "type": "object",
         "description": "Query params for listing fiat deposits",
@@ -17322,23 +18012,6 @@
             "nullable": true
           }
         }
-      },
-      "OrganizationIdParam": {
-        "oneOf": [
-          {
-            "type": "string",
-            "format": "uuid",
-            "description": "Organization UUID"
-          },
-          {
-            "type": "string",
-            "description": "Use authenticated user's default organization",
-            "enum": [
-              "default"
-            ]
-          }
-        ],
-        "description": "Organization ID: either a UUID or 'default' for the authenticated user's default organization"
       },
       "OrganizationInvite": {
         "type": "object",
@@ -23695,6 +24368,44 @@
           }
         }
       },
+      "UpsertFederatedResourceRequest": {
+        "type": "object",
+        "description": "Request to upsert a federated resource",
+        "required": [
+          "resource_type",
+          "external_id",
+          "metadata"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional expiration timestamp",
+            "nullable": true
+          },
+          "external_id": {
+            "type": "string",
+            "description": "External ID of the resource (unique within publisher + type)"
+          },
+          "metadata": {
+            "description": "Resource metadata (JSON object with type-specific fields)"
+          },
+          "org_database_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional database ID where the resource data lives",
+            "nullable": true
+          },
+          "resource_type": {
+            "type": "string",
+            "description": "Type of resource being registered"
+          },
+          "status": {
+            "type": "string",
+            "description": "Resource status (default: \"active\")"
+          }
+        }
+      },
       "UsageEventDebugRecord": {
         "type": "object",
         "description": "Debug view: usage_events entry for an endpoint",
@@ -24710,6 +25421,10 @@
     {
       "name": "skill",
       "description": "Endpoints included in skill.md for AI agent discovery"
+    },
+    {
+      "name": "federation",
+      "description": "Cross-publisher resource discovery and federation"
     }
   ]
 }
