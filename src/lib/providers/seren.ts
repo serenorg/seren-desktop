@@ -4,6 +4,7 @@
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
+import { updateBalanceFromError } from "@/stores/wallet.store";
 import type {
   AuthOptions,
   ChatMessageWithTools,
@@ -35,6 +36,25 @@ function isCreditsError(status: number, rawError: string): boolean {
   const creditKeywords = ["credits", "credit", "afford", "payment", "billing"];
   const lowerError = rawError.toLowerCase();
   return creditKeywords.some((kw) => lowerError.includes(kw));
+}
+
+/**
+ * Parse 402 error response and update wallet balance if available.
+ * The 402 response contains the actual balance, so we update the UI immediately.
+ */
+function handleInsufficientBalanceError(errorText: string): void {
+  try {
+    const data = JSON.parse(errorText);
+    // The 402 response includes availableBalanceAtomic as a string
+    if (data.availableBalanceAtomic !== undefined) {
+      const balanceAtomic = Number.parseInt(data.availableBalanceAtomic, 10);
+      if (!Number.isNaN(balanceAtomic)) {
+        updateBalanceFromError(balanceAtomic);
+      }
+    }
+  } catch {
+    // Failed to parse error response, ignore
+  }
 }
 
 /**
@@ -304,6 +324,10 @@ export const serenProvider: ProviderAdapter = {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
+      // Update displayed balance from 402 error response
+      if (response.status === 402) {
+        handleInsufficientBalanceError(errorText);
+      }
       throw new Error(`Seren request failed: ${response.status} ${errorText}`);
     }
 
@@ -365,6 +389,10 @@ export const serenProvider: ProviderAdapter = {
         body: errorText,
         model,
       });
+      // Update displayed balance from 402 error response
+      if (response.status === 402) {
+        handleInsufficientBalanceError(errorText);
+      }
       throw new Error(
         `Seren streaming failed: ${response.status} - ${errorText}`,
       );
@@ -493,6 +521,10 @@ export async function sendMessageWithTools(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    // Update displayed balance from 402 error response
+    if (response.status === 402) {
+      handleInsufficientBalanceError(errorText);
+    }
     throw new Error(`Seren request failed: ${response.status} ${errorText}`);
   }
 
