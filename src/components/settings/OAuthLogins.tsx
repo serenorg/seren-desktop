@@ -10,6 +10,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   listConnections,
   listProviders,
@@ -25,6 +26,13 @@ import {
 import { apiBase } from "@/lib/config";
 import { authStore } from "@/stores/auth.store";
 
+/** Event payload for oauth-connection-expired */
+interface OAuthExpiredEvent {
+  publisherSlug: string;
+  errorMessage: string;
+  timestamp: number;
+}
+
 interface OAuthLoginsProps {
   onSignInClick?: () => void;
 }
@@ -37,6 +45,10 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     string | null
   >(null);
   const [error, setError] = createSignal<string | null>(null);
+  // Track providers with expired/invalid tokens (detected from tool call failures)
+  const [expiredProviders, setExpiredProviders] = createSignal<Set<string>>(
+    new Set()
+  );
 
   // Fetch available OAuth providers
   const [providers] = createResource(async () => {
@@ -84,6 +96,31 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     },
   );
 
+  // Listen for OAuth token expiration events from tool executor
+  onMount(async () => {
+    console.log("[OAuthLogins] Setting up oauth-connection-expired listener");
+    const unlistenExpired = await listen<OAuthExpiredEvent>(
+      "oauth-connection-expired",
+      (event) => {
+        const { publisherSlug, errorMessage } = event.payload;
+        console.log(
+          `[OAuthLogins] OAuth connection expired for ${publisherSlug}:`,
+          errorMessage,
+        );
+        // Add to expired providers set
+        setExpiredProviders((prev) => {
+          const next = new Set(prev);
+          next.add(publisherSlug);
+          return next;
+        });
+      },
+    );
+
+    onCleanup(() => {
+      unlistenExpired();
+    });
+  });
+
   // Listen for OAuth callbacks
   onMount(async () => {
     console.log("[OAuthLogins] Setting up OAuth callback listener");
@@ -110,6 +147,11 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
         console.log("[OAuthLogins] Refreshing connections after successful OAuth");
         await refetchConnections();
         console.log("[OAuthLogins] Connections refreshed successfully");
+        // Clear expired status for this provider since they just reconnected
+        const currentProvider = connectingProvider();
+        if (currentProvider) {
+          clearExpiredStatus(currentProvider);
+        }
         if (connectTimeout) clearTimeout(connectTimeout);
         setConnectingProvider(null);
         setError(null);
@@ -133,6 +175,18 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     return connections()?.find(
       (c) => c.provider_slug === providerSlug && c.is_valid,
     );
+  };
+
+  const isExpired = (providerSlug: string): boolean => {
+    return expiredProviders().has(providerSlug);
+  };
+
+  const clearExpiredStatus = (providerSlug: string) => {
+    setExpiredProviders((prev) => {
+      const next = new Set(prev);
+      next.delete(providerSlug);
+      return next;
+    });
   };
 
   let connectTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -258,17 +312,25 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
           <For each={providers()}>
             {(provider) => {
               const connection = () => isConnected(provider.slug);
+              const expired = () => isExpired(provider.slug);
               const isConnecting = () => connectingProvider() === provider.slug;
               const isDisconnecting = () =>
                 disconnectingProvider() === provider.slug;
 
+              // Determine card border/background based on state
+              const cardClasses = () => {
+                if (expired()) {
+                  return "border-[rgba(245,158,11,0.5)] bg-[rgba(245,158,11,0.08)]";
+                }
+                if (connection()) {
+                  return "border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.05)]";
+                }
+                return "border-[rgba(148,163,184,0.2)]";
+              };
+
               return (
                 <div
-                  class={`flex items-center justify-between px-4 py-4 bg-[rgba(30,30,30,0.6)] border rounded-lg transition-all duration-150 ${
-                    connection()
-                      ? "border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.05)]"
-                      : "border-[rgba(148,163,184,0.2)]"
-                  }`}
+                  class={`flex items-center justify-between px-4 py-4 bg-[rgba(30,30,30,0.6)] border rounded-lg transition-all duration-150 ${cardClasses()}`}
                 >
                   <div class="flex items-center gap-4 flex-1 min-w-0">
                     {/* Publisher Logo */}
@@ -294,7 +356,12 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                         <span class="font-medium text-foreground">
                           {provider.name}
                         </span>
-                        <Show when={connection()}>
+                        <Show when={expired()}>
+                          <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(245,158,11,0.2)] text-[#f59e0b]">
+                            Expired
+                          </span>
+                        </Show>
+                        <Show when={connection() && !expired()}>
                           <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(34,197,94,0.2)] text-[#4ade80]">
                             Connected
                           </span>
@@ -305,7 +372,12 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                           {provider.description}
                         </span>
                       </Show>
-                      <Show when={connection()}>
+                      <Show when={expired()}>
+                        <span class="text-[0.75rem] text-[#f59e0b]">
+                          Token expired - please reconnect to continue using this service
+                        </span>
+                      </Show>
+                      <Show when={connection() && !expired()}>
                         {(conn) => (
                           <span class="text-[0.75rem] text-muted-foreground">
                             {conn().provider_email
@@ -318,19 +390,19 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                   </div>
 
                   <div class="flex items-center gap-2 ml-4">
-                    <Show
-                      when={connection()}
-                      fallback={
-                        <button
-                          type="button"
-                          class="px-4 py-2 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-[#4f46e5] disabled:opacity-50 disabled:cursor-not-allowed"
-                          onClick={() => handleConnect(provider)}
-                          disabled={isConnecting()}
-                        >
-                          {isConnecting() ? "Connecting..." : "Connect"}
-                        </button>
-                      }
-                    >
+                    {/* Expired state: show Reconnect button */}
+                    <Show when={expired()}>
+                      <button
+                        type="button"
+                        class="px-4 py-2 bg-[#f59e0b] border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-[#d97706] disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => handleConnect(provider)}
+                        disabled={isConnecting()}
+                      >
+                        {isConnecting() ? "Reconnecting..." : "Reconnect"}
+                      </button>
+                    </Show>
+                    {/* Connected state (not expired): show Disconnect button */}
+                    <Show when={connection() && !expired()}>
                       <button
                         type="button"
                         class="px-4 py-2 bg-transparent border border-[rgba(239,68,68,0.5)] rounded-md text-[#ef4444] text-[0.9rem] cursor-pointer transition-all duration-150 hover:not-disabled:bg-[rgba(239,68,68,0.1)] hover:not-disabled:border-[#ef4444] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -338,6 +410,17 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                         disabled={isDisconnecting()}
                       >
                         {isDisconnecting() ? "Disconnecting..." : "Disconnect"}
+                      </button>
+                    </Show>
+                    {/* Not connected and not expired: show Connect button */}
+                    <Show when={!connection() && !expired()}>
+                      <button
+                        type="button"
+                        class="px-4 py-2 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-[#4f46e5] disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => handleConnect(provider)}
+                        disabled={isConnecting()}
+                      >
+                        {isConnecting() ? "Connecting..." : "Connect"}
                       </button>
                     </Show>
                   </div>

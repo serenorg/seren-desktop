@@ -2,6 +2,7 @@
 // ABOUTME: Handles tool call parsing, execution, and result formatting.
 
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
@@ -26,6 +27,39 @@ interface FileEntry {
 const OPENCLAW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_RESULT_SIZE = 50_000; // 50KB cap
 const MAX_ARRAY_ITEMS = 25;
+
+/**
+ * Check if an error message indicates an OAuth token issue.
+ * These errors mean the user's OAuth connection needs to be refreshed.
+ */
+function isOAuthTokenError(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  return (
+    lowerMessage.includes("oauth token refresh failed") ||
+    lowerMessage.includes("token refresh failed") ||
+    lowerMessage.includes("provider error during token refresh") ||
+    lowerMessage.includes("oauth authentication required") ||
+    lowerMessage.includes("invalid_grant") ||
+    lowerMessage.includes("refresh token expired")
+  );
+}
+
+/**
+ * Emit an event to notify the UI that an OAuth connection has expired.
+ * The OAuthLogins component listens for this to update the connection status.
+ */
+async function notifyOAuthExpired(publisherSlug: string, errorMessage: string): Promise<void> {
+  try {
+    await emit("oauth-connection-expired", {
+      publisherSlug,
+      errorMessage,
+      timestamp: Date.now(),
+    });
+    console.log(`[Tool Executor] Emitted oauth-connection-expired for ${publisherSlug}`);
+  } catch (err) {
+    console.error("[Tool Executor] Failed to emit oauth-connection-expired:", err);
+  }
+}
 
 /**
  * Truncate large tool results to prevent overwhelming the AI context and database.
@@ -561,6 +595,11 @@ async function executeGatewayTool(
         ? response.result
         : JSON.stringify(response.result, null, 2);
 
+    // Check for OAuth token errors in the response
+    if (response.is_error && isOAuthTokenError(content)) {
+      notifyOAuthExpired(publisherSlug, content);
+    }
+
     return {
       tool_call_id: toolCallId,
       content: truncateToolResult(content || "Tool executed successfully"),
@@ -569,6 +608,12 @@ async function executeGatewayTool(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[Tool Executor] Gateway tool "${publisherSlug}/${toolName}" failed:`, message);
+
+    // Check for OAuth token errors and notify the UI
+    if (isOAuthTokenError(message)) {
+      notifyOAuthExpired(publisherSlug, message);
+    }
+
     return {
       tool_call_id: toolCallId,
       content: `Gateway tool error: ${message}`,
