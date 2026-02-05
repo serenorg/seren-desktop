@@ -20,6 +20,7 @@ export const ResizableTextarea: Component<ResizableTextareaProps> = (props) => {
   let containerRef: HTMLDivElement | undefined;
   const [height, setHeight] = createSignal(props.minHeight ?? 80);
   const [isDragging, setIsDragging] = createSignal(false);
+  const [isHovering, setIsHovering] = createSignal(false);
 
   const minHeight = props.minHeight ?? 80;
   const maxHeight = props.maxHeight ?? window.innerHeight * 0.5;
@@ -60,20 +61,60 @@ export const ResizableTextarea: Component<ResizableTextareaProps> = (props) => {
     document.removeEventListener("mouseup", handleMouseUp);
   });
 
+  // Determine handle visibility and color based on state
+  const handleActive = () => isDragging() || isHovering();
+  const handleColor = () => {
+    if (isDragging()) return "#58a6ff";
+    if (isHovering()) return "#8b949e";
+    return "#484f58";
+  };
+
   return (
     <div ref={containerRef} class="relative">
-      {/* Resize handle at top */}
+      {/* Resize handle at top - larger clickable area with visible grip */}
       <div
-        class="absolute top-0 left-0 right-0 h-2 cursor-ns-resize flex items-center justify-center group z-10 -translate-y-1"
+        class="absolute top-0 left-0 right-0 h-4 cursor-ns-resize flex items-center justify-center z-10 -translate-y-2"
         onMouseDown={handleMouseDown}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+        title="Drag to resize"
       >
+        {/* Chevron up icon with grip dots */}
         <div
-          class={`w-12 h-1 rounded-full transition-colors ${
-            isDragging()
-              ? "bg-[#58a6ff]"
-              : "bg-[#30363d] group-hover:bg-[#484f58]"
-          }`}
-        />
+          class="flex flex-col items-center gap-px transition-opacity duration-150"
+          style={{ opacity: handleActive() ? 1 : 0.6 }}
+        >
+          {/* Up/down chevron arrows */}
+          <svg
+            width="16"
+            height="10"
+            viewBox="0 0 16 10"
+            fill="none"
+            style={{ color: handleColor() }}
+            aria-hidden="true"
+          >
+            <path
+              d="M4 6L8 2L12 6"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M4 4L8 8L12 4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              opacity="0.5"
+            />
+          </svg>
+          {/* Grip bar */}
+          <div
+            class="w-8 h-0.5 rounded-full transition-colors duration-150"
+            style={{ "background-color": handleColor() }}
+          />
+        </div>
       </div>
       <textarea
         ref={(el) => {
