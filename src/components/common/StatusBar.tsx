@@ -5,7 +5,6 @@ import type { Component } from "solid-js";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { AutocompleteStatus } from "./AutocompleteStatus";
 import { McpStatusIndicator } from "./McpStatusIndicator";
-import { UpdateIndicator } from "./UpdateIndicator";
 
 interface StatusBarProps {
   message?: string;
@@ -17,7 +16,7 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
       <span class="text-xs text-primary-foreground">
         {props.message || "Ready"}
       </span>
-      <div class="flex items-center gap-2 [&_.mcp-status-indicator]:text-primary-foreground [&_.status-label]:text-primary-foreground/85 [&_.update-indicator]:text-primary-foreground/90">
+      <div class="flex items-center gap-2 [&_.mcp-status-indicator]:text-primary-foreground [&_.status-label]:text-primary-foreground/85">
         {/* MCP indicator moved to left side to avoid accidental clicks near Send button */}
         <McpStatusIndicator />
         <span class="w-px h-3.5 bg-primary-foreground/20" />
@@ -26,7 +25,6 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
           errorMessage={autocompleteStore.errorMessage ?? undefined}
           onToggle={autocompleteStore.toggle}
         />
-        <UpdateIndicator />
       </div>
     </footer>
   );
