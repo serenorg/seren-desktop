@@ -726,25 +726,29 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     }
                   }}
                 />
-                <Show when={isPrompting()}>
+                <Show
+                  when={isPrompting()}
+                  fallback={
+                    <button
+                      type="submit"
+                      class="px-4 py-1.5 bg-[#238636] text-white rounded-md text-[13px] font-medium hover:bg-[#2ea043] transition-colors disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
+                      disabled={
+                        !hasSession() ||
+                        (!input().trim() && attachedImages().length === 0)
+                      }
+                    >
+                      Send
+                    </button>
+                  }
+                >
                   <button
                     type="button"
-                    class="px-4 py-1.5 bg-[#21262d] text-[#f85149] border border-[#30363d] rounded-md text-[13px] font-medium hover:bg-[#30363d] transition-colors"
+                    class="px-4 py-1.5 bg-[#da3633] text-white rounded-md text-[13px] font-medium hover:bg-[#f85149] transition-colors"
                     onClick={handleCancel}
                   >
                     Cancel
                   </button>
                 </Show>
-                <button
-                  type="submit"
-                  class="px-4 py-1.5 bg-[#238636] text-white rounded-md text-[13px] font-medium hover:bg-[#2ea043] transition-colors disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
-                  disabled={
-                    !hasSession() ||
-                    (!input().trim() && attachedImages().length === 0)
-                  }
-                >
-                  {isPrompting() ? "Queue" : "Send"}
-                </button>
               </div>
             </div>
           </form>
