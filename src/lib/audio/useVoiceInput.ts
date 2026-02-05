@@ -15,6 +15,21 @@ function getSupportedMimeType(): string {
   return "";
 }
 
+/**
+ * Get platform-appropriate instructions for enabling microphone access.
+ */
+function getMicrophonePermissionInstructions(): string {
+  const platform = navigator.platform.toLowerCase();
+  if (platform.includes("mac")) {
+    return "System Settings > Privacy & Security > Microphone";
+  }
+  if (platform.includes("win")) {
+    return "Settings > Privacy > Microphone";
+  }
+  // Linux or other
+  return "your system settings";
+}
+
 export function useVoiceInput(onTranscript: (text: string) => void) {
   const [voiceState, setVoiceState] = createSignal<VoiceState>("idle");
   const [error, setError] = createSignal<string | null>(null);
@@ -29,8 +44,9 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
       setError(null);
 
       if (!navigator.mediaDevices?.getUserMedia) {
+        const instructions = getMicrophonePermissionInstructions();
         throw new Error(
-          "Microphone access is not available. Please ensure the app has microphone permission in System Settings > Privacy & Security > Microphone.",
+          `Microphone access is not available. Please ensure the app has microphone permission in ${instructions}.`,
         );
       }
 
@@ -85,12 +101,18 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
       setVoiceState("recording");
     } catch (err) {
       stream?.getTracks().forEach((t) => t.stop());
-      const message =
-        err instanceof DOMException && err.name === "NotAllowedError"
-          ? "Microphone access denied. Please allow microphone access in your browser settings."
-          : err instanceof Error
-            ? err.message
-            : "Failed to start recording";
+      console.error("[VoiceInput] startRecording error:", err);
+      let message: string;
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        const instructions = getMicrophonePermissionInstructions();
+        message = `Microphone access denied. Please allow microphone access in ${instructions}.`;
+      } else if (err instanceof DOMException && err.name === "NotFoundError") {
+        message = "No microphone found. Please connect a microphone and try again.";
+      } else if (err instanceof Error) {
+        message = err.message;
+      } else {
+        message = "Failed to start recording";
+      }
       setError(message);
       setVoiceState("error");
     }
