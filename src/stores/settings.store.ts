@@ -1,4 +1,4 @@
-// ABOUTME: Settings store for managing user preferences and MCP configuration.
+// ABOUTME: Settings store for managing user preferences, MCP configuration, and toolsets.
 // ABOUTME: Persists settings to Tauri store for cross-session persistence.
 
 import { createStore } from "solid-js/store";
@@ -8,8 +8,10 @@ import { isTauriRuntime } from "@/lib/tauri-bridge";
 const SETTINGS_STORE = "settings.json";
 const MCP_SETTINGS_KEY = "mcp";
 const APP_SETTINGS_KEY = "app";
+const TOOLSETS_SETTINGS_KEY = "toolsets";
 const BROWSER_SETTINGS_KEY = "seren_settings";
 const BROWSER_MCP_KEY = "seren_mcp_settings";
+const BROWSER_TOOLSETS_KEY = "seren_toolsets_settings";
 
 /**
  * Get invoke function only when in Tauri runtime.
@@ -98,6 +100,33 @@ export interface Settings {
 }
 
 /**
+ * A toolset is a named collection of publisher slugs.
+ * Groups publishers for a specific workflow without affecting their OAuth state.
+ */
+export interface Toolset {
+  /** Unique identifier (UUID v4) */
+  id: string;
+  /** User-friendly name (e.g., "Sales Research", "Content Creation") */
+  name: string;
+  /** Optional description of what this toolset is for */
+  description: string;
+  /** Array of publisher slugs included in this toolset */
+  publisherSlugs: string[];
+  /** When the toolset was created (ISO timestamp) */
+  createdAt: string;
+  /** When the toolset was last modified (ISO timestamp) */
+  updatedAt: string;
+}
+
+/**
+ * Settings for toolset management.
+ */
+export interface ToolsetSettings {
+  /** All user-created toolsets */
+  toolsets: Toolset[];
+}
+
+/**
  * Default settings values.
  */
 const DEFAULT_SETTINGS: Settings = {
@@ -152,15 +181,21 @@ const defaultMcpSettings: McpSettings = {
   defaultTimeout: 30000,
 };
 
+const defaultToolsetSettings: ToolsetSettings = {
+  toolsets: [],
+};
+
 interface SettingsState {
   app: Settings;
   mcp: McpSettings;
+  toolsets: ToolsetSettings;
   isLoading: boolean;
 }
 
 const [settingsState, setSettingsState] = createStore<SettingsState>({
   app: { ...DEFAULT_SETTINGS },
   mcp: defaultMcpSettings,
+  toolsets: defaultToolsetSettings,
   isLoading: true,
 });
 
@@ -428,6 +463,183 @@ function mcpSettings(): McpSettings {
 }
 
 // ============================================================================
+// Toolset Settings Functions
+// ============================================================================
+
+/**
+ * Generate a UUID v4.
+ */
+function generateId(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * Load toolset settings from persistent storage.
+ */
+async function loadToolsetSettings(): Promise<void> {
+  try {
+    const invoke = await getInvoke();
+    let stored: string | null = null;
+
+    if (invoke) {
+      stored = await invoke<string | null>("get_setting", {
+        store: SETTINGS_STORE,
+        key: TOOLSETS_SETTINGS_KEY,
+      });
+    } else {
+      // Browser fallback
+      stored = localStorage.getItem(BROWSER_TOOLSETS_KEY);
+    }
+
+    if (stored) {
+      const parsed = JSON.parse(stored) as ToolsetSettings;
+      setSettingsState("toolsets", parsed);
+    }
+  } catch {
+    // Use defaults if loading fails
+  }
+}
+
+/**
+ * Save toolset settings to persistent storage.
+ */
+async function saveToolsetSettings(): Promise<void> {
+  try {
+    const invoke = await getInvoke();
+    const value = JSON.stringify(settingsState.toolsets);
+
+    if (invoke) {
+      await invoke("set_setting", {
+        store: SETTINGS_STORE,
+        key: TOOLSETS_SETTINGS_KEY,
+        value,
+      });
+    } else {
+      // Browser fallback
+      localStorage.setItem(BROWSER_TOOLSETS_KEY, value);
+    }
+  } catch (error) {
+    console.error("Failed to save toolset settings:", error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new toolset.
+ */
+async function createToolset(
+  name: string,
+  description: string,
+  publisherSlugs: string[] = [],
+): Promise<Toolset> {
+  const now = new Date().toISOString();
+  const toolset: Toolset = {
+    id: generateId(),
+    name,
+    description,
+    publisherSlugs,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  setSettingsState("toolsets", "toolsets", (prev) => [...prev, toolset]);
+  await saveToolsetSettings();
+  return toolset;
+}
+
+/**
+ * Update an existing toolset.
+ */
+async function updateToolset(
+  id: string,
+  updates: Partial<Pick<Toolset, "name" | "description" | "publisherSlugs">>,
+): Promise<void> {
+  setSettingsState("toolsets", "toolsets", (prev) =>
+    prev.map((t) =>
+      t.id === id
+        ? { ...t, ...updates, updatedAt: new Date().toISOString() }
+        : t,
+    ),
+  );
+  await saveToolsetSettings();
+}
+
+/**
+ * Delete a toolset.
+ */
+async function deleteToolset(id: string): Promise<void> {
+  setSettingsState("toolsets", "toolsets", (prev) =>
+    prev.filter((t) => t.id !== id),
+  );
+  await saveToolsetSettings();
+}
+
+/**
+ * Add a publisher to a toolset.
+ */
+async function addPublisherToToolset(
+  toolsetId: string,
+  publisherSlug: string,
+): Promise<void> {
+  setSettingsState("toolsets", "toolsets", (prev) =>
+    prev.map((t) =>
+      t.id === toolsetId && !t.publisherSlugs.includes(publisherSlug)
+        ? {
+            ...t,
+            publisherSlugs: [...t.publisherSlugs, publisherSlug],
+            updatedAt: new Date().toISOString(),
+          }
+        : t,
+    ),
+  );
+  await saveToolsetSettings();
+}
+
+/**
+ * Remove a publisher from a toolset.
+ */
+async function removePublisherFromToolset(
+  toolsetId: string,
+  publisherSlug: string,
+): Promise<void> {
+  setSettingsState("toolsets", "toolsets", (prev) =>
+    prev.map((t) =>
+      t.id === toolsetId
+        ? {
+            ...t,
+            publisherSlugs: t.publisherSlugs.filter((s) => s !== publisherSlug),
+            updatedAt: new Date().toISOString(),
+          }
+        : t,
+    ),
+  );
+  await saveToolsetSettings();
+}
+
+/**
+ * Get a toolset by ID.
+ */
+function getToolset(id: string): Toolset | undefined {
+  return settingsState.toolsets.toolsets.find((t) => t.id === id);
+}
+
+/**
+ * Get all toolsets that contain a specific publisher.
+ */
+function getToolsetsForPublisher(publisherSlug: string): Toolset[] {
+  return settingsState.toolsets.toolsets.filter((t) =>
+    t.publisherSlugs.includes(publisherSlug),
+  );
+}
+
+/**
+ * Convenience accessor for toolset settings.
+ */
+function toolsetSettings(): ToolsetSettings {
+  return settingsState.toolsets;
+}
+
+// ============================================================================
 // Combined Load Function
 // ============================================================================
 
@@ -437,7 +649,11 @@ function mcpSettings(): McpSettings {
 async function loadAllSettings(): Promise<void> {
   setSettingsState("isLoading", true);
   try {
-    await Promise.all([loadAppSettings(), loadMcpSettings()]);
+    await Promise.all([
+      loadAppSettings(),
+      loadMcpSettings(),
+      loadToolsetSettings(),
+    ]);
   } finally {
     setSettingsState("isLoading", false);
   }
@@ -447,6 +663,7 @@ async function loadAllSettings(): Promise<void> {
 export {
   settingsState,
   loadAllSettings,
+  // MCP exports
   loadMcpSettings,
   updateMcpSettings,
   addMcpServer,
@@ -457,4 +674,14 @@ export {
   getAutoConnectMcpServers,
   setMcpDefaultTimeout,
   mcpSettings,
+  // Toolset exports
+  loadToolsetSettings,
+  createToolset,
+  updateToolset,
+  deleteToolset,
+  addPublisherToToolset,
+  removePublisherFromToolset,
+  getToolset,
+  getToolsetsForPublisher,
+  toolsetSettings,
 };

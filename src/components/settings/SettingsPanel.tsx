@@ -19,12 +19,14 @@ import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { OpenClawSettings } from "./OpenClawSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
+import { ToolsetsSettings } from "./ToolsetsSettings";
 
 type SettingsSection =
   | "chat"
   | "agent"
   | "providers"
   | "logins"
+  | "toolsets"
   | "editor"
   | "wallet"
   | "indexing"
@@ -116,6 +118,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "agent", label: "Agent", icon: "🛡️" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },
+    { id: "toolsets", label: "Toolsets", icon: "📦" },
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },
     { id: "indexing", label: "Code Indexing", icon: "🔍" },
@@ -355,6 +358,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
         <Show when={activeSection() === "logins"}>
           <OAuthLogins onSignInClick={props.onSignInClick} />
+        </Show>
+
+        <Show when={activeSection() === "toolsets"}>
+          <ToolsetsSettings />
         </Show>
 
         <Show when={activeSection() === "editor"}>
