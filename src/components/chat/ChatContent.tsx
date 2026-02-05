@@ -19,7 +19,7 @@ import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
-import { formatDuration } from "@/lib/format-duration";
+import { formatDurationWithVerb } from "@/lib/format-duration";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -790,9 +790,16 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                             message.duration
                           }
                         >
-                          <div class="mt-2 text-xs text-[#8b949e]">
-                            ✻ Brewed for {formatDuration(message.duration!)}
-                          </div>
+                          {(() => {
+                            const { verb, duration } = formatDurationWithVerb(
+                              message.duration!,
+                            );
+                            return (
+                              <div class="mt-2 text-xs text-[#8b949e]">
+                                ✻ {verb} for {duration}
+                              </div>
+                            );
+                          })()}
                         </Show>
                         <Show when={message.status === "error"}>
                           <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">

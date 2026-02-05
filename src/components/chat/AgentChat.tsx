@@ -20,7 +20,7 @@ import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
-import { formatDuration } from "@/lib/format-duration";
+import { formatDurationWithVerb } from "@/lib/format-duration";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
@@ -292,9 +292,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               innerHTML={renderMarkdown(message.content)}
             />
             <Show when={message.duration}>
-              <div class="mt-2 text-xs text-[#8b949e]">
-                ✻ Brewed for {formatDuration(message.duration!)}
-              </div>
+              {(() => {
+                const { verb, duration } = formatDurationWithVerb(
+                  message.duration!,
+                );
+                return (
+                  <div class="mt-2 text-xs text-[#8b949e]">
+                    ✻ {verb} for {duration}
+                  </div>
+                );
+              })()}
             </Show>
           </article>
         );
