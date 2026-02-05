@@ -15,6 +15,8 @@ import {
   createToolset,
   updateToolset,
   deleteToolset,
+  addPublisherToToolset,
+  removePublisherFromToolset,
 } from "@/stores/settings.store";
 
 interface Publisher {
@@ -31,11 +33,15 @@ export const ToolsetsSettings: Component = () => {
   );
   const [error, setError] = createSignal<string | null>(null);
 
-  // Form state
+  // Form state for create modal
   const [formName, setFormName] = createSignal("");
   const [formDescription, setFormDescription] = createSignal("");
   const [formPublishers, setFormPublishers] = createSignal<string[]>([]);
   const [publisherSearch, setPublisherSearch] = createSignal("");
+
+  // Inline add publisher state
+  const [addingToToolset, setAddingToToolset] = createSignal<string | null>(null);
+  const [inlineSearch, setInlineSearch] = createSignal("");
 
   // Fetch available publishers
   const [publishers] = createResource(async () => {
@@ -100,7 +106,7 @@ export const ToolsetsSettings: Component = () => {
     setError(null);
   };
 
-  // Filter publishers based on search
+  // Filter publishers based on search (for create modal)
   const filteredPublishers = () => {
     const search = publisherSearch().toLowerCase().trim();
     if (!search) return publishers() || [];
@@ -110,6 +116,30 @@ export const ToolsetsSettings: Component = () => {
         (p.description?.toLowerCase().includes(search) ?? false) ||
         p.slug.toLowerCase().includes(search),
     );
+  };
+
+  // Filter publishers for inline add (excludes already added)
+  const availablePublishersForToolset = (toolset: Toolset) => {
+    const search = inlineSearch().toLowerCase().trim();
+    const existing = new Set(toolset.publisherSlugs);
+    return (publishers() || []).filter(
+      (p) =>
+        !existing.has(p.slug) &&
+        (search === "" ||
+          p.name.toLowerCase().includes(search) ||
+          (p.description?.toLowerCase().includes(search) ?? false) ||
+          p.slug.toLowerCase().includes(search)),
+    );
+  };
+
+  const handleInlineAdd = async (toolsetId: string, slug: string) => {
+    await addPublisherToToolset(toolsetId, slug);
+    setAddingToToolset(null);
+    setInlineSearch("");
+  };
+
+  const handleInlineRemove = async (toolsetId: string, slug: string) => {
+    await removePublisherFromToolset(toolsetId, slug);
   };
 
   const handleSave = async () => {
@@ -217,48 +247,94 @@ export const ToolsetsSettings: Component = () => {
                       </p>
                     </Show>
 
-                    {/* Publisher Pills */}
-                    <Show when={toolset.publisherSlugs.length > 0}>
-                      <div class="flex flex-wrap gap-1.5 mt-3">
-                        <For each={toolset.publisherSlugs}>
-                          {(slug) => {
-                            const pub = getPublisherBySlug(slug);
-                            const status = getConnectionStatus(slug);
-                            const statusColor =
-                              status === "connected"
-                                ? "bg-[rgba(34,197,94,0.2)] border-[rgba(34,197,94,0.3)]"
-                                : status === "expired"
-                                  ? "bg-[rgba(245,158,11,0.2)] border-[rgba(245,158,11,0.3)]"
-                                  : "bg-[rgba(148,163,184,0.1)] border-[rgba(148,163,184,0.2)]";
-                            return (
-                              <span
-                                class={`px-2 py-1 text-xs rounded border ${statusColor}`}
-                                title={
-                                  status === "connected"
-                                    ? "Connected"
-                                    : status === "expired"
-                                      ? "Token expired"
-                                      : "Not connected"
-                                }
+                    {/* Publisher Pills with inline editing */}
+                    <div class="flex flex-wrap gap-1.5 mt-3 items-center">
+                      <For each={toolset.publisherSlugs}>
+                        {(slug) => {
+                          const pub = getPublisherBySlug(slug);
+                          const status = getConnectionStatus(slug);
+                          const statusColor =
+                            status === "connected"
+                              ? "bg-[rgba(34,197,94,0.2)] border-[rgba(34,197,94,0.3)]"
+                              : status === "expired"
+                                ? "bg-[rgba(245,158,11,0.2)] border-[rgba(245,158,11,0.3)]"
+                                : "bg-[rgba(148,163,184,0.1)] border-[rgba(148,163,184,0.2)]";
+                          return (
+                            <span
+                              class={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded border ${statusColor}`}
+                              title={
+                                status === "connected"
+                                  ? "Connected"
+                                  : status === "expired"
+                                    ? "Token expired"
+                                    : "Not connected"
+                              }
+                            >
+                              {pub?.name || slug}
+                              <button
+                                type="button"
+                                class="ml-0.5 text-muted-foreground hover:text-[#ef4444] transition-colors"
+                                onClick={() => handleInlineRemove(toolset.id, slug)}
+                                title="Remove publisher"
                               >
-                                {pub?.name || slug}
-                              </span>
-                            );
+                                ×
+                              </button>
+                            </span>
+                          );
+                        }}
+                      </For>
+
+                      {/* Add Publisher Button */}
+                      <div class="relative">
+                        <button
+                          type="button"
+                          class="px-2 py-1 text-xs text-muted-foreground bg-transparent border border-dashed border-[rgba(148,163,184,0.3)] rounded cursor-pointer transition-colors hover:border-accent hover:text-accent"
+                          onClick={() => {
+                            setAddingToToolset(addingToToolset() === toolset.id ? null : toolset.id);
+                            setInlineSearch("");
                           }}
-                        </For>
+                          title="Add publisher"
+                        >
+                          +
+                        </button>
+
+                        {/* Inline Add Popup */}
+                        <Show when={addingToToolset() === toolset.id}>
+                          <div class="absolute left-0 top-full mt-1 z-50 w-64 bg-[#1e1e1e] border border-[rgba(148,163,184,0.3)] rounded-lg shadow-lg overflow-hidden">
+                            <input
+                              type="text"
+                              value={inlineSearch()}
+                              onInput={(e) => setInlineSearch(e.currentTarget.value)}
+                              placeholder="Search publishers..."
+                              class="w-full px-3 py-2 bg-transparent border-b border-[rgba(148,163,184,0.2)] text-sm text-foreground focus:outline-none"
+                              autofocus
+                            />
+                            <div class="max-h-40 overflow-y-auto">
+                              <Show when={availablePublishersForToolset(toolset).length === 0}>
+                                <div class="px-3 py-2 text-xs text-muted-foreground">
+                                  {inlineSearch() ? "No matches" : "All publishers added"}
+                                </div>
+                              </Show>
+                              <For each={availablePublishersForToolset(toolset).slice(0, 10)}>
+                                {(pub) => (
+                                  <button
+                                    type="button"
+                                    class="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-[rgba(148,163,184,0.1)] transition-colors"
+                                    onClick={() => handleInlineAdd(toolset.id, pub.slug)}
+                                  >
+                                    {pub.name}
+                                  </button>
+                                )}
+                              </For>
+                            </div>
+                          </div>
+                        </Show>
                       </div>
-                    </Show>
+                    </div>
                   </div>
 
-                  {/* Actions */}
+                  {/* Delete Button Only */}
                   <div class="flex gap-2">
-                    <button
-                      type="button"
-                      class="px-2.5 py-1 text-xs text-muted-foreground bg-transparent border border-[rgba(148,163,184,0.3)] rounded cursor-pointer transition-colors hover:bg-[rgba(148,163,184,0.1)]"
-                      onClick={() => openEditModal(toolset)}
-                    >
-                      Edit
-                    </button>
                     <button
                       type="button"
                       class="px-2.5 py-1 text-xs text-[#ef4444] bg-transparent border border-[rgba(239,68,68,0.3)] rounded cursor-pointer transition-colors hover:bg-[rgba(239,68,68,0.1)]"
