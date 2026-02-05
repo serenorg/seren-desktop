@@ -24,6 +24,34 @@ export type AddPaymentMethodRequest = {
 };
 
 /**
+ * Admin grant request
+ *
+ * Either `user_id` or `agent_wallet` must be provided:
+ * - `user_id`: Grant to user's virtual wallet (recommended for admin UI)
+ * - `agent_wallet`: Grant to specific wallet address (for advanced use cases)
+ */
+export type AdminGrantCreditsRequest = {
+    /**
+     * Agent wallet address (alternative to user_id for non-platform wallets)
+     */
+    agent_wallet?: string | null;
+    /**
+     * Amount in atomic units (1,000,000 = $1.00)
+     */
+    amount_atomic: number;
+    asset_id: string;
+    description?: string | null;
+    /**
+     * Days until expiration (None = never)
+     */
+    expires_in_days?: number | null;
+    /**
+     * User ID to grant credits to (derives virtual wallet automatically)
+     */
+    user_id?: string | null;
+};
+
+/**
  * Generic API response wrapper with optional pagination
  *
  * This wrapper provides a consistent structure for all API responses,
@@ -209,9 +237,220 @@ export type AgentBalanceSummaryResponse = {
 };
 
 /**
+ * An agent credit grant with source tracking
+ */
+export type AgentCreditGrant = {
+    agent_wallet: string;
+    /**
+     * Original grant amount in atomic units
+     */
+    amount_atomic: number;
+    asset_id: string;
+    created_at: string;
+    description?: string | null;
+    expiration_notified_at?: string | null;
+    expires_at?: string | null;
+    granted_by?: string | null;
+    id: string;
+    publisher_id?: string | null;
+    /**
+     * Current remaining balance in atomic units
+     */
+    remaining_atomic: number;
+    source: AgentCreditSource;
+    /**
+     * Reference ID to source table (purchases, referrals, etc.)
+     */
+    source_reference_id?: string | null;
+    updated_at: string;
+    /**
+     * User who owns this wallet (if linked)
+     */
+    user_id?: string | null;
+};
+
+/**
  * Source of an agent credit grant (fiat-only, no on-chain deposits)
  */
 export type AgentCreditSource = 'fiat_purchase' | 'signup_bonus' | 'payment_method_bonus' | 'daily_claim' | 'referral_reward' | 'admin_grant' | 'promo_code' | 'tier_bonus' | 'refund' | 'publisher_payout';
+
+/**
+ * Data for listing agent credit grants
+ */
+export type AgentGrantsData = {
+    grants: Array<AgentCreditGrant>;
+    total: number;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type AgentGrantsDataResponse = {
+    data: AgentGrantsData;
+    pagination?: PaginationMeta | null;
+};
+
+/**
+ * Platform-wide statistics for agent credit grants (SerenBucks)
+ */
+export type AgentGrantsStats = {
+    /**
+     * Number of active grants (remaining > 0 and not expired)
+     */
+    active_grants_count: number;
+    /**
+     * Amount granted in the current month (atomic units)
+     */
+    granted_this_month_atomic: number;
+    /**
+     * Total amount ever granted (atomic units)
+     */
+    total_granted_atomic: number;
+    /**
+     * Total amount remaining across all grants (atomic units)
+     */
+    total_remaining_atomic: number;
+    /**
+     * Total amount spent (granted - remaining) (atomic units)
+     */
+    total_spent_atomic: number;
+    /**
+     * Number of unique users with grants
+     */
+    unique_users_count: number;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type AgentGrantsStatsDataResponse = {
+    data: AgentGrantsStats;
+    pagination?: PaginationMeta | null;
+};
 
 /**
  * Agent information returned on successful registration
@@ -1550,13 +1789,6 @@ export type BranchesResponse = {
 export type ChangePlanRequest = {
     plan_id: string;
     stripe_payment_method_id?: StripePaymentMethodId | null;
-};
-
-export type ChargeResponse = {
-    agent_wallet: string;
-    amount_atomic: number;
-    id: string;
-    status: string;
 };
 
 /**
@@ -4797,10 +5029,73 @@ export type InvoicesGeneratedResponse = {
 };
 
 /**
- * Response wrapper for template invocation
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
  */
 export type InvokeDataResponse = {
     data: InvokeTemplateResponse;
+    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -5001,6 +5296,37 @@ export type LimitsResponse = {
     logical_size_bytes?: number;
     projects?: number;
     storage_gb?: number;
+};
+
+/**
+ * Query parameters for listing agent credit grants
+ */
+export type ListAgentGrantsParams = {
+    /**
+     * Only show active grants (has remaining balance and not expired)
+     */
+    active_only?: boolean;
+    /**
+     * Filter by agent wallet address directly
+     */
+    agent_wallet?: string | null;
+    /**
+     * Filter by admin who granted
+     */
+    granted_by?: string | null;
+    /**
+     * Maximum number of results (default: 50)
+     */
+    limit?: number;
+    /**
+     * Offset for pagination (default: 0)
+     */
+    offset?: number;
+    source?: AgentCreditSource | null;
+    /**
+     * Filter by user ID (derives virtual wallet)
+     */
+    user_id?: string | null;
 };
 
 /**
@@ -5931,6 +6257,11 @@ export type OrganizationConsumptionResponse = {
     data: OrganizationConsumption;
     pagination?: PaginationMeta | null;
 };
+
+/**
+ * Organization ID: either a UUID or 'default' for the authenticated user's default organization
+ */
+export type OrganizationIdParam = string | 'default';
 
 /**
  * Response type for organization invites (token is not exposed over the API).
@@ -7251,15 +7582,6 @@ export type PaymentRequirementsV1 = {
  */
 export type PaymentSource = 'onchain' | 'prepaid_balance' | 'credits';
 
-export type PayoutResponse = {
-    amount_atomic: number;
-    destination_wallet: string;
-    error_message?: string | null;
-    id: string;
-    status: string;
-    tx_hash?: string | null;
-};
-
 /**
  * Status of a publisher payout request.
  */
@@ -7736,6 +8058,80 @@ export type Project = {
     updated_at: string;
 };
 
+export type ProjectConnectionUri = {
+    uri: string;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type ProjectConnectionUriDataResponse = {
+    data: ProjectConnectionUri;
+    pagination?: PaginationMeta | null;
+};
+
 export type ProjectConnectionUriQuery = {
     /**
      * Branch ID to target (defaults to project's default branch)
@@ -7757,10 +8153,6 @@ export type ProjectConnectionUriQuery = {
      * Role name override (currently ignored)
      */
     role_name?: string | null;
-};
-
-export type ProjectConnectionUriResponse = {
-    uri: string;
 };
 
 /**
@@ -8703,19 +9095,159 @@ export type PublicationsResponse = {
     pagination?: PaginationMeta | null;
 };
 
-export type PublisherAgentBalanceResponse = {
+export type PublisherAgentBalance = {
     onchain_atomic?: number | null;
     serenbucks_atomic: number;
     total_available_atomic: number;
 };
 
 /**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type PublisherAgentBalanceDataResponse = {
+    data: PublisherAgentBalance;
+    pagination?: PaginationMeta | null;
+};
+
+/**
  * Response for publisher analytics
  */
-export type PublisherAnalyticsResponse = {
+export type PublisherAnalytics = {
     publisher_id: string;
     templates: Array<TemplateAnalytics>;
     totals: PublisherAnalyticsTotals;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type PublisherAnalyticsDataResponse = {
+    data: PublisherAnalytics;
+    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -8736,6 +9268,83 @@ export type PublisherAnalyticsTotals = {
  * Publisher category - the primary classification of what a publisher offers
  */
 export type PublisherCategory = 'database' | 'integration' | 'compute';
+
+export type PublisherChargeInfo = {
+    agent_wallet: string;
+    amount_atomic: number;
+    id: string;
+    status: string;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type PublisherChargeInfoDataResponse = {
+    data: PublisherChargeInfo;
+    pagination?: PaginationMeta | null;
+};
 
 /**
  * Generic API response wrapper with optional pagination
@@ -9035,6 +9644,85 @@ export type PublisherOAuthProviderResponse = {
  */
 export type PublisherPayoutDataResponse = {
     data: PublisherPayoutResponse;
+    pagination?: PaginationMeta | null;
+};
+
+export type PublisherPayoutInfo = {
+    amount_atomic: number;
+    destination_wallet: string;
+    error_message?: string | null;
+    id: string;
+    status: string;
+    tx_hash?: string | null;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type PublisherPayoutInfoDataResponse = {
+    data: PublisherPayoutInfo;
     pagination?: PaginationMeta | null;
 };
 
@@ -10932,10 +11620,73 @@ export type TemplateAnalytics = {
 };
 
 /**
- * Response wrapper for template data
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
  */
 export type TemplateDataResponse = {
     data: CreateTemplateResponse;
+    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -10944,11 +11695,76 @@ export type TemplateDataResponse = {
 export type TemplateLanguage = 'python' | 'typescript' | 'rust';
 
 /**
- * Response wrapper for template list
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
  */
 export type TemplateListResponse = {
+    /**
+     * The actual response data (can be a single object or a collection)
+     */
     data: Array<AgentTemplateSummary>;
-    total: number;
+    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -12993,7 +13809,7 @@ export type CreateChargeResponses = {
     /**
      * Charge created
      */
-    200: ChargeResponse;
+    200: PublisherChargeInfoDataResponse;
 };
 
 export type CreateChargeResponse = CreateChargeResponses[keyof CreateChargeResponses];
@@ -13033,7 +13849,7 @@ export type GetChargeStatusResponses = {
     /**
      * Charge retrieved
      */
-    200: ChargeResponse;
+    200: PublisherChargeInfoDataResponse;
 };
 
 export type GetChargeStatusResponse = GetChargeStatusResponses[keyof GetChargeStatusResponses];
@@ -13073,7 +13889,7 @@ export type RefundChargeResponses = {
     /**
      * Charge refunded
      */
-    200: ChargeResponse;
+    200: PublisherChargeInfoDataResponse;
 };
 
 export type RefundChargeResponse = RefundChargeResponses[keyof RefundChargeResponses];
@@ -13153,7 +13969,7 @@ export type CreatePayoutResponses = {
     /**
      * Payout created
      */
-    200: PayoutResponse;
+    200: PublisherPayoutInfoDataResponse;
 };
 
 export type CreatePayoutResponse = CreatePayoutResponses[keyof CreatePayoutResponses];
@@ -13193,7 +14009,7 @@ export type GetPayoutStatusResponses = {
     /**
      * Payout retrieved
      */
-    200: PayoutResponse;
+    200: PublisherPayoutInfoDataResponse;
 };
 
 export type GetPayoutStatusResponse = GetPayoutStatusResponses[keyof GetPayoutStatusResponses];
@@ -13202,7 +14018,7 @@ export type GetUsageSummaryData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -13567,7 +14383,7 @@ export type ListOrgApiKeysData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -13599,7 +14415,7 @@ export type CreateOrgApiKeyData = {
     body: CreateApiKeyRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -13631,7 +14447,7 @@ export type RevokeOrgApiKeyData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -13665,7 +14481,7 @@ export type ListAuditLogsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -13742,7 +14558,7 @@ export type GetAuditLogData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -13782,7 +14598,7 @@ export type GetEndpointBillingEventsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -13818,7 +14634,7 @@ export type GetOrganizationConsumptionData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -13863,7 +14679,7 @@ export type ListInvitesData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -13895,7 +14711,7 @@ export type CreateInviteData = {
     body: CreateOrganizationInviteRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -13931,7 +14747,7 @@ export type ListMembersData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -13963,7 +14779,7 @@ export type AssignRoleData = {
     body: AssignRoleRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -14005,7 +14821,7 @@ export type ListOrgOauthProvidersData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -14041,7 +14857,7 @@ export type CreateOrgOauthProviderData = {
     body: CreateOAuthProviderRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -14085,7 +14901,7 @@ export type DeleteOrgOauthProviderData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -14129,7 +14945,7 @@ export type GetOrgOauthProviderData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -14173,7 +14989,7 @@ export type UpdateOrgOauthProviderData = {
     body: UpdateOAuthProviderRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -14225,7 +15041,7 @@ export type CheckPermissionData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -14261,7 +15077,7 @@ export type GetMyPermissionsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -14293,7 +15109,7 @@ export type GetOrganizationPlanData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -14325,7 +15141,7 @@ export type ChangeOrganizationPlanData = {
     body: ChangePlanRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -14361,9 +15177,9 @@ export type ListOrgPublishersData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
     };
     query?: never;
     url: '/organizations/{organization_id}/publishers';
@@ -14393,9 +15209,9 @@ export type CreatePublisherData = {
     body: CreatePublisherRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
     };
     query?: never;
     url: '/organizations/{organization_id}/publishers';
@@ -14433,9 +15249,9 @@ export type DeletePublisherData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14471,9 +15287,9 @@ export type GetOrgPublisherData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14511,9 +15327,9 @@ export type UpdatePublisherData = {
     body: UpdatePublisherRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14555,9 +15371,9 @@ export type GetRevenueMetricsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14596,9 +15412,9 @@ export type GetRevenueByDayData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14637,9 +15453,9 @@ export type GetTopAgentsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14678,9 +15494,9 @@ export type GetOrgPublisherEarningsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14718,9 +15534,9 @@ export type UploadPublisherLogoData = {
     body: LogoUploadRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14762,9 +15578,9 @@ export type ListOrgPublisherPayoutsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14811,9 +15627,9 @@ export type CreateOrgPublisherPayoutData = {
     body: CreatePublisherPayoutRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14855,9 +15671,9 @@ export type UpdatePublisherPricingData = {
     body: UpdatePricingRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
-        organization_id: string;
+        organization_id: OrganizationIdParam;
         /**
          * Publisher ID
          */
@@ -14899,7 +15715,7 @@ export type GetQuotaUsageData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -14931,7 +15747,7 @@ export type ListOrganizationRolesData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -14963,7 +15779,7 @@ export type CreateOrganizationRoleData = {
     body: CreateRoleRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -14999,7 +15815,7 @@ export type DeleteOrganizationRoleData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15043,7 +15859,7 @@ export type GetRoleData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15083,7 +15899,7 @@ export type UpdateRoleData = {
     body: UpdateRoleRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15127,7 +15943,7 @@ export type GetPublisherTemplateAnalyticsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15162,7 +15978,7 @@ export type GetPublisherTemplateAnalyticsResponses = {
     /**
      * Analytics retrieved successfully
      */
-    200: PublisherAnalyticsResponse;
+    200: PublisherAnalyticsDataResponse;
 };
 
 export type GetPublisherTemplateAnalyticsResponse = GetPublisherTemplateAnalyticsResponses[keyof GetPublisherTemplateAnalyticsResponses];
@@ -15171,7 +15987,7 @@ export type ListOrgVpcEndpointsData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -15208,7 +16024,7 @@ export type CreateOrgVpcEndpointData = {
     body: CreateOrganizationVpcEndpointRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -15236,7 +16052,7 @@ export type DeleteOrgVpcEndpointData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15272,7 +16088,7 @@ export type GetOrgVpcEndpointData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15308,7 +16124,7 @@ export type ListOrgVpcEndpointsByRegionData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15344,7 +16160,7 @@ export type DeleteOrgVpcEndpointByRegionData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15384,7 +16200,7 @@ export type GetOrgVpcEndpointByRegionData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15424,7 +16240,7 @@ export type ListOrgVpcEndpointsAliasData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -15456,7 +16272,7 @@ export type ListWebhooksData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -15488,7 +16304,7 @@ export type CreateWebhookData = {
     body: CreateWebhookRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
     };
@@ -15524,7 +16340,7 @@ export type DeleteWebhookData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15564,7 +16380,7 @@ export type GetWebhookData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15604,7 +16420,7 @@ export type UpdateWebhookData = {
     body: UpdateWebhookRequest;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15648,7 +16464,7 @@ export type ListWebhookDeliveriesData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -15688,7 +16504,7 @@ export type RotateWebhookSecretData = {
     body?: never;
     path: {
         /**
-         * Organization ID
+         * Organization ID or 'default' for authenticated user's default organization
          */
         organization_id: string;
         /**
@@ -17997,7 +18813,7 @@ export type GetProjectConnectionUriResponses = {
     /**
      * Connection URI retrieved
      */
-    200: ProjectConnectionUriResponse;
+    200: ProjectConnectionUriDataResponse;
 };
 
 export type GetProjectConnectionUriResponse = GetProjectConnectionUriResponses[keyof GetProjectConnectionUriResponses];
@@ -19600,7 +20416,7 @@ export type GetAgentBalanceResponses = {
     /**
      * Balance retrieved
      */
-    200: PublisherAgentBalanceResponse;
+    200: PublisherAgentBalanceDataResponse;
 };
 
 export type GetAgentBalanceResponse = GetAgentBalanceResponses[keyof GetAgentBalanceResponses];

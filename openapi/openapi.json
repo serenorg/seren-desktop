@@ -602,7 +602,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChargeResponse"
+                  "$ref": "#/components/schemas/PublisherChargeInfoDataResponse"
                 }
               }
             }
@@ -661,7 +661,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChargeResponse"
+                  "$ref": "#/components/schemas/PublisherChargeInfoDataResponse"
                 }
               }
             }
@@ -727,7 +727,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChargeResponse"
+                  "$ref": "#/components/schemas/PublisherChargeInfoDataResponse"
                 }
               }
             }
@@ -845,7 +845,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PayoutResponse"
+                  "$ref": "#/components/schemas/PublisherPayoutInfoDataResponse"
                 }
               }
             }
@@ -901,7 +901,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PayoutResponse"
+                  "$ref": "#/components/schemas/PublisherPayoutInfoDataResponse"
                 }
               }
             }
@@ -935,7 +935,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1486,7 +1486,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1528,7 +1528,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1582,7 +1582,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1629,7 +1629,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1778,7 +1778,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1836,7 +1836,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1886,7 +1886,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1954,7 +1954,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -1997,7 +1997,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2055,7 +2055,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2099,7 +2099,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2163,7 +2163,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2209,7 +2209,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2273,7 +2273,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2332,7 +2332,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2384,7 +2384,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2460,7 +2460,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2513,7 +2513,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2561,7 +2561,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2599,7 +2599,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -2652,11 +2652,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           }
         ],
@@ -2690,11 +2689,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           }
         ],
@@ -2746,11 +2744,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -2797,11 +2794,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -2861,11 +2857,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -2907,11 +2902,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -2972,11 +2966,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -3040,11 +3033,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -3108,11 +3100,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -3161,11 +3152,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -3227,11 +3217,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -3300,11 +3289,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -3366,11 +3354,10 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/OrganizationIdParam"
             }
           },
           {
@@ -3432,7 +3419,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3471,7 +3458,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3513,7 +3500,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3570,7 +3557,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3625,7 +3612,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3676,7 +3663,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3747,7 +3734,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3771,7 +3758,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublisherAnalyticsResponse"
+                  "$ref": "#/components/schemas/PublisherAnalyticsDataResponse"
                 }
               }
             }
@@ -3806,7 +3793,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3860,7 +3847,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3910,7 +3897,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -3961,7 +3948,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4008,7 +3995,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4064,7 +4051,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4125,7 +4112,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4181,7 +4168,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4228,7 +4215,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4270,7 +4257,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4327,7 +4314,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4382,7 +4369,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4430,7 +4417,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4500,7 +4487,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -4560,7 +4547,7 @@
           {
             "name": "organization_id",
             "in": "path",
-            "description": "Organization ID",
+            "description": "Organization ID or 'default' for authenticated user's default organization",
             "required": true,
             "schema": {
               "type": "string",
@@ -8085,7 +8072,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProjectConnectionUriResponse"
+                  "$ref": "#/components/schemas/ProjectConnectionUriDataResponse"
                 }
               }
             }
@@ -10374,7 +10361,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublisherAgentBalanceResponse"
+                  "$ref": "#/components/schemas/PublisherAgentBalanceDataResponse"
                 }
               }
             }
@@ -10684,6 +10671,46 @@
           }
         }
       },
+      "AdminGrantCreditsRequest": {
+        "type": "object",
+        "description": "Admin grant request\n\nEither `user_id` or `agent_wallet` must be provided:\n- `user_id`: Grant to user's virtual wallet (recommended for admin UI)\n- `agent_wallet`: Grant to specific wallet address (for advanced use cases)",
+        "required": [
+          "asset_id",
+          "amount_atomic"
+        ],
+        "properties": {
+          "agent_wallet": {
+            "type": "string",
+            "description": "Agent wallet address (alternative to user_id for non-platform wallets)",
+            "nullable": true
+          },
+          "amount_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Amount in atomic units (1,000,000 = $1.00)"
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "expires_in_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days until expiration (None = never)",
+            "nullable": true
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User ID to grant credits to (derives virtual wallet automatically)",
+            "nullable": true
+          }
+        }
+      },
       "AgentBalanceDataResponse": {
         "type": "object",
         "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
@@ -10820,6 +10847,90 @@
           }
         }
       },
+      "AgentCreditGrant": {
+        "type": "object",
+        "description": "An agent credit grant with source tracking",
+        "required": [
+          "id",
+          "agent_wallet",
+          "asset_id",
+          "amount_atomic",
+          "remaining_atomic",
+          "source",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "agent_wallet": {
+            "type": "string"
+          },
+          "amount_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Original grant amount in atomic units"
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiration_notified_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "granted_by": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publisher_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "remaining_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Current remaining balance in atomic units"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AgentCreditSource"
+          },
+          "source_reference_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Reference ID to source table (purchases, referrals, etc.)",
+            "nullable": true
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User who owns this wallet (if linked)",
+            "nullable": true
+          }
+        }
+      },
       "AgentCreditSource": {
         "type": "string",
         "description": "Source of an agent credit grant (fiat-only, no on-chain deposits)",
@@ -10835,6 +10946,110 @@
           "refund",
           "publisher_payout"
         ]
+      },
+      "AgentGrantsData": {
+        "type": "object",
+        "description": "Data for listing agent credit grants",
+        "required": [
+          "grants",
+          "total"
+        ],
+        "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentCreditGrant"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "AgentGrantsDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AgentGrantsData"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "AgentGrantsStats": {
+        "type": "object",
+        "description": "Platform-wide statistics for agent credit grants (SerenBucks)",
+        "required": [
+          "total_granted_atomic",
+          "total_remaining_atomic",
+          "total_spent_atomic",
+          "granted_this_month_atomic",
+          "active_grants_count",
+          "unique_users_count"
+        ],
+        "properties": {
+          "active_grants_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of active grants (remaining > 0 and not expired)"
+          },
+          "granted_this_month_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Amount granted in the current month (atomic units)"
+          },
+          "total_granted_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total amount ever granted (atomic units)"
+          },
+          "total_remaining_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total amount remaining across all grants (atomic units)"
+          },
+          "total_spent_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total amount spent (granted - remaining) (atomic units)"
+          },
+          "unique_users_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of unique users with grants"
+          }
+        }
+      },
+      "AgentGrantsStatsDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AgentGrantsStats"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
       },
       "AgentInfo": {
         "type": "object",
@@ -12159,31 +12374,6 @@
               }
             ],
             "nullable": true
-          }
-        }
-      },
-      "ChargeResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "status",
-          "amount_atomic",
-          "agent_wallet"
-        ],
-        "properties": {
-          "agent_wallet": {
-            "type": "string"
-          },
-          "amount_atomic": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string"
           }
         }
       },
@@ -15969,13 +16159,21 @@
       },
       "InvokeDataResponse": {
         "type": "object",
-        "description": "Response wrapper for template invocation",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
         "required": [
           "data"
         ],
         "properties": {
           "data": {
             "$ref": "#/components/schemas/InvokeTemplateResponse"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
           }
         }
       },
@@ -16132,6 +16330,51 @@
           "storage_gb": {
             "type": "number",
             "format": "double"
+          }
+        }
+      },
+      "ListAgentGrantsParams": {
+        "type": "object",
+        "description": "Query parameters for listing agent credit grants",
+        "properties": {
+          "active_only": {
+            "type": "boolean",
+            "description": "Only show active grants (has remaining balance and not expired)"
+          },
+          "agent_wallet": {
+            "type": "string",
+            "description": "Filter by agent wallet address directly",
+            "nullable": true
+          },
+          "granted_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Filter by admin who granted",
+            "nullable": true
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum number of results (default: 50)"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Offset for pagination (default: 0)"
+          },
+          "source": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentCreditSource"
+              }
+            ],
+            "nullable": true
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Filter by user ID (derives virtual wallet)",
+            "nullable": true
           }
         }
       },
@@ -17079,6 +17322,23 @@
             "nullable": true
           }
         }
+      },
+      "OrganizationIdParam": {
+        "oneOf": [
+          {
+            "type": "string",
+            "format": "uuid",
+            "description": "Organization UUID"
+          },
+          {
+            "type": "string",
+            "description": "Use authenticated user's default organization",
+            "enum": [
+              "default"
+            ]
+          }
+        ],
+        "description": "Organization ID: either a UUID or 'default' for the authenticated user's default organization"
       },
       "OrganizationInvite": {
         "type": "object",
@@ -18161,39 +18421,6 @@
           "credits"
         ]
       },
-      "PayoutResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "status",
-          "amount_atomic",
-          "destination_wallet"
-        ],
-        "properties": {
-          "amount_atomic": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "destination_wallet": {
-            "type": "string"
-          },
-          "error_message": {
-            "type": "string",
-            "nullable": true
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string"
-          },
-          "tx_hash": {
-            "type": "string",
-            "nullable": true
-          }
-        }
-      },
       "PayoutStatus": {
         "type": "string",
         "description": "Status of a publisher payout request.",
@@ -18888,6 +19115,37 @@
           }
         }
       },
+      "ProjectConnectionUri": {
+        "type": "object",
+        "required": [
+          "uri"
+        ],
+        "properties": {
+          "uri": {
+            "type": "string"
+          }
+        }
+      },
+      "ProjectConnectionUriDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProjectConnectionUri"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
       "ProjectConnectionUriQuery": {
         "type": "object",
         "properties": {
@@ -18917,17 +19175,6 @@
             "type": "string",
             "description": "Role name override (currently ignored)",
             "nullable": true
-          }
-        }
-      },
-      "ProjectConnectionUriResponse": {
-        "type": "object",
-        "required": [
-          "uri"
-        ],
-        "properties": {
-          "uri": {
-            "type": "string"
           }
         }
       },
@@ -19679,7 +19926,7 @@
           }
         }
       },
-      "PublisherAgentBalanceResponse": {
+      "PublisherAgentBalance": {
         "type": "object",
         "required": [
           "serenbucks_atomic",
@@ -19701,7 +19948,27 @@
           }
         }
       },
-      "PublisherAnalyticsResponse": {
+      "PublisherAgentBalanceDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublisherAgentBalance"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "PublisherAnalytics": {
         "type": "object",
         "description": "Response for publisher analytics",
         "required": [
@@ -19722,6 +19989,26 @@
           },
           "totals": {
             "$ref": "#/components/schemas/PublisherAnalyticsTotals"
+          }
+        }
+      },
+      "PublisherAnalyticsDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublisherAnalytics"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
           }
         }
       },
@@ -19781,6 +20068,51 @@
           "integration",
           "compute"
         ]
+      },
+      "PublisherChargeInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "amount_atomic",
+          "agent_wallet"
+        ],
+        "properties": {
+          "agent_wallet": {
+            "type": "string"
+          },
+          "amount_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "PublisherChargeInfoDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublisherChargeInfo"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
       },
       "PublisherDataResponse": {
         "type": "object",
@@ -20041,6 +20373,59 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/PublisherPayoutResponse"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "PublisherPayoutInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "amount_atomic",
+          "destination_wallet"
+        ],
+        "properties": {
+          "amount_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "destination_wallet": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tx_hash": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "PublisherPayoutInfoDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublisherPayoutInfo"
           },
           "pagination": {
             "allOf": [
@@ -22117,13 +22502,21 @@
       },
       "TemplateDataResponse": {
         "type": "object",
-        "description": "Response wrapper for template data",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
         "required": [
           "data"
         ],
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CreateTemplateResponse"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
           }
         }
       },
@@ -22138,21 +22531,25 @@
       },
       "TemplateListResponse": {
         "type": "object",
-        "description": "Response wrapper for template list",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
         "required": [
-          "data",
-          "total"
+          "data"
         ],
         "properties": {
           "data": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AgentTemplateSummary"
-            }
+            },
+            "description": "The actual response data (can be a single object or a collection)"
           },
-          "total": {
-            "type": "integer",
-            "format": "int64"
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
           }
         }
       },
