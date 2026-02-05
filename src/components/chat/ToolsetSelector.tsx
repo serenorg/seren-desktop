@@ -40,10 +40,8 @@ export const ToolsetSelector: Component = () => {
     document.removeEventListener("click", handleDocumentClick);
   });
 
-  // Don't render if no toolsets exist
-  if (toolsets().length === 0) {
-    return null;
-  }
+  // Always show the selector - even with no custom toolsets, users need to see
+  // "All Publishers" as visual confirmation that tools are available and active
 
   return (
     <div class="relative" ref={containerRef}>
