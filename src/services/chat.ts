@@ -46,6 +46,8 @@ export interface Message {
   status?: "pending" | "streaming" | "complete" | "error";
   error?: string | null;
   attemptCount?: number;
+  /** Duration in milliseconds for how long the response took */
+  duration?: number;
   request?: {
     prompt: string;
     context?: ChatContext;

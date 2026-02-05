@@ -20,6 +20,7 @@ import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
+import { formatDurationWithVerb } from "@/lib/format-duration";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
@@ -290,6 +291,18 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
               innerHTML={renderMarkdown(message.content)}
             />
+            <Show when={message.duration}>
+              {(() => {
+                const { verb, duration } = formatDurationWithVerb(
+                  message.duration!,
+                );
+                return (
+                  <div class="mt-2 text-xs text-[#8b949e]">
+                    ✻ {verb} for {duration}
+                  </div>
+                );
+              })()}
+            </Show>
           </article>
         );
 

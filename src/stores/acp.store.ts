@@ -36,6 +36,8 @@ export interface AgentMessage {
   toolCallId?: string;
   diff?: DiffEvent;
   toolCall?: ToolCallEvent;
+  /** Duration in milliseconds for how long the response took */
+  duration?: number;
 }
 
 export interface ActiveSession {
@@ -46,6 +48,8 @@ export interface ActiveSession {
   streamingContent: string;
   streamingThinking: string;
   cwd: string;
+  /** Timestamp when the current prompt started */
+  promptStartTime?: number;
 }
 
 interface AcpState {
@@ -461,6 +465,9 @@ export const acpStore = {
       "status",
       "prompting" as SessionStatus,
     );
+
+    // Track when the prompt started for duration calculation
+    setState("sessions", sessionId, "promptStartTime", Date.now());
 
     // Add user message
     const userMessage: AgentMessage = {
@@ -914,14 +921,22 @@ export const acpStore = {
 
     // Finalize assistant content if any
     if (session.streamingContent) {
+      // Calculate duration if we have a start time
+      const duration = session.promptStartTime
+        ? Date.now() - session.promptStartTime
+        : undefined;
+
       const message: AgentMessage = {
         id: crypto.randomUUID(),
         type: "assistant",
         content: session.streamingContent,
         timestamp: Date.now(),
+        duration,
       };
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
       setState("sessions", sessionId, "streamingContent", "");
+      // Clear the start time
+      setState("sessions", sessionId, "promptStartTime", undefined);
     }
   },
 
