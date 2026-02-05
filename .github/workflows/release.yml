@@ -371,7 +371,7 @@ jobs:
           credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
           totp_secret: ${{ secrets.ES_TOTP_SECRET }}
           dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
-          output_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
+          override: true
           environment_name: PROD
           malware_block: true
 
