@@ -360,7 +360,8 @@ jobs:
           overwrite: true
 
       # Windows: Sign executables with SSL.com eSigner (cloud EV code signing)
-      # Sign NSIS installer (.exe)
+      # Sign NSIS installer (.exe) - output to temp dir then copy back
+      # (workaround: action's override flag doesn't work, same-dir output fails)
       - name: Sign Windows NSIS installer
         if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
         uses: sslcom/esigner-codesign@v1.3.2
@@ -371,9 +372,28 @@ jobs:
           credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
           totp_secret: ${{ secrets.ES_TOTP_SECRET }}
           dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
-          override: true
+          output_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis-signed
           environment_name: PROD
           malware_block: true
+
+      # Copy signed files back to original location
+      - name: Copy signed NSIS installer
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $signedDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-signed"
+          $targetDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
+
+          if (Test-Path $signedDir) {
+            Write-Host "Copying signed files from $signedDir to $targetDir"
+            Get-ChildItem -Path $signedDir -Filter "*.exe" | ForEach-Object {
+              Copy-Item -Path $_.FullName -Destination $targetDir -Force
+              Write-Host "Copied: $($_.Name)"
+            }
+          } else {
+            Write-Host "Signed output directory not found: $signedDir"
+            exit 1
+          }
 
       # Verify Windows code signing
       - name: Verify Windows code signing
