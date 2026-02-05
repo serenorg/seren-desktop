@@ -18,9 +18,13 @@ import type {
   ToolResult,
 } from "@/lib/providers/types";
 import { executeTools, getAllTools } from "@/lib/tools";
+import { getGatewayTools } from "@/services/mcp-gateway";
 import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
-import { settingsStore } from "@/stores/settings.store";
+import {
+  getActiveToolsetPublishers,
+  settingsStore,
+} from "@/stores/settings.store";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -262,15 +266,34 @@ export async function* streamMessageWithTools(
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
 
-  // Seren MCP publishers context - added to all prompts to prevent confusion
-  const serenPublishersContext =
-    "\n\nIMPORTANT - Seren MCP Publishers Context:\n" +
-    "This application connects to Seren MCP publishers - third-party data services accessible through Seren. " +
-    "When users mention publisher names like 'Apollo', 'Perplexity', 'Firecrawl', etc., they are referring to Seren MCP publishers, NOT general technologies with similar names:\n" +
-    "- Apollo = Sales intelligence platform for contacts/leads (NOT Apollo GraphQL)\n" +
-    "- Perplexity = AI-powered search and research tool\n" +
-    "- Firecrawl = Web scraping and crawling service\n" +
-    "Always interpret publisher references in the Seren MCP context unless the user explicitly asks about the technology/framework itself.";
+  // Build Seren MCP publishers context dynamically based on active toolset
+  // This ensures the LLM only knows about publishers that are actually available
+  const buildPublishersContext = (): string => {
+    const allGatewayTools = getGatewayTools();
+    const activePublishers = getActiveToolsetPublishers();
+
+    // Filter tools by active toolset (same logic as definitions.ts)
+    const availableTools = activePublishers
+      ? allGatewayTools.filter((t) => activePublishers.includes(t.publisher))
+      : allGatewayTools;
+
+    // Get unique publisher slugs from available tools
+    const publishers = [...new Set(availableTools.map((t) => t.publisher))];
+
+    if (publishers.length === 0) {
+      return ""; // No publishers available, don't add context
+    }
+
+    const publisherList = publishers.join(", ");
+    return (
+      "\n\nIMPORTANT - Available Seren MCP Publishers:\n" +
+      "This application connects to Seren MCP publishers - third-party data services. " +
+      `You have access to the following publishers: ${publisherList}. ` +
+      "ONLY use tools from these publishers. Do NOT suggest or attempt to use publishers that are not in this list. " +
+      "When users mention publisher names, interpret them in the Seren MCP context unless they explicitly ask about the technology/framework itself."
+    );
+  };
+  const serenPublishersContext = buildPublishersContext();
 
   // Build system message - conditional based on actual tool availability
   const toolCount = enableTools ? getAllTools(model).length : 0;
