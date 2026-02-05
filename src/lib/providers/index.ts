@@ -192,7 +192,7 @@ export async function* streamMessage(
 }
 
 /**
- * Build a chat request from content and optional context.
+ * Build a chat request from content, optional context, and conversation history.
  * This is a helper to construct the request object.
  */
 export function buildChatRequest(
@@ -203,6 +203,7 @@ export function buildChatRequest(
     file?: string | null;
     range?: { startLine: number; endLine: number } | null;
   },
+  history?: Array<{ role: "user" | "assistant" | "system"; content: string }>,
 ): ChatRequest {
   const messages: ChatMessage[] = [];
 
@@ -227,7 +228,16 @@ export function buildChatRequest(
     });
   }
 
-  // Add user message
+  // Add conversation history (user and assistant messages only)
+  if (history && history.length > 0) {
+    for (const msg of history) {
+      if (msg.role === "user" || msg.role === "assistant") {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    }
+  }
+
+  // Add current user message
   messages.push({ role: "user", content });
 
   return {
