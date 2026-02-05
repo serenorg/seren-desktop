@@ -35,6 +35,7 @@ export const ToolsetsSettings: Component = () => {
   const [formName, setFormName] = createSignal("");
   const [formDescription, setFormDescription] = createSignal("");
   const [formPublishers, setFormPublishers] = createSignal<string[]>([]);
+  const [publisherSearch, setPublisherSearch] = createSignal("");
 
   // Fetch available publishers
   const [publishers] = createResource(async () => {
@@ -78,6 +79,7 @@ export const ToolsetsSettings: Component = () => {
     setFormName("");
     setFormDescription("");
     setFormPublishers([]);
+    setPublisherSearch("");
     setEditingToolset(null);
     setShowCreateModal(true);
   };
@@ -86,6 +88,7 @@ export const ToolsetsSettings: Component = () => {
     setFormName(toolset.name);
     setFormDescription(toolset.description);
     setFormPublishers([...toolset.publisherSlugs]);
+    setPublisherSearch("");
     setEditingToolset(toolset);
     setShowCreateModal(true);
   };
@@ -93,7 +96,20 @@ export const ToolsetsSettings: Component = () => {
   const closeModal = () => {
     setShowCreateModal(false);
     setEditingToolset(null);
+    setPublisherSearch("");
     setError(null);
+  };
+
+  // Filter publishers based on search
+  const filteredPublishers = () => {
+    const search = publisherSearch().toLowerCase().trim();
+    if (!search) return publishers() || [];
+    return (publishers() || []).filter(
+      (p) =>
+        p.name.toLowerCase().includes(search) ||
+        (p.description?.toLowerCase().includes(search) ?? false) ||
+        p.slug.toLowerCase().includes(search),
+    );
   };
 
   const handleSave = async () => {
@@ -304,9 +320,29 @@ export const ToolsetsSettings: Component = () => {
 
               {/* Publisher Selection */}
               <div>
-                <label class="block text-sm font-medium text-foreground mb-1.5">
-                  Publishers ({formPublishers().length} selected)
-                </label>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-sm font-medium text-foreground">
+                    Publishers ({formPublishers().length} selected)
+                  </label>
+                  <Show when={publisherSearch()}>
+                    <span class="text-xs text-muted-foreground">
+                      {filteredPublishers().length} of {publishers()?.length ?? 0} shown
+                    </span>
+                  </Show>
+                </div>
+                {/* Search Input */}
+                <div class="relative mb-2">
+                  <input
+                    type="text"
+                    value={publisherSearch()}
+                    onInput={(e) => setPublisherSearch(e.currentTarget.value)}
+                    placeholder="Search publishers..."
+                    class="w-full px-3 py-2 pl-8 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-sm focus:outline-none focus:border-accent"
+                  />
+                  <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                    🔍
+                  </span>
+                </div>
                 <Show when={publishers.loading}>
                   <div class="text-sm text-muted-foreground py-4">
                     Loading publishers...
@@ -320,8 +356,14 @@ export const ToolsetsSettings: Component = () => {
                 <Show
                   when={!publishers.loading && (publishers()?.length ?? 0) > 0}
                 >
-                  <div class="max-h-[200px] overflow-y-auto border border-[rgba(148,163,184,0.2)] rounded-md">
-                    <For each={publishers()}>
+                  <Show when={filteredPublishers().length === 0}>
+                    <div class="text-sm text-muted-foreground py-4 text-center border border-[rgba(148,163,184,0.2)] rounded-md">
+                      No publishers match "{publisherSearch()}"
+                    </div>
+                  </Show>
+                  <Show when={filteredPublishers().length > 0}>
+                    <div class="max-h-[200px] overflow-y-auto border border-[rgba(148,163,184,0.2)] rounded-md">
+                      <For each={filteredPublishers()}>
                       {(pub) => {
                         const isSelected = () =>
                           formPublishers().includes(pub.slug);
@@ -366,7 +408,8 @@ export const ToolsetsSettings: Component = () => {
                         );
                       }}
                     </For>
-                  </div>
+                    </div>
+                  </Show>
                 </Show>
               </div>
             </div>
