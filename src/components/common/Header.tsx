@@ -3,6 +3,7 @@
 
 import { type Component, For, Show } from "solid-js";
 import { BalanceDisplay } from "./BalanceDisplay";
+import { updaterStore } from "@/stores/updater.store";
 
 export type Panel =
   | "chat"
@@ -80,6 +81,18 @@ export const Header: Component<HeaderProps> = (props) => {
             </button>
           }
         >
+          <Show when={updaterStore.state.status === "available"}>
+            <button
+              type="button"
+              class="flex items-center gap-1.5 py-1 px-2.5 text-[12px] font-medium text-white bg-[#238636] border-none rounded cursor-pointer transition-all duration-100 hover:bg-[#2ea043] animate-pulse"
+              onClick={() => updaterStore.installAvailableUpdate()}
+            >
+              <span class="leading-none">⬆</span>
+              <span class="leading-none">
+                Update {updaterStore.state.availableVersion}
+              </span>
+            </button>
+          </Show>
           <BalanceDisplay />
           {props.onLogout && (
             <button
