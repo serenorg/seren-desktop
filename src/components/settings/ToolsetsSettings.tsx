@@ -24,6 +24,7 @@ interface Publisher {
   name: string;
   logo_url: string | null;
   description: string | null;
+  categories: string[];
 }
 
 export const ToolsetsSettings: Component = () => {
@@ -58,6 +59,7 @@ export const ToolsetsSettings: Component = () => {
       name: p.name,
       logo_url: p.logo_url,
       description: p.description,
+      categories: p.categories || [],
     }));
     return pubs;
   });
@@ -114,7 +116,8 @@ export const ToolsetsSettings: Component = () => {
       (p) =>
         p.name.toLowerCase().includes(search) ||
         (p.description?.toLowerCase().includes(search) ?? false) ||
-        p.slug.toLowerCase().includes(search),
+        p.slug.toLowerCase().includes(search) ||
+        p.categories.some((c) => c.toLowerCase().includes(search)),
     );
   };
 
@@ -128,7 +131,8 @@ export const ToolsetsSettings: Component = () => {
         (search === "" ||
           p.name.toLowerCase().includes(search) ||
           (p.description?.toLowerCase().includes(search) ?? false) ||
-          p.slug.toLowerCase().includes(search)),
+          p.slug.toLowerCase().includes(search) ||
+          p.categories.some((c) => c.toLowerCase().includes(search))),
     );
   };
 
