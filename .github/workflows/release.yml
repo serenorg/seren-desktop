@@ -371,9 +371,9 @@ jobs:
           credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
           totp_secret: ${{ secrets.ES_TOTP_SECRET }}
           dir_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
+          output_path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
           environment_name: PROD
           malware_block: true
-          override: true
 
       # Verify Windows code signing
       - name: Verify Windows code signing
