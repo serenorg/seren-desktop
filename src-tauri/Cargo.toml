@@ -66,6 +66,7 @@ tiny_http = "0.12"
 log = "0.4"
 tauri-plugin-log = "2"
 anyhow = "1"
+dirs = "6"
 
 
 # ACP (Agent Client Protocol) support

@@ -25,6 +25,7 @@ import {
   getActiveToolsetPublishers,
   settingsStore,
 } from "@/stores/settings.store";
+import { skillsStore } from "@/stores/skills.store";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -343,6 +344,16 @@ export async function* streamMessageWithTools(
   } catch (error) {
     // Silently fail - semantic context is optional
     console.warn("[Chat] Failed to retrieve semantic context:", error);
+  }
+
+  // Inject enabled skills content
+  try {
+    const skillsContent = await skillsStore.getEnabledContent();
+    if (skillsContent) {
+      systemContent += skillsContent;
+    }
+  } catch (error) {
+    console.warn("[Chat] Failed to retrieve skills content:", error);
   }
 
   // Add system message to messages array
