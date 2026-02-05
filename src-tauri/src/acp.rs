@@ -1142,7 +1142,16 @@ async fn run_session_worker(
                 "[ACP] Set CLAUDE_CLI_PATH to: {}",
                 claude_binary.display()
             );
+        } else {
+            log::warn!(
+                "[ACP] Bundled Claude CLI not found at: {}. SDK will fall back to PATH resolution.",
+                claude_binary.display()
+            );
         }
+    } else {
+        log::warn!(
+            "[ACP] cli_tools_bin directory not available. SDK will fall back to PATH resolution."
+        );
     }
 
     let mut child = cmd.spawn().map_err(|e| {
