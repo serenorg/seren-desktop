@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 
 const SIGNABLE_EXTENSIONS = new Set([".node", ".dylib", ".so"]);
 
+// Entitlements file for embedded binaries (provides JIT permissions for V8/Node.js)
+const ENTITLEMENTS_PLIST = "embedded-runtime-entitlements.plist";
+
 function run(cmd: string, args: string[]): boolean {
   const res = spawnSync(cmd, args, {
     env: process.env,
@@ -76,9 +79,16 @@ function main(): void {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(scriptDir, "..");
   const embeddedRuntimeDir = path.join(repoRoot, "src-tauri", "embedded-runtime");
+  const entitlementsPath = path.join(repoRoot, "src-tauri", ENTITLEMENTS_PLIST);
 
   console.log(`[sign-embedded-runtime] Scanning: ${embeddedRuntimeDir}`);
   console.log(`[sign-embedded-runtime] Identity: ${signingIdentity.slice(0, 20)}...`);
+
+  if (!existsSync(entitlementsPath)) {
+    console.error(`[sign-embedded-runtime] Entitlements file not found: ${entitlementsPath}`);
+    process.exit(1);
+  }
+  console.log(`[sign-embedded-runtime] Entitlements: ${ENTITLEMENTS_PLIST}`);
 
   const files = findSignableFiles(embeddedRuntimeDir);
 
@@ -101,6 +111,8 @@ function main(): void {
       signingIdentity,
       "--options",
       "runtime",
+      "--entitlements",
+      entitlementsPath,
       "--timestamp",
       "--force",
       file,
