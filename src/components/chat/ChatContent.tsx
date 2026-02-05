@@ -1048,17 +1048,18 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     </div>
                   </Show>
                   <div class="flex justify-between items-center">
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-3">
                       <ModelSelector />
-                      <span class="text-[10px] text-[#484f58]">
-                        {settingsStore.get("chatEnterToSend")
-                          ? chatStore.isLoading
-                            ? "Enter to queue"
-                            : "Enter to send"
-                          : chatStore.isLoading
-                            ? "Ctrl+Enter to queue"
+                      <Show when={chatStore.isLoading}>
+                        <ThinkingStatus />
+                      </Show>
+                      <Show when={!chatStore.isLoading}>
+                        <span class="text-[10px] text-[#484f58]">
+                          {settingsStore.get("chatEnterToSend")
+                            ? "Enter to send"
                             : "Ctrl+Enter"}
-                      </span>
+                        </span>
+                      </Show>
                     </div>
                     <div class="flex items-center gap-2">
                       <VoiceInputButton
