@@ -95,14 +95,18 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
   };
 
-  // Auto-scroll when messages change
+  // Auto-scroll when messages change or permission dialogs appear
   createEffect(() => {
     const messages = acpStore.messages;
     const streaming = acpStore.streamingContent;
+    const permissions = acpStore.pendingPermissions;
+    const diffProposals = acpStore.pendingDiffProposals;
     console.log("[AgentChat] Effect triggered:", {
       messagesCount: messages.length,
       streamingLength: streaming.length,
       streamingPreview: streaming.slice(0, 100),
+      pendingPermissions: permissions.length,
+      pendingDiffProposals: diffProposals.length,
     });
     requestAnimationFrame(scrollToBottom);
   });
