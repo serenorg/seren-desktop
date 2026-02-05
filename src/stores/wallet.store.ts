@@ -267,6 +267,28 @@ function resetWalletState(): void {
 }
 
 /**
+ * Update wallet balance from a 402 error response.
+ * This ensures the displayed balance matches reality when an insufficient funds error occurs.
+ * @param availableBalanceAtomic The actual balance in atomic units (from 402 error response)
+ */
+function updateBalanceFromError(availableBalanceAtomic: number): void {
+  const balanceUsd = `$${(availableBalanceAtomic / 1_000_000).toFixed(2)}`;
+  console.log(
+    "[Wallet Store] Updating balance from 402 error:",
+    availableBalanceAtomic,
+    "->",
+    balanceUsd
+  );
+  setWalletState({
+    balance: availableBalanceAtomic / 1_000_000,
+    balance_atomic: availableBalanceAtomic,
+    balance_usd: balanceUsd,
+    lastUpdated: new Date().toISOString(),
+    error: null,
+  });
+}
+
+/**
  * Wallet store with reactive state and actions.
  */
 export const walletStore = {
@@ -330,4 +352,5 @@ export {
   checkDailyClaim,
   claimDaily,
   dismissDailyClaim,
+  updateBalanceFromError,
 };
