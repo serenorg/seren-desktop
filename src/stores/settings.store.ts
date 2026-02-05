@@ -124,6 +124,8 @@ export interface Toolset {
 export interface ToolsetSettings {
   /** All user-created toolsets */
   toolsets: Toolset[];
+  /** Currently active toolset ID, or null for "All Publishers" */
+  activeToolsetId: string | null;
 }
 
 /**
@@ -183,6 +185,7 @@ const defaultMcpSettings: McpSettings = {
 
 const defaultToolsetSettings: ToolsetSettings = {
   toolsets: [],
+  activeToolsetId: null,
 };
 
 interface SettingsState {
@@ -639,6 +642,34 @@ function toolsetSettings(): ToolsetSettings {
   return settingsState.toolsets;
 }
 
+/**
+ * Set the active toolset.
+ * Pass null to use "All Publishers" (no filtering).
+ */
+async function setActiveToolset(id: string | null): Promise<void> {
+  setSettingsState("toolsets", "activeToolsetId", id);
+  await saveToolsetSettings();
+}
+
+/**
+ * Get the currently active toolset, or undefined if none selected.
+ */
+function getActiveToolset(): Toolset | undefined {
+  const id = settingsState.toolsets.activeToolsetId;
+  if (!id) return undefined;
+  return settingsState.toolsets.toolsets.find((t) => t.id === id);
+}
+
+/**
+ * Get publisher slugs for the active toolset.
+ * Returns null if no toolset is active (meaning "all publishers").
+ */
+function getActiveToolsetPublishers(): string[] | null {
+  const toolset = getActiveToolset();
+  if (!toolset) return null;
+  return toolset.publisherSlugs;
+}
+
 // ============================================================================
 // Combined Load Function
 // ============================================================================
@@ -684,4 +715,8 @@ export {
   getToolset,
   getToolsetsForPublisher,
   toolsetSettings,
+  // Active toolset exports
+  setActiveToolset,
+  getActiveToolset,
+  getActiveToolsetPublishers,
 };

@@ -9,6 +9,7 @@ import type {
 } from "@/lib/providers/types";
 import { type GatewayTool, getGatewayTools } from "@/services/mcp-gateway";
 import { openclawStore } from "@/stores/openclaw.store";
+import { getActiveToolsetPublishers } from "@/stores/settings.store";
 
 /**
  * Maximum number of tools by model family.
@@ -433,7 +434,13 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
   }
 
   // Add tools from Seren Gateway publishers - fill remaining slots
-  const gatewayTools = getGatewayTools();
+  // Filter by active toolset if one is selected
+  const allGatewayTools = getGatewayTools();
+  const activePublishers = getActiveToolsetPublishers();
+  const gatewayTools = activePublishers
+    ? allGatewayTools.filter((t) => activePublishers.includes(t.publisher))
+    : allGatewayTools;
+
   for (const gatewayTool of gatewayTools) {
     if (tools.length >= limit) break;
     const toolDef = convertGatewayToolToDefinition(gatewayTool);

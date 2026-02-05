@@ -46,6 +46,7 @@ import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { ToolsetSelector } from "./ToolsetSelector";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { StreamingMessage } from "./StreamingMessage";
 import { ThinkingStatus } from "./ThinkingStatus";
@@ -1076,6 +1077,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   <div class="flex justify-between items-center">
                     <div class="flex items-center gap-3">
                       <ModelSelector />
+                      <ToolsetSelector />
                       <Show when={chatStore.isLoading}>
                         <ThinkingStatus />
                       </Show>

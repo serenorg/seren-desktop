@@ -48,6 +48,7 @@ import {
 import { ChatTabBar } from "./ChatTabBar";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { ToolsetSelector } from "./ToolsetSelector";
 import { StreamingMessage } from "./StreamingMessage";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingToggle } from "./ThinkingToggle";
@@ -894,6 +895,7 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
                     <div class="flex justify-between items-center">
                       <div class="flex items-center gap-3">
                         <ModelSelector />
+                        <ToolsetSelector />
                         <span class="text-xs text-[#484f58]">
                           {settingsStore.get("chatEnterToSend")
                             ? "Enter to send"
