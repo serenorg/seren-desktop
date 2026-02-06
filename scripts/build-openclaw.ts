@@ -294,29 +294,39 @@ async function main(): Promise<void> {
       );
     }
 
-    // Remove musl-linked native binaries (e.g. @img/sharp-linuxmusl-x64).
-    // linuxdeploy scans all ELF files in the AppDir and fails if it finds
-    // binaries linked against libc.musl-x86_64.so.1, which doesn't exist
-    // on glibc-based systems. These optional platform packages are installed
-    // by pnpm for completeness but are never used at runtime on glibc Linux.
+    // Remove non-native platform binaries from node_modules.
+    // linuxdeploy scans ALL ELF files in the AppDir and tries to resolve their
+    // dependencies. Packages like @img/sharp and @node-llama-cpp install optional
+    // platform-specific binaries for every OS/arch/libc variant. On a Linux x64
+    // glibc build, we must remove: musl variants, ARM64, CUDA extensions, and
+    // any macOS/Windows binaries that somehow got installed.
     if (process.platform === "linux") {
       const nmDir = path.join(openclawRuntimeDir, "node_modules");
       if (existsSync(nmDir)) {
+        // Patterns that indicate a package is NOT for linux-x64-glibc
+        const removePatterns = [
+          "linuxmusl",   // musl libc (e.g. @img/sharp-linuxmusl-x64)
+          "linux-arm",   // ARM architecture (e.g. @node-llama-cpp/linux-arm64)
+          "-cuda",       // CUDA extensions (e.g. @node-llama-cpp/linux-x64-cuda-ext)
+          "darwin",      // macOS
+          "win32",       // Windows
+        ];
         let removed = 0;
-        for (const scope of readdirSync(nmDir)) {
-          if (!scope.startsWith("@")) continue;
-          const scopeDir = path.join(nmDir, scope);
+        for (const entry of readdirSync(nmDir)) {
+          if (!entry.startsWith("@")) continue;
+          const scopeDir = path.join(nmDir, entry);
           if (!statSync(scopeDir).isDirectory()) continue;
           for (const pkg of readdirSync(scopeDir)) {
-            if (pkg.includes("linuxmusl")) {
+            const lower = pkg.toLowerCase();
+            if (removePatterns.some((p) => lower.includes(p))) {
               rmSync(path.join(scopeDir, pkg), { recursive: true, force: true });
               removed++;
-              console.log(`[build-openclaw] Removed musl package: ${scope}/${pkg}`);
+              console.log(`[build-openclaw] Removed non-native package: ${entry}/${pkg}`);
             }
           }
         }
         if (removed > 0) {
-          console.log(`[build-openclaw] Removed ${removed} musl-linked package(s) for AppImage compatibility.`);
+          console.log(`[build-openclaw] Removed ${removed} non-native package(s) for AppImage compatibility.`);
         }
       }
     }
