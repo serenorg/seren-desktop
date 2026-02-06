@@ -138,7 +138,7 @@ const DEFAULT_SETTINGS: Settings = {
   chatEnterToSend: true,
   chatShowThinking: false,
   chatThinkingExpanded: false,
-  chatMaxToolIterations: 10,
+  chatMaxToolIterations: 0,
   // Auto-compact
   autoCompactEnabled: true,
   autoCompactThreshold: 80,

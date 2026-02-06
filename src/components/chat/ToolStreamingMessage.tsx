@@ -16,7 +16,10 @@ interface ToolStreamingMessageProps {
   onComplete: (fullContent: string, thinking?: string) => void;
   onError?: (error: Error) => void;
   onContentUpdate?: () => void;
-  onIterationLimit?: (state: ToolIterationState, iteration: number) => void;
+  onIterationLimit?: (
+    state: ToolIterationState,
+    iteration: number,
+  ) => AsyncGenerator<ToolStreamEvent> | undefined;
 }
 
 interface ToolExecution {
@@ -38,74 +41,90 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
     let fullContent = "";
     let fullThinking = "";
     let hadError = false;
+    let currentStream: AsyncGenerator<ToolStreamEvent> = props.stream;
 
     try {
-      for await (const event of props.stream) {
-        if (isCancelled) break;
+      let shouldContinue = true;
+      while (shouldContinue) {
+        shouldContinue = false;
 
-        switch (event.type) {
-          case "content":
-            fullContent += event.content;
-            setContent(fullContent);
-            props.onContentUpdate?.();
-            break;
+        streamLoop: for await (const event of currentStream) {
+          if (isCancelled) break;
 
-          case "thinking":
-            fullThinking += event.thinking;
-            setThinking(fullThinking);
-            props.onContentUpdate?.();
-            break;
+          switch (event.type) {
+            case "content":
+              fullContent += event.content;
+              setContent(fullContent);
+              props.onContentUpdate?.();
+              break;
 
-          case "tool_calls":
-            // Add new tool executions in pending state
-            setToolExecutions((prev) => [
-              ...prev,
-              ...event.toolCalls.map((call) => ({
-                call,
-                status: "pending" as const,
-              })),
-            ]);
-            props.onContentUpdate?.();
-            break;
-
-          case "tool_results":
-            // Update tool executions with results
-            setToolExecutions((prev) =>
-              prev.map((exec) => {
-                const result = event.results.find(
-                  (r) => r.tool_call_id === exec.call.id,
-                );
-                if (result) {
-                  return {
-                    ...exec,
-                    result,
-                    status: result.is_error ? "error" : "complete",
-                  };
-                }
-                return exec;
-              }),
-            );
-            props.onContentUpdate?.();
-            break;
-
-          case "complete":
-            fullContent = event.finalContent;
-            setContent(fullContent);
-            if (event.finalThinking) {
-              fullThinking = event.finalThinking;
+            case "thinking":
+              fullThinking += event.thinking;
               setThinking(fullThinking);
-            }
-            break;
+              props.onContentUpdate?.();
+              break;
 
-          case "iteration_limit":
-            // Notify parent about the limit being reached
-            props.onIterationLimit?.(
-              event.continueState,
-              event.currentIteration,
-            );
-            // Don't call onComplete - let parent handle continuation
-            setIsStreaming(false);
-            return;
+            case "tool_calls":
+              // Add new tool executions in pending state
+              setToolExecutions((prev) => [
+                ...prev,
+                ...event.toolCalls.map((call) => ({
+                  call,
+                  status: "pending" as const,
+                })),
+              ]);
+              props.onContentUpdate?.();
+              break;
+
+            case "tool_results":
+              // Update tool executions with results
+              setToolExecutions((prev) =>
+                prev.map((exec) => {
+                  const result = event.results.find(
+                    (r) => r.tool_call_id === exec.call.id,
+                  );
+                  if (result) {
+                    return {
+                      ...exec,
+                      result,
+                      status: result.is_error ? "error" : "complete",
+                    };
+                  }
+                  return exec;
+                }),
+              );
+              props.onContentUpdate?.();
+              break;
+
+            case "complete":
+              fullContent = event.finalContent;
+              setContent(fullContent);
+              if (event.finalThinking) {
+                fullThinking = event.finalThinking;
+                setThinking(fullThinking);
+              }
+              break;
+
+            case "iteration_limit": {
+              // Ask parent for a continuation generator
+              const continuation = props.onIterationLimit?.(
+                event.continueState,
+                event.currentIteration,
+              );
+              if (continuation) {
+                console.log(
+                  "[ToolStreamingMessage] Auto-continuing after iteration",
+                  event.currentIteration,
+                );
+                currentStream = continuation;
+                shouldContinue = true;
+                break streamLoop;
+              }
+              // No continuation handler — stop streaming
+              setIsStreaming(false);
+              return;
+            }
+          }
         }
       }
     } catch (error) {
