@@ -25,7 +25,6 @@ import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval"
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { FileExplorer } from "@/components/sidebar/FileExplorer";
-import { SkillsPanel } from "@/components/skills";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
@@ -64,7 +63,7 @@ function App() {
     return <Phase3Playground />;
   }
 
-  // Overlay panels (settings, database, skills, account)
+  // Overlay panels (settings, database, account)
   const [overlayPanel, setOverlayPanel] = createSignal<Panel | null>(null);
   // Toggle editor visibility
   const [showEditor, setShowEditor] = createSignal(false);
@@ -191,7 +190,7 @@ function App() {
       setShowEditor(true);
       setOverlayPanel(null);
     } else {
-      // Settings, database, skills, account are overlays
+      // Settings, database, account are overlays
       setOverlayPanel(panel);
     }
   };
@@ -245,9 +244,6 @@ function App() {
               <Switch>
                 <Match when={overlayPanel() === "database"}>
                   <DatabasePanel />
-                </Match>
-                <Match when={overlayPanel() === "skills"}>
-                  <SkillsPanel />
                 </Match>
                 <Match when={overlayPanel() === "settings"}>
                   <SettingsPanel onSignInClick={handleSignInClick} />
