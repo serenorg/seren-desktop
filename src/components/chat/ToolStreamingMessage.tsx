@@ -114,7 +114,30 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
     } finally {
       setIsStreaming(false);
       if (!isCancelled && !hadError) {
-        props.onComplete(fullContent, fullThinking || undefined);
+        let finalContent = fullContent;
+        const executions = toolExecutions();
+
+        // When text content is empty but tool operations occurred,
+        // generate a summary so the message isn't invisible after streaming ends
+        if (!finalContent.trim() && executions.length > 0) {
+          console.warn(
+            "[ToolStreamingMessage] Empty content with",
+            executions.length,
+            "tool executions — generating summary",
+          );
+          const lines = executions.map((exec) => {
+            const icon = exec.status === "error" ? "❌" : "✓";
+            const name = exec.call.function.name;
+            let detail = "";
+            if (exec.result?.is_error && exec.result.content) {
+              detail = ` — ${exec.result.content.substring(0, 200)}`;
+            }
+            return `- ${icon} **${name}**${detail}`;
+          });
+          finalContent = `*Tool operations completed:*\n\n${lines.join("\n")}`;
+        }
+
+        props.onComplete(finalContent, fullThinking || undefined);
       }
     }
   };
