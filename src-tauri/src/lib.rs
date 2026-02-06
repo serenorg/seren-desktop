@@ -675,6 +675,8 @@ pub fn run() {
             #[cfg(feature = "acp")]
             acp::acp_set_permission_mode,
             #[cfg(feature = "acp")]
+            acp::acp_set_model,
+            #[cfg(feature = "acp")]
             acp::acp_respond_to_permission,
             #[cfg(feature = "acp")]
             acp::acp_get_available_agents,

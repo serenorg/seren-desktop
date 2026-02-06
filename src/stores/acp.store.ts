@@ -10,6 +10,8 @@ const sessionReadyPromises = new Map<
   string,
   { promise: Promise<void>; resolve: () => void }
 >();
+
+import { getSerenApiKey } from "@/lib/tauri-bridge";
 import type {
   AcpEvent,
   AcpSessionInfo,
@@ -19,10 +21,10 @@ import type {
   DiffProposalEvent,
   PlanEntry,
   SessionStatus,
+  SessionStatusEvent,
   ToolCallEvent,
 } from "@/services/acp";
 import * as acpService from "@/services/acp";
-import { getSerenApiKey } from "@/lib/tauri-bridge";
 
 // ============================================================================
 // Types
@@ -40,6 +42,11 @@ export interface AgentMessage {
   duration?: number;
 }
 
+export interface AgentModelInfo {
+  modelId: string;
+  name: string;
+}
+
 export interface ActiveSession {
   info: AcpSessionInfo;
   messages: AgentMessage[];
@@ -50,6 +57,10 @@ export interface ActiveSession {
   cwd: string;
   /** Timestamp when the current prompt started */
   promptStartTime?: number;
+  /** Currently selected model ID (if agent supports model selection) */
+  currentModelId?: string;
+  /** Available models reported by the agent */
+  availableModels?: AgentModelInfo[];
 }
 
 interface AcpState {
@@ -220,9 +231,8 @@ export const acpStore = {
       cwd,
     });
 
-    const agentAvailable = await acpService.checkAgentAvailable(
-      resolvedAgentType,
-    );
+    const agentAvailable =
+      await acpService.checkAgentAvailable(resolvedAgentType);
     if (!agentAvailable) {
       const helper =
         resolvedAgentType === "codex"
@@ -368,8 +378,7 @@ export const acpStore = {
     } catch (error) {
       console.error("[AcpStore] Spawn error:", error);
       tempUnsubscribe();
-      const message =
-        error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
       setState("error", message);
       setState("isLoading", false);
       return null;
@@ -593,6 +602,21 @@ export const acpStore = {
     }
   },
 
+  /**
+   * Set the AI model for the active session.
+   */
+  async setModel(modelId: string) {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+
+    try {
+      await acpService.setModel(sessionId, modelId);
+      setState("sessions", sessionId, "currentModelId", modelId);
+    } catch (error) {
+      console.error("[AcpStore] Failed to set model:", error);
+    }
+  },
+
   async respondToPermission(requestId: string, optionId: string) {
     const permission = state.pendingPermissions.find(
       (p) => p.requestId === requestId,
@@ -778,7 +802,7 @@ export const acpStore = {
         break;
 
       case "sessionStatus":
-        this.handleStatusChange(sessionId, event.data.status);
+        this.handleStatusChange(sessionId, event.data.status, event.data);
         break;
 
       case "error":
@@ -889,8 +913,27 @@ export const acpStore = {
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
   },
 
-  handleStatusChange(sessionId: string, status: SessionStatus) {
+  handleStatusChange(
+    sessionId: string,
+    status: SessionStatus,
+    data?: SessionStatusEvent,
+  ) {
     setState("sessions", sessionId, "info", "status", status);
+
+    // Extract model state from session status events (e.g. ready with models)
+    if (data?.models) {
+      const models = data.models as {
+        currentModelId: string;
+        availableModels: AgentModelInfo[];
+      };
+      setState("sessions", sessionId, "currentModelId", models.currentModelId);
+      setState(
+        "sessions",
+        sessionId,
+        "availableModels",
+        models.availableModels,
+      );
+    }
 
     if (status === "ready") {
       const entry = sessionReadyPromises.get(sessionId);
@@ -967,4 +1010,11 @@ export const acpStore = {
   },
 };
 
-export type { AgentType, SessionStatus, AcpSessionInfo, AgentInfo, DiffEvent, DiffProposalEvent };
+export type {
+  AgentType,
+  SessionStatus,
+  AcpSessionInfo,
+  AgentInfo,
+  DiffEvent,
+  DiffProposalEvent,
+};

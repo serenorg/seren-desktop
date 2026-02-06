@@ -98,6 +98,10 @@ export interface SessionStatusEvent {
     name: string;
     version: string;
   };
+  models?: {
+    currentModelId: string;
+    availableModels: Array<{ modelId: string; name: string }>;
+  };
 }
 
 export interface DiffProposalEvent {
@@ -182,6 +186,16 @@ export async function terminateSession(sessionId: string): Promise<void> {
  */
 export async function listSessions(): Promise<AcpSessionInfo[]> {
   return invoke<AcpSessionInfo[]>("acp_list_sessions");
+}
+
+/**
+ * Set the AI model for an ACP session.
+ */
+export async function setModel(
+  sessionId: string,
+  modelId: string,
+): Promise<void> {
+  return invoke("acp_set_model", { sessionId, modelId });
 }
 
 /**
