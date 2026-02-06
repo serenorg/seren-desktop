@@ -2,49 +2,9 @@
 // ABOUTME: Integrates with Tauri HTTP plugin and handles token refresh.
 
 import { apiBase } from "@/lib/config";
-import { getToken, isTauriRuntime } from "@/lib/tauri-bridge";
+import { getToken } from "@/lib/tauri-bridge";
+import { getTauriFetch, shouldSkipRefresh } from "@/lib/tauri-fetch";
 import type { ClientOptions, Config } from "./generated/client";
-
-type TauriFetch = typeof globalThis.fetch;
-let tauriFetch: TauriFetch | null = null;
-
-/**
- * Get the appropriate fetch function for the current environment.
- * Uses Tauri HTTP plugin in Tauri runtime, browser fetch otherwise.
- */
-async function getTauriFetch(): Promise<TauriFetch> {
-  if (!isTauriRuntime()) {
-    return globalThis.fetch;
-  }
-
-  if (tauriFetch) {
-    return tauriFetch;
-  }
-
-  try {
-    const mod = await import("@tauri-apps/plugin-http");
-    tauriFetch = mod.fetch as TauriFetch;
-    return tauriFetch;
-  } catch {
-    return globalThis.fetch;
-  }
-}
-
-// Endpoints that should not trigger auto-refresh (to avoid loops)
-const NO_REFRESH_ENDPOINTS = ["/auth/login", "/auth/refresh", "/auth/signup"];
-
-/**
- * Check if the request URL is an auth endpoint that should skip refresh.
- */
-function shouldSkipRefresh(input: RequestInfo | URL): boolean {
-  const url =
-    typeof input === "string"
-      ? input
-      : input instanceof URL
-        ? input.href
-        : input.url;
-  return NO_REFRESH_ENDPOINTS.some((endpoint) => url.includes(endpoint));
-}
 
 /**
  * Custom fetch that uses Tauri HTTP plugin when available.

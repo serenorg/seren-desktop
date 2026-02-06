@@ -1,11 +1,11 @@
 // ABOUTME: MCP Gateway service for connecting to Seren MCP gateway via MCP protocol.
 // ABOUTME: Uses rmcp HTTP streaming transport to connect to mcp.serendb.com/mcp.
 
+import { MCP_GATEWAY_URL } from "@/lib/config";
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool, McpToolResult } from "@/lib/mcp/types";
 import { getSerenApiKey } from "@/lib/tauri-bridge";
 
-const MCP_GATEWAY_URL = "https://mcp.serendb.com/mcp";
 const SEREN_MCP_SERVER_NAME = "seren-gateway";
 
 // Cache configuration
@@ -229,9 +229,7 @@ export async function resetGateway(): Promise<void> {
  * The MCP server returns this JSON structure when x402 payment is needed
  * but the server doesn't have a local wallet to sign.
  */
-function parsePaymentProxyError(
-  content: unknown,
-): PaymentProxyInfo | null {
+function parsePaymentProxyError(content: unknown): PaymentProxyInfo | null {
   // The error comes as text content with JSON inside
   if (!Array.isArray(content)) return null;
 

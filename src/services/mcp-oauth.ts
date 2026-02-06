@@ -2,9 +2,9 @@
 // ABOUTME: Implements Dynamic Client Registration and Authorization Code flow with PKCE (S256).
 
 import { invoke } from "@tauri-apps/api/core";
+import { MCP_OAUTH_BASE } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 
-const MCP_OAUTH_BASE = "https://mcp.serendb.com";
 // MCP server uses dynamic client registration
 const MCP_CLIENT_NAME = "Seren Desktop";
 // Use loopback redirect - webviews can intercept HTTP navigations but not custom schemes
