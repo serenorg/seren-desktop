@@ -275,6 +275,11 @@ async function main(): Promise<void> {
       "--prod",
       "--config.node-linker=hoisted",
       "--config.package-import-method=copy",
+      // Only install native addons for the current platform's libc (glibc on Linux,
+      // system default on macOS/Windows). This prevents musl-linked binaries like
+      // @img/sharp-linuxmusl-x64 from being installed, which would break AppImage
+      // bundling because linuxdeploy cannot resolve libc.musl-x86_64.so.1.
+      ...(process.platform === "linux" ? ["--config.supportedArchitectures.libc=glibc"] : []),
     ];
 
     // Prefer lockfile if present for reproducible bundles.
