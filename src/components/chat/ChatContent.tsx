@@ -530,6 +530,21 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     content: string,
   ) => {
     const duration = Date.now() - session.startTime;
+
+    if (!content.trim()) {
+      console.warn("[ChatContent] Empty content in completed message", {
+        duration,
+        model: session.model,
+        toolsEnabled: session.toolsEnabled,
+      });
+    } else {
+      console.log("[ChatContent] Streaming complete", {
+        contentLength: content.length,
+        duration,
+        model: session.model,
+      });
+    }
+
     const assistantMessage: Message = {
       id: session.id,
       role: "assistant",

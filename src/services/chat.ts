@@ -406,6 +406,11 @@ export async function* streamMessageWithTools(
     }
 
     // Yield tool calls for UI
+    const toolNames = response.tool_calls.map((tc) => tc.function.name);
+    console.log(
+      `[streamMessageWithTools] Iteration ${iteration}: tool_calls =`,
+      toolNames,
+    );
     yield { type: "tool_calls", toolCalls: response.tool_calls };
 
     // Add assistant message with tool_calls to history
@@ -417,6 +422,16 @@ export async function* streamMessageWithTools(
 
     // Execute tools
     const results = await executeTools(response.tool_calls);
+
+    // Log tool execution results
+    for (const result of results) {
+      if (result.is_error) {
+        console.warn(
+          `[streamMessageWithTools] Tool error: ${result.tool_call_id}`,
+          result.content.substring(0, 200),
+        );
+      }
+    }
 
     // Yield results for UI
     yield { type: "tool_results", results };
@@ -434,6 +449,11 @@ export async function* streamMessageWithTools(
   }
 
   // If we hit max iterations, yield an event that allows the user to continue
+  if (!fullContent.trim()) {
+    console.warn(
+      `[streamMessageWithTools] Hit iteration limit (${maxIterations}) with empty content`,
+    );
+  }
   yield {
     type: "iteration_limit",
     currentIteration: maxIterations,
