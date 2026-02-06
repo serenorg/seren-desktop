@@ -496,7 +496,8 @@ export const acpStore = {
       if (
         message.includes("Worker thread dropped") ||
         message.includes("not found") ||
-        message.includes("Session not initialized")
+        message.includes("Session not initialized") ||
+        message.includes("agent did not stop in time")
       ) {
         console.info(
           "[AcpStore] Session appears dead, attempting auto-recovery...",
