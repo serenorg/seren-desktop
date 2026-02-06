@@ -17,9 +17,9 @@ import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
+import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadImages } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
-import { formatDurationWithVerb } from "@/lib/format-duration";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -46,12 +46,12 @@ import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
-import { ToolsetSelector } from "./ToolsetSelector";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { StreamingMessage } from "./StreamingMessage";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolStreamingMessage } from "./ToolStreamingMessage";
+import { ToolsetSelector } from "./ToolsetSelector";
 import "highlight.js/styles/github-dark.css";
 
 // Keywords that trigger publisher suggestions
@@ -426,6 +426,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     parsed.command.execute(ctx);
     setCommandPopupIndex(0);
     return true;
+  };
+
+  const cancelStreaming = () => {
+    const session = streamingSession();
+    if (!session) return;
+    setStreamingSession(null);
+    chatStore.setLoading(false);
+    setMessageQueue([]);
   };
 
   const sendMessage = async () => {
@@ -1115,15 +1123,28 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                           }
                         }}
                       />
-                      <button
-                        type="submit"
-                        class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#2ea043] hover:shadow-[0_2px_8px_rgba(35,134,54,0.3)] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:shadow-none"
-                        disabled={
-                          !input().trim() && attachedImages().length === 0
+                      <Show
+                        when={chatStore.isLoading}
+                        fallback={
+                          <button
+                            type="submit"
+                            class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#2ea043] hover:shadow-[0_2px_8px_rgba(35,134,54,0.3)] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:shadow-none"
+                            disabled={
+                              !input().trim() && attachedImages().length === 0
+                            }
+                          >
+                            Send
+                          </button>
                         }
                       >
-                        {chatStore.isLoading ? "Queue" : "Send"}
-                      </button>
+                        <button
+                          type="button"
+                          class="bg-[#da3633] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#f85149] hover:shadow-[0_2px_8px_rgba(218,54,51,0.3)]"
+                          onClick={cancelStreaming}
+                        >
+                          Stop
+                        </button>
+                      </Show>
                     </div>
                   </div>
                 </form>
