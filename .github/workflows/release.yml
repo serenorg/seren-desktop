@@ -172,6 +172,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
+          prefix-key: ${{ matrix.os }}
           workspaces: 'src-tauri'
 
       - name: Install dependencies (Ubuntu)
