@@ -26,10 +26,12 @@ import {
   areToolsAvailable,
   CHAT_MAX_RETRIES,
   type ChatContext,
+  continueToolIteration,
   type Message,
   sendMessageWithRetry,
   streamMessage,
   streamMessageWithTools,
+  type ToolIterationState,
   type ToolStreamEvent,
 } from "@/services/chat";
 import { acpStore } from "@/stores/acp.store";
@@ -533,6 +535,18 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     setSavedInput("");
   };
 
+  const handleIterationLimit = (
+    state: ToolIterationState,
+    iteration: number,
+  ): AsyncGenerator<ToolStreamEvent> => {
+    console.log(
+      "[ChatContent] Tool iteration limit reached at iteration",
+      iteration,
+      "— auto-continuing",
+    );
+    return continueToolIteration(state);
+  };
+
   const handleStreamingComplete = async (
     session: ActiveStreamingSession,
     content: string,
@@ -890,6 +904,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                             handleStreamingError(session, error)
                           }
                           onContentUpdate={scrollToBottom}
+                          onIterationLimit={handleIterationLimit}
                         />
                       </Show>
                     );
