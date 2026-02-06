@@ -235,6 +235,9 @@ jobs:
       # Build the app (unsigned for macOS without certificates, or other platforms)
       - name: Build Tauri app (unsigned, Linux)
         if: matrix.os == 'ubuntu-latest'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          NO_STRIP: true
         run: pnpm tauri build --target ${{ matrix.target }} --bundles deb,appimage
       - name: Build Tauri app (unsigned, other)
         if: matrix.os != 'macos-latest' && matrix.os != 'ubuntu-latest'
