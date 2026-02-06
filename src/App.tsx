@@ -25,6 +25,7 @@ import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
+import { SkillsPanel } from "@/components/skills";
 import { FileExplorer } from "@/components/sidebar/FileExplorer";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import { shortcuts } from "@/lib/shortcuts";
@@ -191,7 +192,7 @@ function App() {
       setShowEditor(true);
       setOverlayPanel(null);
     } else {
-      // Settings, catalog, database, account are overlays
+      // Settings, catalog, database, skills, account are overlays
       setOverlayPanel(panel);
     }
   };
@@ -248,6 +249,9 @@ function App() {
                 </Match>
                 <Match when={overlayPanel() === "database"}>
                   <DatabasePanel />
+                </Match>
+                <Match when={overlayPanel() === "skills"}>
+                  <SkillsPanel />
                 </Match>
                 <Match when={overlayPanel() === "settings"}>
                   <SettingsPanel onSignInClick={handleSignInClick} />

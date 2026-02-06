@@ -29,6 +29,7 @@ mod oauth_callback_server;
 #[cfg(feature = "openclaw")]
 mod openclaw;
 mod sandbox;
+mod skills;
 mod sync;
 mod terminal;
 mod wallet;
@@ -708,6 +709,14 @@ pub fn run() {
             openclaw::openclaw_set_trust,
             #[cfg(feature = "openclaw")]
             openclaw::openclaw_grant_approval,
+            // Skills commands
+            skills::get_seren_skills_dir,
+            skills::get_claude_skills_dir,
+            skills::get_project_skills_dir,
+            skills::list_skill_dirs,
+            skills::install_skill,
+            skills::remove_skill,
+            skills::read_skill_content,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,6 +10,7 @@ export type Panel =
   | "editor"
   | "catalog"
   | "database"
+  | "skills"
   | "settings"
   | "account";
 
@@ -25,6 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "editor", label: "Editor", icon: "📝" },
   { id: "catalog", label: "Catalog", icon: "📚" },
   { id: "database", label: "Database", icon: "🗄️" },
+  { id: "skills", label: "Skills", icon: "🧩" },
   { id: "settings", label: "Settings", icon: "⚙️" },
 ];
 
