@@ -12,7 +12,6 @@ import {
   untrack,
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
-import { CatalogPanel } from "@/components/catalog";
 import { ChatContent } from "@/components/chat/ChatContent";
 // MCP OAuth dialog removed - now using API key auth flow
 import { AboutDialog } from "@/components/common/AboutDialog";
@@ -25,8 +24,8 @@ import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
-import { SkillsPanel } from "@/components/skills";
 import { FileExplorer } from "@/components/sidebar/FileExplorer";
+import { SkillsPanel } from "@/components/skills";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
@@ -65,7 +64,7 @@ function App() {
     return <Phase3Playground />;
   }
 
-  // Overlay panels (settings, catalog, database, account)
+  // Overlay panels (settings, database, skills, account)
   const [overlayPanel, setOverlayPanel] = createSignal<Panel | null>(null);
   // Toggle editor visibility
   const [showEditor, setShowEditor] = createSignal(false);
@@ -91,8 +90,8 @@ function App() {
     });
     shortcuts.register("openSettings", () => setOverlayPanel("settings"));
     shortcuts.register("toggleSidebar", () => {
-      // Toggle catalog panel
-      setOverlayPanel((p) => (p === "catalog" ? null : "catalog"));
+      // Toggle database panel
+      setOverlayPanel((p) => (p === "database" ? null : "database"));
     });
     shortcuts.register("focusEditor", () => {
       // Editor is always visible, just close overlays
@@ -192,7 +191,7 @@ function App() {
       setShowEditor(true);
       setOverlayPanel(null);
     } else {
-      // Settings, catalog, database, skills, account are overlays
+      // Settings, database, skills, account are overlays
       setOverlayPanel(panel);
     }
   };
@@ -244,9 +243,6 @@ function App() {
           <Show when={overlayPanel()}>
             <div class="absolute inset-0 bg-[#0d1117] z-10">
               <Switch>
-                <Match when={overlayPanel() === "catalog"}>
-                  <CatalogPanel onSignInClick={handleSignInClick} />
-                </Match>
                 <Match when={overlayPanel() === "database"}>
                   <DatabasePanel />
                 </Match>

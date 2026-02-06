@@ -1,14 +1,13 @@
 // ABOUTME: Application header with horizontal navigation, balance, and user actions.
-// ABOUTME: Provides navigation between Chat, Editor, Catalog, Settings with Cursor-like styling.
+// ABOUTME: Provides navigation between Chat, Editor, Database, Skills, Settings with Cursor-like styling.
 
 import { type Component, For, Show } from "solid-js";
-import { BalanceDisplay } from "./BalanceDisplay";
 import { updaterStore } from "@/stores/updater.store";
+import { BalanceDisplay } from "./BalanceDisplay";
 
 export type Panel =
   | "chat"
   | "editor"
-  | "catalog"
   | "database"
   | "skills"
   | "settings"
@@ -24,7 +23,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "editor", label: "Editor", icon: "📝" },
-  { id: "catalog", label: "Catalog", icon: "📚" },
   { id: "database", label: "Database", icon: "🗄️" },
   { id: "skills", label: "Skills", icon: "🧩" },
   { id: "settings", label: "Settings", icon: "⚙️" },
