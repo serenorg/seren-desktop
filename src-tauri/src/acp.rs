@@ -24,6 +24,17 @@ use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use uuid::Uuid;
 
+/// Extract a human-readable error message from an ACP JSON-RPC error.
+/// Prefers the `data` string (more specific) over the generic `message` field.
+fn format_acp_error(e: &agent_client_protocol::Error) -> String {
+    if let Some(ref data) = e.data {
+        if let Some(s) = data.as_str() {
+            return s.to_string();
+        }
+    }
+    e.message.clone()
+}
+
 /// Check if an error message indicates an authentication/login failure
 fn is_auth_error(msg: &str) -> bool {
     let lower = msg.to_lowercase();
@@ -1469,14 +1480,15 @@ async fn run_session_worker(
                     }
                     Err(e) => {
                         log::error!("[ACP] Prompt error: {:?}", e);
+                        let friendly = format_acp_error(&e);
                         let _ = app.emit(
                             events::ERROR,
                             serde_json::json!({
                                 "sessionId": session_id,
-                                "error": format!("{:?}", e)
+                                "error": &friendly
                             }),
                         );
-                        let _ = response_tx.send(Err(format!("{:?}", e)));
+                        let _ = response_tx.send(Err(friendly));
                     }
                 }
 
