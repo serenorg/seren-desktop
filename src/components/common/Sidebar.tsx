@@ -1,15 +1,9 @@
 // ABOUTME: Navigation sidebar with panel switching.
-// ABOUTME: Provides navigation between Chat, Editor, Catalog, Settings, and Account.
+// ABOUTME: Provides navigation between Chat, Editor, Database, Settings, and Account.
 
 import { type Component, createMemo, For } from "solid-js";
 
-export type Panel =
-  | "chat"
-  | "editor"
-  | "catalog"
-  | "database"
-  | "settings"
-  | "account";
+export type Panel = "chat" | "editor" | "database" | "settings" | "account";
 
 interface SidebarProps {
   activePanel: Panel;
@@ -27,7 +21,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "editor", label: "Editor", icon: "📝" },
-  { id: "catalog", label: "Catalog", icon: "📚" },
   { id: "database", label: "Database", icon: "🗄️" },
   { id: "settings", label: "Settings", icon: "⚙️" },
   { id: "account", label: "Sign In", icon: "👤", showWhenAuthenticated: false },

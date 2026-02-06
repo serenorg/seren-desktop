@@ -163,17 +163,6 @@ registry.register({
 });
 
 registry.register({
-  name: "catalog",
-  description: "Open publisher catalog",
-  panels: ["chat", "agent"],
-  execute: (ctx) => {
-    ctx.openPanel("catalog");
-    ctx.clearInput();
-    return true;
-  },
-});
-
-registry.register({
   name: "editor",
   description: "Open code editor",
   panels: ["chat", "agent"],

@@ -1,1 +1,0 @@
-export { CatalogPanel } from "./CatalogPanel";
