@@ -275,11 +275,6 @@ async function main(): Promise<void> {
       "--prod",
       "--config.node-linker=hoisted",
       "--config.package-import-method=copy",
-      // Only install native addons for the current platform's libc (glibc on Linux,
-      // system default on macOS/Windows). This prevents musl-linked binaries like
-      // @img/sharp-linuxmusl-x64 from being installed, which would break AppImage
-      // bundling because linuxdeploy cannot resolve libc.musl-x86_64.so.1.
-      ...(process.platform === "linux" ? ["--config.supportedArchitectures.libc=glibc"] : []),
     ];
 
     // Prefer lockfile if present for reproducible bundles.
@@ -297,6 +292,33 @@ async function main(): Promise<void> {
         openclawRuntimeDir,
         5,
       );
+    }
+
+    // Remove musl-linked native binaries (e.g. @img/sharp-linuxmusl-x64).
+    // linuxdeploy scans all ELF files in the AppDir and fails if it finds
+    // binaries linked against libc.musl-x86_64.so.1, which doesn't exist
+    // on glibc-based systems. These optional platform packages are installed
+    // by pnpm for completeness but are never used at runtime on glibc Linux.
+    if (process.platform === "linux") {
+      const nmDir = path.join(openclawRuntimeDir, "node_modules");
+      if (existsSync(nmDir)) {
+        let removed = 0;
+        for (const scope of readdirSync(nmDir)) {
+          if (!scope.startsWith("@")) continue;
+          const scopeDir = path.join(nmDir, scope);
+          if (!statSync(scopeDir).isDirectory()) continue;
+          for (const pkg of readdirSync(scopeDir)) {
+            if (pkg.includes("linuxmusl")) {
+              rmSync(path.join(scopeDir, pkg), { recursive: true, force: true });
+              removed++;
+              console.log(`[build-openclaw] Removed musl package: ${scope}/${pkg}`);
+            }
+          }
+        }
+        if (removed > 0) {
+          console.log(`[build-openclaw] Removed ${removed} musl-linked package(s) for AppImage compatibility.`);
+        }
+      }
     }
 
     if (!openclawDir) {
