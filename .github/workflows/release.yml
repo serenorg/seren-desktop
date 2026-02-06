@@ -239,7 +239,8 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           NO_STRIP: "true"
-        run: pnpm tauri build --target ${{ matrix.target }} --bundles deb,appimage
+          DEBUG: "1"
+        run: pnpm tauri build --verbose --target ${{ matrix.target }} --bundles deb,appimage
       - name: Build Tauri app (unsigned, other)
         if: matrix.os != 'macos-latest' && !startsWith(matrix.os, 'ubuntu')
         run: pnpm tauri build --target ${{ matrix.target }}
