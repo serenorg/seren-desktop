@@ -18,14 +18,15 @@ import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
+import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
 import type { ImageAttachment } from "@/lib/providers/types";
-import { formatDurationWithVerb } from "@/lib/format-duration";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
+import { AgentModelSelector } from "./AgentModelSelector";
 import { AgentSelector } from "./AgentSelector";
 import { AgentTabBar } from "./AgentTabBar";
 import { DiffCard } from "./DiffCard";
@@ -697,6 +698,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <div class="flex justify-between items-center">
               <div class="flex items-center gap-3">
                 <AgentSelector />
+                <AgentModelSelector />
                 <Show when={isPrompting()}>
                   <ThinkingStatus />
                 </Show>

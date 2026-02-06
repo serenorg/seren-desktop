@@ -6,12 +6,12 @@ use agent_client_protocol::{
     CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest,
     CreateTerminalResponse, EnvVariable, ExtNotification, ExtRequest, ExtResponse, Implementation,
     InitializeRequest, KillTerminalCommandRequest, KillTerminalCommandResponse, McpServer,
-    McpServerStdio, NewSessionRequest, PromptRequest, ProtocolVersion, ReadTextFileRequest,
-    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
-    RequestPermissionResponse, SessionModeId, SessionNotification, SessionUpdate,
-    SetSessionModeRequest, TerminalOutputRequest, TerminalOutputResponse, TextContent,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    McpServerStdio, ModelId, NewSessionRequest, PromptRequest, ProtocolVersion,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionRequest, RequestPermissionResponse, SessionModeId, SessionNotification,
+    SessionUpdate, SetSessionModeRequest, SetSessionModelRequest, TerminalOutputRequest,
+    TerminalOutputResponse, TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -426,6 +426,10 @@ enum AcpCommand {
     },
     SetMode {
         mode: String,
+        response_tx: oneshot::Sender<Result<(), String>>,
+    },
+    SetModel {
+        model_id: String,
         response_tx: oneshot::Sender<Result<(), String>>,
     },
     Terminate,
@@ -1340,6 +1344,19 @@ async fn run_session_worker(
         session_id,
         agent_info.map(|i| i.name.as_str())
     );
+    // Extract model state from session response (if agent supports model selection)
+    let models_json = new_session_response.models.as_ref().map(|m| {
+        serde_json::json!({
+            "currentModelId": &*m.current_model_id.0,
+            "availableModels": m.available_models.iter().map(|info| {
+                serde_json::json!({
+                    "modelId": &*info.model_id.0,
+                    "name": &info.name,
+                })
+            }).collect::<Vec<_>>()
+        })
+    });
+
     let emit_result = app.emit(
         events::SESSION_STATUS,
         serde_json::json!({
@@ -1348,7 +1365,8 @@ async fn run_session_worker(
             "agentInfo": {
                 "name": agent_info.map(|i| i.name.as_str()).unwrap_or("Unknown"),
                 "version": agent_info.map(|i| i.version.as_str()).unwrap_or("Unknown")
-            }
+            },
+            "models": models_json
         }),
     );
     log::debug!("[ACP] Emit result: {:?}", emit_result);
@@ -1524,6 +1542,24 @@ async fn run_session_worker(
                     }
                 }
             }
+            AcpCommand::SetModel {
+                model_id,
+                response_tx,
+            } => {
+                let request = SetSessionModelRequest::new(
+                    agent_session_id.clone(),
+                    ModelId::new(model_id),
+                );
+                match connection.set_session_model(request).await {
+                    Ok(_) => {
+                        let _ = response_tx.send(Ok(()));
+                    }
+                    Err(e) => {
+                        log::error!("[ACP] Failed to set model: {:?}", e);
+                        let _ = response_tx.send(Err(format_acp_error(&e)));
+                    }
+                }
+            }
             AcpCommand::Terminate => {
                 break;
             }
@@ -1677,6 +1713,40 @@ pub async fn acp_set_permission_mode(
         .send(AcpCommand::SetMode { mode, response_tx })
         .await
         .map_err(|_| "Failed to send set mode command".to_string())?;
+
+    response_rx
+        .await
+        .map_err(|_| "Worker thread dropped".to_string())?
+}
+
+/// Set the AI model for an ACP session.
+#[tauri::command]
+pub async fn acp_set_model(
+    state: State<'_, AcpState>,
+    session_id: String,
+    model_id: String,
+) -> Result<(), String> {
+    let command_tx = {
+        let sessions = state.sessions.read().await;
+        let session_arc = sessions
+            .get(&session_id)
+            .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+        let session = session_arc.lock().await;
+        session
+            .command_tx
+            .clone()
+            .ok_or_else(|| "Session not initialized".to_string())?
+    };
+
+    let (response_tx, response_rx) = oneshot::channel();
+
+    command_tx
+        .send(AcpCommand::SetModel {
+            model_id,
+            response_tx,
+        })
+        .await
+        .map_err(|_| "Failed to send set model command".to_string())?;
 
     response_rx
         .await
