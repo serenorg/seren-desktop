@@ -49,10 +49,14 @@ export function shouldSkipRefresh(input: RequestInfo | URL): boolean {
         : input.url;
 
   try {
-    const { pathname } = new URL(raw);
-    return NO_REFRESH_PATHS.some((p) => pathname.endsWith(p));
+    // Parse with a base so relative URLs are handled deterministically.
+    const { pathname } = new URL(raw, "http://localhost");
+    const normalizedPathname = pathname.replace(/\/+$/, "") || "/";
+    return NO_REFRESH_PATHS.some((p) => normalizedPathname.endsWith(p));
   } catch {
-    // Fallback for relative URLs or malformed input
-    return NO_REFRESH_PATHS.some((p) => raw.includes(p));
+    // Last-resort fallback for malformed input: inspect only the path segment.
+    const pathOnly = raw.split(/[?#]/, 1)[0] ?? raw;
+    const normalizedPathname = pathOnly.replace(/\/+$/, "") || "/";
+    return NO_REFRESH_PATHS.some((p) => normalizedPathname.endsWith(p));
   }
 }

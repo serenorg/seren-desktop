@@ -37,7 +37,6 @@ impl std::str::FromStr for SandboxMode {
 /// Configuration for the sandbox applied to a terminal process.
 pub struct SandboxConfig {
     pub mode: SandboxMode,
-    pub workspace: PathBuf,
     pub writable_paths: Vec<PathBuf>,
     pub sensitive_read_paths: Vec<PathBuf>,
     pub network_allowed: bool,
@@ -69,7 +68,6 @@ impl SandboxConfig {
 
         Self {
             mode,
-            workspace: workspace.to_path_buf(),
             writable_paths,
             sensitive_read_paths,
             network_allowed,
@@ -256,7 +254,6 @@ mod tests {
             &["hello".to_string()],
             &SandboxConfig {
                 mode: SandboxMode::FullAccess,
-                workspace: PathBuf::from("/workspace"),
                 writable_paths: vec![],
                 sensitive_read_paths: vec![],
                 network_allowed: true,
