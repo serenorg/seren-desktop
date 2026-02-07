@@ -298,27 +298,35 @@ async function main(): Promise<void> {
     // linuxdeploy scans ALL ELF files in the AppDir and tries to resolve their
     // dependencies. Packages like @img/sharp and @node-llama-cpp install optional
     // platform-specific binaries for every OS/arch/libc variant. On a Linux x64
-    // glibc build, we must remove: musl variants, ARM64, CUDA extensions, and
-    // any macOS/Windows binaries that somehow got installed.
+    // glibc build, we use an ALLOWLIST approach: any scoped package that looks
+    // platform-specific gets removed UNLESS it's for linux-x64 (glibc, no GPU).
     if (process.platform === "linux") {
       const nmDir = path.join(openclawRuntimeDir, "node_modules");
       if (existsSync(nmDir)) {
-        // Patterns that indicate a package is NOT for linux-x64-glibc
-        const removePatterns = [
-          "linuxmusl",   // musl libc (e.g. @img/sharp-linuxmusl-x64)
-          "linux-arm",   // ARM architecture (e.g. @node-llama-cpp/linux-arm64)
-          "-cuda",       // CUDA extensions (e.g. @node-llama-cpp/linux-x64-cuda-ext)
-          "darwin",      // macOS
-          "win32",       // Windows
-        ];
+        // A package name is "platform-specific" if it matches common native
+        // binary distribution naming conventions.
+        const platformIndicators =
+          /linux|darwin|mac-|win32|win-|wasm|android|freebsd/i;
+
+        // On linux-x64-glibc, keep packages containing "linux-x64" but NOT
+        // those with additional hardware suffixes (cuda, vulkan, musl).
+        const isAllowedOnLinuxX64 = (name: string) => {
+          const l = name.toLowerCase();
+          return (
+            l.includes("linux-x64") &&
+            !l.includes("musl") &&
+            !l.includes("cuda") &&
+            !l.includes("vulkan")
+          );
+        };
+
         let removed = 0;
         for (const entry of readdirSync(nmDir)) {
           if (!entry.startsWith("@")) continue;
           const scopeDir = path.join(nmDir, entry);
           if (!statSync(scopeDir).isDirectory()) continue;
           for (const pkg of readdirSync(scopeDir)) {
-            const lower = pkg.toLowerCase();
-            if (removePatterns.some((p) => lower.includes(p))) {
+            if (platformIndicators.test(pkg) && !isAllowedOnLinuxX64(pkg)) {
               rmSync(path.join(scopeDir, pkg), { recursive: true, force: true });
               removed++;
               console.log(`[build-openclaw] Removed non-native package: ${entry}/${pkg}`);
