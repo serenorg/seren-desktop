@@ -165,13 +165,16 @@ function extractContent(data: unknown): string {
   if (choices && choices.length > 0) {
     const first = choices[0];
     const message = first.message as Record<string, unknown> | undefined;
-    if (message && typeof message.content === "string") {
-      return message.content;
+    if (message) {
+      // Handle content in string or array format (Gemini may return array of parts)
+      const extracted = normalizeContent(message.content);
+      if (extracted) return extracted;
     }
 
     const delta = first.delta as Record<string, unknown> | undefined;
-    if (delta && typeof delta.content === "string") {
-      return delta.content;
+    if (delta) {
+      const extracted = normalizeContent(delta.content);
+      if (extracted) return extracted;
     }
   }
 
@@ -211,12 +214,9 @@ function extractChatResponse(data: unknown): ChatResponse {
   let toolCalls: ToolCall[] | undefined;
 
   if (message) {
-    // Extract content
-    if (typeof message.content === "string") {
-      content = message.content;
-    } else if (message.content === null) {
-      content = null;
-    }
+    // Extract content (handle string, array, or null formats)
+    // Gemini models may return content as an array of parts
+    content = normalizeContent(message.content);
 
     // Extract tool_calls
     const rawToolCalls = message.tool_calls as
@@ -467,7 +467,9 @@ export const serenProvider: ProviderAdapter = {
       const data = result.body || result;
       if (Array.isArray((data as { data?: unknown[] }).data)) {
         return (
-          data as { data: Array<{ id: string; name?: string; context_length?: number }> }
+          data as {
+            data: Array<{ id: string; name?: string; context_length?: number }>;
+          }
         ).data.map((m) => ({
           id: m.id,
           name: m.name || m.id,
@@ -540,9 +542,7 @@ export async function sendMessageWithTools(
     const error = body?.error as Record<string, unknown> | undefined;
     if (error) {
       const metadata = (error.metadata as Record<string, unknown>) || {};
-      const rawError = String(
-        metadata.raw || error.message || "Unknown error",
-      );
+      const rawError = String(metadata.raw || error.message || "Unknown error");
 
       // Show user-friendly message for credits/payment issues
       if (isCreditsError(data.status, rawError)) {
