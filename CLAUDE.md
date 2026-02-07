@@ -36,17 +36,13 @@ It connects to Seren's proprietary Gateway API for AI chat, billing, and MCP act
 
 **Required:** Rust toolchain (cargo, rustc) must be in PATH for `pnpm tauri dev` to work.
 
-If cargo is not available in Claude Code shell commands, add to your `~/.claude/settings.json`:
+If cargo is not available in Claude Code shell commands, run the setup script:
 
-```json
-{
-  "env": {
-    "PATH": "/Users/YOUR_USERNAME/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
-  }
-}
+```bash
+./scripts/setup-claude-env.sh
 ```
 
-Replace `YOUR_USERNAME` with your actual username. This is needed because Claude Code may not source your shell profile where `~/.cargo/env` is typically loaded.
+This automatically configures your Claude Code environment to include cargo in PATH. Restart Claude Code after running.
 
 ### API Endpoints
 
