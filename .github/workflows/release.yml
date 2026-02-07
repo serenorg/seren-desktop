@@ -238,7 +238,7 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         env:
           NO_STRIP: "true"
-        run: pnpm tauri build --verbose --target ${{ matrix.target }} --bundles deb,appimage,updater
+        run: pnpm tauri build --verbose --target ${{ matrix.target }} --bundles deb,appimage
       - name: Build Tauri app (unsigned, other)
         if: matrix.os != 'macos-latest' && !startsWith(matrix.os, 'ubuntu')
         run: pnpm tauri build --target ${{ matrix.target }}
