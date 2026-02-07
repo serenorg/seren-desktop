@@ -52,7 +52,7 @@ rand = "0.9"
 base64 = "0.22"
 libc = "0.2"
 reqwest = { version = "0.12", features = ["json"] }
-seren-memory-sdk = { path = "../../seren-memory-sdk" }
+seren-memory-sdk = "0.1"
 rmcp = { version = "0.14", features = [
     "client",
     "transport-io",                           # stdio for local MCP servers

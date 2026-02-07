@@ -5901,6 +5901,8 @@ dependencies = [
 [[package]]
 name = "seren-memory-sdk"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb3c542709e89096e2b8c78b00475a88cc0d4e4b082f57c32b784aba6e02d7e0"
 dependencies = [
  "chrono",
  "reqwest",
