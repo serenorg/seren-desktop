@@ -61,6 +61,8 @@ export interface ActiveSession {
   currentModelId?: string;
   /** Available models reported by the agent */
   availableModels?: AgentModelInfo[];
+  /** Session-specific error message */
+  error?: string | null;
 }
 
 interface AcpState {
@@ -140,7 +142,9 @@ export const acpStore = {
   },
 
   get error() {
-    return state.error;
+    // Return session-specific error for active session, fall back to global error
+    const session = this.activeSession;
+    return session?.error ?? state.error;
   },
 
   get installStatus() {
@@ -451,7 +455,17 @@ export const acpStore = {
 
     const session = state.sessions[sessionId];
     if (!session || session.info.status === "error") {
-      setState("error", "Session has ended. Please start a new session.");
+      // Set session-specific error if session exists
+      if (session) {
+        setState(
+          "sessions",
+          sessionId,
+          "error",
+          "Session has ended. Please start a new session.",
+        );
+      } else {
+        setState("error", "Session has ended. Please start a new session.");
+      }
       return;
     }
 
@@ -748,9 +762,14 @@ export const acpStore = {
   },
 
   /**
-   * Clear error state.
+   * Clear error state for the active session.
    */
   clearError() {
+    const sessionId = state.activeSessionId;
+    if (sessionId) {
+      setState("sessions", sessionId, "error", null);
+    }
+    // Also clear global error for backwards compatibility
     setState("error", null);
   },
 
@@ -993,7 +1012,8 @@ export const acpStore = {
     };
 
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
-    setState("error", error);
+    // Set session-specific error instead of global error
+    setState("sessions", sessionId, "error", error);
   },
 
   // ============================================================================
