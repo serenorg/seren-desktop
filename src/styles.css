@@ -227,7 +227,9 @@ code {
 
 /* Thinking dots bounce animation */
 @keyframes bounce-dot {
-  0%, 80%, 100% {
+  0%,
+  80%,
+  100% {
     transform: translateY(0);
     opacity: 0.4;
   }
@@ -241,9 +243,15 @@ code {
   animation: bounce-dot 1.4s infinite ease-in-out;
 }
 
-.thinking-dot-1 { animation-delay: 0s; }
-.thinking-dot-2 { animation-delay: 0.2s; }
-.thinking-dot-3 { animation-delay: 0.4s; }
+.thinking-dot-1 {
+  animation-delay: 0s;
+}
+.thinking-dot-2 {
+  animation-delay: 0.2s;
+}
+.thinking-dot-3 {
+  animation-delay: 0.4s;
+}
 
 /* Tool execution pulse */
 @keyframes pulse {
@@ -254,4 +262,23 @@ code {
   50% {
     opacity: 0.5;
   }
+}
+
+/* Permission required indicator - pulsing orange dot */
+@keyframes permission-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(251, 146, 60, 0.7);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 4px rgba(251, 146, 60, 0);
+  }
+}
+
+.permission-indicator {
+  @apply w-2 h-2 rounded-full shrink-0;
+  background-color: #fb923c;
+  animation: permission-pulse 1.5s ease-in-out infinite;
 }
