@@ -1,6 +1,7 @@
 // ABOUTME: Chat service supporting streaming completions with multi-provider routing.
 // ABOUTME: Routes requests through provider abstraction for Seren, Anthropic, OpenAI, Gemini.
 
+import { invoke } from "@tauri-apps/api/core";
 import { isTextMime, toDataUrl } from "@/lib/images/attachments";
 import { retrieveCodeContext } from "@/lib/indexing/context-retrieval";
 import {
@@ -25,6 +26,8 @@ import {
   getActiveToolsetPublishers,
   settingsStore,
 } from "@/stores/settings.store";
+import { authStore } from "@/stores/auth.store";
+import { projectStore } from "@/stores/project.store";
 import { skillsStore } from "@/stores/skills.store";
 
 export type ChatRole = "user" | "assistant" | "system";
@@ -384,6 +387,21 @@ export async function* streamMessageWithTools(
     }
   } catch (error) {
     console.warn("[Chat] Failed to retrieve skills content:", error);
+  }
+
+  // Inject memory context if enabled and authenticated
+  if (settingsStore.get("memoryEnabled") && authStore.isAuthenticated) {
+    try {
+      const projectId = projectStore.activeProject?.id ?? null;
+      const memoryContext = await invoke<string | null>("memory_bootstrap", {
+        projectId,
+      });
+      if (memoryContext) {
+        systemContent += memoryContext;
+      }
+    } catch (error) {
+      console.warn("[Chat] Failed to retrieve memory context:", error);
+    }
   }
 
   // Add system message to messages array

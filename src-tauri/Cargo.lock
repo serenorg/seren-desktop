@@ -5876,6 +5876,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "seren-memory-sdk",
  "sqlite-vec",
  "tauri",
  "tauri-build",
@@ -5894,6 +5895,22 @@ dependencies = [
  "tokio-util",
  "url",
  "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "seren-memory-sdk"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sqlite-vec",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 
