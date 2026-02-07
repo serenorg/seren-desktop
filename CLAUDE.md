@@ -32,6 +32,22 @@ It connects to Seren's proprietary Gateway API for AI chat, billing, and MCP act
 | Testing | Vitest (unit), Playwright (e2e) |
 | API Client | @hey-api/openapi-ts (generated) |
 
+### Development Environment
+
+**Required:** Rust toolchain (cargo, rustc) must be in PATH for `pnpm tauri dev` to work.
+
+If cargo is not available in Claude Code shell commands, add to your `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "PATH": "/Users/YOUR_USERNAME/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+  }
+}
+```
+
+Replace `YOUR_USERNAME` with your actual username. This is needed because Claude Code may not source your shell profile where `~/.cargo/env` is typically loaded.
+
 ### API Endpoints
 
 App connects to `https://api.serendb.com`:
