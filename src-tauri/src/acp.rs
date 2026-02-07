@@ -375,6 +375,36 @@ struct ClientDelegate {
     pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
     /// Pending diff proposals awaiting user accept/reject
     pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    /// Maps terminal IDs to tool call IDs for tracking command activity in the UI
+    terminal_tool_calls: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl ClientDelegate {
+    /// Emit a tool-call event to the frontend so the UI can show agent activity.
+    fn emit_tool_call(&self, tool_call_id: &str, title: &str, kind: &str, status: &str) {
+        let _ = self.app.emit(
+            events::TOOL_CALL,
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "toolCallId": tool_call_id,
+                "title": title,
+                "kind": kind,
+                "status": status
+            }),
+        );
+    }
+
+    /// Emit a tool-result event to update a tool call's status in the UI.
+    fn emit_tool_result(&self, tool_call_id: &str, status: &str) {
+        let _ = self.app.emit(
+            events::TOOL_RESULT,
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "toolCallId": tool_call_id,
+                "status": status
+            }),
+        );
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -541,11 +571,24 @@ impl Client for ClientDelegate {
 
     async fn read_text_file(&self, args: ReadTextFileRequest) -> AcpResult<ReadTextFileResponse> {
         let path = std::path::Path::new(&self.cwd).join(&args.path);
+        let display_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| args.path.to_string_lossy().to_string());
+        let tool_call_id = Uuid::new_v4().to_string();
+
+        self.emit_tool_call(&tool_call_id, &format!("Read {display_name}"), "File", "Running");
 
         match tokio::fs::read_to_string(&path).await {
-            Ok(content) => Ok(ReadTextFileResponse::new(content)),
-            Err(e) => Err(agent_client_protocol::Error::internal_error()
-                .data(serde_json::Value::String(e.to_string()))),
+            Ok(content) => {
+                self.emit_tool_result(&tool_call_id, "Completed");
+                Ok(ReadTextFileResponse::new(content))
+            }
+            Err(e) => {
+                self.emit_tool_result(&tool_call_id, "Failed");
+                Err(agent_client_protocol::Error::internal_error()
+                    .data(serde_json::Value::String(e.to_string())))
+            }
         }
     }
 
@@ -569,6 +612,26 @@ impl Client for ClientDelegate {
 
         // Get embedded runtime PATH
         let env_path = crate::embedded_runtime::get_embedded_path().to_string();
+
+        // Emit tool activity for the terminal command
+        let tool_call_id = Uuid::new_v4().to_string();
+        let cmd_label = if args.args.is_empty() {
+            args.command.clone()
+        } else {
+            let full = format!("{} {}", args.command, args.args.join(" "));
+            if full.len() > 80 {
+                format!("{}...", &full[..77])
+            } else {
+                full
+            }
+        };
+        self.emit_tool_call(&tool_call_id, &cmd_label, "Terminal", "Running");
+
+        // Track terminal→tool_call mapping for status updates on exit
+        self.terminal_tool_calls
+            .lock()
+            .await
+            .insert(terminal_id.clone(), tool_call_id);
 
         let mut terminals = self.terminals.lock().await;
         terminals
@@ -622,6 +685,16 @@ impl Client for ClientDelegate {
         &self,
         args: ReleaseTerminalRequest,
     ) -> AcpResult<ReleaseTerminalResponse> {
+        // Clean up tool call tracking if terminal released without waiting for exit
+        if let Some(tool_call_id) = self
+            .terminal_tool_calls
+            .lock()
+            .await
+            .remove(args.terminal_id.0.as_ref())
+        {
+            self.emit_tool_result(&tool_call_id, "Completed");
+        }
+
         let mut terminals = self.terminals.lock().await;
         let _ = terminals.release(&args.terminal_id.0);
         Ok(ReleaseTerminalResponse::default())
@@ -638,6 +711,21 @@ impl Client for ClientDelegate {
             .map_err(|e| {
                 agent_client_protocol::Error::internal_error().data(serde_json::Value::String(e))
             })?;
+
+        // Update the tool call status for this terminal
+        if let Some(tool_call_id) = self
+            .terminal_tool_calls
+            .lock()
+            .await
+            .remove(args.terminal_id.0.as_ref())
+        {
+            let result_status = if status.exit_code == Some(0) {
+                "Completed"
+            } else {
+                "Failed"
+            };
+            self.emit_tool_result(&tool_call_id, result_status);
+        }
 
         let mut acp_status = agent_client_protocol::TerminalExitStatus::new();
         if let Some(code) = status.exit_code {
@@ -1104,6 +1192,7 @@ async fn run_session_worker(
         sandbox_mode,
         pending_permissions,
         pending_diff_proposals,
+        terminal_tool_calls: Arc::new(Mutex::new(HashMap::new())),
     };
 
     // Create ACP connection - use spawn_local since we're in a LocalSet
