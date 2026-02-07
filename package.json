@@ -4,6 +4,7 @@
   "description": "Open source AI-powered desktop IDE with integrated chat, code completion, and MCP integration",
   "type": "module",
   "scripts": {
+    "postinstall": "./scripts/setup-claude-env.sh || true",
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
