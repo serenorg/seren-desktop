@@ -105,13 +105,17 @@ export interface ImageContentBlock {
 export type ContentBlock = TextContentBlock | ImageContentBlock;
 
 /**
- * Image attachment metadata stored with messages.
+ * File attachment metadata stored with messages.
+ * Supports images, PDFs, and text/code files.
  */
-export interface ImageAttachment {
+export interface Attachment {
   name: string;
   mimeType: string;
   base64: string; // raw base64 without data URL prefix
 }
+
+/** @deprecated Use Attachment instead */
+export type ImageAttachment = Attachment;
 
 /**
  * Message format for chat requests.

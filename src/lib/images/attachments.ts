@@ -1,20 +1,124 @@
-// ABOUTME: Image attachment utilities for picking, reading, and validating images.
-// ABOUTME: Provides file dialog integration, base64 conversion, and resizing for chat image attachments.
+// ABOUTME: File attachment utilities for picking, reading, and validating attachments.
+// ABOUTME: Supports images (with resizing), PDFs, and text/code files for chat and agent inputs.
 
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { ImageAttachment } from "@/lib/providers/types";
+import type { Attachment } from "@/lib/providers/types";
 
-const SUPPORTED_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
 const MAX_BASE64_SIZE = 27 * 1024 * 1024; // ~20MB file = ~27MB base64
 const MAX_IMAGE_DIMENSION = 1024;
 
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
+
+const DOCUMENT_EXTENSIONS = ["pdf"];
+
+const TEXT_EXTENSIONS = [
+  // Plain text & markup
+  "txt",
+  "md",
+  "csv",
+  "json",
+  "xml",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "cfg",
+  "conf",
+  "env",
+  "log",
+  // Web
+  "html",
+  "htm",
+  "css",
+  "svg",
+  // Programming languages
+  "js",
+  "ts",
+  "jsx",
+  "tsx",
+  "py",
+  "rs",
+  "go",
+  "java",
+  "c",
+  "cpp",
+  "h",
+  "hpp",
+  "cs",
+  "rb",
+  "swift",
+  "kt",
+  "r",
+  "lua",
+  "sh",
+  "bash",
+  "zsh",
+  "ps1",
+  "sql",
+  "graphql",
+  "proto",
+];
+
+const ALL_EXTENSIONS = [
+  ...IMAGE_EXTENSIONS,
+  ...DOCUMENT_EXTENSIONS,
+  ...TEXT_EXTENSIONS,
+];
+
 const MIME_TYPES: Record<string, string> = {
+  // Images
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   gif: "image/gif",
   webp: "image/webp",
+  svg: "image/svg+xml",
+  // Documents
+  pdf: "application/pdf",
+  // Text & markup
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  json: "application/json",
+  xml: "application/xml",
+  yaml: "text/yaml",
+  yml: "text/yaml",
+  toml: "text/plain",
+  ini: "text/plain",
+  cfg: "text/plain",
+  conf: "text/plain",
+  env: "text/plain",
+  log: "text/plain",
+  html: "text/html",
+  htm: "text/html",
+  css: "text/css",
+  // Code
+  js: "text/javascript",
+  ts: "text/typescript",
+  jsx: "text/javascript",
+  tsx: "text/typescript",
+  py: "text/x-python",
+  rs: "text/x-rust",
+  go: "text/x-go",
+  java: "text/x-java",
+  c: "text/x-c",
+  cpp: "text/x-c++",
+  h: "text/x-c",
+  hpp: "text/x-c++",
+  cs: "text/x-csharp",
+  rb: "text/x-ruby",
+  swift: "text/x-swift",
+  kt: "text/x-kotlin",
+  r: "text/x-r",
+  lua: "text/x-lua",
+  sh: "text/x-shellscript",
+  bash: "text/x-shellscript",
+  zsh: "text/x-shellscript",
+  ps1: "text/x-powershell",
+  sql: "text/x-sql",
+  graphql: "text/x-graphql",
+  proto: "text/x-protobuf",
 };
 
 function getExtension(path: string): string {
@@ -26,6 +130,20 @@ function getFileName(path: string): string {
   const parts = path.split("/");
   const winParts = parts[parts.length - 1].split("\\");
   return winParts[winParts.length - 1];
+}
+
+/** Check whether a MIME type represents an image. */
+export function isImageMime(mimeType: string): boolean {
+  return mimeType.startsWith("image/");
+}
+
+/** Check whether a MIME type represents a text/code file. */
+export function isTextMime(mimeType: string): boolean {
+  return (
+    mimeType.startsWith("text/") ||
+    mimeType === "application/json" ||
+    mimeType === "application/xml"
+  );
 }
 
 /**
@@ -83,17 +201,29 @@ function resizeImage(
 }
 
 /**
- * Open a file dialog to pick one or more images.
- * Returns file paths selected by the user.
+ * Open a file dialog to pick one or more files.
+ * Accepts images, PDFs, and text/code files.
  */
-export async function pickImageFiles(): Promise<string[]> {
+export async function pickFiles(): Promise<string[]> {
   const selected = await open({
     multiple: true,
-    title: "Attach Images",
+    title: "Attach Files",
     filters: [
       {
+        name: "All Supported",
+        extensions: ALL_EXTENSIONS,
+      },
+      {
         name: "Images",
-        extensions: SUPPORTED_EXTENSIONS,
+        extensions: IMAGE_EXTENSIONS,
+      },
+      {
+        name: "Documents",
+        extensions: DOCUMENT_EXTENSIONS,
+      },
+      {
+        name: "Text & Code",
+        extensions: TEXT_EXTENSIONS,
       },
     ],
   });
@@ -104,53 +234,71 @@ export async function pickImageFiles(): Promise<string[]> {
 }
 
 /**
- * Read an image file, resize it, and convert it to an ImageAttachment.
+ * Read a file and convert it to an Attachment.
+ * Images are resized; PDFs and text files are read as-is.
  */
-export async function readImageAttachment(
-  path: string,
-): Promise<ImageAttachment> {
+export async function readAttachment(path: string): Promise<Attachment> {
   const ext = getExtension(path);
   const mimeType = MIME_TYPES[ext];
   if (!mimeType) {
-    throw new Error(`Unsupported image format: .${ext}`);
+    throw new Error(`Unsupported file format: .${ext}`);
   }
 
   const base64 = await invoke<string>("read_file_base64", { path });
   if (base64.length > MAX_BASE64_SIZE) {
-    throw new Error("Image too large (max 20MB)");
+    throw new Error("File too large (max 20MB)");
   }
 
-  const resized = await resizeImage(base64, mimeType, MAX_IMAGE_DIMENSION);
+  // Only resize raster images (not SVGs, PDFs, or text files)
+  if (isImageMime(mimeType) && mimeType !== "image/svg+xml") {
+    const resized = await resizeImage(base64, mimeType, MAX_IMAGE_DIMENSION);
+    return {
+      name: getFileName(path),
+      mimeType: resized.mimeType,
+      base64: resized.base64,
+    };
+  }
 
   return {
     name: getFileName(path),
-    mimeType: resized.mimeType,
-    base64: resized.base64,
+    mimeType,
+    base64,
   };
 }
 
 /**
- * Pick images via file dialog and return them as attachments.
+ * Pick files via dialog and return them as attachments.
  */
-export async function pickAndReadImages(): Promise<ImageAttachment[]> {
-  const paths = await pickImageFiles();
-  const attachments: ImageAttachment[] = [];
+export async function pickAndReadAttachments(): Promise<Attachment[]> {
+  const paths = await pickFiles();
+  const attachments: Attachment[] = [];
 
   for (const path of paths) {
     try {
-      const attachment = await readImageAttachment(path);
+      const attachment = await readAttachment(path);
       attachments.push(attachment);
     } catch (error) {
-      console.warn(`[attachments] Failed to read image ${path}:`, error);
+      console.warn(`[attachments] Failed to read file ${path}:`, error);
     }
   }
 
   return attachments;
 }
 
+// --- Backward-compatible aliases ---
+
+/** @deprecated Use pickFiles instead */
+export const pickImageFiles = pickFiles;
+
+/** @deprecated Use readAttachment instead */
+export const readImageAttachment = readAttachment;
+
+/** @deprecated Use pickAndReadAttachments instead */
+export const pickAndReadImages = pickAndReadAttachments;
+
 /**
- * Build a data URL from an ImageAttachment.
+ * Build a data URL from an Attachment.
  */
-export function toDataUrl(attachment: ImageAttachment): string {
+export function toDataUrl(attachment: Attachment): string {
   return `data:${attachment.mimeType};base64,${attachment.base64}`;
 }
