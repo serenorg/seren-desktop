@@ -52,6 +52,11 @@ fn is_auth_error(msg: &str) -> bool {
         || lower.contains("please obtain a new token")
         || lower.contains("refresh your existing token")
         || lower.contains("401")
+        // Codex-specific: "Invalid request" usually means missing/invalid OpenAI credentials
+        || (lower.contains("codex") && lower.contains("invalid request"))
+        || (lower.contains("codex") && lower.contains("-32600"))
+        || lower.contains("openai api key")
+        || lower.contains("codex connection error")
 }
 
 /// Return a user-friendly auth error message for the given agent type
@@ -79,153 +84,28 @@ fn launch_claude_login() {
     }
 }
 
-/// Open a terminal running the OpenClaw Codex OAuth flow so the user can authenticate
+/// Open a terminal running the Codex CLI login flow so the user can authenticate
 fn launch_codex_login() {
-    #[cfg(not(feature = "openclaw"))]
-    {
-        log::warn!("[ACP] Codex login requested but openclaw feature is disabled");
-        return;
-    }
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("osascript")
+            .args([
+                "-e",
+                r#"tell application "Terminal" to do script "codex login""#,
+            ])
+            .spawn()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "cmd", "/c", "codex login"])
+            .spawn()
+    } else {
+        std::process::Command::new("x-terminal-emulator")
+            .args(["-e", "codex login"])
+            .spawn()
+    };
 
-    #[cfg(feature = "openclaw")]
-    {
-        use std::path::Path;
-
-        fn escape_unix(value: &str) -> String {
-            value.replace('\'', "'\\''")
-        }
-        fn quote_unix_path(path: &Path) -> String {
-            format!("'{}'", escape_unix(&path.to_string_lossy()))
-        }
-        fn quote_unix_str(value: &str) -> String {
-            format!("'{}'", escape_unix(value))
-        }
-
-        let openclaw_entry = match crate::openclaw::find_openclaw_mjs() {
-            Ok(path) => path,
-            Err(err) => {
-                log::warn!(
-                    "[ACP] Unable to locate openclaw.mjs for Codex login: {}",
-                    err
-                );
-                return;
-            }
-        };
-        let openclaw_dir = match openclaw_entry.parent() {
-            Some(dir) => dir.to_path_buf(),
-            None => {
-                log::warn!("[ACP] Invalid openclaw.mjs path: {:?}", openclaw_entry);
-                return;
-            }
-        };
-        let embedded_path = crate::embedded_runtime::get_embedded_path();
-
-        #[cfg(target_os = "macos")]
-        {
-            let mut script_parts: Vec<String> = Vec::new();
-            if !embedded_path.is_empty() {
-                script_parts.push(format!("export PATH={}", quote_unix_str(embedded_path),));
-            }
-            script_parts.push(format!("cd {}", quote_unix_path(&openclaw_dir)));
-            script_parts.push(format!(
-                "node {} models auth login --provider openai-codex",
-                quote_unix_path(&openclaw_entry)
-            ));
-            let script = script_parts.join(" && ");
-            let apple_script = format!(
-                "tell application \"Terminal\" to do script \"{}\"",
-                script.replace('\\', "\\\\").replace('"', "\\\"")
-            );
-            match std::process::Command::new("osascript")
-                .args(["-e", &apple_script])
-                .spawn()
-            {
-                Ok(_) => log::info!("[ACP] Launched Codex OAuth flow in Terminal"),
-                Err(err) => log::warn!("[ACP] Failed to launch Codex login terminal: {}", err),
-            }
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            let mut script_parts: Vec<String> = Vec::new();
-            if !embedded_path.is_empty() {
-                script_parts.push(format!("export PATH={}", quote_unix_str(embedded_path),));
-            }
-            script_parts.push(format!("cd {}", quote_unix_path(&openclaw_dir)));
-            script_parts.push(format!(
-                "node {} models auth login --provider openai-codex",
-                quote_unix_path(&openclaw_entry)
-            ));
-            let script = script_parts.join(" && ");
-
-            let mut launched = false;
-            let terminal_commands: [(&str, &[&str]); 3] = [
-                ("x-terminal-emulator", &["-e", "bash", "-lc"]),
-                ("gnome-terminal", &["--", "bash", "-lc"]),
-                ("konsole", &["-e", "bash", "-lc"]),
-            ];
-            for (terminal, args) in terminal_commands {
-                let spawn_result = std::process::Command::new(terminal)
-                    .args(args)
-                    .arg(&script)
-                    .spawn();
-                match spawn_result {
-                    Ok(_) => {
-                        launched = true;
-                        log::info!("[ACP] Launched Codex OAuth flow via {}", terminal);
-                        break;
-                    }
-                    Err(err) => {
-                        log::debug!(
-                            "[ACP] Failed to launch {} for Codex login: {}",
-                            terminal,
-                            err
-                        );
-                    }
-                }
-            }
-
-            if !launched {
-                if let Err(err) = std::process::Command::new("bash")
-                    .args(["-lc", &script])
-                    .spawn()
-                {
-                    log::warn!(
-                        "[ACP] Failed to launch Codex login fallback shell session: {}",
-                        err
-                    );
-                } else {
-                    log::info!(
-                        "[ACP] Started Codex OAuth flow in background bash session (no GUI terminal found)"
-                    );
-                }
-            }
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            let mut script_parts: Vec<String> = Vec::new();
-            if !embedded_path.is_empty() {
-                let escaped = embedded_path.replace('"', "\"\"");
-                script_parts.push(format!("set \"PATH={}\"", escaped));
-            }
-            script_parts.push(format!(
-                "cd /d \"{}\"",
-                openclaw_dir.to_string_lossy().replace('"', "\"\"")
-            ));
-            script_parts.push(format!(
-                "node \"{}\" models auth login --provider openai-codex",
-                openclaw_entry.to_string_lossy().replace('"', "\"\"")
-            ));
-            let script = script_parts.join(" && ");
-            match std::process::Command::new("cmd")
-                .args(["/c", "start", "cmd", "/k", &script])
-                .spawn()
-            {
-                Ok(_) => log::info!("[ACP] Launched Codex OAuth flow (Windows cmd)"),
-                Err(err) => log::warn!("[ACP] Failed to launch Codex login cmd: {}", err),
-            }
-        }
+    match result {
+        Ok(_) => log::info!("[ACP] Launched codex login terminal"),
+        Err(e) => log::warn!("[ACP] Failed to launch codex login terminal: {}", e),
     }
 }
 
@@ -315,7 +195,7 @@ fn auth_error_message(agent_type: AgentType) -> String {
     match agent_type {
         AgentType::ClaudeCode => "Claude login required. A terminal window has been opened to run `claude login`. Complete authentication there and retry."
             .to_string(),
-        AgentType::Codex => "OpenAI Codex login required. We opened an OpenClaw terminal to run `openclaw models auth login --provider openai-codex`. Complete the browser flow, then retry."
+        AgentType::Codex => "Codex login required. A terminal window has been opened to run `codex login`. Complete authentication there and retry."
             .to_string(),
     }
 }
