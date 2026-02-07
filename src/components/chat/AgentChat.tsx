@@ -4,6 +4,7 @@
 import type { Component } from "solid-js";
 import {
   createEffect,
+  createMemo,
   createSignal,
   For,
   on,
@@ -65,8 +66,18 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [commandStatus, setCommandStatus] = createSignal<string | null>(null);
   const [commandPopupIndex, setCommandPopupIndex] = createSignal(0);
+  const [historyIndex, setHistoryIndex] = createSignal(-1);
+  const [savedInput, setSavedInput] = createSignal("");
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
+
+  // Build reversed list of user prompts for Up/Down arrow navigation
+  const userMessageHistory = createMemo(() =>
+    acpStore.messages
+      .filter((m) => m.type === "user")
+      .map((m) => m.content)
+      .reverse(),
+  );
 
   const onPickImages = () => handleAttachImages();
   onMount(() => {
@@ -234,6 +245,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
     setInput("");
     setAttachedImages([]);
+    setHistoryIndex(-1);
+    setSavedInput("");
     await acpStore.sendPrompt(trimmed, context);
   };
 
@@ -297,6 +310,37 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           event.preventDefault();
           setInput("");
           return;
+        }
+      }
+    }
+
+    // Up arrow: navigate to older prompts
+    const history = userMessageHistory();
+    if (event.key === "ArrowUp" && history.length > 0) {
+      const textarea = event.currentTarget as HTMLTextAreaElement;
+      if (textarea.selectionStart === 0 || input() === "") {
+        event.preventDefault();
+        if (historyIndex() === -1) {
+          setSavedInput(input());
+        }
+        const newIndex = Math.min(historyIndex() + 1, history.length - 1);
+        setHistoryIndex(newIndex);
+        setInput(history[newIndex]);
+      }
+    }
+
+    // Down arrow: navigate to newer prompts
+    if (event.key === "ArrowDown" && historyIndex() >= 0) {
+      const textarea = event.currentTarget as HTMLTextAreaElement;
+      if (textarea.selectionStart === textarea.value.length) {
+        event.preventDefault();
+        const newIndex = historyIndex() - 1;
+        setHistoryIndex(newIndex);
+        if (newIndex < 0) {
+          setInput(savedInput());
+          setSavedInput("");
+        } else {
+          setInput(history[newIndex]);
         }
       }
     }
