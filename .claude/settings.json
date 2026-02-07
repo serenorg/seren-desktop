@@ -1,0 +1,10 @@
+{
+  "env": {
+    "PATH": "$HOME/.cargo/bin:$PATH"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(/Users/taariqlewis/Projects/Seren_Projects/seren-desktop/src-tauri/embedded-runtime/bin/seren-acp-claude:*)"
+    ]
+  }
+}
