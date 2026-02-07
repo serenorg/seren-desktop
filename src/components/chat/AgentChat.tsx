@@ -177,11 +177,33 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const sendMessage = async () => {
     const trimmed = input().trim();
     const images = attachedImages();
-    if ((!trimmed && images.length === 0) || !hasSession()) return;
+
+    console.log("[AgentChat] sendMessage called:", {
+      trimmed,
+      imagesCount: images.length,
+      hasSession: hasSession(),
+      isPrompting: isPrompting(),
+      isReady: isReady(),
+      activeSessionId: acpStore.activeSessionId,
+      activeSession: acpStore.activeSession?.info.status,
+    });
+
+    if (!hasSession()) {
+      console.log("[AgentChat] sendMessage: early return - no active session");
+      return;
+    }
+
+    if (!trimmed && images.length === 0) {
+      console.log("[AgentChat] sendMessage: early return - no input text or images");
+      return;
+    }
 
     // Check for slash commands first
     if (trimmed.startsWith("/") && images.length === 0) {
-      if (executeSlashCommand(trimmed)) return;
+      if (executeSlashCommand(trimmed)) {
+        console.log("[AgentChat] sendMessage: slash command executed");
+        return;
+      }
     }
 
     // If agent is prompting, queue the message instead
@@ -200,9 +222,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           }))
         : undefined;
 
+    console.log("[AgentChat] sendMessage: sending to acpStore.sendPrompt");
     setInput("");
     setAttachedImages([]);
     await acpStore.sendPrompt(trimmed, context);
+    console.log("[AgentChat] sendMessage: acpStore.sendPrompt completed");
   };
 
   // Process queued messages when agent becomes ready
@@ -237,6 +261,27 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    // Also capture the DOM value directly in case of reactivity issues
+    const domValue = (event.target as HTMLTextAreaElement).value;
+    const signalValue = input();
+
+    console.log("[AgentChat] handleKeyDown:", {
+      key: event.key,
+      shiftKey: event.shiftKey,
+      signalValue,
+      domValue,
+      valueMatch: signalValue === domValue,
+      hasSession: hasSession(),
+      isPrompting: isPrompting(),
+      isReady: isReady(),
+    });
+
+    // Sync signal with DOM if they're out of sync (potential reactivity fix)
+    if (signalValue !== domValue) {
+      console.warn("[AgentChat] Signal/DOM value mismatch detected, syncing...");
+      setInput(domValue);
+    }
+
     // Slash command popup keyboard navigation
     const isSlashInput = input().startsWith("/") && !input().includes(" ");
     if (isSlashInput) {
@@ -259,6 +304,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             setInput(`/${selected.name} `);
             setCommandPopupIndex(0);
           }
+          console.log("[AgentChat] Slash command selected, returning early");
           return;
         }
         if (event.key === "Escape") {
@@ -270,8 +316,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
 
     if (event.key === "Enter" && !event.shiftKey) {
+      console.log("[AgentChat] Enter pressed, calling sendMessage");
       event.preventDefault();
-      sendMessage();
+      sendMessage().catch((error) => {
+        console.error("[AgentChat] sendMessage error:", error);
+      });
     }
   };
 
