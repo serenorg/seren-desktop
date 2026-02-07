@@ -1,8 +1,9 @@
 // ABOUTME: Tab bar for managing multiple chat conversations.
-// ABOUTME: Displays tabs with close buttons and a new chat button.
+// ABOUTME: Displays tabs with close buttons, permission indicators, and a new chat button.
 
 import { type Component, For, Show } from "solid-js";
 import { type Conversation, chatStore } from "@/stores/chat.store";
+import { hasPendingApprovals } from "@/stores/mcp-chat.store";
 
 export const ChatTabBar: Component = () => {
   const handleNewChat = async () => {
@@ -58,6 +59,17 @@ export const ChatTabBar: Component = () => {
                   : conversation.title
               }
             >
+              <Show
+                when={
+                  conversation.id === chatStore.activeConversationId &&
+                  hasPendingApprovals()
+                }
+              >
+                <span
+                  class="permission-indicator"
+                  title="Permission required"
+                />
+              </Show>
               <span class="overflow-hidden text-ellipsis max-w-[140px]">
                 {conversation.title}
               </span>

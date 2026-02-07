@@ -1,7 +1,14 @@
 // ABOUTME: Tab bar for managing multiple agent sessions.
-// ABOUTME: Displays session tabs with close buttons and a new session button with agent type picker.
+// ABOUTME: Displays session tabs with permission indicators, close buttons, and agent type picker.
 
-import { type Component, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import {
+  type Component,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import type { AgentType } from "@/services/acp";
 import { acpStore } from "@/stores/acp.store";
 
@@ -26,12 +33,22 @@ export const AgentTabBar: Component<AgentTabBarProps> = (props) => {
   const sessionLabel = (id: string, index: number) => {
     const session = acpStore.sessions[id];
     const agentType = session?.info?.agentType ?? "Agent";
-    const label = agentType === "claude-code" ? "Claude" : agentType === "codex" ? "Codex" : agentType;
+    const label =
+      agentType === "claude-code"
+        ? "Claude"
+        : agentType === "codex"
+          ? "Codex"
+          : agentType;
     return `${label} #${index + 1}`;
   };
 
   const availableAgents = () =>
     acpStore.availableAgents.filter((a) => a.available);
+
+  // Check if a session has pending permission requests
+  const sessionHasPendingPermissions = (sessionId: string) =>
+    acpStore.pendingPermissions.some((p) => p.sessionId === sessionId) ||
+    acpStore.pendingDiffProposals.some((p) => p.sessionId === sessionId);
 
   const handleNewClick = () => {
     const agents = availableAgents();
@@ -72,6 +89,12 @@ export const AgentTabBar: Component<AgentTabBarProps> = (props) => {
               onClick={() => handleTabClick(id)}
               title={sessionLabel(id, index())}
             >
+              <Show when={sessionHasPendingPermissions(id)}>
+                <span
+                  class="permission-indicator"
+                  title="Permission required"
+                />
+              </Show>
               <span class="overflow-hidden text-ellipsis max-w-[140px]">
                 {sessionLabel(id, index())}
               </span>
