@@ -1,5 +1,5 @@
 // ABOUTME: Image attachment utilities for picking, reading, and validating images.
-// ABOUTME: Provides file dialog integration and base64 conversion for chat image attachments.
+// ABOUTME: Provides file dialog integration, base64 conversion, and resizing for chat image attachments.
 
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -7,6 +7,7 @@ import type { ImageAttachment } from "@/lib/providers/types";
 
 const SUPPORTED_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
 const MAX_BASE64_SIZE = 27 * 1024 * 1024; // ~20MB file = ~27MB base64
+const MAX_IMAGE_DIMENSION = 1024;
 
 const MIME_TYPES: Record<string, string> = {
   png: "image/png",
@@ -25,6 +26,60 @@ function getFileName(path: string): string {
   const parts = path.split("/");
   const winParts = parts[parts.length - 1].split("\\");
   return winParts[winParts.length - 1];
+}
+
+/**
+ * Resize an image to fit within maxDim on both sides using canvas.
+ * Returns the resized base64 and updated mimeType.
+ * GIF images are not resized (may be animated).
+ */
+function resizeImage(
+  base64: string,
+  mimeType: string,
+  maxDim: number,
+): Promise<{ base64: string; mimeType: string }> {
+  if (mimeType === "image/gif") {
+    return Promise.resolve({ base64, mimeType });
+  }
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+
+      if (width <= maxDim && height <= maxDim) {
+        resolve({ base64, mimeType });
+        return;
+      }
+
+      if (width > height) {
+        height = Math.round(height * (maxDim / width));
+        width = maxDim;
+      } else {
+        width = Math.round(width * (maxDim / height));
+        height = maxDim;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Failed to create canvas context"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Keep PNG for transparency, JPEG for everything else
+      const outputMime = mimeType === "image/png" ? "image/png" : "image/jpeg";
+      const quality = outputMime === "image/jpeg" ? 0.85 : undefined;
+      const dataUrl = canvas.toDataURL(outputMime, quality);
+      const resizedBase64 = dataUrl.split(",")[1];
+      resolve({ base64: resizedBase64, mimeType: outputMime });
+    };
+    img.onerror = () => reject(new Error("Failed to load image for resizing"));
+    img.src = `data:${mimeType};base64,${base64}`;
+  });
 }
 
 /**
@@ -49,7 +104,7 @@ export async function pickImageFiles(): Promise<string[]> {
 }
 
 /**
- * Read an image file and convert it to an ImageAttachment.
+ * Read an image file, resize it, and convert it to an ImageAttachment.
  */
 export async function readImageAttachment(
   path: string,
@@ -65,10 +120,12 @@ export async function readImageAttachment(
     throw new Error("Image too large (max 20MB)");
   }
 
+  const resized = await resizeImage(base64, mimeType, MAX_IMAGE_DIMENSION);
+
   return {
     name: getFileName(path),
-    mimeType,
-    base64,
+    mimeType: resized.mimeType,
+    base64: resized.base64,
   };
 }
 

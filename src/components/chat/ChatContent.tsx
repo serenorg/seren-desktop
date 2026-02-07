@@ -486,6 +486,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       status: "complete",
     };
 
+    // Snapshot history BEFORE adding the current message to avoid duplication
+    // (streamMessageWithTools adds the current message separately)
+    const history = [...chatStore.messages];
+
     chatStore.addMessage(userMessage);
     await chatStore.persistMessage(userMessage);
 
@@ -506,7 +510,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             chatStore.selectedModel,
             context,
             true,
-            chatStore.messages,
+            history,
             images,
           ),
           toolsEnabled: true,
