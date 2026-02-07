@@ -531,8 +531,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           >
             <For each={acpStore.messages}>{renderMessage}</For>
 
-            {/* Diff proposal dialogs */}
-            <For each={acpStore.pendingDiffProposals}>
+            {/* Diff proposal dialogs (scoped to active session) */}
+            <For
+              each={acpStore.pendingDiffProposals.filter(
+                (p) => p.sessionId === acpStore.activeSessionId,
+              )}
+            >
               {(proposal) => (
                 <div class="px-5 py-2">
                   <DiffProposalDialog proposal={proposal} />
@@ -540,8 +544,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               )}
             </For>
 
-            {/* Permission request dialogs */}
-            <For each={acpStore.pendingPermissions}>
+            {/* Permission request dialogs (scoped to active session) */}
+            <For
+              each={acpStore.pendingPermissions.filter(
+                (p) => p.sessionId === acpStore.activeSessionId,
+              )}
+            >
               {(perm) => (
                 <div class="px-5 py-2">
                   <AcpPermissionDialog permission={perm} />
