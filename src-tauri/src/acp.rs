@@ -52,11 +52,6 @@ fn is_auth_error(msg: &str) -> bool {
         || lower.contains("please obtain a new token")
         || lower.contains("refresh your existing token")
         || lower.contains("401")
-        // Codex-specific: "Invalid request" usually means missing/invalid OpenAI credentials
-        || (lower.contains("codex") && lower.contains("invalid request"))
-        || (lower.contains("codex") && lower.contains("-32600"))
-        || lower.contains("openai api key")
-        || lower.contains("codex connection error")
 }
 
 /// Return a user-friendly auth error message for the given agent type
