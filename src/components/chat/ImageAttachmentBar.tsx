@@ -15,13 +15,23 @@ interface ImageAttachmentBarProps {
 export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
   props,
 ) => {
+  // Debug logging to trace rendering
+  console.log(
+    "[ImageAttachmentBar] Rendering with",
+    props.images.length,
+    "images",
+  );
+
   return (
     <div class="flex items-center gap-2">
       {/* Attach button */}
       <button
         type="button"
         class="flex items-center gap-1 px-2 py-1 bg-transparent border border-[#30363d] text-[#8b949e] rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3]"
-        onClick={props.onAttach}
+        onClick={() => {
+          console.log("[ImageAttachmentBar] Attach button clicked");
+          props.onAttach();
+        }}
         title="Attach files"
       >
         <svg

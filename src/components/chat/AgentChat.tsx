@@ -139,9 +139,41 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const handleAttachImages = async () => {
-    const files = await pickAndReadAttachments();
-    if (files.length > 0) {
-      setAttachedImages((prev) => [...prev, ...files]);
+    console.log(
+      "[AgentChat] handleAttachImages called, hasSession:",
+      hasSession(),
+    );
+    try {
+      const files = await pickAndReadAttachments();
+      console.log(
+        "[AgentChat] pickAndReadAttachments returned:",
+        files.length,
+        "files",
+        files.map((f) => f.name),
+      );
+      if (files.length > 0) {
+        setAttachedImages((prev) => {
+          const newAttachments = [...prev, ...files];
+          console.log(
+            "[AgentChat] Updating attachedImages, prev:",
+            prev.length,
+            "adding:",
+            files.length,
+            "total:",
+            newAttachments.length,
+          );
+          return newAttachments;
+        });
+        // Log the current state after the update
+        console.log(
+          "[AgentChat] attachedImages after update:",
+          attachedImages().length,
+        );
+      } else {
+        console.log("[AgentChat] No files selected or dialog cancelled");
+      }
+    } catch (error) {
+      console.error("[AgentChat] handleAttachImages error:", error);
     }
   };
 

@@ -205,32 +205,39 @@ function resizeImage(
  * Accepts images, PDFs, and text/code files.
  */
 export async function pickFiles(): Promise<string[]> {
-  const selected = await open({
-    multiple: true,
-    title: "Attach Files",
-    filters: [
-      {
-        name: "All Supported",
-        extensions: ALL_EXTENSIONS,
-      },
-      {
-        name: "Images",
-        extensions: IMAGE_EXTENSIONS,
-      },
-      {
-        name: "Documents",
-        extensions: DOCUMENT_EXTENSIONS,
-      },
-      {
-        name: "Text & Code",
-        extensions: TEXT_EXTENSIONS,
-      },
-    ],
-  });
+  console.log("[attachments] pickFiles called, opening dialog...");
+  try {
+    const selected = await open({
+      multiple: true,
+      title: "Attach Files",
+      filters: [
+        {
+          name: "All Supported",
+          extensions: ALL_EXTENSIONS,
+        },
+        {
+          name: "Images",
+          extensions: IMAGE_EXTENSIONS,
+        },
+        {
+          name: "Documents",
+          extensions: DOCUMENT_EXTENSIONS,
+        },
+        {
+          name: "Text & Code",
+          extensions: TEXT_EXTENSIONS,
+        },
+      ],
+    });
 
-  if (!selected) return [];
-  if (typeof selected === "string") return [selected];
-  return selected;
+    console.log("[attachments] pickFiles dialog result:", selected);
+    if (!selected) return [];
+    if (typeof selected === "string") return [selected];
+    return selected;
+  } catch (error) {
+    console.error("[attachments] pickFiles error:", error);
+    throw error;
+  }
 }
 
 /**
