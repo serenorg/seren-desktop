@@ -310,7 +310,14 @@ export async function* streamMessageWithTools(
       `You are a helpful coding assistant running inside Seren Desktop with access to ${toolCount} tools. ` +
       "You can read, write, and create files and directories on the user's computer using the available tools. " +
       "When the user asks you to save, export, or write content to a file, use the write_file tool to save it to their filesystem. " +
-      "Always ask for the desired file path if the user doesn't specify one." +
+      "Always ask for the desired file path if the user doesn't specify one.\n\n" +
+      "IMPORTANT — Tool Usage Guidelines:\n" +
+      "- ALWAYS use your tools proactively to accomplish tasks. Do NOT tell the user you cannot do something if a tool can help.\n" +
+      "- For web searches: use seren_web_fetch with a search engine URL like " +
+      "'https://html.duckduckgo.com/html/?q=your+search+terms' to find information.\n" +
+      "- For fetching web pages: use seren_web_fetch with the page URL.\n" +
+      "- Chain tool calls when needed: search first to find URLs, then fetch those URLs for full content.\n" +
+      "- NEVER say 'I cannot browse the web' or 'I need a URL' — you CAN search by constructing search engine URLs." +
       serenPublishersContext;
   } else {
     // No tools available - don't claim tool capabilities
