@@ -1,13 +1,13 @@
-// ABOUTME: Shared image attachment UI for chat and agent input areas.
-// ABOUTME: Shows attach button, image thumbnails, and remove controls.
+// ABOUTME: Shared file attachment UI for chat and agent input areas.
+// ABOUTME: Shows attach button, thumbnails for images, and file icons for other types.
 
 import type { Component } from "solid-js";
 import { For, Show } from "solid-js";
-import { toDataUrl } from "@/lib/images/attachments";
-import type { ImageAttachment } from "@/lib/providers/types";
+import { isImageMime, toDataUrl } from "@/lib/images/attachments";
+import type { Attachment } from "@/lib/providers/types";
 
 interface ImageAttachmentBarProps {
-  images: ImageAttachment[];
+  images: Attachment[];
   onAttach: () => void;
   onRemove: (index: number) => void;
 }
@@ -22,7 +22,7 @@ export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
         type="button"
         class="flex items-center gap-1 px-2 py-1 bg-transparent border border-[#30363d] text-[#8b949e] rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3]"
         onClick={props.onAttach}
-        title="Attach images"
+        title="Attach files"
       >
         <svg
           width="14"
@@ -41,27 +41,50 @@ export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
         Attach
       </button>
 
-      {/* Image thumbnails */}
+      {/* Attachment thumbnails */}
       <Show when={props.images.length > 0}>
         <div class="flex items-center gap-1.5 overflow-x-auto">
           <For each={props.images}>
-            {(image, index) => (
+            {(file, index) => (
               <div class="relative group flex-shrink-0">
-                <img
-                  src={toDataUrl(image)}
-                  alt={image.name}
-                  class="w-10 h-10 object-cover rounded border border-[#30363d]"
-                />
+                <Show
+                  when={isImageMime(file.mimeType)}
+                  fallback={
+                    <div class="w-10 h-10 flex items-center justify-center rounded border border-[#30363d] bg-[#21262d] text-[#8b949e]">
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        role="img"
+                        aria-label="File"
+                      >
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                    </div>
+                  }
+                >
+                  <img
+                    src={toDataUrl(file)}
+                    alt={file.name}
+                    class="w-10 h-10 object-cover rounded border border-[#30363d]"
+                  />
+                </Show>
                 <button
                   type="button"
                   class="absolute -top-1 -right-1 w-4 h-4 bg-[#f85149] text-white rounded-full text-[10px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer border-none"
                   onClick={() => props.onRemove(index())}
-                  title={`Remove ${image.name}`}
+                  title={`Remove ${file.name}`}
                 >
                   ×
                 </button>
                 <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-[8px] text-white text-center truncate px-0.5 rounded-b">
-                  {image.name}
+                  {file.name}
                 </div>
               </div>
             )}

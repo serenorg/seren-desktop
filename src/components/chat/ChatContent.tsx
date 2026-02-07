@@ -18,8 +18,8 @@ import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
 import { formatDurationWithVerb } from "@/lib/format-duration";
-import { pickAndReadImages } from "@/lib/images/attachments";
-import type { ImageAttachment } from "@/lib/providers/types";
+import { pickAndReadAttachments } from "@/lib/images/attachments";
+import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -115,9 +115,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // Message queue for sending messages while streaming
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   const [showSignInPrompt, setShowSignInPrompt] = createSignal(false);
-  const [attachedImages, setAttachedImages] = createSignal<ImageAttachment[]>(
-    [],
-  );
+  const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -395,9 +393,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   const handleAttachImages = async () => {
-    const images = await pickAndReadImages();
-    if (images.length > 0) {
-      setAttachedImages((prev) => [...prev, ...images]);
+    const files = await pickAndReadAttachments();
+    if (files.length > 0) {
+      setAttachedImages((prev) => [...prev, ...files]);
     }
   };
 
@@ -474,7 +472,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   const sendMessageImmediate = async (
     messageContent: string,
-    images?: ImageAttachment[],
+    images?: Attachment[],
   ) => {
     const userMessage: Message = {
       id: crypto.randomUUID(),

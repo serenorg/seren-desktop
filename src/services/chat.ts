@@ -1,7 +1,7 @@
 // ABOUTME: Chat service supporting streaming completions with multi-provider routing.
 // ABOUTME: Routes requests through provider abstraction for Seren, Anthropic, OpenAI, Gemini.
 
-import { toDataUrl } from "@/lib/images/attachments";
+import { isTextMime, toDataUrl } from "@/lib/images/attachments";
 import { retrieveCodeContext } from "@/lib/indexing/context-retrieval";
 import {
   buildChatRequest,
@@ -10,10 +10,10 @@ import {
 } from "@/lib/providers";
 import { sendMessageWithTools as sendWithTools } from "@/lib/providers/seren";
 import type {
+  Attachment,
   ChatMessageWithTools,
   ChatResponse,
   ContentBlock,
-  ImageAttachment,
   ToolCall,
   ToolResult,
 } from "@/lib/providers/types";
@@ -44,7 +44,7 @@ export interface Message {
   id: string;
   role: ChatRole;
   content: string;
-  images?: ImageAttachment[];
+  images?: Attachment[];
   thinking?: string;
   model?: string;
   timestamp: number;
@@ -224,27 +224,50 @@ export type ToolStreamEvent =
     };
 
 /**
- * Build multimodal content blocks from text and optional images.
+ * Build multimodal content blocks from text and optional attachments.
+ * Images and PDFs become content blocks; text/code files are inlined into the message.
  */
 function buildUserContent(
   text: string,
-  images?: ImageAttachment[],
+  attachments?: Attachment[],
 ): string | ContentBlock[] {
-  if (!images || images.length === 0) {
+  if (!attachments || attachments.length === 0) {
     return text;
   }
 
-  const blocks: ContentBlock[] = [];
+  // Separate text files (inlined) from binary files (content blocks)
+  const mediaFiles: Attachment[] = [];
+  const inlinedParts: string[] = [];
 
-  // Add image blocks first so the model sees them before the text
-  for (const img of images) {
-    blocks.push({
-      type: "image_url",
-      image_url: { url: toDataUrl(img) },
-    });
+  for (const att of attachments) {
+    if (isTextMime(att.mimeType)) {
+      // Decode base64 text and inline as a code block
+      const decoded = atob(att.base64);
+      const ext = att.name.split(".").pop() || "";
+      inlinedParts.push(`\`\`\`${ext} (${att.name})\n${decoded}\n\`\`\``);
+    } else {
+      mediaFiles.push(att);
+    }
   }
 
-  blocks.push({ type: "text", text });
+  // Build final text with inlined files prepended
+  const fullText =
+    inlinedParts.length > 0 ? `${inlinedParts.join("\n\n")}\n\n${text}` : text;
+
+  // If no media files, plain text is sufficient
+  if (mediaFiles.length === 0) {
+    return fullText;
+  }
+
+  // Build content blocks for images and PDFs
+  const blocks: ContentBlock[] = [];
+  for (const att of mediaFiles) {
+    blocks.push({
+      type: "image_url",
+      image_url: { url: toDataUrl(att) },
+    });
+  }
+  blocks.push({ type: "text", text: fullText });
 
   return blocks;
 }
@@ -266,7 +289,7 @@ export async function* streamMessageWithTools(
   context?: ChatContext,
   enableTools = true,
   history: Message[] = [],
-  images?: ImageAttachment[],
+  images?: Attachment[],
 ): AsyncGenerator<ToolStreamEvent> {
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];

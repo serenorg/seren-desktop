@@ -19,8 +19,8 @@ import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
 import { formatDurationWithVerb } from "@/lib/format-duration";
-import { pickAndReadImages, toDataUrl } from "@/lib/images/attachments";
-import type { ImageAttachment } from "@/lib/providers/types";
+import { pickAndReadAttachments, toDataUrl } from "@/lib/images/attachments";
+import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
@@ -62,9 +62,7 @@ interface AgentChatProps {
 export const AgentChat: Component<AgentChatProps> = (props) => {
   const [input, setInput] = createSignal("");
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
-  const [attachedImages, setAttachedImages] = createSignal<ImageAttachment[]>(
-    [],
-  );
+  const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [commandStatus, setCommandStatus] = createSignal<string | null>(null);
   const [commandPopupIndex, setCommandPopupIndex] = createSignal(0);
   let inputRef: HTMLTextAreaElement | undefined;
@@ -141,9 +139,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const handleAttachImages = async () => {
-    const images = await pickAndReadImages();
-    if (images.length > 0) {
-      setAttachedImages((prev) => [...prev, ...images]);
+    const files = await pickAndReadAttachments();
+    if (files.length > 0) {
+      setAttachedImages((prev) => [...prev, ...files]);
     }
   };
 
