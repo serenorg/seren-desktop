@@ -882,6 +882,35 @@ export const acpStore = {
     const session = state.sessions[sessionId];
     if (!session) return;
 
+    // Flush accumulated streaming content so tool cards appear in correct
+    // chronological order relative to assistant text.
+    if (session.streamingThinking) {
+      const thinkingMsg: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "thought",
+        content: session.streamingThinking,
+        timestamp: Date.now(),
+      };
+      setState("sessions", sessionId, "messages", (msgs) => [
+        ...msgs,
+        thinkingMsg,
+      ]);
+      setState("sessions", sessionId, "streamingThinking", "");
+    }
+    if (session.streamingContent) {
+      const contentMsg: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "assistant",
+        content: session.streamingContent,
+        timestamp: Date.now(),
+      };
+      setState("sessions", sessionId, "messages", (msgs) => [
+        ...msgs,
+        contentMsg,
+      ]);
+      setState("sessions", sessionId, "streamingContent", "");
+    }
+
     // Store pending tool call
     session.pendingToolCalls.set(toolCall.toolCallId, toolCall);
 
