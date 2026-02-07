@@ -21,6 +21,7 @@ pub mod services {
 
 #[cfg(feature = "acp")]
 mod acp;
+mod claude_setup;
 mod embedded_runtime;
 mod files;
 mod mcp;
@@ -523,6 +524,9 @@ pub fn run() {
                     paths.git_dir.is_some()
                 );
             }
+
+            // Configure Claude Code environment (adds cargo to PATH if needed)
+            claude_setup::configure_claude_code_environment();
 
             // Start OAuth callback server in dev mode
             // Provides localhost:8787 redirect for OAuth without deep links
