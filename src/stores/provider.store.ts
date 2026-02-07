@@ -162,7 +162,7 @@ const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
 
 const DEFAULT_STATE: ProviderState = {
   activeProvider: "seren",
-  activeModel: "openai/gpt-4o-mini",
+  activeModel: "google/gemini-3-flash-preview",
   configuredProviders: ["seren"],
   oauthProviders: [],
   providerModels: { ...DEFAULT_MODELS },
