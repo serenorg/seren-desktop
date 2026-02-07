@@ -9,6 +9,7 @@ use tauri_plugin_store::StoreExt;
 pub mod commands {
     pub mod chat;
     pub mod indexing;
+    pub mod memory;
     pub mod web;
 }
 
@@ -576,6 +577,29 @@ pub fn run() {
                 });
             }
 
+            // Initialize memory state for cloud + local cache operations
+            {
+                let data_dir = app.path().app_data_dir().expect("failed to get app data dir");
+                let cache_path = data_dir.join("memory_cache.db");
+
+                let api_key = app
+                    .handle()
+                    .store(AUTH_STORE)
+                    .ok()
+                    .and_then(|store| {
+                        store
+                            .get(TOKEN_KEY)
+                            .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    })
+                    .unwrap_or_default();
+
+                app.manage(commands::memory::MemoryState::new(
+                    "https://api.serendb.com".to_string(),
+                    api_key,
+                    cache_path,
+                ));
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -723,6 +747,11 @@ pub fn run() {
             skills::install_skill,
             skills::remove_skill,
             skills::read_skill_content,
+            // Memory commands
+            commands::memory::memory_bootstrap,
+            commands::memory::memory_remember,
+            commands::memory::memory_recall,
+            commands::memory::memory_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1120,6 +1120,40 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 exact estimate before proceeding.
               </p>
             </div>
+
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+              Persistent Memory
+            </h4>
+            <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
+              Store and recall context across sessions. Requires a SerenDB
+              account.
+            </p>
+
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.memoryEnabled}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "memoryEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
+                />
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable Memory
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Persist conversations, preferences, and knowledge across
+                    sessions. Memory data is stored in your SerenDB project.
+                    You must be logged in to SerenDB to use this feature.
+                  </span>
+                </span>
+              </label>
+            </div>
           </section>
         </Show>
 

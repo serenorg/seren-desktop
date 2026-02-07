@@ -88,6 +88,9 @@ export interface Settings {
   // Semantic indexing settings
   semanticIndexingEnabled: boolean;
 
+  // Memory settings
+  memoryEnabled: boolean;
+
   // Agent settings
   agentSandboxMode: "read-only" | "workspace-write" | "full-access";
   agentAutoApproveReads: boolean;
@@ -169,6 +172,8 @@ const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   // Semantic indexing
   semanticIndexingEnabled: false,
+  // Memory
+  memoryEnabled: false,
   // Agent
   agentSandboxMode: "workspace-write",
   agentAutoApproveReads: true,
