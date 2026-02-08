@@ -68,6 +68,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const [commandPopupIndex, setCommandPopupIndex] = createSignal(0);
   const [historyIndex, setHistoryIndex] = createSignal(-1);
   const [savedInput, setSavedInput] = createSignal("");
+  const [awaitingLogin, setAwaitingLogin] = createSignal<AgentType | null>(
+    null,
+  );
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
 
@@ -133,6 +136,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       pendingDiffProposals: diffProposals.length,
     });
     requestAnimationFrame(scrollToBottom);
+  });
+
+  // Clear "awaiting login" banner once a session starts
+  createEffect(() => {
+    if (hasSession()) setAwaitingLogin(null);
   });
 
   // Sync agent cwd when the user opens a different folder
@@ -450,7 +458,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                         await acpStore.terminateSession(sid);
                       }
                       acpStore.clearError();
-                      startSession(agentType);
+                      setAwaitingLogin(agentType);
                     }}
                   >
                     Login
@@ -698,7 +706,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                       await acpStore.terminateSession(sid);
                     }
                     acpStore.clearError();
-                    startSession(agentType);
+                    setAwaitingLogin(agentType);
                   }}
                 >
                   Login
@@ -736,13 +744,42 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           </div>
           <Show when={isAuthError(sessionError())}>
             <p class="mt-1 text-xs opacity-80">
-              Click "Login" to authenticate with{" "}
-              {acpStore.activeSession?.info.agentType === "codex"
-                ? "OpenAI"
-                : "Anthropic"}
-              . A new session will start automatically.
+              Click "Login" to open authentication. Once complete, click "Start
+              Session" to continue.
             </p>
           </Show>
+        </div>
+      </Show>
+
+      {/* Awaiting Login Banner */}
+      <Show when={awaitingLogin()}>
+        <div class="mx-4 mb-2 px-3 py-2 border rounded-md text-sm bg-[rgba(63,185,80,0.1)] border-[rgba(63,185,80,0.4)] text-[#3fb950]">
+          <div class="flex items-center justify-between">
+            <span class="flex-1">
+              Complete authentication in the opened window, then start a new
+              session.
+            </span>
+            <div class="flex items-center gap-2 ml-2">
+              <button
+                type="button"
+                class="px-2 py-1 text-xs font-medium bg-[#3fb950] text-[#0d1117] rounded hover:bg-[#56d364]"
+                onClick={() => {
+                  const agentType = awaitingLogin();
+                  setAwaitingLogin(null);
+                  if (agentType) startSession(agentType);
+                }}
+              >
+                Start Session
+              </button>
+              <button
+                type="button"
+                class="text-xs underline hover:no-underline"
+                onClick={() => setAwaitingLogin(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
         </div>
       </Show>
 
