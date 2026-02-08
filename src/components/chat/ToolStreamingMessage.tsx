@@ -137,7 +137,8 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
         const executions = toolExecutions();
 
         // When text content is empty but tool operations occurred,
-        // generate a summary so the message isn't invisible after streaming ends
+        // generate a summary so the message isn't invisible after streaming ends.
+        // The message makes clear the AI may not have completed the user's request.
         if (!finalContent.trim() && executions.length > 0) {
           console.warn(
             "[ToolStreamingMessage] Empty content with",
@@ -153,7 +154,15 @@ export const ToolStreamingMessage: Component<ToolStreamingMessageProps> = (
             }
             return `- ${icon} **${name}**${detail}`;
           });
-          finalContent = `*Tool operations completed:*\n\n${lines.join("\n")}`;
+
+          const hasErrors = executions.some((e) => e.status === "error");
+          const header = hasErrors
+            ? "*Some tool operations failed:*"
+            : "*Tool operations completed:*";
+          const footer =
+            "\n\n*The AI did not provide a response. " +
+            "Your request may not have been fully completed — please try again if needed.*";
+          finalContent = `${header}\n\n${lines.join("\n")}${footer}`;
         }
 
         props.onComplete(finalContent, fullThinking || undefined);

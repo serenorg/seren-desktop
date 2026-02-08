@@ -425,6 +425,8 @@ export async function* streamMessageWithTools(
 
   // Accumulated content across all iterations
   let fullContent = "";
+  let hasExecutedTools = false;
+  let hasNudged = false;
 
   for (
     let iteration = 0;
@@ -455,7 +457,28 @@ export async function* streamMessageWithTools(
 
     // Check if model wants to call tools
     if (!response.tool_calls || response.tool_calls.length === 0) {
-      // No tool calls, we're done
+      // Model returned no tool calls. If we executed tools but got no text
+      // response, the model may have silently stopped mid-task. Nudge it once
+      // to complete the task or explain what happened.
+      if (hasExecutedTools && !fullContent.trim() && !hasNudged) {
+        hasNudged = true;
+        console.warn(
+          "[streamMessageWithTools] Empty response after tool execution — nudging model to complete task",
+        );
+        messages.push({
+          role: "assistant",
+          content: response.content || "",
+        });
+        messages.push({
+          role: "user",
+          content:
+            "You called tools but did not provide a response or complete the requested task. " +
+            "Please review the tool results above and either complete the task using the appropriate tools, " +
+            "or explain what happened.",
+        });
+        continue;
+      }
+
       console.log(
         "[streamMessageWithTools] No tool_calls, completing with content length:",
         fullContent.length,
@@ -481,6 +504,7 @@ export async function* streamMessageWithTools(
 
     // Execute tools
     const results = await executeTools(response.tool_calls);
+    hasExecutedTools = true;
 
     // Log tool execution results
     for (const result of results) {
@@ -540,6 +564,8 @@ export async function* continueToolIteration(
 ): AsyncGenerator<ToolStreamEvent> {
   const { messages, model, tools, fullContent: existingContent } = state;
   let fullContent = existingContent;
+  let hasExecutedTools = false;
+  let hasNudged = false;
 
   for (let i = 0; i < additionalIterations; i++) {
     console.log("[continueToolIteration] Iteration:", i);
@@ -557,6 +583,24 @@ export async function* continueToolIteration(
     }
 
     if (!response.tool_calls || response.tool_calls.length === 0) {
+      if (hasExecutedTools && !fullContent.trim() && !hasNudged) {
+        hasNudged = true;
+        console.warn(
+          "[continueToolIteration] Empty response after tool execution — nudging model to complete task",
+        );
+        messages.push({
+          role: "assistant",
+          content: response.content || "",
+        });
+        messages.push({
+          role: "user",
+          content:
+            "You called tools but did not provide a response or complete the requested task. " +
+            "Please review the tool results above and either complete the task using the appropriate tools, " +
+            "or explain what happened.",
+        });
+        continue;
+      }
       yield { type: "complete", finalContent: fullContent };
       return;
     }
@@ -570,6 +614,7 @@ export async function* continueToolIteration(
     });
 
     const results = await executeTools(response.tool_calls);
+    hasExecutedTools = true;
     yield { type: "tool_results", results };
 
     for (const result of results) {
