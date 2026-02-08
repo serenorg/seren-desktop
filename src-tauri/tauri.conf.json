@@ -36,7 +36,7 @@
       "endpoints": [
         "https://github.com/serenorg/seren-desktop/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyMDI5MDAyOTlGN0FERTYKUldUbXJmZVpBcEFDa21KeGlyczBhR1N5WDNKL3lSeHNHc1BjYnYrVDJpUEUvT0NOaEpDSFptbHIK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdGQTYwRTZBOEE0Mzg5QTcKUldTbmlVT0thZzZtZjhBS3d6L0dqY2lOVWlHSXRJNkFuRWlwSTVTM2hQSkdhVjBHRnh6UWw5a2gK",
       "dialog": false
     },
     "shell": {
