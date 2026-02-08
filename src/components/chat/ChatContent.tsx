@@ -37,9 +37,11 @@ import {
 import { acpStore } from "@/stores/acp.store";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
+import { conversationStore } from "@/stores/conversation.store";
 import { editorStore } from "@/stores/editor.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
+import { toUnifiedMessage } from "@/types/conversation";
 import { AgentChat } from "./AgentChat";
 import { AgentModeToggle } from "./AgentModeToggle";
 import { ChatTabBar } from "./ChatTabBar";
@@ -182,24 +184,24 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // Ctrl/Cmd+T: New tab (blocked during streaming)
     if (isMod && event.key === "t") {
       event.preventDefault();
-      if (chatStore.isLoading) {
+      if (conversationStore.isLoading) {
         console.log("[ChatContent] Blocked new tab during streaming");
         return;
       }
-      chatStore.createConversation();
+      conversationStore.createConversation();
       return;
     }
 
     // Ctrl/Cmd+W: Close current tab (blocked during streaming)
     if (isMod && event.key === "w") {
       event.preventDefault();
-      if (chatStore.isLoading) {
+      if (conversationStore.isLoading) {
         console.log("[ChatContent] Blocked tab close during streaming");
         return;
       }
-      const activeId = chatStore.activeConversationId;
+      const activeId = conversationStore.activeConversationId;
       if (activeId) {
-        chatStore.archiveConversation(activeId);
+        conversationStore.archiveConversation(activeId);
       }
       return;
     }
@@ -207,17 +209,17 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // Ctrl+Tab / Ctrl+Shift+Tab: Switch tabs (blocked during streaming)
     if (event.ctrlKey && event.key === "Tab") {
       event.preventDefault();
-      if (chatStore.isLoading) {
+      if (conversationStore.isLoading) {
         console.log("[ChatContent] Blocked tab switch during streaming");
         return;
       }
-      const conversations = chatStore.conversations.filter(
+      const conversations = conversationStore.conversations.filter(
         (c) => !c.isArchived,
       );
       if (conversations.length < 2) return;
 
       const currentIndex = conversations.findIndex(
-        (c) => c.id === chatStore.activeConversationId,
+        (c) => c.id === conversationStore.activeConversationId,
       );
       if (currentIndex === -1) return;
 
@@ -225,20 +227,20 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         ? (currentIndex - 1 + conversations.length) % conversations.length
         : (currentIndex + 1) % conversations.length;
 
-      chatStore.setActiveConversation(conversations[nextIndex].id);
+      conversationStore.setActiveConversation(conversations[nextIndex].id);
     }
   };
 
   onMount(async () => {
     console.log(
-      "[ChatContent] Mounting, chatStore.isLoading:",
-      chatStore.isLoading,
+      "[ChatContent] Mounting, conversationStore.isLoading:",
+      conversationStore.isLoading,
     );
 
     // Reset orphaned loading state from HMR interruption
-    if (chatStore.isLoading && !streamingSession()) {
+    if (conversationStore.isLoading && !streamingSession()) {
       console.log("[ChatContent] Resetting orphaned loading state from HMR");
-      chatStore.setLoading(false);
+      conversationStore.setLoading(false);
     }
 
     document.addEventListener("keydown", handleKeyDown);
@@ -251,17 +253,17 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     window.addEventListener("seren:pick-images", handlePickImages);
 
     try {
-      await chatStore.loadHistory();
+      await conversationStore.loadHistory();
     } catch (error) {
-      chatStore.setError((error as Error).message);
+      conversationStore.setError((error as Error).message);
     }
   });
 
   // Debug: log when loading state changes
   createEffect(() => {
     console.log(
-      "[ChatContent] chatStore.isLoading changed to:",
-      chatStore.isLoading,
+      "[ChatContent] conversationStore.isLoading changed to:",
+      conversationStore.isLoading,
     );
   });
 
@@ -278,7 +280,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Auto-scroll to bottom when messages change, streaming starts, or switching channels
   createEffect(() => {
-    void chatStore.messages;
+    void conversationStore.messages;
     void streamingSession();
     void acpStore.agentModeEnabled;
     requestAnimationFrame(scrollToBottom);
@@ -293,9 +295,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     );
 
     // Reset loading state if still active when unmounting (e.g., HMR)
-    if (chatStore.isLoading) {
+    if (conversationStore.isLoading) {
       console.log("[ChatContent] Cleaning up loading state on unmount");
-      chatStore.setLoading(false);
+      conversationStore.setLoading(false);
     }
 
     if (suggestionDebounceTimer) {
@@ -377,7 +379,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // User message history for up/down arrow navigation
   const userMessageHistory = createMemo(() =>
-    chatStore.messages
+    conversationStore.messages
       .filter((m) => m.role === "user")
       .map((m) => m.content)
       .reverse(),
@@ -432,7 +434,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     const session = streamingSession();
     if (!session) return;
     setStreamingSession(null);
-    chatStore.setLoading(false);
+    conversationStore.setLoading(false);
     setMessageQueue([]);
   };
 
@@ -456,7 +458,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
 
     // If currently streaming, queue the message instead
-    if (chatStore.isLoading) {
+    if (conversationStore.isLoading) {
       setMessageQueue((queue) => [...queue, trimmed]);
       setInput("");
       setHistoryIndex(-1);
@@ -486,10 +488,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
     // Snapshot history BEFORE adding the current message to avoid duplication
     // (streamMessageWithTools adds the current message separately)
-    const history = [...chatStore.messages];
+    const history = [...conversationStore.messages];
 
-    chatStore.addMessage(userMessage);
-    await chatStore.persistMessage(userMessage);
+    conversationStore.addMessage(toUnifiedMessage(userMessage));
+    await conversationStore.persistMessage(toUnifiedMessage(userMessage));
 
     const context = buildContext();
     const assistantId = crypto.randomUUID();
@@ -529,9 +531,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
           startTime,
         };
 
-    chatStore.setLoading(true);
+    conversationStore.setLoading(true);
     setStreamingSession(session);
-    chatStore.setError(null);
+    conversationStore.setError(null);
     setInput("");
     setHistoryIndex(-1);
     setSavedInput("");
@@ -580,10 +582,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       request: { prompt: session.prompt, context: session.context },
     };
 
-    chatStore.addMessage(assistantMessage);
-    await chatStore.persistMessage(assistantMessage);
+    conversationStore.addMessage(toUnifiedMessage(assistantMessage));
+    await conversationStore.persistMessage(toUnifiedMessage(assistantMessage));
     setStreamingSession(null);
-    chatStore.setLoading(false);
+    conversationStore.setLoading(false);
 
     // Check if auto-compact should be triggered
     await chatStore.checkAutoCompact(
@@ -610,8 +612,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     error: Error,
   ) => {
     setStreamingSession(null);
-    chatStore.setLoading(false);
-    chatStore.setError(error.message);
+    conversationStore.setLoading(false);
+    conversationStore.setError(error.message);
 
     const failedMessage: Message = {
       id: session.id,
@@ -624,7 +626,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       request: { prompt: session.prompt, context: session.context },
     };
 
-    chatStore.addMessage(failedMessage);
+    conversationStore.addMessage(toUnifiedMessage(failedMessage));
     await attemptRetry(failedMessage, false);
   };
 
@@ -632,7 +634,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     if (!message.request) return;
 
     chatStore.setRetrying(message.id);
-    chatStore.updateMessage(message.id, {
+    conversationStore.updateMessage(message.id, {
       status: "pending",
       attemptCount: message.attemptCount ?? 1,
     });
@@ -643,7 +645,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         message.model ?? chatStore.selectedModel,
         message.request.context,
         (attempt) => {
-          chatStore.updateMessage(message.id, {
+          conversationStore.updateMessage(message.id, {
             status: "pending",
             attemptCount: attempt + 1,
           });
@@ -658,16 +660,16 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         timestamp: Date.now(),
       };
 
-      chatStore.updateMessage(message.id, updated);
-      await chatStore.persistMessage(updated);
+      conversationStore.updateMessage(message.id, updated);
+      await conversationStore.persistMessage(toUnifiedMessage(updated));
     } catch (error) {
       const messageError = (error as Error).message;
-      chatStore.updateMessage(message.id, {
+      conversationStore.updateMessage(message.id, {
         status: "error",
         error: messageError,
       });
       if (isManual) {
-        chatStore.setError(messageError);
+        conversationStore.setError(messageError);
       }
     } finally {
       chatStore.setRetrying(null);
@@ -681,7 +683,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const clearHistory = async () => {
     const confirmClear = window.confirm("Clear all chat history?");
     if (!confirmClear) return;
-    await chatStore.clearHistory();
+    await conversationStore.clearHistory();
   };
 
   return (
@@ -792,7 +794,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
                 <Show
                   when={
-                    chatStore.messages.length > 0 || chatStore.compactedSummary
+                    conversationStore.messages.length > 0 ||
+                    chatStore.compactedSummary
                   }
                   fallback={
                     <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
@@ -805,7 +808,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     </div>
                   }
                 >
-                  <For each={chatStore.messages}>
+                  <For each={conversationStore.messages}>
                     {(message) => (
                       <article
                         class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
@@ -872,7 +875,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   </For>
                 </Show>
 
-                <Show when={chatStore.isLoading && !streamingSession()}>
+                <Show when={conversationStore.isLoading && !streamingSession()}>
                   <article class="px-5 py-4 border-b border-[#21262d]">
                     <ThinkingStatus />
                   </article>
@@ -990,12 +993,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                           "[ChatContent] Textarea ref set, disabled:",
                           el.disabled,
                           "isLoading:",
-                          chatStore.isLoading,
+                          conversationStore.isLoading,
                         );
                       }}
                       value={input()}
                       placeholder={
-                        chatStore.isLoading
+                        conversationStore.isLoading
                           ? "Type to queue message..."
                           : "Ask Seren anything… (type / for commands)"
                       }
@@ -1118,10 +1121,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     <div class="flex items-center gap-3">
                       <ModelSelector />
                       <ToolsetSelector />
-                      <Show when={chatStore.isLoading}>
+                      <Show when={conversationStore.isLoading}>
                         <ThinkingStatus />
                       </Show>
-                      <Show when={!chatStore.isLoading}>
+                      <Show when={!conversationStore.isLoading}>
                         <span class="text-[10px] text-[#484f58]">
                           {settingsStore.get("chatEnterToSend")
                             ? "Enter to send"
@@ -1141,7 +1144,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                         }}
                       />
                       <Show
-                        when={chatStore.isLoading}
+                        when={conversationStore.isLoading}
                         fallback={
                           <button
                             type="submit"

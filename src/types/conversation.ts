@@ -51,6 +51,9 @@ export interface UnifiedMessage {
     prompt: string;
     context?: ChatContextData;
   };
+
+  // Migration field: retry attempt counter (temporary, from Message type)
+  attemptCount?: number;
 }
 
 export interface ToolCallData {
@@ -178,4 +181,37 @@ export function isToolMessage(msg: UnifiedMessage): boolean {
 /** Type guard: is this message from the orchestrator itself? */
 export function isOrchestratorMessage(msg: UnifiedMessage): boolean {
   return msg.type === "transition" || msg.workerType === "orchestrator";
+}
+
+/** Temporary adapter: convert legacy Message to UnifiedMessage during migration. */
+export function toUnifiedMessage(msg: {
+  id: string;
+  role: string;
+  content: string;
+  images?: Attachment[];
+  thinking?: string;
+  model?: string;
+  timestamp: number;
+  status?: string;
+  error?: string | null;
+  attemptCount?: number;
+  duration?: number;
+  request?: { prompt: string; context?: ChatContextData };
+}): UnifiedMessage {
+  return {
+    id: msg.id,
+    type: msg.role === "user" ? "user" : "assistant",
+    role: msg.role as UnifiedMessage["role"],
+    content: msg.content,
+    timestamp: msg.timestamp,
+    status: (msg.status as MessageStatus) ?? "complete",
+    modelId: msg.model,
+    workerType: "chat_model",
+    images: msg.images,
+    thinking: msg.thinking,
+    error: msg.error,
+    duration: msg.duration,
+    request: msg.request,
+    attemptCount: msg.attemptCount,
+  };
 }
