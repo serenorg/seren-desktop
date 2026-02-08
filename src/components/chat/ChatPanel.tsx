@@ -514,7 +514,13 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
       return;
     }
 
-    chatStore.setError(error.message);
+    // Improve error message for timeouts
+    const is408Timeout = error.message.includes("408");
+    const displayError = is408Timeout
+      ? "Request timed out. The model took too long to respond. Click Retry to try again."
+      : error.message;
+
+    chatStore.setError(displayError);
 
     const failedMessage: Message = {
       id: session.id,
@@ -523,12 +529,17 @@ export const ChatPanel: Component<ChatPanelProps> = (_props) => {
       timestamp: Date.now(),
       model: session.model,
       status: "error",
-      error: error.message,
+      error: displayError,
       request: { prompt: session.prompt, context: session.context },
     };
 
     chatStore.addMessage(failedMessage);
-    await attemptRetry(failedMessage, false);
+
+    // Skip automatic retry for 408 streaming timeouts - they're likely to
+    // timeout again. User can manually retry if desired.
+    if (!is408Timeout) {
+      await attemptRetry(failedMessage, false);
+    }
   };
 
   const attemptRetry = async (message: Message, isManual: boolean) => {
