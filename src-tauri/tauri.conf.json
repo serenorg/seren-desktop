@@ -49,6 +49,7 @@
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": true,
     "active": true,
     "targets": ["nsis", "dmg", "deb", "appimage"],
     "icon": [
