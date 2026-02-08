@@ -403,7 +403,15 @@ struct ClientDelegate {
 impl ClientDelegate {
     /// Emit a tool-call event to the frontend so the UI can show agent activity.
     fn emit_tool_call(&self, tool_call_id: &str, title: &str, kind: &str, status: &str) {
-        let _ = self.app.emit(
+        log::debug!(
+            "[ACP] Emitting tool call: session={}, tool_call_id={}, title={}, kind={}, status={}",
+            self.session_id,
+            tool_call_id,
+            title,
+            kind,
+            status
+        );
+        let emit_result = self.app.emit(
             events::TOOL_CALL,
             serde_json::json!({
                 "sessionId": self.session_id,
@@ -413,11 +421,25 @@ impl ClientDelegate {
                 "status": status
             }),
         );
+        if let Err(ref e) = emit_result {
+            log::error!(
+                "[ACP] Failed to emit tool call {} for session {}: {}",
+                tool_call_id,
+                self.session_id,
+                e
+            );
+        }
     }
 
     /// Emit a tool-result event to update a tool call's status in the UI.
     fn emit_tool_result(&self, tool_call_id: &str, status: &str) {
-        let _ = self.app.emit(
+        log::debug!(
+            "[ACP] Emitting tool result: session={}, tool_call_id={}, status={}",
+            self.session_id,
+            tool_call_id,
+            status
+        );
+        let emit_result = self.app.emit(
             events::TOOL_RESULT,
             serde_json::json!({
                 "sessionId": self.session_id,
@@ -425,6 +447,14 @@ impl ClientDelegate {
                 "status": status
             }),
         );
+        if let Err(ref e) = emit_result {
+            log::error!(
+                "[ACP] Failed to emit tool result {} for session {}: {}",
+                tool_call_id,
+                self.session_id,
+                e
+            );
+        }
     }
 }
 
@@ -810,7 +840,15 @@ fn handle_session_notification(
             log::debug!("[ACP] MESSAGE_CHUNK emit result: {:?}", emit_result);
         }
         SessionUpdate::ToolCall(tool_call) => {
-            let _ = app.emit(
+            log::debug!(
+                "[ACP] Emitting TOOL_CALL: session={}, tool_call_id={}, title={}, kind={:?}, status={:?}",
+                session_id,
+                tool_call.tool_call_id,
+                tool_call.title,
+                tool_call.kind,
+                tool_call.status
+            );
+            let emit_result = app.emit(
                 events::TOOL_CALL,
                 serde_json::json!({
                     "sessionId": session_id,
@@ -820,13 +858,27 @@ fn handle_session_notification(
                     "status": format!("{:?}", tool_call.status)
                 }),
             );
+            if let Err(ref e) = emit_result {
+                log::error!(
+                    "[ACP] Failed to emit TOOL_CALL {} for session {}: {}",
+                    tool_call.tool_call_id,
+                    session_id,
+                    e
+                );
+            }
         }
         SessionUpdate::ToolCallUpdate(update) => {
             // Check for diffs in content
             if let Some(ref content) = update.fields.content {
                 for block in content {
                     if let agent_client_protocol::ToolCallContent::Diff(diff) = block {
-                        let _ = app.emit(
+                        log::debug!(
+                            "[ACP] Emitting DIFF: session={}, tool_call_id={}, path={}",
+                            session_id,
+                            update.tool_call_id,
+                            diff.path
+                        );
+                        let emit_result = app.emit(
                             events::DIFF,
                             serde_json::json!({
                                 "sessionId": session_id,
@@ -836,11 +888,25 @@ fn handle_session_notification(
                                 "newText": diff.new_text
                             }),
                         );
+                        if let Err(ref e) = emit_result {
+                            log::error!(
+                                "[ACP] Failed to emit DIFF for tool_call {} session {}: {}",
+                                update.tool_call_id,
+                                session_id,
+                                e
+                            );
+                        }
                     }
                 }
             }
 
-            let _ = app.emit(
+            log::debug!(
+                "[ACP] Emitting TOOL_RESULT: session={}, tool_call_id={}, status={:?}",
+                session_id,
+                update.tool_call_id,
+                update.fields.status
+            );
+            let emit_result = app.emit(
                 events::TOOL_RESULT,
                 serde_json::json!({
                     "sessionId": session_id,
@@ -848,6 +914,14 @@ fn handle_session_notification(
                     "status": format!("{:?}", update.fields.status),
                 }),
             );
+            if let Err(ref e) = emit_result {
+                log::error!(
+                    "[ACP] Failed to emit TOOL_RESULT {} for session {}: {}",
+                    update.tool_call_id,
+                    session_id,
+                    e
+                );
+            }
         }
         SessionUpdate::Plan(plan) => {
             let plan_entries: Vec<serde_json::Value> = plan
