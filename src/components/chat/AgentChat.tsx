@@ -589,32 +589,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           >
             <For each={acpStore.messages}>{renderMessage}</For>
 
-            {/* Diff proposal dialogs (scoped to active session) */}
-            <For
-              each={acpStore.pendingDiffProposals.filter(
-                (p) => p.sessionId === acpStore.activeSessionId,
-              )}
-            >
-              {(proposal) => (
-                <div class="px-5 py-2">
-                  <DiffProposalDialog proposal={proposal} />
-                </div>
-              )}
-            </For>
-
-            {/* Permission request dialogs (scoped to active session) */}
-            <For
-              each={acpStore.pendingPermissions.filter(
-                (p) => p.sessionId === acpStore.activeSessionId,
-              )}
-            >
-              {(perm) => (
-                <div class="px-5 py-2">
-                  <AcpPermissionDialog permission={perm} />
-                </div>
-              )}
-            </For>
-
             {/* Loading placeholder while waiting for first chunk */}
             <Show
               when={
@@ -650,6 +624,44 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           </Show>
         </Show>
       </div>
+
+      {/* Permission and diff proposal dialogs — rendered outside the scroll
+          container so they stay visible while the agent streams content. */}
+      <Show
+        when={
+          acpStore.pendingDiffProposals.some(
+            (p) => p.sessionId === acpStore.activeSessionId,
+          ) ||
+          acpStore.pendingPermissions.some(
+            (p) => p.sessionId === acpStore.activeSessionId,
+          )
+        }
+      >
+        <div class="border-t border-[#30363d] bg-[#0d1117] max-h-[40vh] overflow-y-auto">
+          <For
+            each={acpStore.pendingDiffProposals.filter(
+              (p) => p.sessionId === acpStore.activeSessionId,
+            )}
+          >
+            {(proposal) => (
+              <div class="px-5 py-2">
+                <DiffProposalDialog proposal={proposal} />
+              </div>
+            )}
+          </For>
+          <For
+            each={acpStore.pendingPermissions.filter(
+              (p) => p.sessionId === acpStore.activeSessionId,
+            )}
+          >
+            {(perm) => (
+              <div class="px-5 py-2">
+                <AcpPermissionDialog permission={perm} />
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
 
       {/* Error Display */}
       <Show when={sessionError()}>
