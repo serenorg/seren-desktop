@@ -381,6 +381,20 @@ jobs:
           path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           overwrite: true
 
+      # Move updater artifacts (.sig, .nsis.zip) out of NSIS dir before code signing
+      # so SSL.com's batch_sign doesn't choke on non-exe files
+      - name: Move updater artifacts before code signing
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
+          $tempDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-updater-temp"
+          New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+          Get-ChildItem -Path $nsisDir -Exclude "*.exe" | ForEach-Object {
+            Move-Item -Path $_.FullName -Destination $tempDir -Force
+            Write-Host "Moved aside: $($_.Name)"
+          }
+
       # Windows: Sign executables with SSL.com eSigner (cloud EV code signing)
       # Sign NSIS installer (.exe) - output to temp dir then copy back
       # (workaround: action's override flag doesn't work, same-dir output fails)
@@ -415,6 +429,21 @@ jobs:
           } else {
             Write-Host "Signed output directory not found: $signedDir"
             exit 1
+          }
+
+      # Restore updater artifacts (.sig, .nsis.zip) back to NSIS dir
+      - name: Restore updater artifacts after code signing
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        shell: pwsh
+        run: |
+          $nsisDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis"
+          $tempDir = "src-tauri/target/${{ matrix.target }}/release/bundle/nsis-updater-temp"
+          if (Test-Path $tempDir) {
+            Get-ChildItem -Path $tempDir | ForEach-Object {
+              Move-Item -Path $_.FullName -Destination $nsisDir -Force
+              Write-Host "Restored: $($_.Name)"
+            }
+            Remove-Item -Path $tempDir -Force
           }
 
       # Verify Windows code signing
