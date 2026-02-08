@@ -86,6 +86,8 @@ interface AcpState {
   pendingPermissions: import("@/services/acp").PermissionRequestEvent[];
   /** Pending diff proposals awaiting user accept/reject */
   pendingDiffProposals: DiffProposalEvent[];
+  /** Pending agent input to restore when switching back to agent mode */
+  pendingAgentInput: string | null;
 }
 
 const [state, setState] = createStore<AcpState>({
@@ -99,6 +101,7 @@ const [state, setState] = createStore<AcpState>({
   installStatus: null,
   pendingPermissions: [],
   pendingDiffProposals: [],
+  pendingAgentInput: null,
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
@@ -157,6 +160,10 @@ export const acpStore = {
 
   get pendingDiffProposals() {
     return state.pendingDiffProposals;
+  },
+
+  get pendingAgentInput() {
+    return state.pendingAgentInput;
   },
 
   /**
@@ -737,6 +744,13 @@ export const acpStore = {
    */
   setSelectedAgentType(agentType: AgentType) {
     setState("selectedAgentType", agentType);
+  },
+
+  /**
+   * Set pending agent input to restore when switching back to agent mode.
+   */
+  setPendingAgentInput(input: string | null) {
+    setState("pendingAgentInput", input);
   },
 
   /**

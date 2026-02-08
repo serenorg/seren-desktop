@@ -85,6 +85,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
   onCleanup(() => {
     window.removeEventListener("seren:pick-images", onPickImages);
+    // Save agent input when component unmounts (e.g., when switching to chat mode)
+    const currentInput = input();
+    if (currentInput) {
+      acpStore.setPendingAgentInput(currentInput);
+    }
+  });
+
+  // Restore pending agent input when component mounts (e.g., when switching back to agent mode)
+  createEffect(() => {
+    const pending = acpStore.pendingAgentInput;
+    if (pending) {
+      setInput(pending);
+      acpStore.setPendingAgentInput(null);
+    }
   });
 
   const hasSession = () => acpStore.activeSession !== null;
