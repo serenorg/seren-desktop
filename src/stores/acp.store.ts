@@ -925,6 +925,11 @@ export const acpStore = {
       setState("sessions", sessionId, "streamingContent", "");
     }
 
+    // Skip duplicate if a message with this toolCallId already exists
+    if (session.messages.some((m) => m.toolCallId === toolCall.toolCallId)) {
+      return;
+    }
+
     // Store pending tool call
     session.pendingToolCalls.set(toolCall.toolCallId, toolCall);
 
