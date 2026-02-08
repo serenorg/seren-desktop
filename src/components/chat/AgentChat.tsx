@@ -441,10 +441,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   <button
                     type="button"
                     class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d] flex-shrink-0"
-                    onClick={() => {
+                    onClick={async () => {
                       const agentType =
                         acpStore.activeSession?.info.agentType ?? "claude-code";
                       launchLogin(agentType);
+                      const sid = acpStore.activeSessionId;
+                      if (sid) {
+                        await acpStore.terminateSession(sid);
+                      }
+                      acpStore.clearError();
+                      startSession(agentType);
                     }}
                   >
                     Login
@@ -671,16 +677,27 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <button
                   type="button"
                   class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d]"
-                  onClick={() => {
+                  onClick={async () => {
                     const agentType =
                       acpStore.activeSession?.info.agentType ?? "claude-code";
                     launchLogin(agentType);
+                    const sid = acpStore.activeSessionId;
+                    if (sid) {
+                      await acpStore.terminateSession(sid);
+                    }
+                    acpStore.clearError();
+                    startSession(agentType);
                   }}
                 >
                   Login
                 </button>
               </Show>
-              <Show when={acpStore.activeSession?.info.status === "error"}>
+              <Show
+                when={
+                  !isAuthError(sessionError()) &&
+                  acpStore.activeSession?.info.status === "error"
+                }
+              >
                 <button
                   type="button"
                   class="text-xs underline hover:no-underline"
@@ -711,7 +728,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               {acpStore.activeSession?.info.agentType === "codex"
                 ? "OpenAI"
                 : "Anthropic"}
-              , then restart the session.
+              . A new session will start automatically.
             </p>
           </Show>
         </div>
