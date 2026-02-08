@@ -1216,8 +1216,17 @@ async fn run_session_worker(
         (None, true) => String::new(),
     };
 
+    // Prepend our paths to the existing system PATH so agents can still find
+    // system-installed binaries (e.g. `codex` at /usr/local/bin).
     if !full_path.is_empty() {
-        cmd.env("PATH", &full_path);
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let combined = if system_path.is_empty() {
+            full_path.clone()
+        } else {
+            format!("{}{}{}", full_path, sep, system_path)
+        };
+        cmd.env("PATH", &combined);
     }
 
     // Set CLAUDE_CLI_PATH so the SDK can find the Claude CLI directly without relying on PATH.
