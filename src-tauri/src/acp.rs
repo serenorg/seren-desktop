@@ -2223,6 +2223,270 @@ fn is_version_sufficient(version: &str, min_version: &str) -> bool {
     (cur_maj, cur_min, cur_patch) >= (min_maj, min_min, min_patch)
 }
 
+/// Ensure Codex CLI (`@openai/codex`) is installed and meets the minimum version.
+/// Installs or upgrades via npm into the shared cli-tools directory.
+/// Returns the bin directory path containing the codex binary.
+#[tauri::command]
+pub async fn acp_ensure_codex_cli(app: AppHandle) -> Result<String, String> {
+    let cli_tools_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No app data dir: {e}"))?
+        .join("cli-tools");
+
+    let bin_dir = cli_tools_dir.join("node_modules").join(".bin");
+    let codex_bin = if cfg!(target_os = "windows") {
+        bin_dir.join("codex.cmd")
+    } else {
+        bin_dir.join("codex")
+    };
+
+    // Minimum required Codex CLI version for app-server protocol compatibility
+    const MIN_CODEX_CLI_VERSION: &str = "0.98.0";
+
+    // Already installed locally? Check version and upgrade if needed.
+    if codex_bin.exists() {
+        let embedded_path = crate::embedded_runtime::get_embedded_path();
+        if let Ok(output) = std::process::Command::new(&codex_bin)
+            .arg("--version")
+            .env("PATH", embedded_path)
+            .output()
+        {
+            // `codex --version` outputs "codex-cli X.Y.Z"
+            let version_str = String::from_utf8_lossy(&output.stdout);
+            let version = version_str
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().last())
+                .unwrap_or("")
+                .trim();
+
+            if is_version_sufficient(version, MIN_CODEX_CLI_VERSION) {
+                log::info!(
+                    "[ACP] Codex CLI {} at: {}",
+                    version,
+                    codex_bin.display()
+                );
+                return Ok(bin_dir.to_string_lossy().to_string());
+            }
+
+            log::info!(
+                "[ACP] Codex CLI {} is outdated (need {}), upgrading...",
+                version,
+                MIN_CODEX_CLI_VERSION
+            );
+
+            if let Err(e) = upgrade_codex_cli_sync(&cli_tools_dir, &app) {
+                log::warn!("[ACP] Codex CLI auto-upgrade failed: {}. Will retry on next launch.", e);
+            } else {
+                log::info!("[ACP] Codex CLI upgraded successfully");
+            }
+
+            return Ok(bin_dir.to_string_lossy().to_string());
+        }
+
+        log::info!("[ACP] Codex CLI at: {}", codex_bin.display());
+        return Ok(bin_dir.to_string_lossy().to_string());
+    }
+
+    // Check if codex is available on the system PATH
+    let which_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    let which_arg = if cfg!(target_os = "windows") {
+        "codex.cmd"
+    } else {
+        "codex"
+    };
+    if let Ok(output) = std::process::Command::new(which_cmd)
+        .arg(which_arg)
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                // Check version of system-installed codex
+                let embedded_path = crate::embedded_runtime::get_embedded_path();
+                if let Ok(ver_output) = std::process::Command::new(&path)
+                    .arg("--version")
+                    .env("PATH", &embedded_path)
+                    .output()
+                {
+                    let version_str = String::from_utf8_lossy(&ver_output.stdout);
+                    let version = version_str
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().last())
+                        .unwrap_or("")
+                        .trim();
+
+                    if is_version_sufficient(version, MIN_CODEX_CLI_VERSION) {
+                        log::info!("[ACP] Found codex {} on system PATH: {}", version, path);
+                        return Ok(parent.to_string_lossy().to_string());
+                    }
+
+                    log::info!(
+                        "[ACP] System codex {} is outdated (need {}), installing locally...",
+                        version,
+                        MIN_CODEX_CLI_VERSION
+                    );
+                    // Fall through to install locally
+                } else {
+                    log::info!("[ACP] Found codex on system PATH: {}", path);
+                    return Ok(parent.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    log::info!("[ACP] Codex CLI not found or outdated, installing via npm...");
+
+    let _ = app.emit(
+        "acp://cli-install-progress",
+        serde_json::json!({
+            "stage": "installing",
+            "message": "Installing Codex CLI..."
+        }),
+    );
+
+    // Create directory
+    std::fs::create_dir_all(&cli_tools_dir)
+        .map_err(|e| format!("Failed to create cli-tools dir: {e}"))?;
+
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    let paths = crate::embedded_runtime::discover_embedded_runtime(&app);
+    let node_bin = paths
+        .node_dir
+        .as_ref()
+        .map(|d| {
+            if cfg!(target_os = "windows") {
+                d.join("node.exe")
+            } else {
+                d.join("node")
+            }
+        })
+        .ok_or_else(|| "Embedded Node.js not found".to_string())?;
+
+    let npm_cli = if cfg!(target_os = "windows") {
+        node_bin
+            .parent()
+            .unwrap()
+            .join("node_modules/npm/bin/npm-cli.js")
+    } else {
+        node_bin
+            .parent()
+            .unwrap()
+            .join("../lib/node_modules/npm/bin/npm-cli.js")
+    };
+    let npm_cli = npm_cli.canonicalize().map_err(|e| {
+        format!(
+            "npm CLI script not found at {:?}: {}. Ensure embedded Node.js runtime is properly installed.",
+            npm_cli, e
+        )
+    })?;
+
+    let output = tokio::process::Command::new(&node_bin)
+        .args([
+            npm_cli.to_string_lossy().as_ref(),
+            "install",
+            "--prefix",
+            &cli_tools_dir.to_string_lossy(),
+            "@openai/codex",
+        ])
+        .env("PATH", embedded_path)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run npm install: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = app.emit(
+            "acp://cli-install-progress",
+            serde_json::json!({
+                "stage": "error",
+                "message": format!("Install failed: {stderr}")
+            }),
+        );
+        return Err(format!("npm install failed: {stderr}"));
+    }
+
+    if !codex_bin.exists() {
+        return Err("Install completed but codex binary not found".to_string());
+    }
+
+    log::info!(
+        "[ACP] Codex CLI installed successfully at: {}",
+        codex_bin.display()
+    );
+
+    let _ = app.emit(
+        "acp://cli-install-progress",
+        serde_json::json!({
+            "stage": "complete",
+            "message": "Codex CLI installed successfully"
+        }),
+    );
+
+    Ok(bin_dir.to_string_lossy().to_string())
+}
+
+/// Upgrade Codex CLI synchronously (blocking).
+fn upgrade_codex_cli_sync(
+    cli_tools_dir: &std::path::Path,
+    app: &AppHandle,
+) -> Result<(), String> {
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    let paths = crate::embedded_runtime::discover_embedded_runtime(app);
+
+    let node_bin = paths
+        .node_dir
+        .as_ref()
+        .map(|d| {
+            if cfg!(target_os = "windows") {
+                d.join("node.exe")
+            } else {
+                d.join("node")
+            }
+        })
+        .ok_or_else(|| "Embedded Node.js not found".to_string())?;
+
+    let npm_cli = if cfg!(target_os = "windows") {
+        node_bin
+            .parent()
+            .unwrap()
+            .join("node_modules/npm/bin/npm-cli.js")
+    } else {
+        node_bin
+            .parent()
+            .unwrap()
+            .join("../lib/node_modules/npm/bin/npm-cli.js")
+    };
+    let npm_cli = npm_cli
+        .canonicalize()
+        .map_err(|e| format!("npm CLI not found: {e}"))?;
+
+    let output = std::process::Command::new(&node_bin)
+        .args([
+            npm_cli.to_string_lossy().as_ref(),
+            "install",
+            "--prefix",
+            &cli_tools_dir.to_string_lossy(),
+            "@openai/codex@latest",
+        ])
+        .env("PATH", embedded_path)
+        .output()
+        .map_err(|e| format!("Failed to run npm: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("npm install failed: {stderr}"));
+    }
+
+    Ok(())
+}
+
 /// Upgrade Claude CLI synchronously (blocking).
 fn upgrade_claude_cli_sync(
     cli_tools_dir: &std::path::Path,

@@ -254,6 +254,15 @@ export async function ensureClaudeCli(): Promise<string> {
 }
 
 /**
+ * Ensure Codex CLI (`@openai/codex`) is installed and meets the minimum version.
+ * Installs or upgrades via npm if needed.
+ * Returns the bin directory path containing the codex binary.
+ */
+export async function ensureCodexCli(): Promise<string> {
+  return invoke<string>("acp_ensure_codex_cli");
+}
+
+/**
  * Check if a specific agent binary is available in PATH.
  */
 export async function checkAgentAvailable(

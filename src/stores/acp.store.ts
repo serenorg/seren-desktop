@@ -273,8 +273,15 @@ export const acpStore = {
     });
 
     try {
-      // Ensure Claude CLI is installed before spawning
-      if (resolvedAgentType === "claude-code") {
+      // Ensure the underlying CLI is installed and up-to-date before spawning
+      const ensureFn =
+        resolvedAgentType === "claude-code"
+          ? acpService.ensureClaudeCli
+          : resolvedAgentType === "codex"
+            ? acpService.ensureCodexCli
+            : null;
+
+      if (ensureFn) {
         const { listen } = await import("@tauri-apps/api/event");
         const progressUnsub = await listen<{ stage: string; message: string }>(
           "acp://cli-install-progress",
@@ -284,14 +291,14 @@ export const acpStore = {
         );
 
         try {
-          await acpService.ensureClaudeCli();
+          await ensureFn();
         } catch (error) {
           progressUnsub();
           tempUnsubscribe();
           const message =
             error instanceof Error
               ? error.message
-              : "Failed to install Claude Code CLI";
+              : `Failed to install ${resolvedAgentType === "codex" ? "Codex" : "Claude Code"} CLI`;
           setState("error", message);
           setState("isLoading", false);
           setState("installStatus", null);
