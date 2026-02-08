@@ -68,6 +68,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const [commandPopupIndex, setCommandPopupIndex] = createSignal(0);
   const [historyIndex, setHistoryIndex] = createSignal(-1);
   const [savedInput, setSavedInput] = createSignal("");
+  const [isAttaching, setIsAttaching] = createSignal(false);
   const [awaitingLogin, setAwaitingLogin] = createSignal<AgentType | null>(
     null,
   );
@@ -176,6 +177,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       "[AgentChat] handleAttachImages called, hasSession:",
       hasSession(),
     );
+
+    // Prevent multiple concurrent attach operations
+    if (isAttaching()) {
+      console.log("[AgentChat] Already attaching, skipping");
+      return;
+    }
+
+    setIsAttaching(true);
     try {
       const files = await pickAndReadAttachments();
       console.log(
@@ -207,6 +216,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       }
     } catch (error) {
       console.error("[AgentChat] handleAttachImages error:", error);
+      // Show error status to user
+      setCommandStatus(`Failed to attach files: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setTimeout(() => setCommandStatus(null), 5000);
+    } finally {
+      setIsAttaching(false);
     }
   };
 
@@ -821,6 +835,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               images={attachedImages()}
               onAttach={handleAttachImages}
               onRemove={handleRemoveImage}
+              isLoading={isAttaching()}
             />
             <div class="relative">
               <SlashCommandPopup

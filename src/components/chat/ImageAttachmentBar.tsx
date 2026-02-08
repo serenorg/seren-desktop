@@ -10,6 +10,7 @@ interface ImageAttachmentBarProps {
   images: Attachment[];
   onAttach: () => void;
   onRemove: (index: number) => void;
+  isLoading?: boolean;
 }
 
 export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
@@ -19,7 +20,8 @@ export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
   console.log(
     "[ImageAttachmentBar] Rendering with",
     props.images.length,
-    "images",
+    "images, isLoading:",
+    props.isLoading,
   );
 
   return (
@@ -27,28 +29,51 @@ export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
       {/* Attach button */}
       <button
         type="button"
-        class="flex items-center gap-1 px-2 py-1 bg-transparent border border-[#30363d] text-[#8b949e] rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3]"
+        class={`flex items-center gap-1 px-2 py-1 bg-transparent border border-[#30363d] text-[#8b949e] rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3] ${props.isLoading ? "opacity-50 cursor-wait" : ""}`}
         onClick={() => {
-          console.log("[ImageAttachmentBar] Attach button clicked");
-          props.onAttach();
+          console.log("[ImageAttachmentBar] Attach button clicked, isLoading:", props.isLoading);
+          if (!props.isLoading) {
+            props.onAttach();
+          }
         }}
-        title="Attach files"
+        disabled={props.isLoading}
+        title={props.isLoading ? "Opening file picker..." : "Attach files"}
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          role="img"
-          aria-label="Attach"
+        <Show
+          when={!props.isLoading}
+          fallback={
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              class="animate-spin"
+              role="img"
+              aria-label="Loading"
+            >
+              <circle cx="12" cy="12" r="10" stroke-opacity="0.25" />
+              <path d="M12 2a10 10 0 0 1 10 10" />
+            </svg>
+          }
         >
-          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-        </svg>
-        Attach
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            role="img"
+            aria-label="Attach"
+          >
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+        </Show>
+        {props.isLoading ? "Opening..." : "Attach"}
       </button>
 
       {/* Attachment thumbnails */}

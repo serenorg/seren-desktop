@@ -15,7 +15,14 @@ interface SlashCommandPopupProps {
 }
 
 export function SlashCommandPopup(props: SlashCommandPopupProps) {
-  const matches = () => getCompletions(props.input, props.panel);
+  const matches = () => {
+    const result = getCompletions(props.input, props.panel);
+    // Debug logging to trace slash command matching
+    if (props.input.startsWith("/")) {
+      console.log("[SlashCommandPopup] Input:", props.input, "Panel:", props.panel, "Matches:", result.length, result.map(c => c.name));
+    }
+    return result;
+  };
 
   return (
     <Show when={matches().length > 0}>
