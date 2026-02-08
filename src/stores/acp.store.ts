@@ -523,11 +523,12 @@ export const acpStore = {
       const message = error instanceof Error ? error.message : String(error);
 
       // Auto-recover from dead/zombie sessions
+      // NOTE: "agent did not stop in time" is excluded because it's from
+      // user-initiated cancellation, not a dead session
       if (
         message.includes("Worker thread dropped") ||
         message.includes("not found") ||
-        message.includes("Session not initialized") ||
-        message.includes("agent did not stop in time")
+        message.includes("Session not initialized")
       ) {
         console.info(
           "[AcpStore] Session appears dead, attempting auto-recovery...",
