@@ -6,13 +6,13 @@
   bottom: 100%;
   left: 0;
   right: 0;
-  margin-bottom: 4px;
-  background: var(--popover);
-  border: 1px solid var(--border);
+  margin-bottom: 8px;
+  background: var(--popover, #252526);
+  border: 1px solid var(--border, #333333);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
   overflow: hidden;
-  z-index: 50;
+  z-index: 999;
   max-height: 300px;
   overflow-y: auto;
 }

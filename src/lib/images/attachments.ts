@@ -206,7 +206,15 @@ function resizeImage(
  */
 export async function pickFiles(): Promise<string[]> {
   console.log("[attachments] pickFiles called, opening dialog...");
+  console.log("[attachments] Supported extensions:", ALL_EXTENSIONS.join(", "));
   try {
+    // Ensure the dialog module is available
+    if (typeof open !== "function") {
+      console.error("[attachments] Dialog 'open' function not available");
+      throw new Error("File dialog not available - dialog plugin may not be initialized");
+    }
+
+    console.log("[attachments] Calling open() with filters...");
     const selected = await open({
       multiple: true,
       title: "Attach Files",
@@ -230,12 +238,23 @@ export async function pickFiles(): Promise<string[]> {
       ],
     });
 
-    console.log("[attachments] pickFiles dialog result:", selected);
-    if (!selected) return [];
-    if (typeof selected === "string") return [selected];
+    console.log("[attachments] pickFiles dialog returned:", selected);
+    if (!selected) {
+      console.log("[attachments] No files selected (dialog cancelled or empty selection)");
+      return [];
+    }
+    if (typeof selected === "string") {
+      console.log("[attachments] Single file selected:", selected);
+      return [selected];
+    }
+    console.log("[attachments] Multiple files selected:", selected.length);
     return selected;
   } catch (error) {
     console.error("[attachments] pickFiles error:", error);
+    // Re-throw with more context
+    if (error instanceof Error) {
+      throw new Error(`Failed to open file picker: ${error.message}`);
+    }
     throw error;
   }
 }
