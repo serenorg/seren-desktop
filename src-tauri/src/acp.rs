@@ -876,14 +876,14 @@ fn handle_session_notification(
                             "[ACP] Emitting DIFF: session={}, tool_call_id={}, path={}",
                             session_id,
                             update.tool_call_id,
-                            diff.path
+                            diff.path.display()
                         );
                         let emit_result = app.emit(
                             events::DIFF,
                             serde_json::json!({
                                 "sessionId": session_id,
                                 "toolCallId": update.tool_call_id.to_string(),
-                                "path": diff.path,
+                                "path": diff.path.display().to_string(),
                                 "oldText": diff.old_text,
                                 "newText": diff.new_text
                             }),
