@@ -15,6 +15,7 @@ use agent_client_protocol::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -200,7 +201,27 @@ fn auth_error_message(agent_type: AgentType) -> String {
     }
 }
 
+/// Debounce window: suppress duplicate login launches within this many seconds.
+const LOGIN_DEBOUNCE_SECS: i64 = 15;
+
+/// Timestamp (epoch secs) of the last successful login launch.
+static LAST_LOGIN_LAUNCH: AtomicI64 = AtomicI64::new(0);
+
 fn launch_agent_login(agent_type: AgentType) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let last = LAST_LOGIN_LAUNCH.load(Ordering::Relaxed);
+    if now - last < LOGIN_DEBOUNCE_SECS {
+        log::info!(
+            "[ACP] Skipping duplicate login launch (last was {}s ago)",
+            now - last
+        );
+        return;
+    }
+    LAST_LOGIN_LAUNCH.store(now, Ordering::Relaxed);
+
     match agent_type {
         AgentType::ClaudeCode => launch_claude_login(),
         AgentType::Codex => launch_codex_login(),
