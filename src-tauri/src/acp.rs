@@ -868,6 +868,21 @@ fn handle_session_notification(
             }
         }
         SessionUpdate::ToolCallUpdate(update) => {
+            // Defensive: if the update has a title, also emit a TOOL_CALL event
+            // so the frontend creates a card even if no prior ToolCall was sent.
+            if let Some(ref title) = update.fields.title {
+                let _ = app.emit(
+                    events::TOOL_CALL,
+                    serde_json::json!({
+                        "sessionId": session_id,
+                        "toolCallId": update.tool_call_id.to_string(),
+                        "title": title,
+                        "kind": format!("{:?}", update.fields.kind.unwrap_or_default()),
+                        "status": format!("{:?}", update.fields.status.unwrap_or_default())
+                    }),
+                );
+            }
+
             // Check for diffs in content
             if let Some(ref content) = update.fields.content {
                 for block in content {
