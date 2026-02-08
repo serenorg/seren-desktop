@@ -34,6 +34,7 @@ mod sandbox;
 mod skills;
 mod sync;
 mod terminal;
+mod polymarket;
 mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
@@ -665,6 +666,11 @@ pub fn run() {
             wallet::commands::clear_crypto_wallet,
             wallet::commands::sign_x402_payment,
             wallet::commands::get_crypto_usdc_balance,
+            // Polymarket CLOB API authentication commands
+            polymarket::commands::store_polymarket_credentials,
+            polymarket::commands::get_polymarket_address,
+            polymarket::commands::clear_polymarket_credentials,
+            polymarket::commands::sign_polymarket_request,
             embedded_runtime::get_embedded_runtime_info,
             store_oauth_credentials,
             get_oauth_credentials,
