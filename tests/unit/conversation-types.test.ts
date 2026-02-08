@@ -3,11 +3,14 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  deserializeMetadata,
   isOrchestratorMessage,
   isToolMessage,
+  serializeMetadata,
 } from "@/types/conversation";
 import type {
   DiffData,
+  MessageMetadata,
   MessageStatus,
   MessageType,
   ToolCallData,
@@ -214,5 +217,120 @@ describe("type exhaustiveness", () => {
       const msg = makeMessage({ status: s });
       expect(msg.status).toBe(s);
     }
+  });
+});
+
+describe("serializeMetadata", () => {
+  it("returns null for plain user message with no orchestrator fields", () => {
+    const msg = makeMessage({ type: "user", role: "user" });
+    expect(serializeMetadata(msg)).toBeNull();
+  });
+
+  it("serializes worker_type and model_id", () => {
+    const msg = makeMessage({
+      workerType: "chat_model",
+      modelId: "anthropic/claude-opus-4-6",
+      taskType: "code_generation",
+    });
+    const json = serializeMetadata(msg);
+    expect(json).not.toBeNull();
+    const parsed = JSON.parse(json!) as MessageMetadata;
+    expect(parsed.v).toBe(1);
+    expect(parsed.worker_type).toBe("chat_model");
+    expect(parsed.model_id).toBe("anthropic/claude-opus-4-6");
+    expect(parsed.task_type).toBe("code_generation");
+  });
+
+  it("serializes tool_call data", () => {
+    const msg = makeMessage({
+      toolCall: {
+        toolCallId: "tc-1",
+        title: "read_file",
+        kind: "file",
+        status: "complete",
+        name: "read_file",
+        arguments: '{"path":"/tmp/foo"}',
+      },
+    });
+    const json = serializeMetadata(msg);
+    const parsed = JSON.parse(json!) as MessageMetadata;
+    expect(parsed.tool_call?.id).toBe("tc-1");
+    expect(parsed.tool_call?.name).toBe("read_file");
+    expect(parsed.tool_call?.arguments).toBe('{"path":"/tmp/foo"}');
+  });
+
+  it("serializes diff data", () => {
+    const msg = makeMessage({
+      diff: {
+        path: "/src/main.rs",
+        oldText: "fn main() {}",
+        newText: 'fn main() { println!("hi"); }',
+      },
+    });
+    const json = serializeMetadata(msg);
+    const parsed = JSON.parse(json!) as MessageMetadata;
+    expect(parsed.diff?.path).toBe("/src/main.rs");
+    expect(parsed.diff?.old_text).toBe("fn main() {}");
+  });
+});
+
+describe("deserializeMetadata", () => {
+  it("returns empty object for null", () => {
+    expect(deserializeMetadata(null)).toEqual({});
+  });
+
+  it("returns empty object for invalid JSON", () => {
+    expect(deserializeMetadata("not json")).toEqual({});
+  });
+
+  it("returns empty object for unknown version", () => {
+    expect(deserializeMetadata('{"v":99}')).toEqual({});
+  });
+
+  it("round-trips routing metadata", () => {
+    const msg = makeMessage({
+      workerType: "acp_agent",
+      modelId: "gemini-2.5-flash",
+      taskType: "research",
+    });
+    const json = serializeMetadata(msg);
+    const restored = deserializeMetadata(json);
+    expect(restored.workerType).toBe("acp_agent");
+    expect(restored.modelId).toBe("gemini-2.5-flash");
+    expect(restored.taskType).toBe("research");
+  });
+
+  it("round-trips tool_call data", () => {
+    const msg = makeMessage({
+      toolCall: {
+        toolCallId: "tc-5",
+        title: "run_sql",
+        kind: "database",
+        status: "complete",
+        name: "run_sql",
+        arguments: '{"query":"SELECT 1"}',
+      },
+    });
+    const json = serializeMetadata(msg);
+    const restored = deserializeMetadata(json);
+    expect(restored.toolCall?.toolCallId).toBe("tc-5");
+    expect(restored.toolCall?.name).toBe("run_sql");
+    expect(restored.toolCall?.arguments).toBe('{"query":"SELECT 1"}');
+  });
+
+  it("round-trips diff data", () => {
+    const msg = makeMessage({
+      diff: {
+        path: "/src/lib.rs",
+        oldText: "old",
+        newText: "new",
+        toolCallId: "tc-3",
+      },
+    });
+    const json = serializeMetadata(msg);
+    const restored = deserializeMetadata(json);
+    expect(restored.diff?.path).toBe("/src/lib.rs");
+    expect(restored.diff?.oldText).toBe("old");
+    expect(restored.diff?.newText).toBe("new");
   });
 });

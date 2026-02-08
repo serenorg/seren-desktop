@@ -20,7 +20,13 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
     }
 
     let conn = Connection::open(path)?;
+    setup_schema(&conn)?;
+    Ok(conn)
+}
 
+/// Create tables and run migrations on a connection.
+/// Extracted from init_db so it can be tested with in-memory SQLite.
+pub fn setup_schema(conn: &Connection) -> Result<()> {
     // Create conversations table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS conversations (
@@ -59,10 +65,23 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
             .ok(); // Ignore error if column already exists
     }
 
-    // Migration: Create default conversation for orphan messages
-    migrate_orphan_messages(&conn)?;
+    // Migration: Add metadata column for orchestrator fields (JSON blob)
+    let has_metadata: bool = conn
+        .prepare("SELECT metadata FROM messages LIMIT 1")
+        .is_ok();
 
-    Ok(conn)
+    if !has_metadata {
+        conn.execute(
+            "ALTER TABLE messages ADD COLUMN metadata TEXT DEFAULT NULL",
+            [],
+        )
+        .ok();
+    }
+
+    // Migration: Create default conversation for orphan messages
+    migrate_orphan_messages(conn)?;
+
+    Ok(())
 }
 
 /// Migrate messages without a conversation_id to a default conversation
@@ -96,4 +115,74 @@ fn migrate_orphan_messages(conn: &Connection) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schema_creates_metadata_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        // Verify metadata column exists by inserting a row with it
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Test', 1000)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp, metadata)
+             VALUES ('m1', 'c1', 'user', 'hello', 1000, '{\"v\":1,\"worker_type\":\"chat_model\"}')",
+            [],
+        )
+        .unwrap();
+
+        let metadata: Option<String> = conn
+            .query_row("SELECT metadata FROM messages WHERE id = 'm1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+
+        assert!(metadata.is_some());
+        assert!(metadata.unwrap().contains("\"v\":1"));
+    }
+
+    #[test]
+    fn null_metadata_for_pre_orchestrator_messages() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Test', 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Insert message without metadata (simulates pre-migration data)
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp)
+             VALUES ('m1', 'c1', 'user', 'hello', 1000)",
+            [],
+        )
+        .unwrap();
+
+        let metadata: Option<String> = conn
+            .query_row("SELECT metadata FROM messages WHERE id = 'm1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+
+        assert!(metadata.is_none());
+    }
+
+    #[test]
+    fn schema_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        // Running setup again should not error
+        setup_schema(&conn).unwrap();
+    }
 }
