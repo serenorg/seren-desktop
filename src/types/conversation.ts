@@ -42,6 +42,8 @@ export interface UnifiedMessage {
   thinking?: string;
   error?: string | null;
   duration?: number;
+  /** Total cost in SerenBucks for this message's query, reported by Gateway. */
+  cost?: number;
   toolCallId?: string;
   toolCall?: ToolCallData;
   diff?: DiffData;

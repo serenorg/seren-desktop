@@ -700,10 +700,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       {(() => {
                         const dur = message.duration;
                         if (!dur) return null;
-                        const { verb, duration } = formatDurationWithVerb(dur);
+                        const { verb, duration, costDisplay } =
+                          formatDurationWithVerb(dur, message.cost);
                         return (
                           <div class="mt-2 text-xs text-[#8b949e]">
                             ✻ {verb} for {duration}
+                            {costDisplay && ` at ${costDisplay}`}
                           </div>
                         );
                       })()}

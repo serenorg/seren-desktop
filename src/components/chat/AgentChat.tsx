@@ -409,12 +409,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             />
             <Show when={message.duration}>
               {(() => {
-                const { verb, duration } = formatDurationWithVerb(
+                const { verb, duration, costDisplay } = formatDurationWithVerb(
                   message.duration!,
+                  message.cost,
                 );
                 return (
                   <div class="mt-2 text-xs text-[#8b949e]">
                     ✻ {verb} for {duration}
+                    {costDisplay && ` at ${costDisplay}`}
                   </div>
                 );
               })()}

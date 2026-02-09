@@ -62,17 +62,22 @@ impl McpPublisherWorker {
         })
     }
 
-    /// Parse a single SSE data line into WorkerEvents.
+    /// Parse a single SSE data line into WorkerEvents and optional cost.
     ///
     /// Uses the same parsing logic as ChatModelWorker since publisher endpoints
     /// return the same OpenAI-compatible streaming format.
-    fn parse_sse_data(data: &str) -> Vec<WorkerEvent> {
+    fn parse_sse_data(data: &str) -> (Vec<WorkerEvent>, Option<f64>) {
         let parsed: serde_json::Value = match serde_json::from_str(data) {
             Ok(v) => v,
-            Err(_) => return Vec::new(),
+            Err(_) => return (Vec::new(), None),
         };
 
         let mut events = Vec::new();
+
+        // Extract cost from Gateway wrapper
+        let chunk_cost = parsed
+            .get("cost")
+            .and_then(|v| v.as_str().and_then(|s| s.parse::<f64>().ok()).or_else(|| v.as_f64()));
 
         // Check for wrapped error status from Gateway
         if let Some(status) = parsed.get("status").and_then(|s| s.as_u64()) {
@@ -84,14 +89,21 @@ impl McpPublisherWorker {
                 events.push(WorkerEvent::Error {
                     message: format!("HTTP {}: {}", status, error_msg),
                 });
-                return events;
+                return (events, chunk_cost);
             }
         }
 
+        // If Gateway wraps the SSE event in {status, body, cost}, unwrap body
+        let effective = if parsed.get("body").is_some() && parsed.get("status").is_some() {
+            parsed.pointer("/body").unwrap_or(&parsed)
+        } else {
+            &parsed
+        };
+
         // Extract content delta
-        let content = parsed
+        let content = effective
             .pointer("/delta/content")
-            .or_else(|| parsed.pointer("/choices/0/delta/content"))
+            .or_else(|| effective.pointer("/choices/0/delta/content"))
             .and_then(|v| v.as_str());
 
         if let Some(text) = content {
@@ -103,9 +115,9 @@ impl McpPublisherWorker {
         }
 
         // Extract tool calls from delta
-        if let Some(tool_calls) = parsed
+        if let Some(tool_calls) = effective
             .pointer("/delta/tool_calls")
-            .or_else(|| parsed.pointer("/choices/0/delta/tool_calls"))
+            .or_else(|| effective.pointer("/choices/0/delta/tool_calls"))
             .and_then(|v| v.as_array())
         {
             for tc in tool_calls {
@@ -137,7 +149,7 @@ impl McpPublisherWorker {
         }
 
         // Check for finish_reason
-        let finish_reason = parsed
+        let finish_reason = effective
             .pointer("/choices/0/finish_reason")
             .and_then(|v| v.as_str());
 
@@ -146,10 +158,11 @@ impl McpPublisherWorker {
             events.push(WorkerEvent::Complete {
                 final_content,
                 thinking: None,
+                cost: None, // Cost set by stream_response from accumulated total
             });
         }
 
-        events
+        (events, chunk_cost)
     }
 
     /// Stream SSE response and forward events.
@@ -161,6 +174,7 @@ impl McpPublisherWorker {
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
         let mut accumulated_content = String::new();
+        let mut accumulated_cost: f64 = 0.0;
         let mut got_complete = false;
 
         while let Some(chunk_result) = stream.next().await {
@@ -183,10 +197,12 @@ impl McpPublisherWorker {
                 if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
                         if !got_complete {
+                            let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
                             event_tx
                                 .send(WorkerEvent::Complete {
                                     final_content: accumulated_content.clone(),
                                     thinking: None,
+                                    cost,
                                 })
                                 .await
                                 .map_err(|e| format!("Failed to send Complete event: {}", e))?;
@@ -194,7 +210,10 @@ impl McpPublisherWorker {
                         return Ok(());
                     }
 
-                    let events = Self::parse_sse_data(data);
+                    let (events, chunk_cost) = Self::parse_sse_data(data);
+                    if let Some(c) = chunk_cost {
+                        accumulated_cost += c;
+                    }
                     for event in events {
                         match &event {
                             WorkerEvent::Content { text } => {
@@ -202,10 +221,12 @@ impl McpPublisherWorker {
                             }
                             WorkerEvent::Complete { .. } => {
                                 got_complete = true;
+                                let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
                                 event_tx
                                     .send(WorkerEvent::Complete {
                                         final_content: accumulated_content.clone(),
                                         thinking: None,
+                                        cost,
                                     })
                                     .await
                                     .map_err(|e| {
@@ -225,10 +246,12 @@ impl McpPublisherWorker {
         }
 
         if !got_complete {
+            let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
             event_tx
                 .send(WorkerEvent::Complete {
                     final_content: accumulated_content,
                     thinking: None,
+                    cost,
                 })
                 .await
                 .map_err(|e| format!("Failed to send final Complete event: {}", e))?;
@@ -369,7 +392,7 @@ mod tests {
     #[test]
     fn parses_content_sse_data() {
         let data = r#"{"choices":[{"delta":{"content":"Result"},"finish_reason":null}]}"#;
-        let events = McpPublisherWorker::parse_sse_data(data);
+        let (events, _cost) = McpPublisherWorker::parse_sse_data(data);
         assert_eq!(events.len(), 1);
         match &events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Result"),
@@ -380,7 +403,7 @@ mod tests {
     #[test]
     fn parses_publisher_error_response() {
         let data = r#"{"status":429,"body":{"error":{"message":"Rate limited"}},"cost":"0"}"#;
-        let events = McpPublisherWorker::parse_sse_data(data);
+        let (events, _cost) = McpPublisherWorker::parse_sse_data(data);
         assert_eq!(events.len(), 1);
         match &events[0] {
             WorkerEvent::Error { message } => {
@@ -394,7 +417,7 @@ mod tests {
     #[test]
     fn parses_finish_stop_as_complete() {
         let data = r#"{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}"#;
-        let events = McpPublisherWorker::parse_sse_data(data);
+        let (events, _cost) = McpPublisherWorker::parse_sse_data(data);
         assert!(events
             .iter()
             .any(|e| matches!(e, WorkerEvent::Complete { .. })));
@@ -403,7 +426,7 @@ mod tests {
     #[test]
     fn parses_tool_call_from_publisher() {
         let data = r#"{"choices":[{"delta":{"tool_calls":[{"id":"tc_pub","type":"function","function":{"name":"scrape","arguments":"{\"url\":\"https://example.com\"}"}}]},"finish_reason":null}]}"#;
-        let events = McpPublisherWorker::parse_sse_data(data);
+        let (events, _cost) = McpPublisherWorker::parse_sse_data(data);
         assert_eq!(events.len(), 1);
         match &events[0] {
             WorkerEvent::ToolCall {
@@ -420,7 +443,7 @@ mod tests {
 
     #[test]
     fn ignores_invalid_json() {
-        let events = McpPublisherWorker::parse_sse_data("not json");
+        let (events, _cost) = McpPublisherWorker::parse_sse_data("not json");
         assert!(events.is_empty());
     }
 }

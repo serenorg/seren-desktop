@@ -110,6 +110,7 @@ impl Worker for AcpWorker {
                     .send(WorkerEvent::Complete {
                         final_content: String::new(),
                         thinking: None,
+                        cost: None,
                     })
                     .await
                     .map_err(|e| format!("Failed to send Complete event: {}", e))?;

@@ -62,6 +62,9 @@ pub enum WorkerEvent {
     Complete {
         final_content: String,
         thinking: Option<String>,
+        /// Total cost in SerenBucks for this worker's request, reported by Gateway.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cost: Option<f64>,
     },
     Error {
         message: String,
@@ -236,10 +239,21 @@ mod tests {
         let complete = WorkerEvent::Complete {
             final_content: "done".to_string(),
             thinking: None,
+            cost: Some(0.005),
         };
         let json = serde_json::to_value(&complete).unwrap();
         assert_eq!(json["type"], "complete");
         assert_eq!(json["thinking"], serde_json::Value::Null);
+        assert_eq!(json["cost"], 0.005);
+
+        // cost: None should be omitted from serialized JSON
+        let complete_no_cost = WorkerEvent::Complete {
+            final_content: "done".to_string(),
+            thinking: None,
+            cost: None,
+        };
+        let json = serde_json::to_value(&complete_no_cost).unwrap();
+        assert!(json.get("cost").is_none());
 
         let error = WorkerEvent::Error {
             message: "oops".to_string(),

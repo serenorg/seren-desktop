@@ -134,15 +134,33 @@ export function formatDuration(ms: number): string {
 }
 
 /**
- * Format duration with a random verb prefix.
- * Returns object with verb and formatted duration for flexible display.
+ * Format duration with a random verb prefix and optional cost.
+ * Returns object with verb, formatted duration, and optional cost string.
  */
-export function formatDurationWithVerb(ms: number): {
+export function formatDurationWithVerb(
+  ms: number,
+  cost?: number,
+): {
   verb: string;
   duration: string;
+  costDisplay: string | null;
 } {
   return {
     verb: getRandomVerb(),
     duration: formatDuration(ms),
+    costDisplay: formatCost(cost),
   };
+}
+
+/**
+ * Format a cost in SerenBucks to a display string.
+ * Returns null if cost is absent or zero.
+ * Examples: "$0.003", "$0.15", "$1.20"
+ */
+function formatCost(cost?: number): string | null {
+  if (cost == null || cost <= 0) return null;
+  if (cost < 0.01) {
+    return `$${cost.toFixed(4)}`;
+  }
+  return `$${cost.toFixed(2)}`;
 }

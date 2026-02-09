@@ -50,7 +50,12 @@ type WorkerEvent =
       new_text: string;
       tool_call_id: string | null;
     }
-  | { type: "complete"; final_content: string; thinking: string | null }
+  | {
+      type: "complete";
+      final_content: string;
+      thinking: string | null;
+      cost?: number;
+    }
   | { type: "error"; message: string };
 
 /** Capabilities payload sent to the Rust orchestrator. */
@@ -227,7 +232,11 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
       handleDiff(workerEvent);
       break;
     case "complete":
-      handleComplete(workerEvent.final_content, workerEvent.thinking);
+      handleComplete(
+        workerEvent.final_content,
+        workerEvent.thinking,
+        workerEvent.cost,
+      );
       break;
     case "error":
       handleError(workerEvent.message);
@@ -346,7 +355,11 @@ function handleDiff(event: {
   conversationStore.addMessage(diffMessage);
 }
 
-function handleComplete(finalContent: string, thinking: string | null): void {
+function handleComplete(
+  finalContent: string,
+  thinking: string | null,
+  cost?: number,
+): void {
   if (!activeMessageId) return;
 
   const duration = Date.now() - streamStartTime;
@@ -366,6 +379,7 @@ function handleComplete(finalContent: string, thinking: string | null): void {
     status: "complete",
     workerType: "orchestrator",
     duration,
+    cost,
   };
 
   conversationStore.finalizeStreaming();

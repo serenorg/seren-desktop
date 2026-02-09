@@ -55,6 +55,8 @@ export interface AgentMessage {
   toolCall?: ToolCallEvent;
   /** Duration in milliseconds for how long the response took */
   duration?: number;
+  /** Total cost in SerenBucks for this message's query, reported by Gateway. */
+  cost?: number;
 }
 
 export interface AgentModelInfo {
