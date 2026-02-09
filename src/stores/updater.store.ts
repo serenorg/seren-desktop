@@ -43,7 +43,7 @@ async function initUpdater(): Promise<void> {
 // Store the update object for later installation
 let pendingUpdate: Awaited<ReturnType<typeof check>> | null = null;
 
-async function checkForUpdates(manual = false): Promise<void> {
+async function checkForUpdates(_manual = false): Promise<void> {
   if (!isTauriRuntime()) {
     setState({ status: "unsupported" });
     return;
@@ -52,9 +52,11 @@ async function checkForUpdates(manual = false): Promise<void> {
   setState({ status: "checking", error: null });
 
   try {
+    console.log("[Updater] Checking for updates...");
     const update = await check();
 
     if (update) {
+      console.log("[Updater] Update available:", update.version);
       pendingUpdate = update;
       setState({
         status: "available",
@@ -63,9 +65,10 @@ async function checkForUpdates(manual = false): Promise<void> {
         error: null,
       });
     } else {
+      console.log("[Updater] No update available");
       pendingUpdate = null;
       setState({
-        status: manual ? "up_to_date" : "up_to_date",
+        status: "up_to_date",
         availableVersion: undefined,
         lastChecked: Date.now(),
         error: null,
@@ -73,22 +76,55 @@ async function checkForUpdates(manual = false): Promise<void> {
     }
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
+    console.error("[Updater] Check failed:", err.message);
     telemetry.captureError(err, { type: "updater", phase: "check" });
     setState({ status: "error", error: err.message });
   }
 }
 
 async function installAvailableUpdate(): Promise<void> {
-  if (!isTauriRuntime() || !pendingUpdate) return;
-  setState({ status: "installing" });
+  if (!isTauriRuntime()) {
+    console.warn("[Updater] Install skipped: not Tauri runtime");
+    return;
+  }
+  if (!pendingUpdate) {
+    console.warn("[Updater] Install skipped: no pending update");
+    setState({
+      status: "error",
+      error: "No pending update found. Try checking again.",
+    });
+    return;
+  }
+
+  console.log("[Updater] Starting download and install...");
+  setState({ status: "installing", error: null });
 
   try {
-    await pendingUpdate.downloadAndInstall();
+    await pendingUpdate.downloadAndInstall(
+      (progress: {
+        event: string;
+        data: { contentLength?: number; chunkLength?: number };
+      }) => {
+        if (progress.event === "Started" && progress.data.contentLength) {
+          console.log(
+            `[Updater] Download started, size: ${progress.data.contentLength} bytes`,
+          );
+        } else if (progress.event === "Progress") {
+          console.log(
+            `[Updater] Downloaded ${progress.data.chunkLength} bytes`,
+          );
+        } else if (progress.event === "Finished") {
+          console.log("[Updater] Download finished, installing...");
+        }
+      },
+    );
+    console.log("[Updater] Install complete, relaunching...");
     await relaunch();
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
+    console.error("[Updater] Install failed:", err.message);
     telemetry.captureError(err, { type: "updater", phase: "install" });
-    setState({ status: "available", error: err.message });
+    setState({ status: "error", error: err.message });
   }
 }
 
