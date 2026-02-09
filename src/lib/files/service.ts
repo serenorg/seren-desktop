@@ -132,8 +132,11 @@ function entriesToNodes(entries: FileEntry[]): FileNode[] {
  * Open a file in a tab.
  */
 export async function openFileInTab(path: string): Promise<void> {
+  console.log("[openFileInTab] Opening file:", path);
   const content = await readFile(path);
-  openTab(path, content);
+  console.log("[openFileInTab] Read content length:", content.length);
+  const tabId = openTab(path, content);
+  console.log("[openFileInTab] Opened tab:", tabId);
 }
 
 /**

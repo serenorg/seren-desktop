@@ -138,13 +138,23 @@ export const EditorPanel: Component = () => {
   createEffect(() => {
     const activeId = tabsState.activeTabId;
     const activeTab = tabsState.tabs.find((tab) => tab.id === activeId);
+    console.log("[EditorPanel] Sync effect triggered:", {
+      activeId,
+      activeTab: activeTab ? {
+        id: activeTab.id,
+        filePath: activeTab.filePath,
+        contentLength: activeTab.content.length
+      } : null
+    });
     if (activeTab) {
       setActiveFilePath(activeTab.filePath);
       setEditorContent(activeTab.content);
       setSelectedPath(activeTab.filePath);
+      console.log("[EditorPanel] Editor content set, first 100 chars:", activeTab.content.substring(0, 100));
     } else {
       setActiveFilePath(null);
       setEditorContent("");
+      console.log("[EditorPanel] No active tab, cleared editor");
     }
   });
 
@@ -160,10 +170,12 @@ export const EditorPanel: Component = () => {
   }
 
   async function handleFileSelect(path: string) {
+    console.log("[EditorPanel] handleFileSelect called with:", path);
     try {
       await openFileInTab(path);
+      console.log("[EditorPanel] File opened successfully");
     } catch (error) {
-      console.error("Failed to open file:", error);
+      console.error("[EditorPanel] Failed to open file:", error);
     }
   }
 
