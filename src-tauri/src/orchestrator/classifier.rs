@@ -100,6 +100,9 @@ const RESEARCH_KEYWORDS: &[&str] = &[
     "search for",
     "search the",
     "look up",
+    "find out",
+    "tell me about",
+    "what happened",
     "explain",
     "research",
     "summarize",
@@ -112,6 +115,34 @@ const RESEARCH_KEYWORDS: &[&str] = &[
     "documentation",
     "tutorial",
     "guide",
+    "latest",
+    "current",
+    "recent",
+    "news",
+    "developments",
+    "trends",
+    "update on",
+    "updates on",
+    "what are the",
+    "what is the latest",
+];
+
+/// Keywords that indicate the user explicitly wants to use publishers/tools.
+/// Highest priority for tool routing — overrides general_chat classification.
+const PUBLISHER_KEYWORDS: &[&str] = &[
+    "use publisher",
+    "use publishers",
+    "use the publisher",
+    "use the publishers",
+    "use any publisher",
+    "use any of the publisher",
+    "use any of the publishers",
+    "with publisher",
+    "with publishers",
+    "using publisher",
+    "using publishers",
+    "publisher",
+    "publishers",
 ];
 
 const DOCUMENT_KEYWORDS: &[&str] = &[
@@ -185,9 +216,10 @@ fn contains_keyword(text: &str, keyword: &str) -> bool {
 /// Rules are applied in priority order:
 /// 1. Code generation (code keywords or code fences)
 /// 2. File operations (file keywords)
-/// 3. Research (search/explain keywords)
-/// 4. Document generation (writing keywords)
-/// 5. General chat (default)
+/// 3. Explicit publisher request (user mentions publishers)
+/// 4. Research (search/explain/latest keywords)
+/// 5. Document generation (writing keywords)
+/// 6. General chat (default)
 pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
     let prompt_lower = prompt.to_lowercase();
 
@@ -222,7 +254,21 @@ pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
         };
     }
 
-    // Rule 3: Research
+    // Rule 3: Explicit publisher request (user wants MCP publisher tools)
+    if PUBLISHER_KEYWORDS
+        .iter()
+        .any(|kw| contains_keyword(&prompt_lower, kw))
+    {
+        return TaskClassification {
+            task_type: "research".to_string(),
+            requires_tools: true,
+            requires_file_system: false,
+            complexity: TaskComplexity::Simple,
+            relevant_skills,
+        };
+    }
+
+    // Rule 4: Research
     if RESEARCH_KEYWORDS
         .iter()
         .any(|kw| contains_keyword(&prompt_lower, kw))
@@ -236,7 +282,7 @@ pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
         };
     }
 
-    // Rule 4: Document generation
+    // Rule 5: Document generation
     if DOCUMENT_KEYWORDS
         .iter()
         .any(|kw| contains_keyword(&prompt_lower, kw))
@@ -250,7 +296,7 @@ pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
         };
     }
 
-    // Rule 5: Default
+    // Rule 6: Default
     TaskClassification {
         task_type: "general_chat".to_string(),
         requires_tools: false,
@@ -467,5 +513,68 @@ mod tests {
         let result = classify("Help me git commit my code changes", &skills);
         assert_eq!(result.task_type, "code_generation");
         assert_eq!(result.relevant_skills, vec!["git-commit"]);
+    }
+
+    // =========================================================================
+    // Publisher & Expanded Research Tests
+    // =========================================================================
+
+    #[test]
+    fn classifies_explicit_publisher_request_as_research() {
+        let result = classify(
+            "What is the latest FASB digital asset developments in 2026. Use any of the publishers to help with this question.",
+            &[],
+        );
+        assert_eq!(result.task_type, "research");
+        assert!(result.requires_tools);
+    }
+
+    #[test]
+    fn classifies_use_publishers_as_research() {
+        let result = classify("Use publishers to find the answer", &[]);
+        assert_eq!(result.task_type, "research");
+        assert!(result.requires_tools);
+    }
+
+    #[test]
+    fn classifies_latest_keyword_as_research() {
+        let result = classify("What is the latest news about Bitcoin?", &[]);
+        assert_eq!(result.task_type, "research");
+        assert!(result.requires_tools);
+    }
+
+    #[test]
+    fn classifies_current_keyword_as_research() {
+        let result = classify("What is the current price of gold?", &[]);
+        assert_eq!(result.task_type, "research");
+        assert!(result.requires_tools);
+    }
+
+    #[test]
+    fn classifies_developments_keyword_as_research() {
+        let result = classify("Tell me about recent developments in AI regulation", &[]);
+        assert_eq!(result.task_type, "research");
+        assert!(result.requires_tools);
+    }
+
+    #[test]
+    fn classifies_find_out_as_research() {
+        let result = classify("Find out what happened at the conference", &[]);
+        assert_eq!(result.task_type, "research");
+        assert!(result.requires_tools);
+    }
+
+    #[test]
+    fn publisher_does_not_match_substring() {
+        // "published" should NOT match "publisher" because of word boundary check
+        let result = classify("The book was published last year", &[]);
+        assert_eq!(result.task_type, "general_chat");
+    }
+
+    #[test]
+    fn latest_does_not_match_in_code_context() {
+        // Code keywords take priority over research keywords
+        let result = classify("Get the latest version of the function from git", &[]);
+        assert_eq!(result.task_type, "code_generation");
     }
 }

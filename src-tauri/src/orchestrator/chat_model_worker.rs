@@ -539,7 +539,13 @@ impl Worker for ChatModelWorker {
             "{}/publishers/{}/chat/completions",
             GATEWAY_BASE_URL, PUBLISHER_SLUG
         );
-        let tools: Vec<serde_json::Value> = Vec::new(); // Tools will be populated by the orchestrator
+        // TODO: ChatModel worker doesn't pass tools to the LLM yet. The frontend
+        // sends tool names in capabilities.available_tools, but this worker needs
+        // full tool definitions (name, description, parameters schema). To fix this,
+        // the frontend should send complete tool definitions, or the orchestrator
+        // should resolve definitions from names. For now, tool-requiring requests
+        // are routed to McpPublisher or AcpAgent workers instead.
+        let tools: Vec<serde_json::Value> = Vec::new();
         let body = self.build_request_body(prompt, conversation_context, routing, skill_content, &tools, images);
         let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
 
