@@ -23,17 +23,12 @@ import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
-  areToolsAvailable,
   CHAT_MAX_RETRIES,
   type ChatContext,
-  continueToolIteration,
   type Message,
   sendMessageWithRetry,
-  streamMessage,
-  streamMessageWithTools,
-  type ToolIterationState,
-  type ToolStreamEvent,
 } from "@/services/chat";
+import { cancelOrchestration, orchestrate } from "@/services/orchestrator";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -48,10 +43,8 @@ import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { SlashCommandPopup } from "./SlashCommandPopup";
-import { StreamingMessage } from "./StreamingMessage";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
-import { ToolStreamingMessage } from "./ToolStreamingMessage";
 import { ToolsetSelector } from "./ToolsetSelector";
 import { TransitionAnnouncement } from "./TransitionAnnouncement";
 import "highlight.js/styles/github-dark.css";
@@ -72,38 +65,12 @@ const SUGGESTION_KEYWORDS = [
   "research",
 ];
 
-interface StreamingSession {
-  id: string;
-  userMessageId: string;
-  prompt: string;
-  model: string;
-  context?: ChatContext;
-  stream: AsyncGenerator<string>;
-  toolsEnabled: false;
-  startTime: number;
-}
-
-interface ToolStreamingSession {
-  id: string;
-  userMessageId: string;
-  prompt: string;
-  model: string;
-  context?: ChatContext;
-  stream: AsyncGenerator<ToolStreamEvent>;
-  toolsEnabled: true;
-  startTime: number;
-}
-
-type ActiveStreamingSession = StreamingSession | ToolStreamingSession;
-
 interface ChatContentProps {
   onSignInClick?: () => void;
 }
 
 export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [input, setInput] = createSignal("");
-  const [streamingSession, setStreamingSession] =
-    createSignal<ActiveStreamingSession | null>(null);
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
@@ -236,7 +203,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     );
 
     // Reset orphaned loading state from HMR interruption
-    if (conversationStore.isLoading && !streamingSession()) {
+    if (conversationStore.isLoading) {
       console.log("[ChatContent] Resetting orphaned loading state from HMR");
       conversationStore.setLoading(false);
     }
@@ -279,7 +246,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // Auto-scroll to bottom when messages change, streaming starts, or switching channels
   createEffect(() => {
     void conversationStore.messages;
-    void streamingSession();
+    void conversationStore.streamingContent;
     requestAnimationFrame(scrollToBottom);
   });
 
@@ -428,10 +395,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   const cancelStreaming = () => {
-    const session = streamingSession();
-    if (!session) return;
-    setStreamingSession(null);
-    conversationStore.setLoading(false);
+    const conversationId = conversationStore.activeConversationId;
+    if (conversationId) {
+      cancelOrchestration(conversationId);
+    }
     setMessageQueue([]);
   };
 
@@ -473,6 +440,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     messageContent: string,
     images?: Attachment[],
   ) => {
+    const conversationId = conversationStore.activeConversationId;
+    if (!conversationId) return;
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -483,106 +453,26 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       status: "complete",
     };
 
-    // Snapshot history BEFORE adding the current message to avoid duplication
-    // (streamMessageWithTools adds the current message separately)
-    const history = [...conversationStore.messages];
-
     conversationStore.addMessage(toUnifiedMessage(userMessage));
     await conversationStore.persistMessage(toUnifiedMessage(userMessage));
 
-    const context = buildContext();
-    const assistantId = crypto.randomUUID();
-
-    const useTools = areToolsAvailable();
-    const startTime = Date.now();
-    const session: ActiveStreamingSession = useTools
-      ? {
-          id: assistantId,
-          userMessageId: userMessage.id,
-          prompt: messageContent,
-          model: chatStore.selectedModel,
-          context,
-          stream: streamMessageWithTools(
-            messageContent,
-            chatStore.selectedModel,
-            context,
-            true,
-            history,
-            images,
-          ),
-          toolsEnabled: true,
-          startTime,
-        }
-      : {
-          id: assistantId,
-          userMessageId: userMessage.id,
-          prompt: messageContent,
-          model: chatStore.selectedModel,
-          context,
-          stream: streamMessage(
-            messageContent,
-            chatStore.selectedModel,
-            context,
-          ),
-          toolsEnabled: false,
-          startTime,
-        };
-
-    conversationStore.setLoading(true);
-    setStreamingSession(session);
     conversationStore.setError(null);
     setInput("");
     setHistoryIndex(-1);
     setSavedInput("");
-  };
 
-  const handleIterationLimit = (
-    state: ToolIterationState,
-    iteration: number,
-  ): AsyncGenerator<ToolStreamEvent> => {
-    console.log(
-      "[ChatContent] Tool iteration limit reached at iteration",
-      iteration,
-      "— auto-continuing",
-    );
-    return continueToolIteration(state);
-  };
-
-  const handleStreamingComplete = async (
-    session: ActiveStreamingSession,
-    content: string,
-  ) => {
-    const duration = Date.now() - session.startTime;
-
-    if (!content.trim()) {
-      console.warn("[ChatContent] Empty content in completed message", {
-        duration,
-        model: session.model,
-        toolsEnabled: session.toolsEnabled,
-      });
-    } else {
-      console.log("[ChatContent] Streaming complete", {
-        contentLength: content.length,
-        duration,
-        model: session.model,
-      });
+    // Enrich prompt with editor context if available
+    const context = buildContext();
+    let prompt = messageContent;
+    if (context) {
+      const fileLabel = context.file ?? "selection";
+      const rangeLabel = context.range
+        ? ` (lines ${context.range.startLine}-${context.range.endLine})`
+        : "";
+      prompt = `Context from ${fileLabel}${rangeLabel}:\n\`\`\`\n${context.content}\n\`\`\`\n\n${messageContent}`;
     }
 
-    const assistantMessage: Message = {
-      id: session.id,
-      role: "assistant",
-      content,
-      timestamp: Date.now(),
-      model: session.model,
-      status: "complete",
-      duration,
-      request: { prompt: session.prompt, context: session.context },
-    };
-
-    conversationStore.addMessage(toUnifiedMessage(assistantMessage));
-    await conversationStore.persistMessage(toUnifiedMessage(assistantMessage));
-    setStreamingSession(null);
-    conversationStore.setLoading(false);
+    await orchestrate(conversationId, prompt);
 
     // Check if auto-compact should be triggered
     await chatStore.checkAutoCompact(
@@ -597,34 +487,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       const [nextMessage, ...remainingQueue] = queue;
       setMessageQueue(remainingQueue);
       console.log("[ChatContent] Processing queued message:", nextMessage);
-      // Small delay to ensure UI updates
       setTimeout(() => {
         sendMessageImmediate(nextMessage);
       }, 100);
     }
-  };
-
-  const handleStreamingError = async (
-    session: ActiveStreamingSession,
-    error: Error,
-  ) => {
-    setStreamingSession(null);
-    conversationStore.setLoading(false);
-    conversationStore.setError(error.message);
-
-    const failedMessage: Message = {
-      id: session.id,
-      role: "assistant",
-      content: "",
-      timestamp: Date.now(),
-      model: session.model,
-      status: "error",
-      error: error.message,
-      request: { prompt: session.prompt, context: session.context },
-    };
-
-    conversationStore.addMessage(toUnifiedMessage(failedMessage));
-    await attemptRetry(failedMessage, false);
   };
 
   const attemptRetry = async (message: Message, isManual: boolean) => {
@@ -866,43 +732,26 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               </For>
             </Show>
 
-            <Show when={conversationStore.isLoading && !streamingSession()}>
+            <Show
+              when={
+                conversationStore.isLoading &&
+                !conversationStore.streamingContent
+              }
+            >
               <article class="px-5 py-4 border-b border-[#21262d]">
                 <ThinkingStatus />
               </article>
             </Show>
 
-            <Show when={streamingSession()}>
-              {(sessionAccessor) => {
-                const session = sessionAccessor();
-                return (
-                  <Show
-                    when={session.toolsEnabled}
-                    fallback={
-                      <StreamingMessage
-                        stream={(session as StreamingSession).stream}
-                        onComplete={(content) =>
-                          handleStreamingComplete(session, content)
-                        }
-                        onError={(error) =>
-                          handleStreamingError(session, error)
-                        }
-                        onContentUpdate={scrollToBottom}
-                      />
-                    }
-                  >
-                    <ToolStreamingMessage
-                      stream={(session as ToolStreamingSession).stream}
-                      onComplete={(content) =>
-                        handleStreamingComplete(session, content)
-                      }
-                      onError={(error) => handleStreamingError(session, error)}
-                      onContentUpdate={scrollToBottom}
-                      onIterationLimit={handleIterationLimit}
-                    />
+            <Show when={conversationStore.streamingContent}>
+              <article class="px-5 py-4 border-b border-[#21262d]">
+                <div class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words whitespace-pre-wrap">
+                  {conversationStore.streamingContent}
+                  <Show when={conversationStore.isLoading}>
+                    <span class="inline-block w-[6px] h-[14px] bg-[#58a6ff] ml-0.5 animate-pulse" />
                   </Show>
-                );
-              }}
+                </div>
+              </article>
             </Show>
           </div>
 

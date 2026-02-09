@@ -103,20 +103,9 @@ export async function orchestrate(
   // 3. Get auth token
   let token = (await getToken()) ?? "";
 
-  // 4. Create the assistant message placeholder
+  // 4. Prepare streaming state (message added on completion)
   activeMessageId = crypto.randomUUID();
   streamStartTime = Date.now();
-
-  const assistantMessage: UnifiedMessage = {
-    id: activeMessageId,
-    type: "assistant",
-    role: "assistant",
-    content: "",
-    timestamp: Date.now(),
-    status: "streaming",
-    workerType: "orchestrator",
-  };
-  conversationStore.addMessage(assistantMessage);
   conversationStore.setLoading(true);
 
   // 5. Listen for events
@@ -320,30 +309,37 @@ function handleComplete(finalContent: string, thinking: string | null): void {
   const thinkingContent =
     conversationStore.streamingThinking || thinking || undefined;
 
-  conversationStore.updateMessage(activeMessageId, {
+  const assistantMessage: UnifiedMessage = {
+    id: activeMessageId,
+    type: "assistant",
+    role: "assistant",
     content,
     thinking: thinkingContent,
+    timestamp: Date.now(),
     status: "complete",
+    workerType: "orchestrator",
     duration,
-  });
+  };
 
   conversationStore.finalizeStreaming();
-
-  // Persist the completed message
-  const messages = conversationStore.messages;
-  const completedMsg = messages.find((m) => m.id === activeMessageId);
-  if (completedMsg) {
-    conversationStore.persistMessage(completedMsg);
-  }
+  conversationStore.addMessage(assistantMessage);
+  conversationStore.persistMessage(assistantMessage);
 }
 
 function handleError(message: string): void {
   if (activeMessageId) {
-    conversationStore.updateMessage(activeMessageId, {
-      content: message,
+    const errorMessage: UnifiedMessage = {
+      id: activeMessageId,
+      type: "assistant",
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
       status: "error",
       error: message,
-    });
+      workerType: "orchestrator",
+    };
+    conversationStore.finalizeStreaming();
+    conversationStore.addMessage(errorMessage);
   } else {
     conversationStore.setError(message);
   }
@@ -354,7 +350,7 @@ function handleError(message: string): void {
 // =============================================================================
 
 /**
- * Flush accumulated streaming content into the active assistant message
+ * Flush accumulated streaming content into a completed assistant message
  * before tool calls or diffs create new messages.
  */
 function flushStreamingToMessage(): void {
@@ -364,11 +360,21 @@ function flushStreamingToMessage(): void {
   const thinking = conversationStore.streamingThinking;
 
   if (content || thinking) {
-    conversationStore.updateMessage(activeMessageId, {
-      content: content || undefined,
+    const flushedMessage: UnifiedMessage = {
+      id: activeMessageId,
+      type: "assistant",
+      role: "assistant",
+      content: content || "",
       thinking: thinking || undefined,
-    });
+      timestamp: Date.now(),
+      status: "complete",
+      workerType: "orchestrator",
+    };
+    conversationStore.addMessage(flushedMessage);
     conversationStore.finalizeStreaming();
+
+    // Generate a new ID for the next streaming segment
+    activeMessageId = crypto.randomUUID();
   }
 }
 
