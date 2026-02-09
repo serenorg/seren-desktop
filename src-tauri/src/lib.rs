@@ -31,6 +31,7 @@ mod oauth_callback_server;
 #[cfg(feature = "openclaw")]
 mod openclaw;
 mod sandbox;
+mod shell;
 mod skills;
 mod sync;
 mod terminal;
@@ -629,6 +630,8 @@ pub fn run() {
             files::delete_path,
             files::rename_path,
             files::reveal_in_file_manager,
+            // Shell command execution (requires frontend approval)
+            shell::execute_shell_command,
             // Web fetch command
             commands::web::web_fetch,
             // Conversation commands

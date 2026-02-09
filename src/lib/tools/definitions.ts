@@ -384,6 +384,35 @@ export const FILE_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "execute_command",
+      description:
+        "Execute a shell command on the user's machine. " +
+        "Use this to run system commands like killing processes, checking system status, " +
+        "running scripts, installing packages, or any terminal operation. " +
+        "The command runs in a shell (/bin/sh on Unix, cmd on Windows). " +
+        "Always requires user approval before execution. " +
+        "Returns stdout, stderr, and exit code.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: {
+            type: "string",
+            description:
+              "The shell command to execute (e.g., 'pkill -f \"npm run dev\"')",
+          },
+          timeout_secs: {
+            type: "number",
+            description:
+              "Timeout in seconds (default: 30, max: 300). Use longer timeouts for commands like npm install.",
+          },
+        },
+        required: ["command"],
+      },
+    },
+  },
 ];
 
 /** Check if OpenClaw is set up and running so we can expose its tools. */
