@@ -22,8 +22,10 @@ const [tabsState, setTabsState] = createStore<TabsState>({
  * Open a file in a new tab or focus existing tab.
  */
 export function openTab(filePath: string, content: string = ""): string {
+  console.log("[openTab] Called with:", { filePath, contentLength: content.length });
   const existing = tabsState.tabs.find((t) => t.filePath === filePath);
   if (existing) {
+    console.log("[openTab] Tab already exists, focusing:", existing.id);
     setTabsState("activeTabId", existing.id);
     return existing.id;
   }
@@ -36,6 +38,7 @@ export function openTab(filePath: string, content: string = ""): string {
     { id, filePath, fileName, isDirty: false, content },
   ]);
   setTabsState("activeTabId", id);
+  console.log("[openTab] Created new tab:", { id, fileName, contentLength: content.length });
 
   return id;
 }
