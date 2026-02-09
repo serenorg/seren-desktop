@@ -109,6 +109,9 @@ pub struct ImageAttachment {
 pub struct UserCapabilities {
     pub has_acp_agent: bool,
     pub agent_type: Option<String>,
+    /// The model the user explicitly selected in the UI.
+    #[serde(default)]
+    pub selected_model: Option<String>,
     pub available_models: Vec<String>,
     pub available_tools: Vec<String>,
     pub installed_skills: Vec<SkillRef>,

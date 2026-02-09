@@ -105,10 +105,20 @@ fn extract_publisher_slug(
 }
 
 /// Select the best available model for the task.
+///
+/// If the user explicitly selected a model in the UI, respect that choice.
+/// Otherwise, fall back to heuristic-based selection by task complexity.
 fn select_model(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
 ) -> String {
+    // Respect the user's explicit model selection
+    if let Some(ref selected) = capabilities.selected_model {
+        if !selected.is_empty() {
+            return selected.clone();
+        }
+    }
+
     let preferred = match classification.complexity {
         TaskComplexity::Complex | TaskComplexity::Moderate => CODE_PREFERRED_MODELS,
         TaskComplexity::Simple => SIMPLE_PREFERRED_MODELS,
@@ -183,8 +193,12 @@ fn humanize_model_id(model_id: &str) -> &str {
         "anthropic/claude-opus-4.5" => "Claude Opus",
         "anthropic/claude-sonnet-4" => "Claude Sonnet",
         "anthropic/claude-haiku-4.5" => "Claude Haiku",
+        "openai/gpt-5" => "GPT-5",
         "openai/gpt-4o" => "GPT-4o",
+        "openai/gpt-4o-mini" => "GPT-4o Mini",
+        "google/gemini-2.5-pro" => "Gemini Pro",
         "google/gemini-2.5-flash" => "Gemini Flash",
+        "google/gemini-3-flash-preview" => "Gemini 3 Flash",
         _ => model_id,
     }
 }
@@ -213,6 +227,7 @@ mod tests {
             } else {
                 None
             },
+            selected_model: None,
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: tools.iter().map(|t| t.to_string()).collect(),
             installed_skills: vec![],
@@ -231,6 +246,7 @@ mod tests {
             } else {
                 None
             },
+            selected_model: None,
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: vec![],
             installed_skills: skills,
@@ -388,6 +404,25 @@ mod tests {
         let capabilities = make_capabilities(false, &[], &[]);
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
+    }
+
+    #[test]
+    fn respects_user_selected_model() {
+        let classification = make_classification("general_chat", false, false);
+        let mut capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4", "google/gemini-2.5-flash", "openai/gpt-5"],
+            &[],
+        );
+        // Without selection, router picks gemini flash for simple tasks
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.model_id, "google/gemini-2.5-flash");
+
+        // With explicit selection, router respects the user's choice
+        capabilities.selected_model = Some("openai/gpt-5".to_string());
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.model_id, "openai/gpt-5");
+        assert!(decision.reason.contains("GPT-5"));
     }
 
     // =========================================================================

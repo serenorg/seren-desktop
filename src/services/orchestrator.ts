@@ -58,6 +58,7 @@ type WorkerEvent =
 interface UserCapabilities {
   has_acp_agent: boolean;
   agent_type: string | null;
+  selected_model: string | null;
   available_models: string[];
   available_tools: string[];
   installed_skills: SkillRef[];
@@ -423,6 +424,7 @@ function buildCapabilities(): UserCapabilities {
   return {
     has_acp_agent: acpStore.availableAgents.length > 0,
     agent_type: acpStore.selectedAgentType ?? null,
+    selected_model: providerStore.activeModel,
     available_models: activeModels.map((m) => m.id),
     available_tools: tools.map((t) => t.function.name),
     installed_skills: enabledSkills.map((s) => ({
