@@ -78,6 +78,21 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         .ok();
     }
 
+    // Create eval_signals table for satisfaction feedback
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS eval_signals (
+            message_id TEXT PRIMARY KEY,
+            task_type TEXT NOT NULL,
+            model_id TEXT,
+            worker_type TEXT,
+            satisfaction INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            synced INTEGER DEFAULT 0,
+            FOREIGN KEY (message_id) REFERENCES messages(id)
+        )",
+        [],
+    )?;
+
     // Migration: Create default conversation for orphan messages
     migrate_orphan_messages(conn)?;
 
