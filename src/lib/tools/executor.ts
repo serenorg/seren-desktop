@@ -14,6 +14,7 @@ import {
   parseMcpToolName,
   parseOpenClawToolName,
 } from "./definitions";
+import { getApprovalRequirement, requiresApproval } from "./approval-config";
 
 /**
  * File entry returned by list_directory.
@@ -25,6 +26,7 @@ interface FileEntry {
 }
 
 const OPENCLAW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const GATEWAY_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_RESULT_SIZE = 50_000; // 50KB cap
 const MAX_ARRAY_ITEMS = 25;
 
@@ -156,6 +158,69 @@ async function waitForOpenClawApproval(approvalId: string): Promise<boolean> {
         unlisten = fn;
       })
       .catch(() => {
+        clearTimeout(timeout);
+        resolve(false);
+      });
+  });
+}
+
+/**
+ * Request user approval for a Gateway tool operation.
+ * Returns a promise that resolves to true if approved, false if denied or timeout.
+ */
+async function requestGatewayApproval(
+  publisherSlug: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<boolean> {
+  const approvalId = `gateway-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const requirement = getApprovalRequirement(publisherSlug, toolName);
+
+  console.log(
+    `[Tool Executor] Requesting approval for ${publisherSlug}/${toolName} (ID: ${approvalId})`,
+  );
+
+  // Emit approval request event for UI to display
+  try {
+    await emit("gateway-tool-approval-request", {
+      approvalId,
+      publisherSlug,
+      toolName,
+      args,
+      description: requirement?.description || "Execute operation",
+      isDestructive: requirement?.isDestructive || false,
+    });
+  } catch (err) {
+    console.error("[Tool Executor] Failed to emit approval request:", err);
+    return false;
+  }
+
+  // Wait for approval response
+  return new Promise((resolve) => {
+    let unlisten: UnlistenFn | undefined;
+    const timeout = setTimeout(() => {
+      console.log(`[Tool Executor] Approval timeout for ${approvalId}`);
+      unlisten?.();
+      resolve(false);
+    }, GATEWAY_APPROVAL_TIMEOUT_MS);
+
+    listen<{ id: string; approved: boolean }>(
+      "gateway-tool-approval-response",
+      (event) => {
+        if (event.payload.id !== approvalId) return;
+        console.log(
+          `[Tool Executor] Received approval response: ${event.payload.approved}`,
+        );
+        clearTimeout(timeout);
+        unlisten?.();
+        resolve(event.payload.approved);
+      },
+    )
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((err) => {
+        console.error("[Tool Executor] Failed to listen for approval:", err);
         clearTimeout(timeout);
         resolve(false);
       });
@@ -501,6 +566,29 @@ async function executeGatewayTool(
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
   try {
+    // Check if this operation requires user approval
+    if (requiresApproval(publisherSlug, toolName)) {
+      console.log(
+        `[Tool Executor] Operation requires approval: ${publisherSlug}/${toolName}`,
+      );
+      const approved = await requestGatewayApproval(
+        publisherSlug,
+        toolName,
+        args,
+      );
+
+      if (!approved) {
+        console.log("[Tool Executor] Operation denied by user");
+        return {
+          tool_call_id: toolCallId,
+          content: "Operation was not approved by user",
+          is_error: true,
+        };
+      }
+
+      console.log("[Tool Executor] Operation approved by user");
+    }
+
     const response = await callGatewayTool(publisherSlug, toolName, args);
 
     // Check if this is a payment proxy response (requires client-side signing)

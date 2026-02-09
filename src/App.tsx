@@ -21,6 +21,7 @@ import { ResizableLayout } from "@/components/common/ResizableLayout";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
+import { GatewayToolApproval } from "@/components/gateway/GatewayToolApproval";
 import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
@@ -259,6 +260,7 @@ function App() {
         <LowBalanceModal />
         <DailyClaimPopup />
         <X402PaymentApproval />
+        <GatewayToolApproval />
         <OpenClawApprovalManager />
         <AboutDialog />
       </div>
