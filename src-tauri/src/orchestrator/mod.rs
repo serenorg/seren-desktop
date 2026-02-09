@@ -3,6 +3,7 @@
 
 pub mod chat_model_worker;
 pub mod classifier;
+pub mod router;
 pub mod types;
 pub mod worker;
 

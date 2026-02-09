@@ -16,26 +16,21 @@ const CODE_KEYWORDS: &[&str] = &[
     "compile",
     "debug",
     "refactor",
-    "test",
     "bug",
-    "error",
     "stack trace",
     "variable",
     "method",
     "algorithm",
     "syntax",
-    "import",
     "module",
     "package",
     "dependency",
-    "api",
     "endpoint",
     "database",
     "query",
     "schema",
     "migration",
     "deploy",
-    "build",
     "lint",
     "type check",
     "async",
@@ -62,30 +57,49 @@ const CODE_KEYWORDS: &[&str] = &[
     "merge",
     "pull request",
     "code review",
+    "code",
+    "coding",
+    "programming",
+    "compiler",
+    "runtime",
+    "typescript",
+    "javascript",
+    "python",
+    "rust",
 ];
 
 const FILE_KEYWORDS: &[&str] = &[
     "read file",
+    "read the file",
     "write file",
+    "write to file",
+    "write a file",
     "create file",
+    "create a file",
     "delete file",
+    "delete the file",
     "rename file",
+    "rename the file",
     "move file",
+    "move the file",
     "copy file",
+    "copy the file",
     "list directory",
+    "list the directory",
     "create directory",
+    "create a directory",
     "file system",
     "file path",
     "file contents",
     "save to file",
     "open file",
+    "open the file",
 ];
 
 const RESEARCH_KEYWORDS: &[&str] = &[
-    "search",
-    "find",
+    "search for",
+    "search the",
     "look up",
-    "what is",
     "explain",
     "research",
     "summarize",
@@ -98,11 +112,9 @@ const RESEARCH_KEYWORDS: &[&str] = &[
     "documentation",
     "tutorial",
     "guide",
-    "reference",
 ];
 
 const DOCUMENT_KEYWORDS: &[&str] = &[
-    "write",
     "draft",
     "document",
     "report",
@@ -118,6 +130,51 @@ const DOCUMENT_KEYWORDS: &[&str] = &[
     "changelog",
     "release notes",
 ];
+
+// =============================================================================
+// Word Boundary Matching
+// =============================================================================
+
+/// Check if a keyword appears in text with word boundaries.
+/// Multi-word keywords use simple substring matching.
+/// Single-word keywords require word boundary characters on both sides.
+fn contains_keyword(text: &str, keyword: &str) -> bool {
+    if keyword.contains(' ') {
+        // Multi-word: simple substring match
+        return text.contains(keyword);
+    }
+
+    // Single-word: check word boundaries
+    let keyword_bytes = keyword.as_bytes();
+    let text_bytes = text.as_bytes();
+
+    if keyword_bytes.len() > text_bytes.len() {
+        return false;
+    }
+
+    let mut start = 0;
+    while let Some(pos) = text[start..].find(keyword) {
+        let abs_pos = start + pos;
+        let end_pos = abs_pos + keyword.len();
+
+        let boundary_before =
+            abs_pos == 0 || !text_bytes[abs_pos - 1].is_ascii_alphanumeric();
+        let boundary_after =
+            end_pos >= text_bytes.len() || !text_bytes[end_pos].is_ascii_alphanumeric();
+
+        if boundary_before && boundary_after {
+            return true;
+        }
+
+        // Move past this match to avoid infinite loop
+        start = abs_pos + 1;
+        if start >= text.len() {
+            break;
+        }
+    }
+
+    false
+}
 
 // =============================================================================
 // Task Classification
@@ -140,7 +197,7 @@ pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
     if contains_code_fence(prompt)
         || CODE_KEYWORDS
             .iter()
-            .any(|kw| prompt_lower.contains(kw))
+            .any(|kw| contains_keyword(&prompt_lower, kw))
     {
         return TaskClassification {
             task_type: "code_generation".to_string(),
@@ -154,7 +211,7 @@ pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
     // Rule 2: File operations
     if FILE_KEYWORDS
         .iter()
-        .any(|kw| prompt_lower.contains(kw))
+        .any(|kw| contains_keyword(&prompt_lower, kw))
     {
         return TaskClassification {
             task_type: "file_operations".to_string(),
@@ -168,7 +225,7 @@ pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
     // Rule 3: Research
     if RESEARCH_KEYWORDS
         .iter()
-        .any(|kw| prompt_lower.contains(kw))
+        .any(|kw| contains_keyword(&prompt_lower, kw))
     {
         return TaskClassification {
             task_type: "research".to_string(),
@@ -182,7 +239,7 @@ pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
     // Rule 4: Document generation
     if DOCUMENT_KEYWORDS
         .iter()
-        .any(|kw| prompt_lower.contains(kw))
+        .any(|kw| contains_keyword(&prompt_lower, kw))
     {
         return TaskClassification {
             task_type: "document_generation".to_string(),
@@ -215,21 +272,21 @@ fn contains_code_fence(prompt: &str) -> bool {
 /// Select skills relevant to a prompt by matching against skill metadata.
 ///
 /// Matches by:
-/// - Skill name appearing in the prompt
-/// - Any skill tag appearing in the prompt
-/// - Skill slug appearing in the prompt
+/// - Skill name appearing in the prompt (word boundary)
+/// - Any skill tag appearing in the prompt (word boundary)
+/// - Skill slug appearing in the prompt (word boundary)
 pub fn select_relevant_skills(prompt: &str, skills: &[SkillRef]) -> Vec<String> {
     let prompt_lower = prompt.to_lowercase();
 
     skills
         .iter()
         .filter(|skill| {
-            prompt_lower.contains(&skill.name.to_lowercase())
+            contains_keyword(&prompt_lower, &skill.name.to_lowercase())
                 || skill
                     .tags
                     .iter()
-                    .any(|tag| prompt_lower.contains(&tag.to_lowercase()))
-                || prompt_lower.contains(&skill.slug.to_lowercase())
+                    .any(|tag| contains_keyword(&prompt_lower, &tag.to_lowercase()))
+                || contains_keyword(&prompt_lower, &skill.slug.to_lowercase())
         })
         .map(|skill| skill.slug.clone())
         .collect()
@@ -247,6 +304,34 @@ mod tests {
             tags: tags.iter().map(|t| t.to_string()).collect(),
             path: format!("/skills/{}/SKILL.md", slug),
         }
+    }
+
+    // =========================================================================
+    // Word Boundary Tests
+    // =========================================================================
+
+    #[test]
+    fn word_boundary_rejects_substring_match() {
+        // "capital" should NOT match "api"
+        assert!(!contains_keyword("capital", "api"));
+        // "latest" should NOT match "test"
+        assert!(!contains_keyword("latest", "test"));
+        // "testing" should NOT match "test" (no boundary after)
+        assert!(!contains_keyword("testing", "test"));
+    }
+
+    #[test]
+    fn word_boundary_accepts_whole_word() {
+        assert!(contains_keyword("run a test", "test"));
+        assert!(contains_keyword("test this", "test"));
+        assert!(contains_keyword("test", "test"));
+        assert!(contains_keyword("the api is broken", "api"));
+    }
+
+    #[test]
+    fn multi_word_keyword_uses_substring_match() {
+        assert!(contains_keyword("search for the news", "search for"));
+        assert!(contains_keyword("please write code here", "write code"));
     }
 
     // =========================================================================
@@ -379,7 +464,7 @@ mod tests {
     #[test]
     fn classify_includes_relevant_skills() {
         let skills = vec![make_skill("git-commit", "Git Commit", &["git", "version-control"])];
-        let result = classify("Help me commit my code changes", &skills);
+        let result = classify("Help me git commit my code changes", &skills);
         assert_eq!(result.task_type, "code_generation");
         assert_eq!(result.relevant_skills, vec!["git-commit"]);
     }
