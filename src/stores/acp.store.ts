@@ -87,8 +87,6 @@ interface AcpState {
   sessions: Record<string, ActiveSession>;
   /** Currently focused session ID */
   activeSessionId: string | null;
-  /** Whether agent mode is enabled in the chat */
-  agentModeEnabled: boolean;
   /** Selected agent type for new sessions */
   selectedAgentType: AgentType;
   /** Loading state */
@@ -101,22 +99,18 @@ interface AcpState {
   pendingPermissions: import("@/services/acp").PermissionRequestEvent[];
   /** Pending diff proposals awaiting user accept/reject */
   pendingDiffProposals: DiffProposalEvent[];
-  /** Pending agent input to restore when switching back to agent mode */
-  pendingAgentInput: string | null;
 }
 
 const [state, setState] = createStore<AcpState>({
   availableAgents: [],
   sessions: {},
   activeSessionId: null,
-  agentModeEnabled: false,
   selectedAgentType: "claude-code",
   isLoading: false,
   error: null,
   installStatus: null,
   pendingPermissions: [],
   pendingDiffProposals: [],
-  pendingAgentInput: null,
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
@@ -147,10 +141,6 @@ export const acpStore = {
     return state.sessions[state.activeSessionId] ?? null;
   },
 
-  get agentModeEnabled() {
-    return state.agentModeEnabled;
-  },
-
   get selectedAgentType() {
     return state.selectedAgentType;
   },
@@ -175,10 +165,6 @@ export const acpStore = {
 
   get pendingDiffProposals() {
     return state.pendingDiffProposals;
-  },
-
-  get pendingAgentInput() {
-    return state.pendingAgentInput;
   },
 
   /**
@@ -757,24 +743,10 @@ export const acpStore = {
   // ============================================================================
 
   /**
-   * Toggle agent mode on/off.
-   */
-  setAgentModeEnabled(enabled: boolean) {
-    setState("agentModeEnabled", enabled);
-  },
-
-  /**
    * Set the selected agent type for new sessions.
    */
   setSelectedAgentType(agentType: AgentType) {
     setState("selectedAgentType", agentType);
-  },
-
-  /**
-   * Set pending agent input to restore when switching back to agent mode.
-   */
-  setPendingAgentInput(input: string | null) {
-    setState("pendingAgentInput", input);
   },
 
   /**

@@ -1,7 +1,6 @@
 // ABOUTME: Central registry of all slash commands with their handlers.
 // ABOUTME: Commands are organized by tier and registered at module load.
 
-import { acpStore } from "@/stores/acp.store";
 import { chatStore } from "@/stores/chat.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
@@ -169,30 +168,6 @@ registry.register({
   execute: (ctx) => {
     ctx.openPanel("editor");
     ctx.clearInput();
-    return true;
-  },
-});
-
-registry.register({
-  name: "agent",
-  description: "Switch to agent mode",
-  panels: ["chat"],
-  execute: (ctx) => {
-    acpStore.setAgentModeEnabled(true);
-    ctx.clearInput();
-    ctx.showStatus("Switched to agent mode.");
-    return true;
-  },
-});
-
-registry.register({
-  name: "chat",
-  description: "Switch to chat mode",
-  panels: ["agent"],
-  execute: (ctx) => {
-    acpStore.setAgentModeEnabled(false);
-    ctx.clearInput();
-    ctx.showStatus("Switched to chat mode.");
     return true;
   },
 });

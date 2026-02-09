@@ -89,20 +89,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
   onCleanup(() => {
     window.removeEventListener("seren:pick-images", onPickImages);
-    // Save agent input when component unmounts (e.g., when switching to chat mode)
-    const currentInput = input();
-    if (currentInput) {
-      acpStore.setPendingAgentInput(currentInput);
-    }
-  });
-
-  // Restore pending agent input when component mounts (e.g., when switching back to agent mode)
-  createEffect(() => {
-    const pending = acpStore.pendingAgentInput;
-    if (pending) {
-      setInput(pending);
-      acpStore.setPendingAgentInput(null);
-    }
   });
 
   const hasSession = () => acpStore.activeSession !== null;
@@ -217,7 +203,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     } catch (error) {
       console.error("[AgentChat] handleAttachImages error:", error);
       // Show error status to user
-      setCommandStatus(`Failed to attach files: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setCommandStatus(
+        `Failed to attach files: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
       setTimeout(() => setCommandStatus(null), 5000);
     } finally {
       setIsAttaching(false);

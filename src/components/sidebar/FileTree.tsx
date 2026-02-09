@@ -8,6 +8,7 @@ import {
   type ContextMenuItem,
 } from "@/components/common/ContextMenu";
 import { openFolder } from "@/lib/files/service";
+import { chatStore } from "@/stores/chat.store";
 import {
   type FileNode,
   fileTreeState,
@@ -16,8 +17,6 @@ import {
   setSelectedPath,
   toggleExpanded,
 } from "@/stores/fileTree";
-import { chatStore } from "@/stores/chat.store";
-import { acpStore } from "@/stores/acp.store";
 
 interface FileTreeProps {
   onFileSelect?: (path: string) => void;
@@ -144,10 +143,8 @@ export const FileTree: Component<FileTreeProps> = (props) => {
     try {
       const content = await invoke<string>("read_file", { path: node.path });
       const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
-      // Enable agent mode and set pending input
-      acpStore.setAgentModeEnabled(true);
       chatStore.setPendingInput(message);
-      // Navigate to chat panel (agent is shown there when enabled)
+      // Navigate to chat panel
       window.dispatchEvent(
         new CustomEvent("seren:open-panel", { detail: "chat" }),
       );
@@ -162,8 +159,6 @@ export const FileTree: Component<FileTreeProps> = (props) => {
     try {
       const content = await invoke<string>("read_file", { path: node.path });
       const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
-      // Enable agent mode
-      acpStore.setAgentModeEnabled(true);
       chatStore.setPendingInput(message);
       // Navigate to chat panel
       window.dispatchEvent(
