@@ -1,9 +1,9 @@
 // ABOUTME: Context retrieval for AI chat using semantic code search.
 // ABOUTME: Automatically finds relevant code chunks and injects them into AI prompts.
 
-import { settingsStore } from "@/stores/settings.store";
-import { searchCodebase } from "@/services/indexing";
 import type { SearchResult } from "@/services/indexing";
+import { searchCodebase } from "@/services/indexing";
+import { settingsStore } from "@/stores/settings.store";
 
 /** Maximum number of code chunks to inject as context */
 const MAX_CONTEXT_CHUNKS = 5;
@@ -32,10 +32,16 @@ export async function retrieveCodeContext(
 
   try {
     // Search for relevant code chunks
-    const results = await searchCodebase(projectPath, userQuery, MAX_CONTEXT_CHUNKS);
+    const results = await searchCodebase(
+      projectPath,
+      userQuery,
+      MAX_CONTEXT_CHUNKS,
+    );
 
     // Filter by similarity threshold
-    const relevantResults = results.filter((r) => r.distance < MIN_SIMILARITY_THRESHOLD);
+    const relevantResults = results.filter(
+      (r) => r.distance < MIN_SIMILARITY_THRESHOLD,
+    );
 
     if (relevantResults.length === 0) {
       return null;
@@ -80,7 +86,9 @@ function formatCodeContext(results: SearchResult[]): string {
 /**
  * Check if semantic indexing is available for a project.
  */
-export async function isIndexingAvailable(projectPath: string | null): Promise<boolean> {
+export async function isIndexingAvailable(
+  projectPath: string | null,
+): Promise<boolean> {
   if (!projectPath) {
     return false;
   }

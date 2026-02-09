@@ -1,11 +1,11 @@
 // ABOUTME: Indexing status component for sidebar display.
 // ABOUTME: Shows indexing progress, statistics, and controls.
 
-import { Show, createEffect, createSignal } from "solid-js";
+import { createEffect, createSignal, Show } from "solid-js";
+import { runIndexing } from "@/lib/indexing/orchestrator";
+import { fileTreeState } from "@/stores/fileTree";
 import { indexingStore } from "@/stores/indexing.store";
 import { settingsStore } from "@/stores/settings.store";
-import { fileTreeState } from "@/stores/fileTree";
-import { runIndexing } from "@/lib/indexing/orchestrator";
 import "./IndexingStatus.css";
 
 export function IndexingStatus() {
@@ -40,7 +40,8 @@ export function IndexingStatus() {
       console.log("[Indexing] Complete:", result);
     } catch (error) {
       console.error("[Indexing] Failed:", error);
-      const message = error instanceof Error ? error.message : "Indexing failed";
+      const message =
+        error instanceof Error ? error.message : "Indexing failed";
       alert(`Indexing failed: ${message}`);
     } finally {
       setIsIndexing(false);
@@ -92,7 +93,9 @@ export function IndexingStatus() {
       </div>
 
       <Show
-        when={indexingStore.phase !== "idle" && indexingStore.phase !== "complete"}
+        when={
+          indexingStore.phase !== "idle" && indexingStore.phase !== "complete"
+        }
         fallback={
           <Show
             when={indexingStore.hasIndex && indexingStore.stats}
@@ -152,12 +155,16 @@ export function IndexingStatus() {
           <div class="indexing-progress-info">
             <span class="indexing-phase">{indexingStore.phase}</span>
             <Show when={indexingStore.currentFile}>
-              <span class="indexing-current-file">{indexingStore.currentFile}</span>
+              <span class="indexing-current-file">
+                {indexingStore.currentFile}
+              </span>
             </Show>
           </div>
           <Show when={indexingStore.estimatedTokens > 0}>
             <div class="indexing-cost-estimate">
-              <span>Estimated: ~{formatNumber(indexingStore.estimatedTokens)} tokens</span>
+              <span>
+                Estimated: ~{formatNumber(indexingStore.estimatedTokens)} tokens
+              </span>
             </div>
           </Show>
         </div>

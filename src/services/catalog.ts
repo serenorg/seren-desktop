@@ -226,7 +226,9 @@ export const catalog = {
     });
     if (error) {
       log.error("[Catalog] Error fetching publishers:", error);
-      throw new Error(`Failed to list publishers: ${formatApiError(error, "unknown error")}`);
+      throw new Error(
+        `Failed to list publishers: ${formatApiError(error, "unknown error")}`,
+      );
     }
     const rawPublishers = data?.data || [];
     log.info("[Catalog] Found", rawPublishers.length, "publishers");
@@ -243,7 +245,9 @@ export const catalog = {
     });
     if (error || !data?.data) {
       log.error("[Catalog] Error fetching publisher:", error);
-      throw new Error(`Failed to get publisher: ${formatApiError(error, "not found")}`);
+      throw new Error(
+        `Failed to get publisher: ${formatApiError(error, "not found")}`,
+      );
     }
     return transformPublisher(data.data);
   },
@@ -262,7 +266,9 @@ export const catalog = {
     });
     if (error) {
       log.error("[Catalog] Error searching publishers:", error);
-      throw new Error(`Failed to search publishers: ${formatApiError(error, "unknown error")}`);
+      throw new Error(
+        `Failed to search publishers: ${formatApiError(error, "unknown error")}`,
+      );
     }
     const rawPublishers = data?.data || [];
     return rawPublishers.map(transformPublisher);
@@ -321,7 +327,9 @@ export const catalog = {
     });
     if (error) {
       log.error("[Catalog] Error listing by category:", error);
-      throw new Error(`Failed to list publishers by category: ${formatApiError(error, "unknown error")}`);
+      throw new Error(
+        `Failed to list publishers by category: ${formatApiError(error, "unknown error")}`,
+      );
     }
     const rawPublishers = data?.data || [];
     return rawPublishers.map(transformPublisher);

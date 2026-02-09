@@ -2,13 +2,13 @@
 // ABOUTME: Tracks indexing progress, status, and provides actions for index management.
 
 import { createStore } from "solid-js/store";
-import { fileTreeState } from "@/stores/fileTree";
 import {
-  initProjectIndex,
   getIndexStatus,
   hasProjectIndex,
   type IndexStats,
+  initProjectIndex,
 } from "@/services/indexing";
+import { fileTreeState } from "@/stores/fileTree";
 
 export type IndexingPhase =
   | "idle"
@@ -197,7 +197,8 @@ export const indexingStore = {
         stats,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to initialize index";
+      const message =
+        error instanceof Error ? error.message : "Failed to initialize index";
       throw new Error(message);
     }
   },

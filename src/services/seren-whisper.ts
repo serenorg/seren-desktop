@@ -97,7 +97,8 @@ export async function transcribeAudio(
 
   // Gateway wraps upstream errors in a 200 response with a status field
   if (result.status && result.status !== 200) {
-    const msg = result.body?.error?.message || `Upstream error: ${result.status}`;
+    const msg =
+      result.body?.error?.message || `Upstream error: ${result.status}`;
     console.error("[Whisper] Gateway upstream error:", msg);
     throw new Error(msg);
   }

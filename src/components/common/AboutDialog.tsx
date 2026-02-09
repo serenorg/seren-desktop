@@ -1,9 +1,9 @@
 // ABOUTME: About Seren dialog showing detailed build information.
 // ABOUTME: Triggered by the native "About Seren" menu item via Tauri event.
 
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import "./AboutDialog.css";
 
 interface BuildInfo {

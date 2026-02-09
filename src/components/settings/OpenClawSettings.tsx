@@ -221,7 +221,8 @@ export const OpenClawSettings: Component = () => {
               OpenClaw Dashboard
             </h4>
             <p class="m-0 mb-3 text-[0.8rem] text-muted-foreground">
-              Configure channel security policies, allowlists, and DM/group settings.
+              Configure channel security policies, allowlists, and DM/group
+              settings.
             </p>
             <div class="rounded-lg border border-[rgba(148,163,184,0.2)] overflow-hidden">
               <iframe

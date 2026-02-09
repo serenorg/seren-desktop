@@ -16,8 +16,8 @@ import {
 } from "@/stores/settings.store";
 import { claimDaily, walletState } from "@/stores/wallet.store";
 import { OAuthLogins } from "./OAuthLogins";
-import { ProviderSettings } from "./ProviderSettings";
 import { OpenClawSettings } from "./OpenClawSettings";
+import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
 import { ToolsetsSettings } from "./ToolsetsSettings";
 
@@ -1148,8 +1148,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   </span>
                   <span class="text-[0.8rem] text-muted-foreground">
                     Persist conversations, preferences, and knowledge across
-                    sessions. Memory data is stored in your SerenDB project.
-                    You must be logged in to SerenDB to use this feature.
+                    sessions. Memory data is stored in your SerenDB project. You
+                    must be logged in to SerenDB to use this feature.
                   </span>
                 </span>
               </label>

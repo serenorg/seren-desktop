@@ -2,10 +2,14 @@
 // ABOUTME: Manages the end-to-end indexing process: discover → chunk → embed → store.
 
 import { invoke } from "@tauri-apps/api/core";
-import { indexingStore } from "@/stores/indexing.store";
-import { embedTexts } from "@/services/seren-embed";
+import type {
+  ChunkedFile,
+  DiscoveredFile,
+  FileChunk,
+} from "@/services/indexing";
 import { indexChunks } from "@/services/indexing";
-import type { DiscoveredFile, ChunkedFile, FileChunk } from "@/services/indexing";
+import { embedTexts } from "@/services/seren-embed";
+import { indexingStore } from "@/stores/indexing.store";
 
 const BATCH_SIZE = 20; // Process 20 chunks at a time
 
@@ -19,7 +23,9 @@ interface IndexingResult {
 /**
  * Run the full indexing workflow for a project.
  */
-export async function runIndexing(projectPath: string): Promise<IndexingResult> {
+export async function runIndexing(
+  projectPath: string,
+): Promise<IndexingResult> {
   const startTime = Date.now();
   let totalChunks = 0;
   let totalTokens = 0;
@@ -31,7 +37,9 @@ export async function runIndexing(projectPath: string): Promise<IndexingResult> 
 
     // Phase 2: Discover files
     indexingStore.setPhase("discovering");
-    const files = await invoke<DiscoveredFile[]>("discover_project_files", { projectPath });
+    const files = await invoke<DiscoveredFile[]>("discover_project_files", {
+      projectPath,
+    });
 
     if (files.length === 0) {
       throw new Error("No indexable files found in project");
@@ -43,9 +51,12 @@ export async function runIndexing(projectPath: string): Promise<IndexingResult> 
     });
 
     // Phase 3: Estimate work
-    const [estimatedChunks, estimatedTokens] = await invoke<[number, number]>("estimate_indexing", {
-      files,
-    });
+    const [estimatedChunks, estimatedTokens] = await invoke<[number, number]>(
+      "estimate_indexing",
+      {
+        files,
+      },
+    );
 
     indexingStore.updateProgress({
       chunksTotal: estimatedChunks,
@@ -171,7 +182,9 @@ export async function reindexFile(
     }
 
     // Get file info
-    const files = await invoke<DiscoveredFile[]>("discover_project_files", { projectPath });
+    const files = await invoke<DiscoveredFile[]>("discover_project_files", {
+      projectPath,
+    });
     const file = files.find((f) => f.path === filePath);
 
     if (!file) {
@@ -179,7 +192,10 @@ export async function reindexFile(
     }
 
     // Delete old chunks
-    await invoke("delete_file_index", { projectPath, filePath: file.relative_path });
+    await invoke("delete_file_index", {
+      projectPath,
+      filePath: file.relative_path,
+    });
 
     // Chunk the file
     const chunked = await invoke<ChunkedFile>("chunk_file", { file });
@@ -193,17 +209,19 @@ export async function reindexFile(
     const embeddingResponse = await embedTexts(texts);
 
     // Store chunks
-    const chunksToStore = chunked.chunks.map((chunk: FileChunk, idx: number) => ({
-      file_path: file.relative_path,
-      start_line: chunk.start_line,
-      end_line: chunk.end_line,
-      content: chunk.content,
-      chunk_type: chunk.chunk_type,
-      symbol_name: chunk.symbol_name,
-      language: file.language,
-      file_hash: file.hash,
-      embedding: embeddingResponse.data[idx].embedding,
-    }));
+    const chunksToStore = chunked.chunks.map(
+      (chunk: FileChunk, idx: number) => ({
+        file_path: file.relative_path,
+        start_line: chunk.start_line,
+        end_line: chunk.end_line,
+        content: chunk.content,
+        chunk_type: chunk.chunk_type,
+        symbol_name: chunk.symbol_name,
+        language: file.language,
+        file_hash: file.hash,
+        embedding: embeddingResponse.data[idx].embedding,
+      }),
+    );
 
     await indexChunks(projectPath, chunksToStore);
 

@@ -10,7 +10,9 @@
   background: var(--popover, #252526);
   border: 1px solid var(--border, #333333);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
   overflow: hidden;
   z-index: 999;
   max-height: 300px;

@@ -1,9 +1,9 @@
 // ABOUTME: File watcher integration for automatic re-indexing.
 // ABOUTME: Listens to file-changed events from sync.rs and triggers incremental re-indexing.
 
-import { syncStore, type FileChangeEvent } from "@/stores/sync.store";
-import { settingsStore } from "@/stores/settings.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { settingsStore } from "@/stores/settings.store";
+import { type FileChangeEvent, syncStore } from "@/stores/sync.store";
 import { reindexFile } from "./orchestrator";
 
 let unsubscribeFn: (() => void) | null = null;

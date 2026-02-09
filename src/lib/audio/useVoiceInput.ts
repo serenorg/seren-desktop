@@ -81,7 +81,12 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
         try {
           console.log("[VoiceInput] Sending blob for transcription");
           const text = await transcribeAudio(blob, mimeType);
-          console.log("[VoiceInput] Transcription result:", JSON.stringify(text), "type:", typeof text);
+          console.log(
+            "[VoiceInput] Transcription result:",
+            JSON.stringify(text),
+            "type:",
+            typeof text,
+          );
           if (text?.trim()) {
             console.log("[VoiceInput] Calling onTranscript with:", text.trim());
             onTranscript(text.trim());
@@ -107,7 +112,8 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
         const instructions = getMicrophonePermissionInstructions();
         message = `Microphone access denied. Please allow microphone access in ${instructions}.`;
       } else if (err instanceof DOMException && err.name === "NotFoundError") {
-        message = "No microphone found. Please connect a microphone and try again.";
+        message =
+          "No microphone found. Please connect a microphone and try again.";
       } else if (err instanceof Error) {
         message = err.message;
       } else {

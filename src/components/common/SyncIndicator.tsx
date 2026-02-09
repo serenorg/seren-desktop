@@ -2,11 +2,11 @@
 // ABOUTME: Shows current sync status with visual feedback (idle, syncing, synced, error).
 
 import { type Component, onCleanup, onMount } from "solid-js";
-import { type SyncStatus, syncStore } from "@/stores/sync.store";
 import {
   startFileWatcherForIndexing,
   stopFileWatcherForIndexing,
 } from "@/lib/indexing/file-watcher";
+import { type SyncStatus, syncStore } from "@/stores/sync.store";
 
 /**
  * Get icon for sync status.

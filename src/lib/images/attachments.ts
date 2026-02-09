@@ -211,7 +211,9 @@ export async function pickFiles(): Promise<string[]> {
     // Ensure the dialog module is available
     if (typeof open !== "function") {
       console.error("[attachments] Dialog 'open' function not available");
-      throw new Error("File dialog not available - dialog plugin may not be initialized");
+      throw new Error(
+        "File dialog not available - dialog plugin may not be initialized",
+      );
     }
 
     console.log("[attachments] Calling open() with filters...");
@@ -240,7 +242,9 @@ export async function pickFiles(): Promise<string[]> {
 
     console.log("[attachments] pickFiles dialog returned:", selected);
     if (!selected) {
-      console.log("[attachments] No files selected (dialog cancelled or empty selection)");
+      console.log(
+        "[attachments] No files selected (dialog cancelled or empty selection)",
+      );
       return [];
     }
     if (typeof selected === "string") {
