@@ -256,8 +256,46 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
 
       {/* Details */}
       <Show when={isExpanded()}>
-        <div class="px-3 py-2 border-t border-[#21262d] text-xs text-[#8b949e]">
-          <div class="grid grid-cols-2 gap-2">
+        <div class="px-3 py-2 border-t border-[#21262d] text-xs">
+          {/* Parameters */}
+          <Show when={props.toolCall.parameters}>
+            <div class="mb-3">
+              <div class="text-[#484f58] font-medium mb-1">Parameters:</div>
+              <div class="bg-[#0d1117] border border-[#30363d] rounded p-2 font-mono text-[#e6edf3]">
+                {Object.entries(props.toolCall.parameters!).map(([key, value]) => (
+                  <div class="mb-1 last:mb-0">
+                    <span class="text-[#79c0ff]">{key}:</span>{" "}
+                    <span class="text-[#a5d6ff]">
+                      {typeof value === "string" ? value : JSON.stringify(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Show>
+
+          {/* Result */}
+          <Show when={props.toolCall.result}>
+            <div class="mb-3">
+              <div class="text-[#484f58] font-medium mb-1">Result:</div>
+              <div class="bg-[#0d1117] border border-[#238636] rounded p-2 text-[#3fb950]">
+                {props.toolCall.result}
+              </div>
+            </div>
+          </Show>
+
+          {/* Error */}
+          <Show when={props.toolCall.error}>
+            <div class="mb-3">
+              <div class="text-[#484f58] font-medium mb-1">Error:</div>
+              <div class="bg-[#0d1117] border border-[#f85149] rounded p-2 text-[#f85149]">
+                {props.toolCall.error}
+              </div>
+            </div>
+          </Show>
+
+          {/* Metadata */}
+          <div class="grid grid-cols-2 gap-2 text-[#8b949e]">
             <div>
               <span class="text-[#484f58]">Kind:</span>{" "}
               <span class="text-[#e6edf3]">{props.toolCall.kind}</span>

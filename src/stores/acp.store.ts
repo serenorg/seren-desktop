@@ -545,12 +545,13 @@ export const acpStore = {
       const message = error instanceof Error ? error.message : String(error);
 
       // Auto-recover from dead/zombie sessions
-      // NOTE: "agent did not stop in time" is excluded because it's from
-      // user-initiated cancellation, not a dead session
+      // NOTE: Cancellation messages ("Task cancelled") are excluded because
+      // they're from user-initiated cancellation, not a dead session
       if (
-        message.includes("Worker thread dropped") ||
-        message.includes("not found") ||
-        message.includes("Session not initialized")
+        !message.includes("Task cancelled") &&
+        (message.includes("Worker thread dropped") ||
+          message.includes("not found") ||
+          message.includes("Session not initialized"))
       ) {
         console.info(
           "[AcpStore] Session appears dead, attempting auto-recovery...",
@@ -834,6 +835,8 @@ export const acpStore = {
           sessionId,
           event.data.toolCallId,
           event.data.status,
+          event.data.result,
+          event.data.error,
         );
         break;
 
@@ -969,7 +972,7 @@ export const acpStore = {
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
   },
 
-  handleToolResult(sessionId: string, toolCallId: string, status: string) {
+  handleToolResult(sessionId: string, toolCallId: string, status: string, result?: string, error?: string) {
     const session = state.sessions[sessionId];
     if (!session) return;
 
@@ -979,7 +982,12 @@ export const acpStore = {
         if (msg.toolCallId === toolCallId && msg.toolCall) {
           return {
             ...msg,
-            toolCall: { ...msg.toolCall, status },
+            toolCall: {
+              ...msg.toolCall,
+              status,
+              ...(result !== undefined && { result }),
+              ...(error !== undefined && { error }),
+            },
           };
         }
         return msg;
