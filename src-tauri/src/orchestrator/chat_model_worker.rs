@@ -331,6 +331,7 @@ impl ChatModelWorker {
                             Some(accumulated_thinking.clone())
                         };
                         let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
+                        log::debug!("[ChatModelWorker] Stream complete — accumulated_cost={}, sending cost={:?}", accumulated_cost, cost);
                         event_tx
                             .send(WorkerEvent::Complete {
                                 final_content: accumulated_content.clone(),
@@ -492,6 +493,7 @@ impl ChatModelWorker {
                 Some(accumulated_thinking)
             };
             let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
+            log::debug!("[ChatModelWorker] Final complete — accumulated_cost={}, sending cost={:?}", accumulated_cost, cost);
             event_tx
                 .send(WorkerEvent::Complete {
                     final_content: accumulated_content,
