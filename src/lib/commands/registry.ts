@@ -1,7 +1,9 @@
 // ABOUTME: Central registry of all slash commands with their handlers.
 // ABOUTME: Commands are organized by tier and registered at module load.
 
+import { acpStore } from "@/stores/acp.store";
 import { chatStore } from "@/stores/chat.store";
+import { conversationStore } from "@/stores/conversation.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import { walletStore } from "@/stores/wallet.store";
@@ -84,7 +86,7 @@ registry.register({
   description: "Clear chat messages",
   panels: ["chat"],
   execute: (ctx) => {
-    chatStore.clearMessages();
+    conversationStore.clearMessages();
     ctx.clearInput();
     ctx.showStatus("Chat cleared.");
     return true;
@@ -96,7 +98,7 @@ registry.register({
   description: "Start new conversation",
   panels: ["chat"],
   execute: async (ctx) => {
-    await chatStore.createConversation();
+    await conversationStore.createConversation();
     ctx.clearInput();
     ctx.showStatus("New conversation started.");
     return true;
@@ -119,12 +121,20 @@ registry.register({
   description: "Copy last response",
   panels: ["chat", "agent"],
   execute: (ctx) => {
-    const messages = chatStore.messages;
-    const lastAssistant = [...messages]
-      .reverse()
-      .find((m) => m.role === "assistant");
-    if (lastAssistant?.content) {
-      navigator.clipboard.writeText(lastAssistant.content);
+    let lastContent: string | undefined;
+    if (ctx.panel === "agent") {
+      const last = [...acpStore.messages]
+        .reverse()
+        .find((m) => m.type === "assistant");
+      lastContent = last?.content;
+    } else {
+      const last = [...conversationStore.messages]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      lastContent = last?.content;
+    }
+    if (lastContent) {
+      navigator.clipboard.writeText(lastContent);
       ctx.showStatus("Response copied to clipboard.");
     } else {
       ctx.showStatus("No response to copy.");
