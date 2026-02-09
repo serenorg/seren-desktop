@@ -9,15 +9,16 @@ use super::types::{
 /// Preferred models for code tasks (ordered by capability).
 const CODE_PREFERRED_MODELS: &[&str] = &[
     "anthropic/claude-opus-4-6",
-    "anthropic/claude-opus-4.5",
-    "anthropic/claude-sonnet-4",
-    "openai/gpt-4o",
+    "openai/gpt-5.3",
 ];
 
 /// Preferred models for simple Q&A (ordered by speed/cost).
 const SIMPLE_PREFERRED_MODELS: &[&str] = &[
+    "google/gemini-3-flash-preview",
     "google/gemini-2.5-flash",
     "anthropic/claude-haiku-4.5",
+    "moonshot/kimi-k2.5",
+    "thudm/glm-4.7",
     "anthropic/claude-sonnet-4",
 ];
 
@@ -193,12 +194,16 @@ fn humanize_model_id(model_id: &str) -> &str {
         "anthropic/claude-opus-4.5" => "Claude Opus",
         "anthropic/claude-sonnet-4" => "Claude Sonnet",
         "anthropic/claude-haiku-4.5" => "Claude Haiku",
+        "openai/gpt-5.3" => "GPT-5.3",
         "openai/gpt-5" => "GPT-5",
         "openai/gpt-4o" => "GPT-4o",
         "openai/gpt-4o-mini" => "GPT-4o Mini",
         "google/gemini-2.5-pro" => "Gemini Pro",
         "google/gemini-2.5-flash" => "Gemini Flash",
         "google/gemini-3-flash-preview" => "Gemini 3 Flash",
+        "moonshot/kimi-k2.5" => "Kimi K2.5",
+        "thudm/glm-4.7" => "GLM-4.7",
+        "thudm/glm-4" => "GLM-4",
         _ => model_id,
     }
 }
