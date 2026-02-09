@@ -86,6 +86,23 @@ export const Header: Component<HeaderProps> = (props) => {
               </span>
             </button>
           </Show>
+          <Show when={updaterStore.state.status === "installing"}>
+            <span class="flex items-center gap-1.5 py-1 px-2.5 text-[12px] font-medium text-blue-400">
+              <span class="leading-none animate-spin inline-block">⟳</span>
+              <span class="leading-none">Updating...</span>
+            </span>
+          </Show>
+          <Show when={updaterStore.state.status === "error"}>
+            <button
+              type="button"
+              class="flex items-center gap-1.5 py-1 px-2.5 text-[12px] font-medium text-white bg-red-700 border-none rounded cursor-pointer transition-all duration-100 hover:bg-red-600"
+              onClick={() => updaterStore.checkForUpdates(true)}
+              title={updaterStore.state.error ?? "Update failed"}
+            >
+              <span class="leading-none">⚠</span>
+              <span class="leading-none">Update failed — retry</span>
+            </button>
+          </Show>
           <BalanceDisplay />
           {props.onLogout && (
             <button
