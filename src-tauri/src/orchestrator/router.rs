@@ -208,6 +208,126 @@ fn humanize_model_id(model_id: &str) -> &str {
     }
 }
 
+/// HTTP status codes that indicate a transient failure eligible for model reroute.
+const REROUTABLE_STATUS_CODES: &[u16] = &[408, 429, 502, 503, 504];
+
+/// Maximum number of reroute attempts before giving up.
+pub const MAX_REROUTE_ATTEMPTS: usize = 2;
+
+/// Check whether an error message indicates a transient failure eligible for reroute.
+pub fn is_reroutable_error(error_message: &str) -> bool {
+    // Don't reroute auth or client errors
+    if error_message.contains("401")
+        || error_message.contains("403")
+        || error_message.contains("400")
+        || error_message.contains("API key")
+        || error_message.contains("Insufficient credits")
+    {
+        return false;
+    }
+
+    REROUTABLE_STATUS_CODES
+        .iter()
+        .any(|code| error_message.contains(&code.to_string()))
+}
+
+/// Select a fallback model after a transient failure, ranked by satisfaction signals.
+///
+/// Queries the local eval_signals table for models with positive satisfaction
+/// for the given task_type, then falls back to the hardcoded preference list.
+/// Excludes any models already tried.
+pub fn reroute_on_failure(
+    conn: &rusqlite::Connection,
+    task_type: &str,
+    tried_models: &[String],
+    available_models: &[String],
+    classification: &TaskClassification,
+) -> Option<(String, String)> {
+    // 1. Query satisfaction-ranked models from eval_signals
+    if let Ok(ranked) = query_satisfaction_ranked_models(conn, task_type, tried_models) {
+        for (model_id, score) in &ranked {
+            if available_models.iter().any(|m| m == model_id) {
+                let reason = format!(
+                    "Rerouted to {} (rated helpful for {}, score: {})",
+                    humanize_model_id(model_id),
+                    humanize_task_type(task_type),
+                    score,
+                );
+                return Some((model_id.clone(), reason));
+            }
+        }
+    }
+
+    // 2. Fall back to hardcoded preference list, skipping tried models
+    let preferred = if classification.task_type == "code_generation" {
+        CODE_PREFERRED_MODELS
+    } else {
+        match classification.complexity {
+            TaskComplexity::Complex | TaskComplexity::Moderate => CODE_PREFERRED_MODELS,
+            TaskComplexity::Simple => SIMPLE_PREFERRED_MODELS,
+        }
+    };
+
+    for model in preferred {
+        let model_str = model.to_string();
+        if !tried_models.contains(&model_str) && available_models.iter().any(|m| m == model) {
+            let reason = format!(
+                "Rerouted to {} for {}",
+                humanize_model_id(model),
+                humanize_task_type(task_type),
+            );
+            return Some((model_str, reason));
+        }
+    }
+
+    // 3. Try any available model not yet tried
+    for model in available_models {
+        if !tried_models.contains(model) {
+            let reason = format!(
+                "Rerouted to {} for {}",
+                humanize_model_id(model),
+                humanize_task_type(task_type),
+            );
+            return Some((model.clone(), reason));
+        }
+    }
+
+    None
+}
+
+/// Query eval_signals for models ranked by positive satisfaction count.
+///
+/// Returns (model_id, positive_count) pairs sorted descending, excluding tried models.
+fn query_satisfaction_ranked_models(
+    conn: &rusqlite::Connection,
+    task_type: &str,
+    tried_models: &[String],
+) -> Result<Vec<(String, i64)>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT model_id, SUM(CASE WHEN satisfaction = 1 THEN 1 ELSE 0 END) as positive_count
+         FROM eval_signals
+         WHERE task_type = ?1 AND model_id IS NOT NULL
+         GROUP BY model_id
+         HAVING positive_count > 0
+         ORDER BY positive_count DESC",
+    )?;
+
+    let rows = stmt.query_map(rusqlite::params![task_type], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        if let Ok((model_id, score)) = row {
+            if !tried_models.contains(&model_id) {
+                results.push((model_id, score));
+            }
+        }
+    }
+
+    Ok(results)
+}
+
 /// Convert a task type to a human-readable description.
 fn humanize_task_type(task_type: &str) -> &str {
     match task_type {
@@ -528,5 +648,160 @@ mod tests {
 
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.selected_skills.len(), 2);
+    }
+
+    // =========================================================================
+    // Reroutable Error Detection
+    // =========================================================================
+
+    #[test]
+    fn detects_408_as_reroutable() {
+        assert!(is_reroutable_error("Gateway returned HTTP 408 Request Timeout"));
+    }
+
+    #[test]
+    fn detects_429_as_reroutable() {
+        assert!(is_reroutable_error("HTTP 429: Rate limit exceeded"));
+    }
+
+    #[test]
+    fn detects_502_as_reroutable() {
+        assert!(is_reroutable_error("Gateway returned HTTP 502"));
+    }
+
+    #[test]
+    fn rejects_401_as_not_reroutable() {
+        assert!(!is_reroutable_error("HTTP 401: Unauthorized"));
+    }
+
+    #[test]
+    fn rejects_403_as_not_reroutable() {
+        assert!(!is_reroutable_error("HTTP 403: Forbidden"));
+    }
+
+    #[test]
+    fn rejects_400_as_not_reroutable() {
+        assert!(!is_reroutable_error("HTTP 400: Bad Request"));
+    }
+
+    #[test]
+    fn rejects_insufficient_credits() {
+        assert!(!is_reroutable_error("HTTP 402: Insufficient credits"));
+    }
+
+    #[test]
+    fn rejects_generic_error_as_not_reroutable() {
+        assert!(!is_reroutable_error("Something went wrong"));
+    }
+
+    // =========================================================================
+    // Reroute Fallback (without DB — hardcoded preferences)
+    // =========================================================================
+
+    #[test]
+    fn reroute_skips_tried_models() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS eval_signals (
+                message_id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                model_id TEXT,
+                worker_type TEXT,
+                satisfaction INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                synced INTEGER DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap();
+
+        let classification = make_classification("general_chat", false, false);
+        let tried = vec!["google/gemini-3-flash-preview".to_string()];
+        let available = vec![
+            "google/gemini-3-flash-preview".to_string(),
+            "google/gemini-2.5-flash".to_string(),
+            "anthropic/claude-sonnet-4".to_string(),
+        ];
+
+        let result = reroute_on_failure(&conn, "general_chat", &tried, &available, &classification);
+        assert!(result.is_some());
+        let (model, _reason) = result.unwrap();
+        // Should skip gemini-3-flash (tried) and pick gemini-2.5-flash (next preferred)
+        assert_eq!(model, "google/gemini-2.5-flash");
+    }
+
+    #[test]
+    fn reroute_returns_none_when_all_models_tried() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS eval_signals (
+                message_id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                model_id TEXT,
+                worker_type TEXT,
+                satisfaction INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                synced INTEGER DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap();
+
+        let classification = make_classification("general_chat", false, false);
+        let available = vec!["anthropic/claude-sonnet-4".to_string()];
+        let tried = vec!["anthropic/claude-sonnet-4".to_string()];
+
+        let result = reroute_on_failure(&conn, "general_chat", &tried, &available, &classification);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn reroute_prefers_satisfaction_ranked_model() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS eval_signals (
+                message_id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                model_id TEXT,
+                worker_type TEXT,
+                satisfaction INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                synced INTEGER DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap();
+
+        // Insert satisfaction signals: sonnet has 3 positive, haiku has 1
+        for i in 0..3 {
+            conn.execute(
+                "INSERT INTO eval_signals (message_id, task_type, model_id, worker_type, satisfaction, created_at, synced)
+                 VALUES (?1, 'general_chat', 'anthropic/claude-sonnet-4', 'chat_model', 1, 1000, 0)",
+                rusqlite::params![format!("msg-sonnet-{}", i)],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO eval_signals (message_id, task_type, model_id, worker_type, satisfaction, created_at, synced)
+             VALUES ('msg-haiku-1', 'general_chat', 'anthropic/claude-haiku-4.5', 'chat_model', 1, 1000, 0)",
+            [],
+        )
+        .unwrap();
+
+        let classification = make_classification("general_chat", false, false);
+        let tried = vec!["moonshot/kimi-k2.5".to_string()];
+        let available = vec![
+            "moonshot/kimi-k2.5".to_string(),
+            "anthropic/claude-haiku-4.5".to_string(),
+            "anthropic/claude-sonnet-4".to_string(),
+        ];
+
+        let result = reroute_on_failure(&conn, "general_chat", &tried, &available, &classification);
+        assert!(result.is_some());
+        let (model, reason) = result.unwrap();
+        // Should prefer sonnet (3 positive signals) over haiku (1)
+        assert_eq!(model, "anthropic/claude-sonnet-4");
+        assert!(reason.contains("rated helpful"));
+        assert!(reason.contains("score: 3"));
     }
 }

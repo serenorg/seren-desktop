@@ -132,8 +132,11 @@ pub async fn orchestrate(
 // Single-Task Execution (Fast Path)
 // =============================================================================
 
-/// Execute a single subtask — the original orchestration path.
-/// No decomposition overhead, no plan persistence.
+/// Execute a single subtask with automatic reroute on transient errors.
+///
+/// When a worker hits a 408/429/5xx, the orchestrator queries eval_signals
+/// for satisfaction-ranked fallback models and retries with a different model.
+/// Respects user-selected models (no reroute when user explicitly chose a model).
 async fn execute_single_task(
     app: &AppHandle,
     conversation_id: &str,
@@ -143,6 +146,11 @@ async fn execute_single_task(
     images: &[ImageAttachment],
     cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), String> {
+    let user_explicitly_selected = capabilities
+        .selected_model
+        .as_ref()
+        .is_some_and(|m| !m.is_empty());
+
     // Route
     let mut routing = router::route(&subtask.classification, capabilities);
 
@@ -164,50 +172,93 @@ async fn execute_single_task(
         routing.reason = format!("{} (trusted)", routing.reason);
     }
 
-    // Load skills
-    let skill_content = load_skill_content(&routing.selected_skills)?;
+    // Track tried models for reroute
+    let mut tried_models: Vec<String> = vec![routing.model_id.clone()];
+    let mut reroute_count: usize = 0;
 
-    // Emit transition
-    let transition = TransitionEvent {
-        conversation_id: conversation_id.to_string(),
-        model_name: routing.model_id.clone(),
-        task_description: routing.reason.clone(),
-    };
-    app.emit("orchestrator://transition", &transition)
-        .map_err(|e| format!("Failed to emit transition event: {}", e))?;
+    // Wrap cancel_rx in Arc<Mutex> so it survives reroute iterations
+    let cancel_rx = Arc::new(Mutex::new(Some(cancel_rx)));
 
-    // Create channel and spawn worker
-    let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
-    let worker = create_worker(&routing, app);
-    let worker_prompt = subtask.prompt.clone();
-    let worker_routing = routing.clone();
-    let worker_app = app.clone();
-    let worker_images = images.to_vec();
-    let worker_history = history.to_vec();
-    let worker_handle = tokio::spawn(async move {
-        worker
-            .execute(
-                &worker_prompt,
-                &worker_history,
-                &worker_routing,
-                &skill_content,
-                &worker_app,
-                &worker_images,
-                event_tx,
-            )
-            .await
-    });
+    loop {
+        // Load skills
+        let skill_content = load_skill_content(&routing.selected_skills)?;
 
-    // Forward events to frontend with cancellation support
-    let conv_id = conversation_id.to_string();
-    let app_for_events = app.clone();
-    let forward_handle = tokio::spawn(async move {
-        let mut cancel_rx = cancel_rx;
-        loop {
-            tokio::select! {
-                event = event_rx.recv() => {
-                    match event {
+        // Emit transition
+        let transition = TransitionEvent {
+            conversation_id: conversation_id.to_string(),
+            model_name: routing.model_id.clone(),
+            task_description: routing.reason.clone(),
+        };
+        app.emit("orchestrator://transition", &transition)
+            .map_err(|e| format!("Failed to emit transition event: {}", e))?;
+
+        // Create channel and spawn worker
+        let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
+        let worker = create_worker(&routing, app);
+        let worker_prompt = subtask.prompt.clone();
+        let worker_routing = routing.clone();
+        let worker_app = app.clone();
+        let worker_images = images.to_vec();
+        let worker_history = history.to_vec();
+        let worker_handle = tokio::spawn(async move {
+            worker
+                .execute(
+                    &worker_prompt,
+                    &worker_history,
+                    &worker_routing,
+                    &skill_content,
+                    &worker_app,
+                    &worker_images,
+                    event_tx,
+                )
+                .await
+        });
+
+        // Collect events, looking for reroutable errors
+        let conv_id = conversation_id.to_string();
+        let app_for_events = app.clone();
+        let cancel_rx_clone = cancel_rx.clone();
+
+        // Collect all events, intercepting errors for reroute analysis
+        let mut reroutable_error: Option<String> = None;
+        let forward_handle = tokio::spawn(async move {
+            let mut taken_rx = cancel_rx_clone.lock().await.take();
+            let mut captured_error: Option<String> = None;
+            loop {
+                if let Some(ref mut rx) = taken_rx {
+                    tokio::select! {
+                        event = event_rx.recv() => {
+                            match event {
+                                Some(worker_event) => {
+                                    // Capture error messages for reroute analysis
+                                    if let WorkerEvent::Error { ref message } = worker_event {
+                                        captured_error = Some(message.clone());
+                                    }
+                                    let orchestrator_event = OrchestratorEvent {
+                                        conversation_id: conv_id.clone(),
+                                        worker_event,
+                                        subtask_id: None,
+                                    };
+                                    if let Err(e) = app_for_events.emit("orchestrator://event", &orchestrator_event) {
+                                        log::error!("[Orchestrator] Failed to emit event: {}", e);
+                                        break;
+                                    }
+                                }
+                                None => break,
+                            }
+                        }
+                        _ = rx => {
+                            log::info!("[Orchestrator] Cancellation received for conversation {}", conv_id);
+                            break;
+                        }
+                    }
+                } else {
+                    // No cancel_rx available (already consumed), just forward events
+                    match event_rx.recv().await {
                         Some(worker_event) => {
+                            if let WorkerEvent::Error { ref message } = worker_event {
+                                captured_error = Some(message.clone());
+                            }
                             let orchestrator_event = OrchestratorEvent {
                                 conversation_id: conv_id.clone(),
                                 worker_event,
@@ -221,36 +272,117 @@ async fn execute_single_task(
                         None => break,
                     }
                 }
-                _ = &mut cancel_rx => {
-                    log::info!("[Orchestrator] Cancellation received for conversation {}", conv_id);
-                    break;
+            }
+            captured_error
+        });
+
+        let forward_result = forward_handle.await;
+        if let Ok(Some(error_msg)) = &forward_result {
+            reroutable_error = Some(error_msg.clone());
+        }
+
+        match worker_handle.await {
+            Ok(Ok(())) => {
+                log::info!(
+                    "[Orchestrator] Completed single-task orchestration for conversation {}",
+                    conversation_id
+                );
+            }
+            Ok(Err(e)) => {
+                log::error!("[Orchestrator] Worker error: {}", e);
+                if reroutable_error.is_none() {
+                    reroutable_error = Some(e);
                 }
             }
+            Err(e) => {
+                log::error!("[Orchestrator] Worker task panicked: {}", e);
+                let error_event = OrchestratorEvent {
+                    conversation_id: conversation_id.to_string(),
+                    worker_event: WorkerEvent::Error {
+                        message: "Internal error: worker task failed".to_string(),
+                    },
+                    subtask_id: None,
+                };
+                let _ = app.emit("orchestrator://event", &error_event);
+            }
         }
-    });
 
-    let _ = forward_handle.await;
+        // Attempt reroute if we got a transient error
+        let should_reroute = !user_explicitly_selected
+            && reroute_count < router::MAX_REROUTE_ATTEMPTS
+            && reroutable_error
+                .as_ref()
+                .is_some_and(|msg| router::is_reroutable_error(msg));
 
-    match worker_handle.await {
-        Ok(Ok(())) => {
-            log::info!(
-                "[Orchestrator] Completed single-task orchestration for conversation {}",
-                conversation_id
-            );
+        if !should_reroute {
+            break;
         }
-        Ok(Err(e)) => {
-            log::error!("[Orchestrator] Worker error: {}", e);
-        }
-        Err(e) => {
-            log::error!("[Orchestrator] Worker task panicked: {}", e);
-            let error_event = OrchestratorEvent {
-                conversation_id: conversation_id.to_string(),
-                worker_event: WorkerEvent::Error {
-                    message: "Internal error: worker task failed".to_string(),
-                },
-                subtask_id: None,
-            };
-            let _ = app.emit("orchestrator://event", &error_event);
+
+        let error_msg = reroutable_error.unwrap();
+        let failed_model = routing.model_id.clone();
+        log::info!(
+            "[Orchestrator] Attempting reroute #{} after error on {}: {}",
+            reroute_count + 1,
+            failed_model,
+            error_msg
+        );
+
+        // Query satisfaction-ranked fallback from database
+        let app_for_reroute = app.clone();
+        let task_type_for_reroute = subtask.classification.task_type.clone();
+        let tried_for_reroute = tried_models.clone();
+        let available_for_reroute = capabilities.available_models.clone();
+        let classification_for_reroute = subtask.classification.clone();
+
+        let reroute_result = tauri::async_runtime::spawn_blocking(move || {
+            match crate::services::database::init_db(&app_for_reroute) {
+                Ok(conn) => router::reroute_on_failure(
+                    &conn,
+                    &task_type_for_reroute,
+                    &tried_for_reroute,
+                    &available_for_reroute,
+                    &classification_for_reroute,
+                ),
+                Err(_) => None,
+            }
+        })
+        .await
+        .unwrap_or(None);
+
+        match reroute_result {
+            Some((new_model, reason)) => {
+                // Emit reroute event to frontend
+                let reroute_event = OrchestratorEvent {
+                    conversation_id: conversation_id.to_string(),
+                    worker_event: WorkerEvent::Reroute {
+                        from_model: failed_model.clone(),
+                        to_model: new_model.clone(),
+                        reason: reason.clone(),
+                    },
+                    subtask_id: None,
+                };
+                let _ = app.emit("orchestrator://event", &reroute_event);
+
+                // Update routing for next iteration
+                routing.model_id = new_model.clone();
+                routing.reason = reason;
+                tried_models.push(new_model);
+                reroute_count += 1;
+
+                log::info!(
+                    "[Orchestrator] Rerouting from {} to {} (attempt {})",
+                    failed_model,
+                    routing.model_id,
+                    reroute_count,
+                );
+            }
+            None => {
+                log::warn!(
+                    "[Orchestrator] No fallback model available, giving up after {} reroute attempts",
+                    reroute_count
+                );
+                break;
+            }
         }
     }
 

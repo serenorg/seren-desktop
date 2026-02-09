@@ -56,7 +56,13 @@ type WorkerEvent =
       thinking: string | null;
       cost?: number;
     }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      type: "reroute";
+      from_model: string;
+      to_model: string;
+      reason: string;
+    };
 
 /** Capabilities payload sent to the Rust orchestrator. */
 interface UserCapabilities {
@@ -241,6 +247,9 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
     case "error":
       handleError(workerEvent.message);
       break;
+    case "reroute":
+      handleReroute(workerEvent);
+      break;
   }
 }
 
@@ -412,6 +421,34 @@ function handleError(message: string): void {
   }
 }
 
+function handleReroute(event: {
+  from_model: string;
+  to_model: string;
+  reason: string;
+}): void {
+  // Flush any partial streaming content from the failed model
+  flushStreamingToMessage();
+
+  // Reset streaming state for the new model attempt
+  activeMessageId = crypto.randomUUID();
+  streamStartTime = Date.now();
+
+  // Add a reroute announcement message to the conversation
+  const rerouteMessage: UnifiedMessage = {
+    id: crypto.randomUUID(),
+    type: "reroute",
+    role: "system",
+    content: event.reason,
+    timestamp: Date.now(),
+    status: "complete",
+    workerType: "orchestrator",
+    modelId: event.to_model,
+    error: event.from_model,
+  };
+
+  conversationStore.addMessage(rerouteMessage);
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -457,6 +494,7 @@ function serializeHistory(
       (m) =>
         (m.role === "user" || m.role === "assistant") &&
         m.type !== "transition" &&
+        m.type !== "reroute" &&
         m.type !== "tool_call" &&
         m.type !== "tool_result" &&
         m.type !== "diff" &&

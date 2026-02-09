@@ -69,6 +69,12 @@ pub enum WorkerEvent {
     Error {
         message: String,
     },
+    /// Emitted when a request is rerouted to a different model after a transient error.
+    Reroute {
+        from_model: String,
+        to_model: String,
+        reason: String,
+    },
 }
 
 /// Routing decision made by the orchestrator.
@@ -261,6 +267,17 @@ mod tests {
         let json = serde_json::to_value(&error).unwrap();
         assert_eq!(json["type"], "error");
         assert_eq!(json["message"], "oops");
+
+        let reroute = WorkerEvent::Reroute {
+            from_model: "moonshot/kimi-k2.5".to_string(),
+            to_model: "anthropic/claude-sonnet-4".to_string(),
+            reason: "Rerouted to Claude Sonnet (rated helpful for research)".to_string(),
+        };
+        let json = serde_json::to_value(&reroute).unwrap();
+        assert_eq!(json["type"], "reroute");
+        assert_eq!(json["from_model"], "moonshot/kimi-k2.5");
+        assert_eq!(json["to_model"], "anthropic/claude-sonnet-4");
+        assert!(json["reason"].as_str().unwrap().contains("Claude Sonnet"));
     }
 
     #[test]
