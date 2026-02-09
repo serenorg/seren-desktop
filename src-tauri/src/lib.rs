@@ -33,12 +33,12 @@ mod orchestrator;
 mod oauth_callback_server;
 #[cfg(feature = "openclaw")]
 mod openclaw;
+mod polymarket;
 mod sandbox;
 mod shell;
 mod skills;
 mod sync;
 mod terminal;
-mod polymarket;
 mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
@@ -594,7 +594,10 @@ pub fn run() {
 
             // Initialize memory state for cloud + local cache operations
             {
-                let data_dir = app.path().app_data_dir().expect("failed to get app data dir");
+                let data_dir = app
+                    .path()
+                    .app_data_dir()
+                    .expect("failed to get app data dir");
                 let cache_path = data_dir.join("memory_cache.db");
 
                 let api_key = app
@@ -654,6 +657,12 @@ pub fn run() {
             commands::chat::update_conversation,
             commands::chat::archive_conversation,
             commands::chat::delete_conversation,
+            // Agent conversation commands
+            commands::chat::create_agent_conversation,
+            commands::chat::get_agent_conversations,
+            commands::chat::get_agent_conversation,
+            commands::chat::set_agent_conversation_session_id,
+            commands::chat::set_agent_conversation_model_id,
             // Message commands
             commands::chat::save_message,
             commands::chat::get_messages,
@@ -726,6 +735,8 @@ pub fn run() {
             acp::acp_set_permission_mode,
             #[cfg(feature = "acp")]
             acp::acp_set_model,
+            #[cfg(feature = "acp")]
+            acp::acp_set_config_option,
             #[cfg(feature = "acp")]
             acp::acp_respond_to_permission,
             #[cfg(feature = "acp")]

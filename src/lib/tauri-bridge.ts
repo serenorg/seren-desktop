@@ -663,6 +663,23 @@ export interface Conversation {
 }
 
 /**
+ * An agent conversation stored in SQLite.
+ *
+ * Note: These are persisted separately from normal chat conversations
+ * and are filtered out of `getConversations()`.
+ */
+export interface AgentConversation {
+  id: string;
+  title: string;
+  created_at: number;
+  agent_type: string;
+  agent_session_id: string | null;
+  agent_cwd: string | null;
+  agent_model_id: string | null;
+  is_archived: boolean;
+}
+
+/**
  * A chat message stored in a conversation.
  */
 export interface StoredMessage {
@@ -739,6 +756,87 @@ export async function updateConversation(
     selectedModel,
     selectedProvider,
   });
+}
+
+/**
+ * Create (or re-open) an agent conversation.
+ */
+export async function createAgentConversation(
+  id: string,
+  title: string,
+  agentType: string,
+  agentCwd?: string,
+  agentSessionId?: string,
+): Promise<AgentConversation> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  return await invoke<AgentConversation>("create_agent_conversation", {
+    id,
+    title,
+    agentType,
+    agentCwd,
+    agentSessionId,
+  });
+}
+
+/**
+ * List recent persisted agent conversations.
+ */
+export async function getAgentConversations(
+  limit = 20,
+): Promise<AgentConversation[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  return await invoke<AgentConversation[]>("get_agent_conversations", {
+    limit,
+  });
+}
+
+/**
+ * Get a single persisted agent conversation by ID.
+ */
+export async function getAgentConversation(
+  id: string,
+): Promise<AgentConversation | null> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  return await invoke<AgentConversation | null>("get_agent_conversation", {
+    id,
+  });
+}
+
+/**
+ * Update the remote ACP session id (e.g., Codex thread id) for a persisted agent conversation.
+ */
+export async function setAgentConversationSessionId(
+  id: string,
+  agentSessionId: string,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("set_agent_conversation_session_id", { id, agentSessionId });
+}
+
+/**
+ * Update the selected model id for a persisted agent conversation.
+ */
+export async function setAgentConversationModelId(
+  id: string,
+  agentModelId: string,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("set_agent_conversation_model_id", { id, agentModelId });
 }
 
 /**

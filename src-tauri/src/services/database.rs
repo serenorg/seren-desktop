@@ -35,7 +35,12 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             created_at INTEGER NOT NULL,
             selected_model TEXT,
             selected_provider TEXT,
-            is_archived INTEGER DEFAULT 0
+            is_archived INTEGER DEFAULT 0,
+            kind TEXT NOT NULL DEFAULT 'chat',
+            agent_type TEXT,
+            agent_session_id TEXT,
+            agent_cwd TEXT,
+            agent_model_id TEXT
         )",
         [],
     )?;
@@ -53,6 +58,69 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
+
+    // Migration: add agent conversation columns if they don't exist (for existing DBs)
+    let has_kind: bool = conn
+        .prepare("SELECT kind FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_kind {
+        // NOT NULL requires a DEFAULT when added via ALTER TABLE.
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
+            [],
+        )
+        .ok();
+    }
+
+    let has_agent_type: bool = conn
+        .prepare("SELECT agent_type FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_agent_type {
+        conn.execute("ALTER TABLE conversations ADD COLUMN agent_type TEXT", [])
+            .ok();
+    }
+
+    let has_agent_session_id: bool = conn
+        .prepare("SELECT agent_session_id FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_agent_session_id {
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN agent_session_id TEXT",
+            [],
+        )
+        .ok();
+    }
+
+    let has_agent_cwd: bool = conn
+        .prepare("SELECT agent_cwd FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_agent_cwd {
+        conn.execute("ALTER TABLE conversations ADD COLUMN agent_cwd TEXT", [])
+            .ok();
+    }
+
+    let has_agent_model_id: bool = conn
+        .prepare("SELECT agent_model_id FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_agent_model_id {
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN agent_model_id TEXT",
+            [],
+        )
+        .ok();
+    }
+
+    // Helpful indexes for agent history lookups (safe to run repeatedly).
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_kind_created_at ON conversations(kind, created_at DESC)",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_agent_session_id ON conversations(agent_session_id)",
+        [],
+    )
+    .ok();
 
     // Migration: Add conversation_id column if it doesn't exist (for existing DBs)
     let has_conversation_id: bool = conn

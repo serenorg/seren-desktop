@@ -23,6 +23,8 @@ export interface AcpSessionInfo {
   cwd: string;
   status: SessionStatus;
   createdAt: string;
+  /** Remote ACP session id (e.g., Codex thread id). Populated after ready. */
+  agentSessionId?: string;
 }
 
 export interface AgentInfo {
@@ -73,6 +75,26 @@ export interface PlanEntry {
   status: string;
 }
 
+// Session config options (unstable ACP surface, but used by Codex for reasoning effort)
+export interface SessionConfigSelectOption {
+  value: string;
+  name: string;
+  description?: string | null;
+}
+
+export interface SessionConfigOptionSelect {
+  id: string;
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  type: "select";
+  currentValue: string;
+  // We currently only handle ungrouped select options.
+  options: SessionConfigSelectOption[];
+}
+
+export type SessionConfigOption = SessionConfigOptionSelect;
+
 export interface PlanUpdateEvent {
   sessionId: string;
   entries: PlanEntry[];
@@ -99,6 +121,10 @@ export interface PermissionRequestEvent {
 export interface SessionStatusEvent {
   sessionId: string;
   status: SessionStatus;
+  /** Remote ACP session id (e.g., Codex thread id). */
+  agentSessionId?: string;
+  /** Session configuration options (e.g., reasoning effort). */
+  configOptions?: SessionConfigOption[];
   agentInfo?: {
     name: string;
     version: string;
@@ -164,10 +190,14 @@ export async function spawnAgent(
   apiKey?: string,
   approvalPolicy?: string,
   searchEnabled?: boolean,
+  localSessionId?: string,
+  resumeAgentSessionId?: string,
 ): Promise<AcpSessionInfo> {
   return invoke<AcpSessionInfo>("acp_spawn", {
     agentType,
     cwd,
+    localSessionId: localSessionId ?? null,
+    resumeAgentSessionId: resumeAgentSessionId ?? null,
     sandboxMode: sandboxMode ?? null,
     apiKey: apiKey ?? null,
     approvalPolicy: approvalPolicy ?? null,
@@ -215,6 +245,17 @@ export async function setModel(
   modelId: string,
 ): Promise<void> {
   return invoke("acp_set_model", { sessionId, modelId });
+}
+
+/**
+ * Set a session configuration option (e.g., reasoning effort).
+ */
+export async function setConfigOption(
+  sessionId: string,
+  configId: string,
+  valueId: string,
+): Promise<void> {
+  return invoke("acp_set_config_option", { sessionId, configId, valueId });
 }
 
 /**

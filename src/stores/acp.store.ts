@@ -12,7 +12,18 @@ const sessionReadyPromises = new Map<
 >();
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
-import { getSerenApiKey } from "@/lib/tauri-bridge";
+import {
+  createAgentConversation,
+  getAgentConversation,
+  getAgentConversations,
+  getMessages,
+  getSerenApiKey,
+  saveMessage as saveMessageDb,
+  setAgentConversationModelId as setAgentConversationModelIdDb,
+  setAgentConversationSessionId as setAgentConversationSessionIdDb,
+  type AgentConversation as DbAgentConversation,
+  type StoredMessage,
+} from "@/lib/tauri-bridge";
 
 import type {
   AcpEvent,
@@ -22,6 +33,7 @@ import type {
   DiffEvent,
   DiffProposalEvent,
   PlanEntry,
+  SessionConfigOption,
   SessionStatus,
   SessionStatusEvent,
   ToolCallEvent,
@@ -65,6 +77,12 @@ export interface ActiveSession {
   streamingContent: string;
   streamingThinking: string;
   cwd: string;
+  /** Local persisted conversation id (SQLite). */
+  conversationId: string;
+  /** Remote ACP session id (e.g., Codex thread id). */
+  agentSessionId?: string;
+  /** Session configuration options reported by the agent (unstable ACP surface). */
+  configOptions?: SessionConfigOption[];
   /** Timestamp when the current prompt started */
   promptStartTime?: number;
   /** Currently selected model ID (if agent supports model selection) */
@@ -90,6 +108,8 @@ interface AcpState {
   activeSessionId: string | null;
   /** Selected agent type for new sessions */
   selectedAgentType: AgentType;
+  /** Recent persisted agent conversations for resuming. */
+  recentAgentConversations: DbAgentConversation[];
   /** Loading state */
   isLoading: boolean;
   /** Error message */
@@ -109,6 +129,7 @@ const [state, setState] = createStore<AcpState>({
   sessions: {},
   activeSessionId: null,
   selectedAgentType: "claude-code",
+  recentAgentConversations: [],
   isLoading: false,
   error: null,
   installStatus: null,
@@ -147,6 +168,10 @@ export const acpStore = {
 
   get selectedAgentType() {
     return state.selectedAgentType;
+  },
+
+  get recentAgentConversations() {
+    return state.recentAgentConversations;
   },
 
   get isLoading() {
@@ -231,6 +256,18 @@ export const acpStore = {
     }
   },
 
+  /**
+   * Load recent persisted agent conversations for resuming.
+   */
+  async refreshRecentAgentConversations(limit = 10) {
+    try {
+      const rows = await getAgentConversations(limit);
+      setState("recentAgentConversations", rows);
+    } catch (error) {
+      console.error("Failed to load agent conversation history:", error);
+    }
+  },
+
   // ============================================================================
   // Session Management
   // ============================================================================
@@ -241,14 +278,27 @@ export const acpStore = {
   async spawnSession(
     cwd: string,
     agentType?: AgentType,
+    opts?: {
+      localSessionId?: string;
+      resumeAgentSessionId?: string;
+      conversationTitle?: string;
+    },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
+    const localSessionId = opts?.localSessionId;
+    const resumeAgentSessionId = opts?.resumeAgentSessionId;
+    const conversationTitle =
+      opts?.conversationTitle ??
+      (resolvedAgentType === "codex" ? "Codex Agent" : "Claude Agent");
+
     setState("isLoading", true);
     setState("error", null);
 
     console.log("[AcpStore] Spawning session:", {
       agentType: resolvedAgentType,
       cwd,
+      localSessionId,
+      resumeAgentSessionId,
     });
 
     const agentAvailable =
@@ -270,16 +320,21 @@ export const acpStore = {
       resolveReady = resolve;
     });
 
-    // Listen to all session status events temporarily
-    const tempUnsubscribe = await acpService.subscribeToEvent<{
-      sessionId: string;
-      status: string;
-    }>("sessionStatus", (data) => {
+    // Listen to all session status events temporarily.
+    // This also captures `agentSessionId` in case the "ready" event arrives
+    // before the global event router is installed.
+    const tempUnsubscribe = await acpService.subscribeToEvent<SessionStatusEvent>(
+      "sessionStatus",
+      (data) => {
       console.log("[AcpStore] Received session status event:", data);
+      if (state.sessions[data.sessionId]) {
+        this.handleStatusChange(data.sessionId, data.status, data);
+      }
       if (data.status === "ready" && resolveReady) {
         resolveReady(data.sessionId);
       }
-    });
+      },
+    );
 
     try {
       // Ensure the underlying CLI is installed and up-to-date before spawning
@@ -327,8 +382,23 @@ export const acpStore = {
         apiKey ?? undefined,
         settingsStore.settings.agentApprovalPolicy,
         settingsStore.settings.agentSearchEnabled,
+        localSessionId,
+        resumeAgentSessionId,
       );
       console.log("[AcpStore] Spawn result:", info);
+
+      // Persist an agent conversation record (safe to call repeatedly via INSERT OR IGNORE).
+      try {
+        await createAgentConversation(
+          info.id,
+          conversationTitle,
+          resolvedAgentType,
+          cwd,
+          resumeAgentSessionId ?? undefined,
+        );
+      } catch (error) {
+        console.warn("Failed to persist agent conversation", error);
+      }
 
       // Create session state
       const session: ActiveSession = {
@@ -339,6 +409,7 @@ export const acpStore = {
         streamingContent: "",
         streamingThinking: "",
         cwd,
+        conversationId: info.id,
       };
 
       setState("sessions", info.id, session);
@@ -412,6 +483,89 @@ export const acpStore = {
       setState("isLoading", false);
       return null;
     }
+  },
+
+  /**
+   * Resume a persisted agent conversation by loading its remote ACP session.
+   *
+   * This relies on the agent sidecar supporting `load_session` and having access
+   * to the underlying session store (e.g., local Codex threads).
+   */
+  async resumeAgentConversation(
+    conversationId: string,
+    cwd: string,
+  ): Promise<string | null> {
+    // If already running, just focus it.
+    if (state.sessions[conversationId]) {
+      setState("activeSessionId", conversationId);
+      return conversationId;
+    }
+
+    setState("error", null);
+
+    let convo: DbAgentConversation | null = null;
+    try {
+      convo = await getAgentConversation(conversationId);
+    } catch (error) {
+      console.error("Failed to read agent conversation:", error);
+    }
+    if (!convo) {
+      setState("error", "Agent conversation not found");
+      return null;
+    }
+    if (!convo.agent_session_id) {
+      setState(
+        "error",
+        "This agent conversation does not have a resumable session id yet.",
+      );
+      return null;
+    }
+
+    let storedMessages: StoredMessage[] = [];
+    try {
+      storedMessages = await getMessages(conversationId, 1000);
+    } catch (error) {
+      console.warn("Failed to load persisted agent messages:", error);
+    }
+
+    const history: AgentMessage[] = storedMessages
+      .map((m) => {
+        const t = m.role as AgentMessage["type"];
+        const type: AgentMessage["type"] =
+          t === "user" ||
+          t === "assistant" ||
+          t === "thought" ||
+          t === "tool" ||
+          t === "diff" ||
+          t === "error"
+            ? t
+            : "assistant";
+        return {
+          id: m.id,
+          type,
+          content: m.content,
+          timestamp: m.timestamp,
+        };
+      })
+      // Best-effort: ignore empty messages
+      .filter((m) => m.content.trim().length > 0);
+
+    const agentType: AgentType =
+      convo.agent_type === "codex" || convo.agent_type === "claude-code"
+        ? (convo.agent_type as AgentType)
+        : state.selectedAgentType;
+
+    const sessionId = await this.spawnSession(cwd, agentType, {
+      localSessionId: conversationId,
+      resumeAgentSessionId: convo.agent_session_id,
+      conversationTitle: convo.title,
+    });
+    if (sessionId) {
+      setState("sessions", sessionId, "messages", history);
+      setState("sessions", sessionId, "streamingContent", "");
+      setState("sessions", sessionId, "streamingThinking", "");
+    }
+    return sessionId;
   },
 
   /**
@@ -529,6 +683,16 @@ export const acpStore = {
       ...msgs,
       userMessage,
     ]);
+    void saveMessageDb(
+      userMessage.id,
+      session.conversationId,
+      userMessage.type,
+      userMessage.content,
+      session.currentModelId ?? null,
+      userMessage.timestamp,
+    ).catch((error) => {
+      console.warn("Failed to persist agent message", error);
+    });
     setState("sessions", sessionId, "streamingContent", "");
     setState("sessions", sessionId, "streamingThinking", "");
 
@@ -588,7 +752,9 @@ export const acpStore = {
         await this.terminateSession(sessionId);
 
         // Spawn a fresh session
-        const newSessionId = await this.spawnSession(cwd, agentType);
+        const newSessionId = await this.spawnSession(cwd, agentType, {
+          localSessionId: session.conversationId,
+        });
         if (newSessionId) {
           // Restore conversation history to the new session
           if (existingMessages.length > 0) {
@@ -698,8 +864,40 @@ export const acpStore = {
     try {
       await acpService.setModel(sessionId, modelId);
       setState("sessions", sessionId, "currentModelId", modelId);
+      const session = state.sessions[sessionId];
+      if (session) {
+        void setAgentConversationModelIdDb(session.conversationId, modelId).catch(
+          (error) => {
+            console.warn("Failed to persist agent model selection", error);
+          },
+        );
+      }
     } catch (error) {
       console.error("[AcpStore] Failed to set model:", error);
+    }
+  },
+
+  /**
+   * Set a session configuration option (e.g., reasoning effort).
+   */
+  async setConfigOption(configId: string, valueId: string) {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+
+    try {
+      await acpService.setConfigOption(sessionId, configId, valueId);
+      // Optimistically update local config option state (if present).
+      setState("sessions", sessionId, "configOptions", (opts) => {
+        if (!opts) return opts;
+        return opts.map((o) => {
+          if (o.id === configId && o.type === "select") {
+            return { ...o, currentValue: valueId };
+          }
+          return o;
+        });
+      });
+    } catch (error) {
+      console.error("[AcpStore] Failed to set config option:", error);
     }
   },
 
@@ -1100,16 +1298,40 @@ export const acpStore = {
   },
 
   handleDiff(sessionId: string, diff: DiffEvent) {
-    const message: AgentMessage = {
-      id: crypto.randomUUID(),
-      type: "diff",
-      content: `Modified: ${diff.path}`,
-      timestamp: Date.now(),
-      toolCallId: diff.toolCallId,
-      diff,
-    };
+    setState("sessions", sessionId, "messages", (msgs) => {
+      // If we already have a diff message for this tool call + path, update it in place
+      // so streaming diff updates don't spam the timeline.
+      const existingIndex = msgs.findIndex(
+        (m) =>
+          m.type === "diff" &&
+          m.toolCallId === diff.toolCallId &&
+          m.diff?.path === diff.path,
+      );
 
-    setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
+      const nextMessage: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "diff",
+        content: `Modified: ${diff.path}`,
+        timestamp: Date.now(),
+        toolCallId: diff.toolCallId,
+        diff,
+      };
+
+      if (existingIndex >= 0) {
+        const next = msgs.slice();
+        next[existingIndex] = {
+          ...next[existingIndex],
+          // Keep the existing message id so keyed lists remain stable.
+          id: next[existingIndex].id,
+          timestamp: next[existingIndex].timestamp,
+          content: nextMessage.content,
+          diff: nextMessage.diff,
+        };
+        return next;
+      }
+
+      return [...msgs, nextMessage];
+    });
   },
 
   handleStatusChange(
@@ -1118,6 +1340,19 @@ export const acpStore = {
     data?: SessionStatusEvent,
   ) {
     setState("sessions", sessionId, "info", "status", status);
+
+    if (data?.agentSessionId) {
+      setState("sessions", sessionId, "agentSessionId", data.agentSessionId);
+      const session = state.sessions[sessionId];
+      if (session) {
+        void setAgentConversationSessionIdDb(
+          session.conversationId,
+          data.agentSessionId,
+        ).catch((error) => {
+          console.warn("Failed to persist agent session id", error);
+        });
+      }
+    }
 
     // Extract model state from session status events (e.g. ready with models)
     if (data?.models) {
@@ -1147,6 +1382,10 @@ export const acpStore = {
       }
     }
 
+    if (data?.configOptions) {
+      setState("sessions", sessionId, "configOptions", data.configOptions);
+    }
+
     if (status === "ready") {
       const entry = sessionReadyPromises.get(sessionId);
       if (entry) {
@@ -1172,6 +1411,16 @@ export const acpStore = {
         ...msgs,
         thinkingMessage,
       ]);
+      void saveMessageDb(
+        thinkingMessage.id,
+        session.conversationId,
+        thinkingMessage.type,
+        thinkingMessage.content,
+        session.currentModelId ?? null,
+        thinkingMessage.timestamp,
+      ).catch((error) => {
+        console.warn("Failed to persist agent message", error);
+      });
       setState("sessions", sessionId, "streamingThinking", "");
     }
 
@@ -1190,6 +1439,16 @@ export const acpStore = {
         duration,
       };
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
+      void saveMessageDb(
+        message.id,
+        session.conversationId,
+        message.type,
+        message.content,
+        session.currentModelId ?? null,
+        message.timestamp,
+      ).catch((error) => {
+        console.warn("Failed to persist agent message", error);
+      });
 
       // If the agent streamed a short auth error as text, surface it as a session error
       // so the error banner with the Login button appears. Long messages are skipped
@@ -1213,6 +1472,19 @@ export const acpStore = {
     };
 
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
+    const session = state.sessions[sessionId];
+    if (session) {
+      void saveMessageDb(
+        message.id,
+        session.conversationId,
+        message.type,
+        message.content,
+        session.currentModelId ?? null,
+        message.timestamp,
+      ).catch((persistErr) => {
+        console.warn("Failed to persist agent message", persistErr);
+      });
+    }
     // Set session-specific error instead of global error
     setState("sessions", sessionId, "error", error);
   },

@@ -19,6 +19,18 @@ pub struct Conversation {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AgentConversation {
+    pub id: String,
+    pub title: String,
+    pub created_at: i64,
+    pub agent_type: String,
+    pub agent_session_id: Option<String>,
+    pub agent_cwd: Option<String>,
+    pub agent_model_id: Option<String>,
+    pub is_archived: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StoredMessage {
     pub id: String,
     pub conversation_id: Option<String>,
@@ -57,8 +69,8 @@ pub async fn create_conversation(
 
     run_db(app, move |conn| {
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, selected_model, selected_provider, is_archived)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            "INSERT INTO conversations (id, title, created_at, selected_model, selected_provider, is_archived, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, 'chat')",
             params![id, title, created_at, selected_model, selected_provider],
         )?;
         Ok(())
@@ -74,7 +86,7 @@ pub async fn get_conversations(app: AppHandle) -> Result<Vec<Conversation>, Stri
         let mut stmt = conn.prepare(
             "SELECT id, title, created_at, selected_model, selected_provider, is_archived
              FROM conversations
-             WHERE is_archived = 0
+             WHERE kind = 'chat' AND is_archived = 0
              ORDER BY created_at DESC",
         )?;
 
@@ -102,7 +114,7 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
         let mut stmt = conn.prepare(
             "SELECT id, title, created_at, selected_model, selected_provider, is_archived
              FROM conversations
-             WHERE id = ?1",
+             WHERE id = ?1 AND kind = 'chat'",
         )?;
 
         let result = stmt
@@ -177,6 +189,161 @@ pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), Strin
         )?;
         // Then delete the conversation
         conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])?;
+        Ok(())
+    })
+    .await
+}
+
+// ============================================================================
+// Agent Conversation Commands
+// ============================================================================
+
+#[tauri::command]
+pub async fn create_agent_conversation(
+    app: AppHandle,
+    id: String,
+    title: String,
+    agent_type: String,
+    agent_cwd: Option<String>,
+    agent_session_id: Option<String>,
+) -> Result<AgentConversation, String> {
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    let convo = AgentConversation {
+        id: id.clone(),
+        title: title.clone(),
+        created_at,
+        agent_type: agent_type.clone(),
+        agent_session_id: agent_session_id.clone(),
+        agent_cwd: agent_cwd.clone(),
+        agent_model_id: None,
+        is_archived: false,
+    };
+
+    run_db(app, move |conn| {
+        conn.execute(
+            "INSERT OR IGNORE INTO conversations (
+                id,
+                title,
+                created_at,
+                is_archived,
+                kind,
+                agent_type,
+                agent_session_id,
+                agent_cwd
+            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6)",
+            params![
+                id,
+                title,
+                created_at,
+                agent_type,
+                agent_session_id,
+                agent_cwd
+            ],
+        )?;
+        Ok(())
+    })
+    .await?;
+
+    Ok(convo)
+}
+
+#[tauri::command]
+pub async fn get_agent_conversations(
+    app: AppHandle,
+    limit: i32,
+) -> Result<Vec<AgentConversation>, String> {
+    run_db(app, move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, is_archived
+             FROM conversations
+             WHERE kind = 'agent' AND is_archived = 0
+             ORDER BY created_at DESC
+             LIMIT ?1",
+        )?;
+
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                Ok(AgentConversation {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    created_at: row.get(2)?,
+                    agent_type: row.get(3)?,
+                    agent_session_id: row.get(4)?,
+                    agent_cwd: row.get(5)?,
+                    agent_model_id: row.get(6)?,
+                    is_archived: row.get::<_, i32>(7)? != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rows)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn get_agent_conversation(
+    app: AppHandle,
+    id: String,
+) -> Result<Option<AgentConversation>, String> {
+    run_db(app, move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, is_archived
+             FROM conversations
+             WHERE id = ?1 AND kind = 'agent'",
+        )?;
+
+        let result = stmt
+            .query_row(params![id], |row| {
+                Ok(AgentConversation {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    created_at: row.get(2)?,
+                    agent_type: row.get(3)?,
+                    agent_session_id: row.get(4)?,
+                    agent_cwd: row.get(5)?,
+                    agent_model_id: row.get(6)?,
+                    is_archived: row.get::<_, i32>(7)? != 0,
+                })
+            })
+            .optional()?;
+
+        Ok(result)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_agent_conversation_session_id(
+    app: AppHandle,
+    id: String,
+    agent_session_id: String,
+) -> Result<(), String> {
+    run_db(app, move |conn| {
+        conn.execute(
+            "UPDATE conversations SET agent_session_id = ?1 WHERE id = ?2 AND kind = 'agent'",
+            params![agent_session_id, id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_agent_conversation_model_id(
+    app: AppHandle,
+    id: String,
+    agent_model_id: String,
+) -> Result<(), String> {
+    run_db(app, move |conn| {
+        conn.execute(
+            "UPDATE conversations SET agent_model_id = ?1 WHERE id = ?2 AND kind = 'agent'",
+            params![agent_model_id, id],
+        )?;
         Ok(())
     })
     .await

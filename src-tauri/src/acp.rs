@@ -3,20 +3,21 @@
 
 use agent_client_protocol::{Agent, Client, ClientSideConnection, Result as AcpResult};
 use agent_client_protocol::{
-    CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest,
-    CreateTerminalResponse, EnvVariable, ExtNotification, ExtRequest, ExtResponse, Implementation,
-    InitializeRequest, KillTerminalCommandRequest, KillTerminalCommandResponse, McpServer,
-    McpServerStdio, ModelId, NewSessionRequest, PromptRequest, ProtocolVersion,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionRequest, RequestPermissionResponse, SessionModeId, SessionNotification,
-    SessionUpdate, SetSessionModeRequest, SetSessionModelRequest, TerminalOutputRequest,
-    TerminalOutputResponse, TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
+    AuthMethod, AuthenticateRequest, CancelNotification, ClientCapabilities, ContentBlock,
+    CreateTerminalRequest, CreateTerminalResponse, EnvVariable, ExtNotification, ExtRequest,
+    ExtResponse, Implementation, InitializeRequest, KillTerminalCommandRequest,
+    KillTerminalCommandResponse, LoadSessionRequest, McpServer, McpServerStdio, ModelId,
+    NewSessionRequest, PromptRequest, ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
+    RequestPermissionResponse, SessionModeId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
+    TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::AsyncBufReadExt;
@@ -182,7 +183,6 @@ impl AgentType {
                 .join("\n")
         ))
     }
-
 }
 
 fn auth_error_message(agent_type: AgentType) -> String {
@@ -330,6 +330,11 @@ pub(crate) enum AcpCommand {
         model_id: String,
         response_tx: oneshot::Sender<Result<(), String>>,
     },
+    SetConfigOption {
+        config_id: String,
+        value_id: String,
+        response_tx: oneshot::Sender<Result<(), String>>,
+    },
     Terminate,
 }
 
@@ -390,6 +395,10 @@ struct ClientDelegate {
     cwd: String,
     terminals: Arc<Mutex<crate::terminal::TerminalManager>>,
     sandbox_mode: crate::sandbox::SandboxMode,
+    /// When true, suppress forwarding session/update notifications to the frontend.
+    /// Used to avoid duplicating history during `load_session` when the UI is
+    /// already rendering from local persistence.
+    suppress_session_notifications: Arc<AtomicBool>,
     pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
     /// Pending diff proposals awaiting user accept/reject
     pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
@@ -401,7 +410,14 @@ struct ClientDelegate {
 
 impl ClientDelegate {
     /// Emit a tool-call event to the frontend so the UI can show agent activity.
-    fn emit_tool_call(&self, tool_call_id: &str, title: &str, kind: &str, status: &str, parameters: Option<serde_json::Value>) {
+    fn emit_tool_call(
+        &self,
+        tool_call_id: &str,
+        title: &str,
+        kind: &str,
+        status: &str,
+        parameters: Option<serde_json::Value>,
+    ) {
         log::debug!(
             "[ACP] Emitting tool call: session={}, tool_call_id={}, title={}, kind={}, status={}, parameters={:?}",
             self.session_id,
@@ -421,10 +437,7 @@ impl ClientDelegate {
         if let Some(params) = parameters {
             payload["parameters"] = params;
         }
-        let emit_result = self.app.emit(
-            events::TOOL_CALL,
-            payload,
-        );
+        let emit_result = self.app.emit(events::TOOL_CALL, payload);
         if let Err(ref e) = emit_result {
             log::error!(
                 "[ACP] Failed to emit tool call {} for session {}: {}",
@@ -436,7 +449,13 @@ impl ClientDelegate {
     }
 
     /// Emit a tool-result event to update a tool call's status in the UI.
-    fn emit_tool_result(&self, tool_call_id: &str, status: &str, result: Option<String>, error: Option<String>) {
+    fn emit_tool_result(
+        &self,
+        tool_call_id: &str,
+        status: &str,
+        result: Option<String>,
+        error: Option<String>,
+    ) {
         log::debug!(
             "[ACP] Emitting tool result: session={}, tool_call_id={}, status={}, result_len={:?}, error={:?}",
             self.session_id,
@@ -462,10 +481,7 @@ impl ClientDelegate {
         if let Some(e) = error {
             payload["error"] = serde_json::Value::String(e);
         }
-        let emit_result = self.app.emit(
-            events::TOOL_RESULT,
-            payload,
-        );
+        let emit_result = self.app.emit(events::TOOL_RESULT, payload);
         if let Err(ref e) = emit_result {
             log::error!(
                 "[ACP] Failed to emit tool result {} for session {}: {}",
@@ -650,7 +666,13 @@ impl Client for ClientDelegate {
         let parameters = serde_json::json!({
             "path": args.path.to_string_lossy().to_string(),
         });
-        self.emit_tool_call(&tool_call_id, &format!("Read {display_name}"), "File", "Running", Some(parameters));
+        self.emit_tool_call(
+            &tool_call_id,
+            &format!("Read {display_name}"),
+            "File",
+            "Running",
+            Some(parameters),
+        );
 
         match tokio::fs::read_to_string(&path).await {
             Ok(content) => {
@@ -707,7 +729,13 @@ impl Client for ClientDelegate {
             "args": args.args,
             "cwd": args.cwd.as_ref().map(|p| p.to_string_lossy().to_string()),
         });
-        self.emit_tool_call(&tool_call_id, &cmd_label, "Terminal", "Running", Some(parameters));
+        self.emit_tool_call(
+            &tool_call_id,
+            &cmd_label,
+            "Terminal",
+            "Running",
+            Some(parameters),
+        );
 
         // Track terminal→tool_call mapping for status updates on exit
         self.terminal_tool_calls
@@ -774,7 +802,12 @@ impl Client for ClientDelegate {
             .await
             .remove(args.terminal_id.0.as_ref())
         {
-            self.emit_tool_result(&tool_call_id, "Completed", Some("Terminal released".to_string()), None);
+            self.emit_tool_result(
+                &tool_call_id,
+                "Completed",
+                Some("Terminal released".to_string()),
+                None,
+            );
         }
 
         let mut terminals = self.terminals.lock().await;
@@ -806,7 +839,11 @@ impl Client for ClientDelegate {
                 Some(code) => ("Failed", None, Some(format!("Exit code: {}", code))),
                 None => {
                     if let Some(ref sig) = status.signal {
-                        ("Failed", None, Some(format!("Terminated by signal {}", sig)))
+                        (
+                            "Failed",
+                            None,
+                            Some(format!("Terminated by signal {}", sig)),
+                        )
                     } else {
                         ("Failed", None, Some("Process terminated".to_string()))
                     }
@@ -836,6 +873,9 @@ impl Client for ClientDelegate {
 
     async fn session_notification(&self, args: SessionNotification) -> AcpResult<()> {
         self.activity_notify.notify_one();
+        if self.suppress_session_notifications.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         handle_session_notification(&self.app, &self.session_id, args);
         Ok(())
     }
@@ -918,12 +958,16 @@ fn handle_session_notification(
             // Defensive: if the update has a title, also emit a TOOL_CALL event
             // so the frontend creates a card even if no prior ToolCall was sent.
             if let Some(ref title) = update.fields.title {
-                let kind_str = update.fields.kind
+                let kind_str = update
+                    .fields
+                    .kind
                     .as_ref()
                     .and_then(|k| serde_json::to_value(k).ok())
                     .and_then(|v| v.as_str().map(String::from))
                     .unwrap_or_else(|| "other".to_string());
-                let status_str = update.fields.status
+                let status_str = update
+                    .fields
+                    .status
                     .as_ref()
                     .and_then(|s| serde_json::to_value(s).ok())
                     .and_then(|v| v.as_str().map(String::from))
@@ -956,7 +1000,7 @@ fn handle_session_notification(
                                 "sessionId": session_id,
                                 "toolCallId": update.tool_call_id.to_string(),
                                 "path": diff.path.display().to_string(),
-                                "oldText": diff.old_text,
+                                    "oldText": diff.old_text.clone().unwrap_or_default(),
                                 "newText": diff.new_text
                             }),
                         );
@@ -974,7 +1018,9 @@ fn handle_session_notification(
 
             // Serialize status using serde (not Debug format) for consistent
             // values like "in_progress", "completed" that the frontend expects.
-            let result_status_str = update.fields.status
+            let result_status_str = update
+                .fields
+                .status
                 .as_ref()
                 .and_then(|s| serde_json::to_value(s).ok())
                 .and_then(|v| v.as_str().map(String::from))
@@ -1016,10 +1062,7 @@ fn handle_session_notification(
                     result_payload["result"] = serde_json::Value::String(truncated);
                 }
             }
-            let emit_result = app.emit(
-                events::TOOL_RESULT,
-                result_payload,
-            );
+            let emit_result = app.emit(events::TOOL_RESULT, result_payload);
             if let Err(ref e) = emit_result {
                 log::error!(
                     "[ACP] Failed to emit TOOL_RESULT {} for session {}: {}",
@@ -1123,6 +1166,8 @@ pub async fn acp_spawn(
     state: State<'_, AcpState>,
     agent_type: AgentType,
     cwd: String,
+    local_session_id: Option<String>,
+    resume_agent_session_id: Option<String>,
     sandbox_mode: Option<String>,
     api_key: Option<String>,
     approval_policy: Option<String>,
@@ -1135,7 +1180,12 @@ pub async fn acp_spawn(
         .transpose()
         .map_err(|e| e)?
         .unwrap_or_default();
-    let session_id = Uuid::new_v4().to_string();
+    let session_id = local_session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let now = jiff::Timestamp::now();
 
     // Create channel for commands to the worker thread
@@ -1164,6 +1214,9 @@ pub async fn acp_spawn(
     // Store session
     {
         let mut sessions = state.sessions.write().await;
+        if sessions.contains_key(&session_id) {
+            return Err(format!("Session '{}' already exists", session_id));
+        }
         sessions.insert(session_id.clone(), session_arc.clone());
     }
 
@@ -1182,6 +1235,7 @@ pub async fn acp_spawn(
     let cwd_clone = cwd.clone();
     let session_arc_clone = session_arc.clone();
     let api_key_clone = api_key.clone();
+    let resume_agent_session_id_clone = resume_agent_session_id.clone();
 
     let session_arc_for_worker = session_arc_clone.clone();
 
@@ -1207,6 +1261,7 @@ pub async fn acp_spawn(
                 api_key_clone,
                 approval_policy,
                 search_enabled,
+                resume_agent_session_id_clone,
             )
             .await
             {
@@ -1219,8 +1274,14 @@ pub async fn acp_spawn(
                     }
 
                     let error_msg = if is_auth_error(&e) {
-                        launch_agent_login(agent_type);
-                        auth_error_message(agent_type)
+                        // Codex auth is handled via ACP `authenticate` (browser/API key).
+                        // Avoid auto-launching `codex login` here.
+                        if agent_type == AgentType::Codex {
+                            "Codex authentication required. Restart the agent session to re-authenticate.".to_string()
+                        } else {
+                            launch_agent_login(agent_type);
+                            auth_error_message(agent_type)
+                        }
                     } else {
                         e
                     };
@@ -1296,6 +1357,7 @@ async fn run_session_worker(
     api_key: Option<String>,
     approval_policy: Option<String>,
     search_enabled: Option<bool>,
+    resume_agent_session_id: Option<String>,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
 
@@ -1351,7 +1413,11 @@ async fn run_session_worker(
     // Prepend our paths to the existing system PATH so agents can still find
     // system-installed binaries (e.g. `codex` at /usr/local/bin).
     if !full_path.is_empty() {
-        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
         let system_path = std::env::var("PATH").unwrap_or_default();
         let combined = if system_path.is_empty() {
             full_path.clone()
@@ -1372,10 +1438,7 @@ async fn run_session_worker(
         };
         if claude_binary.exists() {
             cmd.env("CLAUDE_CLI_PATH", &claude_binary);
-            log::info!(
-                "[ACP] Set CLAUDE_CLI_PATH to: {}",
-                claude_binary.display()
-            );
+            log::info!("[ACP] Set CLAUDE_CLI_PATH to: {}", claude_binary.display());
         } else {
             log::warn!(
                 "[ACP] Bundled Claude CLI not found at: {}. SDK will fall back to PATH resolution.",
@@ -1436,12 +1499,14 @@ async fn run_session_worker(
     // Create client delegate (keep terminals ref for cleanup on session exit)
     let terminals = Arc::new(Mutex::new(crate::terminal::TerminalManager::new()));
     let activity_notify = Arc::new(tokio::sync::Notify::new());
+    let suppress_session_notifications = Arc::new(AtomicBool::new(false));
     let delegate = ClientDelegate {
         app: app.clone(),
         session_id: session_id.clone(),
         cwd: cwd.clone(),
         terminals: Arc::clone(&terminals),
         sandbox_mode,
+        suppress_session_notifications: Arc::clone(&suppress_session_notifications),
         pending_permissions,
         pending_diff_proposals,
         terminal_tool_calls: Arc::new(Mutex::new(HashMap::new())),
@@ -1517,68 +1582,189 @@ async fn run_session_worker(
     };
     log::info!("[ACP] Initialize response received");
 
-    // Create a new session with the agent
-    log::info!("[ACP] Creating new session...");
-    let mcp_servers = build_mcp_servers(api_key.as_deref());
-    log::info!("[ACP] MCP servers for session: {:?}", mcp_servers.len());
-    let new_session_request = NewSessionRequest::new(&cwd).mcp_servers(mcp_servers);
+    // Create/load a session with the agent (with one auth retry on auth_required)
+    let pick_auth_method_id = |methods: &[AuthMethod]| -> Option<String> {
+        if methods.is_empty() {
+            return None;
+        }
 
-    let new_session_response = match connection.new_session(new_session_request).await {
-        Ok(resp) => resp,
-        Err(e) => {
-            let exit_status = child.try_wait().ok().flatten();
-            let stderr_lines = {
-                let buf = stderr_tail.lock().await;
-                buf.iter()
-                    .rev()
-                    .take(STDERR_TAIL_ON_ERROR)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-            };
+        // Prefer API-key methods if the corresponding env vars are set.
+        let wants_codex_key = std::env::var("CODEX_API_KEY")
+            .ok()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        let wants_openai_key = std::env::var("OPENAI_API_KEY")
+            .ok()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
 
-            let mut msg = format!("Failed to create agent session: {:?}", e);
-            if let Some(status) = exit_status {
-                msg.push_str(&format!("\nAgent exit status: {status}"));
+        if wants_codex_key {
+            if let Some(m) = methods.iter().find(|m| m.id.0.as_ref() == "codex-api-key") {
+                return Some(m.id.0.to_string());
             }
-            if !stderr_lines.is_empty() {
-                msg.push_str("\nACP agent stderr (tail):\n");
-                msg.push_str(&stderr_lines.join("\n"));
+        }
+        if wants_openai_key {
+            if let Some(m) = methods.iter().find(|m| m.id.0.as_ref() == "openai-api-key") {
+                return Some(m.id.0.to_string());
             }
-            return Err(msg);
+        }
+
+        // Prefer browser-based auth if available.
+        if let Some(m) = methods.iter().find(|m| m.id.0.as_ref() == "chatgpt") {
+            return Some(m.id.0.to_string());
+        }
+
+        Some(methods[0].id.0.to_string())
+    };
+
+    let ensure_authenticated = async || -> Result<(), agent_client_protocol::Error> {
+        let method_id = pick_auth_method_id(&init_response.auth_methods)
+            .ok_or_else(agent_client_protocol::Error::auth_required)?;
+        log::info!("[ACP] Authenticating via ACP method: {}", method_id);
+        connection
+            .authenticate(AuthenticateRequest::new(method_id))
+            .await?;
+        Ok(())
+    };
+
+    let models_json: Option<serde_json::Value>;
+    let modes_state: Option<agent_client_protocol::SessionModeState>;
+    let config_options_json: Option<serde_json::Value>;
+    let agent_session_id = {
+        let mut did_auth_retry = false;
+        loop {
+            let mcp_servers = build_mcp_servers(api_key.as_deref());
+            log::info!("[ACP] MCP servers for session: {:?}", mcp_servers.len());
+
+            if let Some(ref resume_id) = resume_agent_session_id {
+                log::info!("[ACP] Loading existing agent session: {}", resume_id);
+                let load_req =
+                    LoadSessionRequest::new(resume_id.clone(), &cwd).mcp_servers(mcp_servers);
+                // When resuming, we render the local persisted transcript and suppress the
+                // agent's history replay notifications to avoid duplicated UI messages.
+                suppress_session_notifications.store(true, Ordering::Relaxed);
+                let load_result = connection.load_session(load_req).await;
+                suppress_session_notifications.store(false, Ordering::Relaxed);
+                match load_result {
+                    Ok(load_resp) => {
+                        // Extract model state from response (if agent supports model selection)
+                        models_json = load_resp.models.as_ref().map(|m| {
+                            serde_json::json!({
+                                "currentModelId": &*m.current_model_id.0,
+                                "availableModels": m.available_models.iter().map(|info| {
+                                    serde_json::json!({
+                                        "modelId": &*info.model_id.0,
+                                        "name": &info.name,
+                                    })
+                                }).collect::<Vec<_>>()
+                            })
+                        });
+                        modes_state = load_resp.modes.clone();
+                        config_options_json = load_resp
+                            .config_options
+                            .as_ref()
+                            .and_then(|opts| serde_json::to_value(opts).ok());
+                        break agent_client_protocol::SessionId::new(resume_id.clone());
+                    }
+                    Err(e) => {
+                        if e.code == agent_client_protocol::ErrorCode::AuthRequired
+                            && !did_auth_retry
+                        {
+                            did_auth_retry = true;
+                            if let Err(auth_err) = ensure_authenticated().await {
+                                return Err(format!("ACP authenticate failed: {auth_err:?}"));
+                            }
+                            continue;
+                        }
+
+                        let exit_status = child.try_wait().ok().flatten();
+                        let stderr_lines = {
+                            let buf = stderr_tail.lock().await;
+                            buf.iter()
+                                .rev()
+                                .take(STDERR_TAIL_ON_ERROR)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .collect::<Vec<_>>()
+                        };
+
+                        let mut msg = format!("Failed to load agent session {resume_id}: {:?}", e);
+                        if let Some(status) = exit_status {
+                            msg.push_str(&format!("\nAgent exit status: {status}"));
+                        }
+                        if !stderr_lines.is_empty() {
+                            msg.push_str("\nACP agent stderr (tail):\n");
+                            msg.push_str(&stderr_lines.join("\n"));
+                        }
+                        return Err(msg);
+                    }
+                }
+            } else {
+                log::info!("[ACP] Creating new session...");
+                let new_req = NewSessionRequest::new(&cwd).mcp_servers(mcp_servers);
+                match connection.new_session(new_req).await {
+                    Ok(new_resp) => {
+                        log::info!("[ACP] Session created: {:?}", new_resp.session_id);
+                        models_json = new_resp.models.as_ref().map(|m| {
+                            serde_json::json!({
+                                "currentModelId": &*m.current_model_id.0,
+                                "availableModels": m.available_models.iter().map(|info| {
+                                    serde_json::json!({
+                                        "modelId": &*info.model_id.0,
+                                        "name": &info.name,
+                                    })
+                                }).collect::<Vec<_>>()
+                            })
+                        });
+                        modes_state = new_resp.modes.clone();
+                        config_options_json = new_resp
+                            .config_options
+                            .as_ref()
+                            .and_then(|opts| serde_json::to_value(opts).ok());
+                        break new_resp.session_id;
+                    }
+                    Err(e) => {
+                        if e.code == agent_client_protocol::ErrorCode::AuthRequired
+                            && !did_auth_retry
+                        {
+                            did_auth_retry = true;
+                            if let Err(auth_err) = ensure_authenticated().await {
+                                return Err(format!("ACP authenticate failed: {auth_err:?}"));
+                            }
+                            continue;
+                        }
+
+                        let exit_status = child.try_wait().ok().flatten();
+                        let stderr_lines = {
+                            let buf = stderr_tail.lock().await;
+                            buf.iter()
+                                .rev()
+                                .take(STDERR_TAIL_ON_ERROR)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .collect::<Vec<_>>()
+                        };
+
+                        let mut msg = format!("Failed to create agent session: {:?}", e);
+                        if let Some(status) = exit_status {
+                            msg.push_str(&format!("\nAgent exit status: {status}"));
+                        }
+                        if !stderr_lines.is_empty() {
+                            msg.push_str("\nACP agent stderr (tail):\n");
+                            msg.push_str(&stderr_lines.join("\n"));
+                        }
+                        return Err(msg);
+                    }
+                }
+            }
         }
     };
-    log::info!(
-        "[ACP] Session created: {:?}",
-        new_session_response.session_id
-    );
 
-    let agent_session_id = new_session_response.session_id;
-
-    // Emit ready status with agent info
-    let agent_info = init_response.agent_info.as_ref();
-    log::info!(
-        "[ACP] Emitting ready status for session {} (agent: {:?})",
-        session_id,
-        agent_info.map(|i| i.name.as_str())
-    );
-    // Extract model state from session response (if agent supports model selection)
-    let models_json = new_session_response.models.as_ref().map(|m| {
-        serde_json::json!({
-            "currentModelId": &*m.current_model_id.0,
-            "availableModels": m.available_models.iter().map(|info| {
-                serde_json::json!({
-                    "modelId": &*info.model_id.0,
-                    "name": &info.name,
-                })
-            }).collect::<Vec<_>>()
-        })
-    });
-
-    // Extract mode state from session response (if agent supports mode selection)
-    let modes_json = new_session_response.modes.as_ref().map(|m| {
+    let modes_json = modes_state.as_ref().map(|m| {
         serde_json::json!({
             "currentModeId": &*m.current_mode_id.0,
             "availableModes": m.available_modes.iter().map(|mode| {
@@ -1591,24 +1777,33 @@ async fn run_session_worker(
         })
     });
 
+    // Emit ready status with agent info
+    let agent_info = init_response.agent_info.as_ref();
+    log::info!(
+        "[ACP] Emitting ready status for session {} (agent: {:?})",
+        session_id,
+        agent_info.map(|i| i.name.as_str())
+    );
     let emit_result = app.emit(
         events::SESSION_STATUS,
         serde_json::json!({
             "sessionId": session_id,
             "status": "ready",
+            "agentSessionId": agent_session_id.to_string(),
             "agentInfo": {
                 "name": agent_info.map(|i| i.name.as_str()).unwrap_or("Unknown"),
                 "version": agent_info.map(|i| i.version.as_str()).unwrap_or("Unknown")
             },
             "models": models_json,
-            "modes": modes_json
+            "modes": modes_json,
+            "configOptions": config_options_json
         }),
     );
     log::debug!("[ACP] Emit result: {:?}", emit_result);
 
     // Auto-set the user's preferred permission mode if the agent advertises modes.
     // Map Seren sandbox mode names to agent mode IDs by matching name patterns.
-    if let Some(mode_state) = &new_session_response.modes {
+    if let Some(mode_state) = &modes_state {
         let preferred = match sandbox_mode {
             crate::sandbox::SandboxMode::ReadOnly => "read",
             crate::sandbox::SandboxMode::WorkspaceWrite => "default",
@@ -1812,7 +2007,9 @@ async fn run_session_worker(
                 // kill the agent process and exit the worker. The frontend will
                 // detect the dead session and auto-recover with a fresh spawn.
                 if force_stopped {
-                    log::info!("[ACP] Session force-stopped — exiting worker to kill agent process");
+                    log::info!(
+                        "[ACP] Session force-stopped — exiting worker to kill agent process"
+                    );
                     break;
                 }
 
@@ -1852,16 +2049,34 @@ async fn run_session_worker(
                 model_id,
                 response_tx,
             } => {
-                let request = SetSessionModelRequest::new(
-                    agent_session_id.clone(),
-                    ModelId::new(model_id),
-                );
+                let request =
+                    SetSessionModelRequest::new(agent_session_id.clone(), ModelId::new(model_id));
                 match connection.set_session_model(request).await {
                     Ok(_) => {
                         let _ = response_tx.send(Ok(()));
                     }
                     Err(e) => {
                         log::error!("[ACP] Failed to set model: {:?}", e);
+                        let _ = response_tx.send(Err(format_acp_error(&e)));
+                    }
+                }
+            }
+            AcpCommand::SetConfigOption {
+                config_id,
+                value_id,
+                response_tx,
+            } => {
+                let request = SetSessionConfigOptionRequest::new(
+                    agent_session_id.clone(),
+                    config_id,
+                    value_id,
+                );
+                match connection.set_session_config_option(request).await {
+                    Ok(_) => {
+                        let _ = response_tx.send(Ok(()));
+                    }
+                    Err(e) => {
+                        log::error!("[ACP] Failed to set config option: {:?}", e);
                         let _ = response_tx.send(Err(format_acp_error(&e)));
                     }
                 }
@@ -1920,6 +2135,14 @@ pub async fn acp_prompt(
 
     if let Err(ref e) = result {
         if is_auth_error(e) {
+            // Codex authentication is handled via ACP `authenticate` (browser/API key),
+            // so avoid launching `codex login` automatically.
+            if agent_type == AgentType::Codex {
+                return Err(
+                    "Codex authentication required. Restart the agent session to re-authenticate."
+                        .to_string(),
+                );
+            }
             launch_agent_login(agent_type);
             return Err(auth_error_message(agent_type));
         }
@@ -2053,6 +2276,42 @@ pub async fn acp_set_model(
         })
         .await
         .map_err(|_| "Failed to send set model command".to_string())?;
+
+    response_rx
+        .await
+        .map_err(|_| "Worker thread dropped".to_string())?
+}
+
+/// Set a session configuration option (e.g., reasoning effort).
+#[tauri::command]
+pub async fn acp_set_config_option(
+    state: State<'_, AcpState>,
+    session_id: String,
+    config_id: String,
+    value_id: String,
+) -> Result<(), String> {
+    let command_tx = {
+        let sessions = state.sessions.read().await;
+        let session_arc = sessions
+            .get(&session_id)
+            .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+        let session = session_arc.lock().await;
+        session
+            .command_tx
+            .clone()
+            .ok_or_else(|| "Session not initialized".to_string())?
+    };
+
+    let (response_tx, response_rx) = oneshot::channel();
+
+    command_tx
+        .send(AcpCommand::SetConfigOption {
+            config_id,
+            value_id,
+            response_tx,
+        })
+        .await
+        .map_err(|_| "Failed to send set config option command".to_string())?;
 
     response_rx
         .await
@@ -2247,11 +2506,7 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
                 .trim();
 
             if is_version_sufficient(version, MIN_CLI_VERSION) {
-                log::info!(
-                    "[ACP] Claude CLI {} at: {}",
-                    version,
-                    claude_bin.display()
-                );
+                log::info!("[ACP] Claude CLI {} at: {}", version, claude_bin.display());
                 return Ok(bin_dir.to_string_lossy().to_string());
             }
 
@@ -2263,7 +2518,10 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
             );
 
             if let Err(e) = upgrade_claude_cli_sync(&cli_tools_dir, &app) {
-                log::warn!("[ACP] Auto-upgrade failed: {}. Will retry on next launch.", e);
+                log::warn!(
+                    "[ACP] Auto-upgrade failed: {}. Will retry on next launch.",
+                    e
+                );
             } else {
                 log::info!("[ACP] Claude CLI upgraded successfully");
             }
@@ -2272,10 +2530,7 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         }
 
         // Couldn't check version, return existing path
-        log::info!(
-            "[ACP] Claude CLI at: {}",
-            claude_bin.display()
-        );
+        log::info!("[ACP] Claude CLI at: {}", claude_bin.display());
         return Ok(bin_dir.to_string_lossy().to_string());
     }
 
@@ -2480,11 +2735,7 @@ pub async fn acp_ensure_codex_cli(app: AppHandle) -> Result<String, String> {
                 .trim();
 
             if is_version_sufficient(version, MIN_CODEX_CLI_VERSION) {
-                log::info!(
-                    "[ACP] Codex CLI {} at: {}",
-                    version,
-                    codex_bin.display()
-                );
+                log::info!("[ACP] Codex CLI {} at: {}", version, codex_bin.display());
                 return Ok(bin_dir.to_string_lossy().to_string());
             }
 
@@ -2495,7 +2746,10 @@ pub async fn acp_ensure_codex_cli(app: AppHandle) -> Result<String, String> {
             );
 
             if let Err(e) = upgrade_codex_cli_sync(&cli_tools_dir, &app) {
-                log::warn!("[ACP] Codex CLI auto-upgrade failed: {}. Will retry on next launch.", e);
+                log::warn!(
+                    "[ACP] Codex CLI auto-upgrade failed: {}. Will retry on next launch.",
+                    e
+                );
             } else {
                 log::info!("[ACP] Codex CLI upgraded successfully");
             }
@@ -2651,10 +2905,7 @@ pub async fn acp_ensure_codex_cli(app: AppHandle) -> Result<String, String> {
 }
 
 /// Upgrade Codex CLI synchronously (blocking).
-fn upgrade_codex_cli_sync(
-    cli_tools_dir: &std::path::Path,
-    app: &AppHandle,
-) -> Result<(), String> {
+fn upgrade_codex_cli_sync(cli_tools_dir: &std::path::Path, app: &AppHandle) -> Result<(), String> {
     let embedded_path = crate::embedded_runtime::get_embedded_path();
     let paths = crate::embedded_runtime::discover_embedded_runtime(app);
 
@@ -2706,10 +2957,7 @@ fn upgrade_codex_cli_sync(
 }
 
 /// Upgrade Claude CLI synchronously (blocking).
-fn upgrade_claude_cli_sync(
-    cli_tools_dir: &std::path::Path,
-    app: &AppHandle,
-) -> Result<(), String> {
+fn upgrade_claude_cli_sync(cli_tools_dir: &std::path::Path, app: &AppHandle) -> Result<(), String> {
     let embedded_path = crate::embedded_runtime::get_embedded_path();
     let paths = crate::embedded_runtime::discover_embedded_runtime(app);
 
