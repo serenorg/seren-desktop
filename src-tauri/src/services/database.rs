@@ -93,6 +93,19 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Migration: Add cost column to eval_signals for Thompson sampling
+    let has_cost: bool = conn
+        .prepare("SELECT cost FROM eval_signals LIMIT 1")
+        .is_ok();
+
+    if !has_cost {
+        conn.execute(
+            "ALTER TABLE eval_signals ADD COLUMN cost REAL DEFAULT NULL",
+            [],
+        )
+        .ok();
+    }
+
     // Create orchestration_plans table for sub-task decomposition
     conn.execute(
         "CREATE TABLE IF NOT EXISTS orchestration_plans (

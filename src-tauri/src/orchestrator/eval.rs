@@ -154,11 +154,11 @@ pub fn submit(
         )
         .map_err(|e| format!("Message not found: {e}"))?;
 
-    let (task_type, model_id, worker_type) = parse_metadata(&metadata_json);
+    let meta = parse_metadata(&metadata_json);
 
     // Validate task_type against allowlist
-    let task_type = if VALID_TASK_TYPES.contains(&task_type.as_str()) {
-        task_type
+    let task_type = if VALID_TASK_TYPES.contains(&meta.task_type.as_str()) {
+        meta.task_type
     } else {
         "general_chat".to_string()
     };
@@ -170,18 +170,18 @@ pub fn submit(
 
     // Store in SQLite for persistence across restarts
     conn.execute(
-        "INSERT OR REPLACE INTO eval_signals (message_id, task_type, model_id, worker_type, satisfaction, created_at, synced)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
-        rusqlite::params![message_id, task_type, model_id, worker_type, satisfaction, now],
+        "INSERT OR REPLACE INTO eval_signals (message_id, task_type, model_id, worker_type, satisfaction, cost, created_at, synced)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+        rusqlite::params![message_id, task_type, meta.model_id, meta.worker_type, satisfaction, meta.cost, now],
     )
     .map_err(|e| format!("Failed to store eval signal: {e}"))?;
 
     // Queue for batch Gateway sync
     let signal = EvalSignal {
         task_type,
-        model_id,
+        model_id: meta.model_id,
         satisfaction,
-        worker_type,
+        worker_type: meta.worker_type,
         delegation_type: Some("in_loop".to_string()),
         had_tool_errors: false,
         duration_ms: None,
@@ -193,14 +193,32 @@ pub fn submit(
     Ok(())
 }
 
+/// Parsed metadata fields from a message's JSON blob.
+struct ParsedMetadata {
+    task_type: String,
+    model_id: Option<String>,
+    worker_type: Option<String>,
+    cost: Option<f64>,
+}
+
 /// Parse metadata JSON to extract feature vector fields.
-fn parse_metadata(json: &Option<String>) -> (String, Option<String>, Option<String>) {
+fn parse_metadata(json: &Option<String>) -> ParsedMetadata {
     let Some(json_str) = json else {
-        return ("general_chat".to_string(), None, None);
+        return ParsedMetadata {
+            task_type: "general_chat".to_string(),
+            model_id: None,
+            worker_type: None,
+            cost: None,
+        };
     };
 
     let Ok(meta) = serde_json::from_str::<serde_json::Value>(json_str) else {
-        return ("general_chat".to_string(), None, None);
+        return ParsedMetadata {
+            task_type: "general_chat".to_string(),
+            model_id: None,
+            worker_type: None,
+            cost: None,
+        };
     };
 
     let task_type = meta
@@ -219,7 +237,14 @@ fn parse_metadata(json: &Option<String>) -> (String, Option<String>, Option<Stri
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    (task_type, model_id, worker_type)
+    let cost = meta.get("cost").and_then(|v| v.as_f64());
+
+    ParsedMetadata {
+        task_type,
+        model_id,
+        worker_type,
+        cost,
+    }
 }
 
 /// Validate that a task_type is in the allowlist.
@@ -419,17 +444,51 @@ mod tests {
 
     #[test]
     fn parse_metadata_handles_missing_fields() {
-        let (task, model, worker) = parse_metadata(&Some(r#"{"v":1}"#.to_string()));
-        assert_eq!(task, "general_chat");
-        assert!(model.is_none());
-        assert!(worker.is_none());
+        let meta = parse_metadata(&Some(r#"{"v":1}"#.to_string()));
+        assert_eq!(meta.task_type, "general_chat");
+        assert!(meta.model_id.is_none());
+        assert!(meta.worker_type.is_none());
+        assert!(meta.cost.is_none());
     }
 
     #[test]
     fn parse_metadata_handles_invalid_json() {
-        let (task, model, worker) = parse_metadata(&Some("not json".to_string()));
-        assert_eq!(task, "general_chat");
-        assert!(model.is_none());
-        assert!(worker.is_none());
+        let meta = parse_metadata(&Some("not json".to_string()));
+        assert_eq!(meta.task_type, "general_chat");
+        assert!(meta.model_id.is_none());
+        assert!(meta.worker_type.is_none());
+        assert!(meta.cost.is_none());
+    }
+
+    #[test]
+    fn parse_metadata_extracts_cost() {
+        let meta = parse_metadata(&Some(
+            r#"{"v":1,"task_type":"research","model_id":"gpt-4o","cost":0.005}"#.to_string(),
+        ));
+        assert_eq!(meta.task_type, "research");
+        assert_eq!(meta.model_id, Some("gpt-4o".to_string()));
+        assert_eq!(meta.cost, Some(0.005));
+    }
+
+    #[test]
+    fn submit_stores_cost_from_metadata() {
+        let conn = setup_test_db();
+        let state = EvalState::new();
+        insert_message(
+            &conn,
+            "msg1",
+            Some(r#"{"v":1,"task_type":"code_generation","model_id":"claude-opus","cost":0.012}"#),
+        );
+
+        submit(&conn, &state, "msg1", 1, "test-token").unwrap();
+
+        let cost: Option<f64> = conn
+            .query_row(
+                "SELECT cost FROM eval_signals WHERE message_id = 'msg1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cost, Some(0.012));
     }
 }
