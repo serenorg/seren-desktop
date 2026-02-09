@@ -402,24 +402,29 @@ struct ClientDelegate {
 
 impl ClientDelegate {
     /// Emit a tool-call event to the frontend so the UI can show agent activity.
-    fn emit_tool_call(&self, tool_call_id: &str, title: &str, kind: &str, status: &str) {
+    fn emit_tool_call(&self, tool_call_id: &str, title: &str, kind: &str, status: &str, parameters: Option<serde_json::Value>) {
         log::debug!(
-            "[ACP] Emitting tool call: session={}, tool_call_id={}, title={}, kind={}, status={}",
+            "[ACP] Emitting tool call: session={}, tool_call_id={}, title={}, kind={}, status={}, parameters={:?}",
             self.session_id,
             tool_call_id,
             title,
             kind,
-            status
+            status,
+            parameters
         );
+        let mut payload = serde_json::json!({
+            "sessionId": self.session_id,
+            "toolCallId": tool_call_id,
+            "title": title,
+            "kind": kind,
+            "status": status
+        });
+        if let Some(params) = parameters {
+            payload["parameters"] = params;
+        }
         let emit_result = self.app.emit(
             events::TOOL_CALL,
-            serde_json::json!({
-                "sessionId": self.session_id,
-                "toolCallId": tool_call_id,
-                "title": title,
-                "kind": kind,
-                "status": status
-            }),
+            payload,
         );
         if let Err(ref e) = emit_result {
             log::error!(
@@ -432,20 +437,35 @@ impl ClientDelegate {
     }
 
     /// Emit a tool-result event to update a tool call's status in the UI.
-    fn emit_tool_result(&self, tool_call_id: &str, status: &str) {
+    fn emit_tool_result(&self, tool_call_id: &str, status: &str, result: Option<String>, error: Option<String>) {
         log::debug!(
-            "[ACP] Emitting tool result: session={}, tool_call_id={}, status={}",
+            "[ACP] Emitting tool result: session={}, tool_call_id={}, status={}, result_len={:?}, error={:?}",
             self.session_id,
             tool_call_id,
-            status
+            status,
+            result.as_ref().map(|r| r.len()),
+            error
         );
+        let mut payload = serde_json::json!({
+            "sessionId": self.session_id,
+            "toolCallId": tool_call_id,
+            "status": status
+        });
+        if let Some(r) = result {
+            // Truncate result to avoid massive payloads
+            let truncated = if r.len() > 5000 {
+                format!("{}... ({} bytes total)", &r[..5000], r.len())
+            } else {
+                r
+            };
+            payload["result"] = serde_json::Value::String(truncated);
+        }
+        if let Some(e) = error {
+            payload["error"] = serde_json::Value::String(e);
+        }
         let emit_result = self.app.emit(
             events::TOOL_RESULT,
-            serde_json::json!({
-                "sessionId": self.session_id,
-                "toolCallId": tool_call_id,
-                "status": status
-            }),
+            payload,
         );
         if let Err(ref e) = emit_result {
             log::error!(
@@ -628,17 +648,24 @@ impl Client for ClientDelegate {
             .unwrap_or_else(|| args.path.to_string_lossy().to_string());
         let tool_call_id = Uuid::new_v4().to_string();
 
-        self.emit_tool_call(&tool_call_id, &format!("Read {display_name}"), "File", "Running");
+        let parameters = serde_json::json!({
+            "path": args.path.to_string_lossy().to_string(),
+        });
+        self.emit_tool_call(&tool_call_id, &format!("Read {display_name}"), "File", "Running", Some(parameters));
 
         match tokio::fs::read_to_string(&path).await {
             Ok(content) => {
-                self.emit_tool_result(&tool_call_id, "Completed");
+                let lines = content.lines().count();
+                let bytes = content.len();
+                let result = format!("{} lines, {} bytes", lines, bytes);
+                self.emit_tool_result(&tool_call_id, "Completed", Some(result), None);
                 Ok(ReadTextFileResponse::new(content))
             }
             Err(e) => {
-                self.emit_tool_result(&tool_call_id, "Failed");
+                let error_msg = e.to_string();
+                self.emit_tool_result(&tool_call_id, "Failed", None, Some(error_msg.clone()));
                 Err(agent_client_protocol::Error::internal_error()
-                    .data(serde_json::Value::String(e.to_string())))
+                    .data(serde_json::Value::String(error_msg)))
             }
         }
     }
@@ -676,7 +703,12 @@ impl Client for ClientDelegate {
                 full
             }
         };
-        self.emit_tool_call(&tool_call_id, &cmd_label, "Terminal", "Running");
+        let parameters = serde_json::json!({
+            "command": args.command,
+            "args": args.args,
+            "cwd": args.cwd.as_ref().map(|p| p.to_string_lossy().to_string()),
+        });
+        self.emit_tool_call(&tool_call_id, &cmd_label, "Terminal", "Running", Some(parameters));
 
         // Track terminal→tool_call mapping for status updates on exit
         self.terminal_tool_calls
@@ -743,7 +775,7 @@ impl Client for ClientDelegate {
             .await
             .remove(args.terminal_id.0.as_ref())
         {
-            self.emit_tool_result(&tool_call_id, "Completed");
+            self.emit_tool_result(&tool_call_id, "Completed", Some("Terminal released".to_string()), None);
         }
 
         let mut terminals = self.terminals.lock().await;
@@ -770,12 +802,18 @@ impl Client for ClientDelegate {
             .await
             .remove(args.terminal_id.0.as_ref())
         {
-            let result_status = if status.exit_code == Some(0) {
-                "Completed"
-            } else {
-                "Failed"
+            let (result_status, result_msg, error_msg) = match status.exit_code {
+                Some(0) => ("Completed", Some(format!("Exit code: 0")), None),
+                Some(code) => ("Failed", None, Some(format!("Exit code: {}", code))),
+                None => {
+                    if let Some(ref sig) = status.signal {
+                        ("Failed", None, Some(format!("Terminated by signal {}", sig)))
+                    } else {
+                        ("Failed", None, Some("Process terminated".to_string()))
+                    }
+                }
             };
-            self.emit_tool_result(&tool_call_id, result_status);
+            self.emit_tool_result(&tool_call_id, result_status, result_msg, error_msg);
         }
 
         let mut acp_status = agent_client_protocol::TerminalExitStatus::new();
@@ -1510,7 +1548,7 @@ async fn run_session_worker(
                             _ = tokio::time::sleep_until(deadline) => {
                                 log::warn!("[ACP] Prompt did not resolve within 5s after cancel — forcing stop");
                                 break Err(agent_client_protocol::Error::internal_error().data(
-                                    serde_json::Value::String("Cancelled (agent did not stop in time)".into()),
+                                    serde_json::Value::String("Task cancelled. The agent was processing your request and stopped after cancellation was triggered. Any partial work may not have been saved.".into()),
                                 ));
                             }
                             cmd = command_rx.recv() => {

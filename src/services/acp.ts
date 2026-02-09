@@ -47,12 +47,17 @@ export interface ToolCallEvent {
   title: string;
   kind: string;
   status: string;
+  parameters?: Record<string, unknown>;
+  result?: string;
+  error?: string;
 }
 
 export interface ToolResultEvent {
   sessionId: string;
   toolCallId: string;
   status: string;
+  result?: string;
+  error?: string;
 }
 
 export interface DiffEvent {
