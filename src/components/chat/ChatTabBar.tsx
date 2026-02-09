@@ -2,41 +2,44 @@
 // ABOUTME: Displays tabs with close buttons, permission indicators, and a new chat button.
 
 import { type Component, For, Show } from "solid-js";
-import { type Conversation, chatStore } from "@/stores/chat.store";
 import { hasPendingApprovals } from "@/stores/mcp-chat.store";
+import {
+  type Conversation,
+  conversationStore,
+} from "@/stores/conversation.store";
 
 export const ChatTabBar: Component = () => {
   const handleNewChat = async () => {
     // Prevent creating new chat during streaming to avoid confusion
-    if (chatStore.isLoading) {
+    if (conversationStore.isLoading) {
       console.log("[ChatTabBar] Blocked new chat creation during streaming");
       return;
     }
-    await chatStore.createConversation();
+    await conversationStore.createConversation();
   };
 
   const handleTabClick = (id: string) => {
     // Prevent tab switching during streaming to avoid chat history "loss"
     // The history isn't actually lost - it's just showing a different conversation
-    if (chatStore.isLoading && id !== chatStore.activeConversationId) {
+    if (conversationStore.isLoading && id !== conversationStore.activeConversationId) {
       console.log("[ChatTabBar] Blocked tab switch during streaming");
       return;
     }
-    chatStore.setActiveConversation(id);
+    conversationStore.setActiveConversation(id);
   };
 
   const handleCloseTab = async (e: MouseEvent, id: string) => {
     e.stopPropagation(); // Prevent tab switch
-    await chatStore.archiveConversation(id);
+    await conversationStore.archiveConversation(id);
   };
 
   // Filter out archived conversations
   const visibleConversations = () =>
-    chatStore.conversations.filter((c) => !c.isArchived);
+    conversationStore.conversations.filter((c) => !c.isArchived);
 
   // Visual indicator for blocked state
   const isTabSwitchBlocked = () =>
-    chatStore.isLoading && visibleConversations().length > 1;
+    conversationStore.isLoading && visibleConversations().length > 1;
 
   return (
     <div class="flex items-center gap-1 px-3 py-2 bg-[#161b22] border-b border-[#21262d] min-h-[40px]">
@@ -47,21 +50,21 @@ export const ChatTabBar: Component = () => {
               type="button"
               class={`group flex items-center gap-1.5 px-2.5 py-1.5 bg-transparent border border-transparent rounded-md text-[13px] text-[#8b949e] whitespace-nowrap max-w-[180px] transition-all ${
                 isTabSwitchBlocked() &&
-                conversation.id !== chatStore.activeConversationId
+                conversation.id !== conversationStore.activeConversationId
                   ? "cursor-not-allowed opacity-50"
                   : "cursor-pointer hover:bg-[rgba(139,148,158,0.1)] hover:text-[#e6edf3]"
-              } ${conversation.id === chatStore.activeConversationId ? "bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.3)] text-[#58a6ff]" : ""}`}
+              } ${conversation.id === conversationStore.activeConversationId ? "bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.3)] text-[#58a6ff]" : ""}`}
               onClick={() => handleTabClick(conversation.id)}
               title={
                 isTabSwitchBlocked() &&
-                conversation.id !== chatStore.activeConversationId
+                conversation.id !== conversationStore.activeConversationId
                   ? "Cannot switch tabs while processing"
                   : conversation.title
               }
             >
               <Show
                 when={
-                  conversation.id === chatStore.activeConversationId &&
+                  conversation.id === conversationStore.activeConversationId &&
                   hasPendingApprovals()
                 }
               >
@@ -90,13 +93,13 @@ export const ChatTabBar: Component = () => {
       <button
         type="button"
         class={`flex items-center justify-center w-7 h-7 p-0 bg-transparent border border-[#30363d] rounded-md text-lg leading-none text-[#8b949e] shrink-0 transition-all ${
-          chatStore.isLoading
+          conversationStore.isLoading
             ? "cursor-not-allowed opacity-50"
             : "cursor-pointer hover:bg-[#21262d] hover:border-[#484f58] hover:text-[#e6edf3]"
         }`}
         onClick={handleNewChat}
         title={
-          chatStore.isLoading
+          conversationStore.isLoading
             ? "Cannot create new chat while processing"
             : "New Chat"
         }

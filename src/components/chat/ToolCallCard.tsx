@@ -1,5 +1,5 @@
 // ABOUTME: Card component for displaying agent tool calls and their status.
-// ABOUTME: Shows tool name, status indicator, and expandable details.
+// ABOUTME: Shows tool summary, status indicator, and expandable details.
 
 import type { Component } from "solid-js";
 import { createSignal, Show } from "solid-js";
@@ -9,8 +9,51 @@ interface ToolCallCardProps {
   toolCall: ToolCallEvent;
 }
 
+/** Truncate a string to maxLen characters with ellipsis. */
+function truncate(str: string, maxLen: number): string {
+  return str.length > maxLen ? `${str.slice(0, maxLen - 3)}...` : str;
+}
+
+/** Extract a meaningful one-line description from tool call parameters. */
+function extractSummary(toolCall: ToolCallEvent): string {
+  const params = toolCall.parameters;
+  if (!params) return toolCall.title;
+
+  // Bash / terminal commands: show the command
+  if (params.command) {
+    const desc = params.description;
+    if (typeof desc === "string" && desc) return truncate(desc, 100);
+    return truncate(String(params.command), 100);
+  }
+
+  // Task / subagent: show the short description
+  if (params.description) {
+    return truncate(String(params.description), 100);
+  }
+
+  // File operations: show the path
+  const filePath = params.file_path ?? params.path;
+  if (filePath) {
+    return truncate(String(filePath), 100);
+  }
+
+  // Search: show the pattern
+  if (params.pattern) {
+    return truncate(String(params.pattern), 80);
+  }
+
+  // URL operations
+  if (params.url) {
+    return truncate(String(params.url), 100);
+  }
+
+  return toolCall.title;
+}
+
 export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   const [isExpanded, setIsExpanded] = createSignal(false);
+
+  const summary = () => extractSummary(props.toolCall);
 
   const statusInfo = () => {
     const status = props.toolCall.status.toLowerCase();
@@ -102,7 +145,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
 
   const toolIcon = () => {
     const kind = props.toolCall.kind.toLowerCase();
-    if (kind.includes("read") || kind.includes("file")) {
+    if (kind === "read" || kind.includes("file")) {
       return (
         <svg
           class="w-4 h-4"
@@ -121,7 +164,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
         </svg>
       );
     }
-    if (kind.includes("write") || kind.includes("edit")) {
+    if (kind === "edit" || kind === "delete" || kind.includes("write")) {
       return (
         <svg
           class="w-4 h-4"
@@ -141,6 +184,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
       );
     }
     if (
+      kind === "execute" ||
       kind.includes("bash") ||
       kind.includes("terminal") ||
       kind.includes("command")
@@ -164,7 +208,8 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
       );
     }
     if (
-      kind.includes("search") ||
+      kind === "search" ||
+      kind === "fetch" ||
       kind.includes("grep") ||
       kind.includes("glob")
     ) {
@@ -182,6 +227,25 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
             stroke-linejoin="round"
             stroke-width="2"
             d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          />
+        </svg>
+      );
+    }
+    if (kind === "think") {
+      return (
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          role="img"
+          aria-label="Think"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
           />
         </svg>
       );
@@ -212,6 +276,11 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
     );
   };
 
+  const showToolLabel = () => {
+    const s = summary();
+    return s !== props.toolCall.title;
+  };
+
   return (
     <div class="my-2 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
       {/* Header */}
@@ -221,16 +290,23 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
         onClick={() => setIsExpanded(!isExpanded())}
       >
         {/* Tool Icon */}
-        <span class="text-[#8b949e]">{toolIcon()}</span>
+        <span class="text-[#8b949e] shrink-0">{toolIcon()}</span>
 
-        {/* Title */}
+        {/* Tool name label (when summary differs from title) */}
+        <Show when={showToolLabel()}>
+          <span class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#30363d] text-[#8b949e]">
+            {props.toolCall.title}
+          </span>
+        </Show>
+
+        {/* Summary */}
         <span class="flex-1 text-sm text-[#e6edf3] truncate">
-          {props.toolCall.title}
+          {summary()}
         </span>
 
         {/* Status Badge */}
         <span
-          class={`flex items-center gap-1 px-2 py-0.5 rounded text-xs ${statusInfo().color} ${statusInfo().bg}`}
+          class={`shrink-0 flex items-center gap-1 px-2 py-0.5 rounded text-xs ${statusInfo().color} ${statusInfo().bg}`}
         >
           {statusInfo().icon}
           <span>{statusInfo().label}</span>
@@ -238,7 +314,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
 
         {/* Expand Icon */}
         <svg
-          class={`w-4 h-4 text-[#8b949e] transition-transform ${isExpanded() ? "rotate-180" : ""}`}
+          class={`w-4 h-4 shrink-0 text-[#8b949e] transition-transform ${isExpanded() ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -261,12 +337,14 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
           <Show when={props.toolCall.parameters}>
             <div class="mb-3">
               <div class="text-[#484f58] font-medium mb-1">Parameters:</div>
-              <div class="bg-[#0d1117] border border-[#30363d] rounded p-2 font-mono text-[#e6edf3]">
+              <div class="bg-[#0d1117] border border-[#30363d] rounded p-2 font-mono text-[#e6edf3] max-h-48 overflow-auto">
                 {Object.entries(props.toolCall.parameters!).map(([key, value]) => (
                   <div class="mb-1 last:mb-0">
                     <span class="text-[#79c0ff]">{key}:</span>{" "}
-                    <span class="text-[#a5d6ff]">
-                      {typeof value === "string" ? value : JSON.stringify(value)}
+                    <span class="text-[#a5d6ff] break-all">
+                      {typeof value === "string"
+                        ? truncate(value, 500)
+                        : JSON.stringify(value)}
                     </span>
                   </div>
                 ))}
@@ -278,7 +356,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
           <Show when={props.toolCall.result}>
             <div class="mb-3">
               <div class="text-[#484f58] font-medium mb-1">Result:</div>
-              <div class="bg-[#0d1117] border border-[#238636] rounded p-2 text-[#3fb950]">
+              <div class="bg-[#0d1117] border border-[#238636] rounded p-2 text-[#3fb950] max-h-48 overflow-auto">
                 {props.toolCall.result}
               </div>
             </div>
@@ -295,17 +373,9 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
           </Show>
 
           {/* Metadata */}
-          <div class="grid grid-cols-2 gap-2 text-[#8b949e]">
-            <div>
-              <span class="text-[#484f58]">Kind:</span>{" "}
-              <span class="text-[#e6edf3]">{props.toolCall.kind}</span>
-            </div>
-            <div>
-              <span class="text-[#484f58]">ID:</span>{" "}
-              <span class="font-mono">
-                {props.toolCall.toolCallId.slice(0, 8)}...
-              </span>
-            </div>
+          <div class="text-[#8b949e]">
+            <span class="text-[#484f58]">Tool:</span>{" "}
+            <span class="text-[#e6edf3]">{props.toolCall.title}</span>
           </div>
         </div>
       </Show>

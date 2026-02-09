@@ -125,20 +125,22 @@ export const ResizableLayout: ParentComponent<ResizableLayoutProps> = (
         "resizable-layout--dragging": isDraggingLeft() || isDraggingRight(),
       }}
     >
-      {/* Left Panel (FileTree) */}
-      <div class="resizable-layout__left" style={{ width: `${leftWidth()}px` }}>
-        {props.left}
-      </div>
+      <Show when={props.left}>
+        {/* Left Panel (FileTree) */}
+        <div class="resizable-layout__left" style={{ width: `${leftWidth()}px` }}>
+          {props.left}
+        </div>
 
-      {/* Left Separator */}
-      <div
-        class="resizable-layout__separator"
-        classList={{ "resizable-layout__separator--active": isDraggingLeft() }}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          setIsDraggingLeft(true);
-        }}
-      />
+        {/* Left Separator */}
+        <div
+          class="resizable-layout__separator"
+          classList={{ "resizable-layout__separator--active": isDraggingLeft() }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setIsDraggingLeft(true);
+          }}
+        />
+      </Show>
 
       {/* Center Panel (Chat) */}
       <div class="resizable-layout__center">{props.center}</div>

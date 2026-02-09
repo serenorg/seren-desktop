@@ -426,7 +426,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                           this service
                         </span>
                       </Show>
-                      <Show when={connection() && !expired()}>
+                      <Show when={!expired() && connection()}>
                         {(conn) => (
                           <span class="text-[0.75rem] text-muted-foreground">
                             {conn().provider_email

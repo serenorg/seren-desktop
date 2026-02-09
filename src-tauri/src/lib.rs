@@ -10,6 +10,7 @@ pub mod commands {
     pub mod chat;
     pub mod indexing;
     pub mod memory;
+    pub mod orchestrator;
     pub mod web;
 }
 
@@ -22,11 +23,13 @@ pub mod services {
 
 #[cfg(feature = "acp")]
 mod acp;
+mod auth;
 mod claude_setup;
 mod embedded_runtime;
 mod files;
 mod mcp;
 mod oauth;
+mod orchestrator;
 mod oauth_callback_server;
 #[cfg(feature = "openclaw")]
 mod openclaw;
@@ -431,7 +434,9 @@ pub fn run() {
 
     builder = builder
         .manage(mcp::McpState::new())
-        .manage(mcp::HttpMcpState::new());
+        .manage(mcp::HttpMcpState::new())
+        .manage(orchestrator::service::OrchestratorState::new())
+        .manage(orchestrator::eval::EvalState::new());
 
     #[cfg(feature = "acp")]
     {
@@ -758,6 +763,10 @@ pub fn run() {
             skills::install_skill,
             skills::remove_skill,
             skills::read_skill_content,
+            // Orchestrator commands
+            commands::orchestrator::orchestrate,
+            commands::orchestrator::cancel_orchestration,
+            commands::orchestrator::submit_eval_signal,
             // Memory commands
             commands::memory::memory_bootstrap,
             commands::memory::memory_remember,

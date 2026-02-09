@@ -14,6 +14,7 @@ import {
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
+import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
@@ -23,37 +24,35 @@ import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
-  areToolsAvailable,
   CHAT_MAX_RETRIES,
   type ChatContext,
-  continueToolIteration,
   type Message,
   sendMessageWithRetry,
-  streamMessage,
-  streamMessageWithTools,
-  type ToolIterationState,
-  type ToolStreamEvent,
 } from "@/services/chat";
-import { acpStore } from "@/stores/acp.store";
+import {
+  cancelOrchestration,
+  orchestrate,
+  retryOrchestration,
+} from "@/services/orchestrator";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
+import { conversationStore } from "@/stores/conversation.store";
 import { editorStore } from "@/stores/editor.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
-import { AgentChat } from "./AgentChat";
-import { AgentModeToggle } from "./AgentModeToggle";
+import { toUnifiedMessage } from "@/types/conversation";
 import { ChatTabBar } from "./ChatTabBar";
 import { CompactedMessage } from "./CompactedMessage";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { SatisfactionSignal } from "./SatisfactionSignal";
 import { SlashCommandPopup } from "./SlashCommandPopup";
-import { StreamingMessage } from "./StreamingMessage";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
-import { ToolStreamingMessage } from "./ToolStreamingMessage";
 import { ToolsetSelector } from "./ToolsetSelector";
+import { TransitionAnnouncement } from "./TransitionAnnouncement";
 import "highlight.js/styles/github-dark.css";
 
 // Keywords that trigger publisher suggestions
@@ -72,38 +71,12 @@ const SUGGESTION_KEYWORDS = [
   "research",
 ];
 
-interface StreamingSession {
-  id: string;
-  userMessageId: string;
-  prompt: string;
-  model: string;
-  context?: ChatContext;
-  stream: AsyncGenerator<string>;
-  toolsEnabled: false;
-  startTime: number;
-}
-
-interface ToolStreamingSession {
-  id: string;
-  userMessageId: string;
-  prompt: string;
-  model: string;
-  context?: ChatContext;
-  stream: AsyncGenerator<ToolStreamEvent>;
-  toolsEnabled: true;
-  startTime: number;
-}
-
-type ActiveStreamingSession = StreamingSession | ToolStreamingSession;
-
 interface ChatContentProps {
   onSignInClick?: () => void;
 }
 
 export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [input, setInput] = createSignal("");
-  const [streamingSession, setStreamingSession] =
-    createSignal<ActiveStreamingSession | null>(null);
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
   const [suggestionsDismissed, setSuggestionsDismissed] = createSignal(false);
@@ -182,24 +155,24 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // Ctrl/Cmd+T: New tab (blocked during streaming)
     if (isMod && event.key === "t") {
       event.preventDefault();
-      if (chatStore.isLoading) {
+      if (conversationStore.isLoading) {
         console.log("[ChatContent] Blocked new tab during streaming");
         return;
       }
-      chatStore.createConversation();
+      conversationStore.createConversation();
       return;
     }
 
     // Ctrl/Cmd+W: Close current tab (blocked during streaming)
     if (isMod && event.key === "w") {
       event.preventDefault();
-      if (chatStore.isLoading) {
+      if (conversationStore.isLoading) {
         console.log("[ChatContent] Blocked tab close during streaming");
         return;
       }
-      const activeId = chatStore.activeConversationId;
+      const activeId = conversationStore.activeConversationId;
       if (activeId) {
-        chatStore.archiveConversation(activeId);
+        conversationStore.archiveConversation(activeId);
       }
       return;
     }
@@ -207,17 +180,17 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // Ctrl+Tab / Ctrl+Shift+Tab: Switch tabs (blocked during streaming)
     if (event.ctrlKey && event.key === "Tab") {
       event.preventDefault();
-      if (chatStore.isLoading) {
+      if (conversationStore.isLoading) {
         console.log("[ChatContent] Blocked tab switch during streaming");
         return;
       }
-      const conversations = chatStore.conversations.filter(
+      const conversations = conversationStore.conversations.filter(
         (c) => !c.isArchived,
       );
       if (conversations.length < 2) return;
 
       const currentIndex = conversations.findIndex(
-        (c) => c.id === chatStore.activeConversationId,
+        (c) => c.id === conversationStore.activeConversationId,
       );
       if (currentIndex === -1) return;
 
@@ -225,20 +198,20 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         ? (currentIndex - 1 + conversations.length) % conversations.length
         : (currentIndex + 1) % conversations.length;
 
-      chatStore.setActiveConversation(conversations[nextIndex].id);
+      conversationStore.setActiveConversation(conversations[nextIndex].id);
     }
   };
 
   onMount(async () => {
     console.log(
-      "[ChatContent] Mounting, chatStore.isLoading:",
-      chatStore.isLoading,
+      "[ChatContent] Mounting, conversationStore.isLoading:",
+      conversationStore.isLoading,
     );
 
     // Reset orphaned loading state from HMR interruption
-    if (chatStore.isLoading && !streamingSession()) {
+    if (conversationStore.isLoading) {
       console.log("[ChatContent] Resetting orphaned loading state from HMR");
-      chatStore.setLoading(false);
+      conversationStore.setLoading(false);
     }
 
     document.addEventListener("keydown", handleKeyDown);
@@ -251,17 +224,17 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     window.addEventListener("seren:pick-images", handlePickImages);
 
     try {
-      await chatStore.loadHistory();
+      await conversationStore.loadHistory();
     } catch (error) {
-      chatStore.setError((error as Error).message);
+      conversationStore.setError((error as Error).message);
     }
   });
 
   // Debug: log when loading state changes
   createEffect(() => {
     console.log(
-      "[ChatContent] chatStore.isLoading changed to:",
-      chatStore.isLoading,
+      "[ChatContent] conversationStore.isLoading changed to:",
+      conversationStore.isLoading,
     );
   });
 
@@ -278,9 +251,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Auto-scroll to bottom when messages change, streaming starts, or switching channels
   createEffect(() => {
-    void chatStore.messages;
-    void streamingSession();
-    void acpStore.agentModeEnabled;
+    void conversationStore.messages;
+    void conversationStore.streamingContent;
     requestAnimationFrame(scrollToBottom);
   });
 
@@ -293,9 +265,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     );
 
     // Reset loading state if still active when unmounting (e.g., HMR)
-    if (chatStore.isLoading) {
+    if (conversationStore.isLoading) {
       console.log("[ChatContent] Cleaning up loading state on unmount");
-      chatStore.setLoading(false);
+      conversationStore.setLoading(false);
     }
 
     if (suggestionDebounceTimer) {
@@ -377,7 +349,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // User message history for up/down arrow navigation
   const userMessageHistory = createMemo(() =>
-    chatStore.messages
+    conversationStore.messages
       .filter((m) => m.role === "user")
       .map((m) => m.content)
       .reverse(),
@@ -429,10 +401,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   const cancelStreaming = () => {
-    const session = streamingSession();
-    if (!session) return;
-    setStreamingSession(null);
-    chatStore.setLoading(false);
+    const conversationId = conversationStore.activeConversationId;
+    if (conversationId) {
+      cancelOrchestration(conversationId);
+    }
     setMessageQueue([]);
   };
 
@@ -456,7 +428,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
 
     // If currently streaming, queue the message instead
-    if (chatStore.isLoading) {
+    if (conversationStore.isLoading) {
       setMessageQueue((queue) => [...queue, trimmed]);
       setInput("");
       setHistoryIndex(-1);
@@ -474,6 +446,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     messageContent: string,
     images?: Attachment[],
   ) => {
+    const conversationId = conversationStore.activeConversationId;
+    if (!conversationId) return;
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -484,106 +459,26 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       status: "complete",
     };
 
-    // Snapshot history BEFORE adding the current message to avoid duplication
-    // (streamMessageWithTools adds the current message separately)
-    const history = [...chatStore.messages];
+    conversationStore.addMessage(toUnifiedMessage(userMessage));
+    await conversationStore.persistMessage(toUnifiedMessage(userMessage));
 
-    chatStore.addMessage(userMessage);
-    await chatStore.persistMessage(userMessage);
-
-    const context = buildContext();
-    const assistantId = crypto.randomUUID();
-
-    const useTools = areToolsAvailable();
-    const startTime = Date.now();
-    const session: ActiveStreamingSession = useTools
-      ? {
-          id: assistantId,
-          userMessageId: userMessage.id,
-          prompt: messageContent,
-          model: chatStore.selectedModel,
-          context,
-          stream: streamMessageWithTools(
-            messageContent,
-            chatStore.selectedModel,
-            context,
-            true,
-            history,
-            images,
-          ),
-          toolsEnabled: true,
-          startTime,
-        }
-      : {
-          id: assistantId,
-          userMessageId: userMessage.id,
-          prompt: messageContent,
-          model: chatStore.selectedModel,
-          context,
-          stream: streamMessage(
-            messageContent,
-            chatStore.selectedModel,
-            context,
-          ),
-          toolsEnabled: false,
-          startTime,
-        };
-
-    chatStore.setLoading(true);
-    setStreamingSession(session);
-    chatStore.setError(null);
+    conversationStore.setError(null);
     setInput("");
     setHistoryIndex(-1);
     setSavedInput("");
-  };
 
-  const handleIterationLimit = (
-    state: ToolIterationState,
-    iteration: number,
-  ): AsyncGenerator<ToolStreamEvent> => {
-    console.log(
-      "[ChatContent] Tool iteration limit reached at iteration",
-      iteration,
-      "— auto-continuing",
-    );
-    return continueToolIteration(state);
-  };
-
-  const handleStreamingComplete = async (
-    session: ActiveStreamingSession,
-    content: string,
-  ) => {
-    const duration = Date.now() - session.startTime;
-
-    if (!content.trim()) {
-      console.warn("[ChatContent] Empty content in completed message", {
-        duration,
-        model: session.model,
-        toolsEnabled: session.toolsEnabled,
-      });
-    } else {
-      console.log("[ChatContent] Streaming complete", {
-        contentLength: content.length,
-        duration,
-        model: session.model,
-      });
+    // Enrich prompt with editor context if available
+    const context = buildContext();
+    let prompt = messageContent;
+    if (context) {
+      const fileLabel = context.file ?? "selection";
+      const rangeLabel = context.range
+        ? ` (lines ${context.range.startLine}-${context.range.endLine})`
+        : "";
+      prompt = `Context from ${fileLabel}${rangeLabel}:\n\`\`\`\n${context.content}\n\`\`\`\n\n${messageContent}`;
     }
 
-    const assistantMessage: Message = {
-      id: session.id,
-      role: "assistant",
-      content,
-      timestamp: Date.now(),
-      model: session.model,
-      status: "complete",
-      duration,
-      request: { prompt: session.prompt, context: session.context },
-    };
-
-    chatStore.addMessage(assistantMessage);
-    await chatStore.persistMessage(assistantMessage);
-    setStreamingSession(null);
-    chatStore.setLoading(false);
+    await orchestrate(conversationId, prompt, images);
 
     // Check if auto-compact should be triggered
     await chatStore.checkAutoCompact(
@@ -598,41 +493,17 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       const [nextMessage, ...remainingQueue] = queue;
       setMessageQueue(remainingQueue);
       console.log("[ChatContent] Processing queued message:", nextMessage);
-      // Small delay to ensure UI updates
       setTimeout(() => {
         sendMessageImmediate(nextMessage);
       }, 100);
     }
   };
 
-  const handleStreamingError = async (
-    session: ActiveStreamingSession,
-    error: Error,
-  ) => {
-    setStreamingSession(null);
-    chatStore.setLoading(false);
-    chatStore.setError(error.message);
-
-    const failedMessage: Message = {
-      id: session.id,
-      role: "assistant",
-      content: "",
-      timestamp: Date.now(),
-      model: session.model,
-      status: "error",
-      error: error.message,
-      request: { prompt: session.prompt, context: session.context },
-    };
-
-    chatStore.addMessage(failedMessage);
-    await attemptRetry(failedMessage, false);
-  };
-
   const attemptRetry = async (message: Message, isManual: boolean) => {
     if (!message.request) return;
 
     chatStore.setRetrying(message.id);
-    chatStore.updateMessage(message.id, {
+    conversationStore.updateMessage(message.id, {
       status: "pending",
       attemptCount: message.attemptCount ?? 1,
     });
@@ -643,7 +514,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         message.model ?? chatStore.selectedModel,
         message.request.context,
         (attempt) => {
-          chatStore.updateMessage(message.id, {
+          conversationStore.updateMessage(message.id, {
             status: "pending",
             attemptCount: attempt + 1,
           });
@@ -658,16 +529,16 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         timestamp: Date.now(),
       };
 
-      chatStore.updateMessage(message.id, updated);
-      await chatStore.persistMessage(updated);
+      conversationStore.updateMessage(message.id, updated);
+      await conversationStore.persistMessage(toUnifiedMessage(updated));
     } catch (error) {
       const messageError = (error as Error).message;
-      chatStore.updateMessage(message.id, {
+      conversationStore.updateMessage(message.id, {
         status: "error",
         error: messageError,
       });
       if (isManual) {
-        chatStore.setError(messageError);
+        conversationStore.setError(messageError);
       }
     } finally {
       chatStore.setRetrying(null);
@@ -681,7 +552,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const clearHistory = async () => {
     const confirmClear = window.confirm("Clear all chat history?");
     if (!confirmClear) return;
-    await chatStore.clearHistory();
+    await conversationStore.clearHistory();
   };
 
   return (
@@ -715,462 +586,488 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         <ChatTabBar />
         <header class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[#21262d] bg-[#161b22]">
           <div class="flex items-center gap-3">
-            <AgentModeToggle />
-            <Show when={!acpStore.agentModeEnabled}>
-              <Show when={chatStore.messages.length > 0}>
-                <div class="flex items-center gap-1.5 text-[10px] text-[#484f58]">
+            <Show when={chatStore.messages.length > 0}>
+              <div class="flex items-center gap-1.5 text-[10px] text-[#484f58]">
+                <div
+                  class="w-12 h-1.5 bg-[#21262d] rounded-full overflow-hidden"
+                  title={`Context: ${chatStore.contextUsagePercent}% (${chatStore.estimatedTokens.toLocaleString()} tokens)`}
+                >
                   <div
-                    class="w-12 h-1.5 bg-[#21262d] rounded-full overflow-hidden"
-                    title={`Context: ${chatStore.contextUsagePercent}% (${chatStore.estimatedTokens.toLocaleString()} tokens)`}
-                  >
-                    <div
-                      class={`h-full rounded-full transition-all ${
-                        chatStore.contextUsagePercent >= 80
-                          ? "bg-[#f85149]"
-                          : chatStore.contextUsagePercent >= 50
-                            ? "bg-[#d29922]"
-                            : "bg-[#238636]"
-                      }`}
-                      style={{ width: `${chatStore.contextUsagePercent}%` }}
-                    />
-                  </div>
-                  <span>{chatStore.contextUsagePercent}%</span>
+                    class={`h-full rounded-full transition-all ${
+                      chatStore.contextUsagePercent >= 80
+                        ? "bg-[#f85149]"
+                        : chatStore.contextUsagePercent >= 50
+                          ? "bg-[#d29922]"
+                          : "bg-[#238636]"
+                    }`}
+                    style={{ width: `${chatStore.contextUsagePercent}%` }}
+                  />
                 </div>
-              </Show>
+                <span>{chatStore.contextUsagePercent}%</span>
+              </div>
             </Show>
           </div>
           <div class="flex items-center gap-2">
             <ThinkingToggle />
-            <Show when={!acpStore.agentModeEnabled}>
-              <Show
-                when={
-                  chatStore.messages.length >
-                  settingsStore.get("autoCompactPreserveMessages")
-                }
-              >
-                <button
-                  type="button"
-                  class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={() =>
-                    chatStore.compactConversation(
-                      settingsStore.get("autoCompactPreserveMessages"),
-                    )
-                  }
-                  disabled={chatStore.isCompacting}
-                >
-                  {chatStore.isCompacting ? "Compacting..." : "Compact"}
-                </button>
-              </Show>
+            <Show
+              when={
+                chatStore.messages.length >
+                settingsStore.get("autoCompactPreserveMessages")
+              }
+            >
               <button
                 type="button"
-                class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3]"
-                onClick={clearHistory}
+                class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() =>
+                  chatStore.compactConversation(
+                    settingsStore.get("autoCompactPreserveMessages"),
+                  )
+                }
+                disabled={chatStore.isCompacting}
               >
-                Clear
+                {chatStore.isCompacting ? "Compacting..." : "Compact"}
               </button>
             </Show>
+            <button
+              type="button"
+              class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3]"
+              onClick={clearHistory}
+            >
+              Clear
+            </button>
           </div>
         </header>
 
-        {/* Conditional rendering: Agent mode vs Chat mode */}
-        <Show
-          when={acpStore.agentModeEnabled}
-          fallback={
-            <>
-              <div
-                class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded"
-                ref={messagesRef}
-              >
-                <Show when={chatStore.compactedSummary}>
-                  {(summary) => (
-                    <CompactedMessage
-                      summary={summary()}
-                      onClear={() => chatStore.clearCompactedSummary()}
-                    />
-                  )}
-                </Show>
+        <div
+          class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded"
+          ref={messagesRef}
+        >
+          <Show when={chatStore.compactedSummary}>
+            {(summary) => (
+              <CompactedMessage
+                summary={summary()}
+                onClear={() => chatStore.clearCompactedSummary()}
+              />
+            )}
+          </Show>
 
+          <Show
+            when={
+              conversationStore.messages.length > 0 ||
+              chatStore.compactedSummary
+            }
+            fallback={
+              <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
+                <h3 class="m-0 mb-3 text-lg font-medium text-[#e6edf3]">
+                  Welcome to Seren
+                </h3>
+                <p class="m-0 text-sm text-center max-w-[320px] leading-relaxed">
+                  Your AI assistant for everyday work. Try typing:
+                </p>
+                <p class="m-0 mt-2 text-sm text-center max-w-[320px] leading-relaxed italic text-[#e6edf3]">
+                  "Summarize the key points of this article for me"
+                </p>
+              </div>
+            }
+          >
+            <For each={conversationStore.messages}>
+              {(message) => (
                 <Show
-                  when={
-                    chatStore.messages.length > 0 || chatStore.compactedSummary
-                  }
-                  fallback={
-                    <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
-                      <h3 class="m-0 mb-3 text-lg font-medium text-[#e6edf3]">
-                        Start a conversation
-                      </h3>
-                      <p class="m-0 text-sm text-center max-w-[280px] leading-relaxed">
-                        Ask questions about code or request help with tasks.
-                      </p>
-                    </div>
-                  }
+                  when={message.type !== "transition"}
+                  fallback={<TransitionAnnouncement message={message} />}
                 >
-                  <For each={chatStore.messages}>
-                    {(message) => (
-                      <article
-                        class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
-                      >
+                  <article
+                    class={`group/msg px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
+                  >
+                    <Show when={message.images && message.images.length > 0}>
+                      <MessageImages images={message.images ?? []} />
+                    </Show>
+                    <div
+                      class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-[#f0f6fc] [&_h1]:border-b [&_h1]:border-[#21262d] [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-[#f0f6fc] [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-[#f0f6fc] [&_code]:bg-[#1c2333] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-[#f0f6fc] [&_strong]:font-semibold"
+                      innerHTML={
+                        message.role === "assistant"
+                          ? renderMarkdown(message.content)
+                          : escapeHtmlWithLinks(message.content)
+                      }
+                    />
+                    <Show
+                      when={
+                        message.role === "assistant" &&
+                        message.status === "complete" &&
+                        message.duration
+                      }
+                    >
+                      {(() => {
+                        const dur = message.duration;
+                        if (!dur) return null;
+                        const { verb, duration, costDisplay } =
+                          formatDurationWithVerb(dur, message.cost);
+                        return (
+                          <div class="mt-2 text-xs text-[#8b949e]">
+                            ✻ {verb} for {duration}
+                            {costDisplay && ` at ${costDisplay}`}
+                          </div>
+                        );
+                      })()}
+                    </Show>
+                    <Show
+                      when={
+                        message.role === "assistant" &&
+                        message.status === "complete"
+                      }
+                    >
+                      <div class="mt-1.5 flex justify-end">
+                        <SatisfactionSignal messageId={message.id} />
+                      </div>
+                    </Show>
+                    <Show when={message.status === "error"}>
+                      <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
                         <Show
-                          when={message.images && message.images.length > 0}
-                        >
-                          <MessageImages images={message.images ?? []} />
-                        </Show>
-                        <div
-                          class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-[#f0f6fc] [&_h1]:border-b [&_h1]:border-[#21262d] [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-[#f0f6fc] [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-[#f0f6fc] [&_code]:bg-[#1c2333] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-[#f0f6fc] [&_strong]:font-semibold"
-                          innerHTML={
-                            message.role === "assistant"
-                              ? renderMarkdown(message.content)
-                              : escapeHtmlWithLinks(message.content)
-                          }
-                        />
-                        <Show
-                          when={
-                            message.role === "assistant" &&
-                            message.status === "complete" &&
-                            message.duration
-                          }
-                        >
-                          {(() => {
-                            const { verb, duration } = formatDurationWithVerb(
-                              message.duration!,
-                            );
-                            return (
-                              <div class="mt-2 text-xs text-[#8b949e]">
-                                ✻ {verb} for {duration}
-                              </div>
-                            );
-                          })()}
-                        </Show>
-                        <Show when={message.status === "error"}>
-                          <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
-                            <span>{message.error ?? "Message failed"}</span>
-                            <Show
-                              when={chatStore.retryingMessageId === message.id}
-                            >
+                          when={!isAuthError(message.error)}
+                          fallback={
+                            <>
                               <span>
-                                Retrying (
-                                {Math.min(
-                                  message.attemptCount ?? 1,
-                                  CHAT_MAX_RETRIES,
-                                )}
-                                /{CHAT_MAX_RETRIES})…
+                                Session expired. Please sign in to continue.
                               </span>
-                            </Show>
-                            <Show when={message.request}>
                               <button
                                 type="button"
                                 class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
-                                onClick={() => handleManualRetry(message)}
+                                onClick={() => setShowSignInPrompt(true)}
                               >
-                                Retry
+                                Sign In
                               </button>
-                            </Show>
-                          </div>
-                        </Show>
-                      </article>
-                    )}
-                  </For>
-                </Show>
-
-                <Show when={chatStore.isLoading && !streamingSession()}>
-                  <article class="px-5 py-4 border-b border-[#21262d]">
-                    <ThinkingStatus />
-                  </article>
-                </Show>
-
-                <Show when={streamingSession()}>
-                  {(sessionAccessor) => {
-                    const session = sessionAccessor();
-                    return (
-                      <Show
-                        when={session.toolsEnabled}
-                        fallback={
-                          <StreamingMessage
-                            stream={(session as StreamingSession).stream}
-                            onComplete={(content) =>
-                              handleStreamingComplete(session, content)
-                            }
-                            onError={(error) =>
-                              handleStreamingError(session, error)
-                            }
-                            onContentUpdate={scrollToBottom}
-                          />
-                        }
-                      >
-                        <ToolStreamingMessage
-                          stream={(session as ToolStreamingSession).stream}
-                          onComplete={(content) =>
-                            handleStreamingComplete(session, content)
+                            </>
                           }
-                          onError={(error) =>
-                            handleStreamingError(session, error)
-                          }
-                          onContentUpdate={scrollToBottom}
-                          onIterationLimit={handleIterationLimit}
-                        />
-                      </Show>
-                    );
-                  }}
-                </Show>
-              </div>
-
-              <Show when={contextPreview()}>
-                {(ctx) => (
-                  <div class="mx-3 my-2 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
-                    <div class="flex justify-between items-center px-2 py-1.5 bg-[#21262d] text-xs text-[#8b949e]">
-                      <span>
-                        Context from {ctx().file ?? "selection"}
-                        {ctx().range &&
-                          ` (${ctx().range?.startLine}-${ctx().range?.endLine})`}
-                      </span>
-                      <button
-                        type="button"
-                        class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1 py-0.5 text-sm leading-none hover:text-[#e6edf3]"
-                        onClick={() => editorStore.clearSelection()}
-                      >
-                        ×
-                      </button>
-                    </div>
-                    <pre class="m-0 p-2 max-h-[80px] overflow-y-auto text-xs leading-normal bg-transparent">
-                      {ctx().text}
-                    </pre>
-                  </div>
-                )}
-              </Show>
-
-              <div class="shrink-0 px-4 py-3.5 border-t border-[#21262d] bg-[#161b22]">
-                <form
-                  class="flex flex-col gap-2"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    sendMessage();
-                  }}
-                >
-                  <PublisherSuggestions
-                    suggestions={suggestions()}
-                    isLoading={suggestionsLoading()}
-                    onSelect={handlePublisherSelect}
-                    onDismiss={dismissSuggestions}
-                  />
-                  <ImageAttachmentBar
-                    images={attachedImages()}
-                    onAttach={handleAttachImages}
-                    onRemove={handleRemoveImage}
-                  />
-                  <Show when={messageQueue().length > 0}>
-                    <div class="flex items-center gap-2 px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e]">
-                      <span>
-                        {messageQueue().length} message
-                        {messageQueue().length > 1 ? "s" : ""} queued
-                      </span>
-                      <button
-                        type="button"
-                        class="ml-auto bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[#30363d] hover:text-[#e6edf3]"
-                        onClick={() => setMessageQueue([])}
-                      >
-                        Clear Queue
-                      </button>
-                    </div>
-                  </Show>
-                  <div class="relative">
-                    <SlashCommandPopup
-                      input={input()}
-                      panel="chat"
-                      selectedIndex={commandPopupIndex()}
-                      onSelect={(cmd) => {
-                        setInput(`/${cmd.name} `);
-                        inputRef?.focus();
-                        setCommandPopupIndex(0);
-                      }}
-                    />
-                    <textarea
-                      ref={(el) => {
-                        inputRef = el;
-                        console.log(
-                          "[ChatContent] Textarea ref set, disabled:",
-                          el.disabled,
-                          "isLoading:",
-                          chatStore.isLoading,
-                        );
-                      }}
-                      value={input()}
-                      placeholder={
-                        chatStore.isLoading
-                          ? "Type to queue message..."
-                          : "Ask Seren anything… (type / for commands)"
-                      }
-                      class="w-full min-h-[72px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-xl text-[#e6edf3] px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-[#58a6ff] focus:shadow-[0_0_0_3px_rgba(88,166,255,0.15)] placeholder:text-[#484f58]"
-                      onInput={(event) => {
-                        setInput(event.currentTarget.value);
-                        setCommandPopupIndex(0);
-                        if (historyIndex() !== -1) {
-                          setHistoryIndex(-1);
-                          setSavedInput("");
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        // Slash command popup keyboard navigation
-                        const isSlashInput =
-                          input().startsWith("/") && !input().includes(" ");
-                        if (isSlashInput) {
-                          const matches = getCompletions(input(), "chat");
-                          if (matches.length > 0) {
-                            if (event.key === "ArrowUp") {
-                              event.preventDefault();
-                              setCommandPopupIndex((i) =>
-                                i > 0 ? i - 1 : matches.length - 1,
-                              );
-                              return;
-                            }
-                            if (event.key === "ArrowDown") {
-                              event.preventDefault();
-                              setCommandPopupIndex((i) =>
-                                i < matches.length - 1 ? i + 1 : 0,
-                              );
-                              return;
-                            }
-                            if (
-                              event.key === "Tab" ||
-                              (event.key === "Enter" && !event.shiftKey)
-                            ) {
-                              event.preventDefault();
-                              const selected = matches[commandPopupIndex()];
-                              if (selected) {
-                                setInput(`/${selected.name} `);
-                                setCommandPopupIndex(0);
-                              }
-                              return;
-                            }
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              setInput("");
-                              return;
-                            }
-                          }
-                        }
-
-                        const history = userMessageHistory();
-
-                        // Up arrow: navigate to older message
-                        if (event.key === "ArrowUp" && history.length > 0) {
-                          const textarea = event.currentTarget;
-                          if (textarea.selectionStart === 0 || input() === "") {
-                            event.preventDefault();
-
-                            if (historyIndex() === -1) {
-                              setSavedInput(input());
-                            }
-
-                            const newIndex = Math.min(
-                              historyIndex() + 1,
-                              history.length - 1,
-                            );
-                            setHistoryIndex(newIndex);
-                            setInput(history[newIndex]);
-                          }
-                        }
-
-                        // Down arrow: navigate to newer message
-                        if (event.key === "ArrowDown" && historyIndex() >= 0) {
-                          const textarea = event.currentTarget;
-                          if (
-                            textarea.selectionStart === textarea.value.length
-                          ) {
-                            event.preventDefault();
-
-                            const newIndex = historyIndex() - 1;
-                            setHistoryIndex(newIndex);
-
-                            if (newIndex < 0) {
-                              setInput(savedInput());
-                              setSavedInput("");
-                            } else {
-                              setInput(history[newIndex]);
-                            }
-                          }
-                        }
-
-                        // Enter key handling
-                        if (event.key === "Enter") {
-                          const enterToSend =
-                            settingsStore.get("chatEnterToSend");
-                          if (enterToSend) {
-                            if (!event.shiftKey) {
-                              event.preventDefault();
-                              sendMessage();
-                            }
-                          } else {
-                            if (event.metaKey || event.ctrlKey) {
-                              event.preventDefault();
-                              sendMessage();
-                            }
-                          }
-                        }
-                      }}
-                    />
-                  </div>
-                  <Show when={commandStatus()}>
-                    <div class="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e] whitespace-pre-wrap">
-                      {commandStatus()}
-                    </div>
-                  </Show>
-                  <div class="flex justify-between items-center">
-                    <div class="flex items-center gap-3">
-                      <ModelSelector />
-                      <ToolsetSelector />
-                      <Show when={chatStore.isLoading}>
-                        <ThinkingStatus />
-                      </Show>
-                      <Show when={!chatStore.isLoading}>
-                        <span class="text-[10px] text-[#484f58]">
-                          {settingsStore.get("chatEnterToSend")
-                            ? "Enter to send"
-                            : "Ctrl+Enter"}
-                        </span>
-                      </Show>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <VoiceInputButton
-                        onTranscript={(text) => {
-                          setInput((prev) => (prev ? `${prev} ${text}` : text));
-                          if (settingsStore.get("voiceAutoSubmit")) {
-                            sendMessage();
-                          } else {
-                            inputRef?.focus();
-                          }
-                        }}
-                      />
-                      <Show
-                        when={chatStore.isLoading}
-                        fallback={
-                          <button
-                            type="submit"
-                            class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#2ea043] hover:shadow-[0_2px_8px_rgba(35,134,54,0.3)] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:shadow-none"
-                            disabled={
-                              !input().trim() && attachedImages().length === 0
+                        >
+                          <span>{message.error ?? "Message failed"}</span>
+                          <Show
+                            when={chatStore.retryingMessageId === message.id}
+                          >
+                            <span>
+                              Retrying (
+                              {Math.min(
+                                message.attemptCount ?? 1,
+                                CHAT_MAX_RETRIES,
+                              )}
+                              /{CHAT_MAX_RETRIES})…
+                            </span>
+                          </Show>
+                          <Show when={message.request}>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                              onClick={() => handleManualRetry(message)}
+                            >
+                              Retry
+                            </button>
+                          </Show>
+                          <Show
+                            when={
+                              !message.request &&
+                              message.workerType === "orchestrator"
                             }
                           >
-                            Send
-                          </button>
-                        }
-                      >
-                        <button
-                          type="button"
-                          class="bg-[#da3633] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#f85149] hover:shadow-[0_2px_8px_rgba(218,54,51,0.3)]"
-                          onClick={cancelStreaming}
-                        >
-                          Stop
-                        </button>
-                      </Show>
-                    </div>
-                  </div>
-                </form>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                              onClick={() => retryOrchestration()}
+                            >
+                              Retry
+                            </button>
+                          </Show>
+                        </Show>
+                      </div>
+                    </Show>
+                  </article>
+                </Show>
+              )}
+            </For>
+          </Show>
+
+          <Show
+            when={
+              conversationStore.isLoading && !conversationStore.streamingContent
+            }
+          >
+            <article class="px-5 py-4 border-b border-[#21262d]">
+              <ThinkingStatus />
+            </article>
+          </Show>
+
+          <Show when={conversationStore.streamingThinking}>
+            <article class="px-5 py-4 border-b border-[#21262d]">
+              <details open class="text-xs text-[#8b949e]">
+                <summary class="cursor-pointer select-none mb-1">
+                  Thinking…
+                </summary>
+                <div class="whitespace-pre-wrap opacity-70">
+                  {conversationStore.streamingThinking}
+                </div>
+              </details>
+            </article>
+          </Show>
+
+          <Show when={conversationStore.streamingContent}>
+            <article class="px-5 py-4 border-b border-[#21262d]">
+              <div class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words whitespace-pre-wrap">
+                {conversationStore.streamingContent}
+                <Show when={conversationStore.isLoading}>
+                  <span class="inline-block w-[6px] h-[14px] bg-[#58a6ff] ml-0.5 animate-pulse" />
+                </Show>
               </div>
-            </>
-          }
-        >
-          <AgentChat />
+            </article>
+          </Show>
+        </div>
+
+        <Show when={contextPreview()}>
+          {(ctx) => (
+            <div class="mx-3 my-2 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
+              <div class="flex justify-between items-center px-2 py-1.5 bg-[#21262d] text-xs text-[#8b949e]">
+                <span>
+                  Context from {ctx().file ?? "selection"}
+                  {ctx().range &&
+                    ` (${ctx().range?.startLine}-${ctx().range?.endLine})`}
+                </span>
+                <button
+                  type="button"
+                  class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1 py-0.5 text-sm leading-none hover:text-[#e6edf3]"
+                  onClick={() => editorStore.clearSelection()}
+                >
+                  ×
+                </button>
+              </div>
+              <pre class="m-0 p-2 max-h-[80px] overflow-y-auto text-xs leading-normal bg-transparent">
+                {ctx().text}
+              </pre>
+            </div>
+          )}
         </Show>
+
+        <div class="shrink-0 px-4 py-3.5 border-t border-[#21262d] bg-[#161b22]">
+          <form
+            class="flex flex-col gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              sendMessage();
+            }}
+          >
+            <PublisherSuggestions
+              suggestions={suggestions()}
+              isLoading={suggestionsLoading()}
+              onSelect={handlePublisherSelect}
+              onDismiss={dismissSuggestions}
+            />
+            <ImageAttachmentBar
+              images={attachedImages()}
+              onAttach={handleAttachImages}
+              onRemove={handleRemoveImage}
+            />
+            <Show when={messageQueue().length > 0}>
+              <div class="flex items-center gap-2 px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e]">
+                <span>
+                  {messageQueue().length} message
+                  {messageQueue().length > 1 ? "s" : ""} queued
+                </span>
+                <button
+                  type="button"
+                  class="ml-auto bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[#30363d] hover:text-[#e6edf3]"
+                  onClick={() => setMessageQueue([])}
+                >
+                  Clear Queue
+                </button>
+              </div>
+            </Show>
+            <div class="relative">
+              <SlashCommandPopup
+                input={input()}
+                panel="chat"
+                selectedIndex={commandPopupIndex()}
+                onSelect={(cmd) => {
+                  setInput(`/${cmd.name} `);
+                  inputRef?.focus();
+                  setCommandPopupIndex(0);
+                }}
+              />
+              <textarea
+                ref={(el) => {
+                  inputRef = el;
+                  console.log(
+                    "[ChatContent] Textarea ref set, disabled:",
+                    el.disabled,
+                    "isLoading:",
+                    conversationStore.isLoading,
+                  );
+                }}
+                value={input()}
+                placeholder={
+                  conversationStore.isLoading
+                    ? "Type to queue message..."
+                    : "Ask Seren anything… (type / for commands)"
+                }
+                class="w-full min-h-[72px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-xl text-[#e6edf3] px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-[#58a6ff] focus:shadow-[0_0_0_3px_rgba(88,166,255,0.15)] placeholder:text-[#484f58]"
+                onInput={(event) => {
+                  setInput(event.currentTarget.value);
+                  setCommandPopupIndex(0);
+                  if (historyIndex() !== -1) {
+                    setHistoryIndex(-1);
+                    setSavedInput("");
+                  }
+                }}
+                onKeyDown={(event) => {
+                  // Slash command popup keyboard navigation
+                  const isSlashInput =
+                    input().startsWith("/") && !input().includes(" ");
+                  if (isSlashInput) {
+                    const matches = getCompletions(input(), "chat");
+                    if (matches.length > 0) {
+                      if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setCommandPopupIndex((i) =>
+                          i > 0 ? i - 1 : matches.length - 1,
+                        );
+                        return;
+                      }
+                      if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        setCommandPopupIndex((i) =>
+                          i < matches.length - 1 ? i + 1 : 0,
+                        );
+                        return;
+                      }
+                      if (
+                        event.key === "Tab" ||
+                        (event.key === "Enter" && !event.shiftKey)
+                      ) {
+                        event.preventDefault();
+                        const selected = matches[commandPopupIndex()];
+                        if (selected) {
+                          setInput(`/${selected.name} `);
+                          setCommandPopupIndex(0);
+                        }
+                        return;
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setInput("");
+                        return;
+                      }
+                    }
+                  }
+
+                  const history = userMessageHistory();
+
+                  // Up arrow: navigate to older message
+                  if (event.key === "ArrowUp" && history.length > 0) {
+                    const textarea = event.currentTarget;
+                    if (textarea.selectionStart === 0 || input() === "") {
+                      event.preventDefault();
+
+                      if (historyIndex() === -1) {
+                        setSavedInput(input());
+                      }
+
+                      const newIndex = Math.min(
+                        historyIndex() + 1,
+                        history.length - 1,
+                      );
+                      setHistoryIndex(newIndex);
+                      setInput(history[newIndex]);
+                    }
+                  }
+
+                  // Down arrow: navigate to newer message
+                  if (event.key === "ArrowDown" && historyIndex() >= 0) {
+                    const textarea = event.currentTarget;
+                    if (textarea.selectionStart === textarea.value.length) {
+                      event.preventDefault();
+
+                      const newIndex = historyIndex() - 1;
+                      setHistoryIndex(newIndex);
+
+                      if (newIndex < 0) {
+                        setInput(savedInput());
+                        setSavedInput("");
+                      } else {
+                        setInput(history[newIndex]);
+                      }
+                    }
+                  }
+
+                  // Enter key handling
+                  if (event.key === "Enter") {
+                    const enterToSend = settingsStore.get("chatEnterToSend");
+                    if (enterToSend) {
+                      if (!event.shiftKey) {
+                        event.preventDefault();
+                        sendMessage();
+                      }
+                    } else {
+                      if (event.metaKey || event.ctrlKey) {
+                        event.preventDefault();
+                        sendMessage();
+                      }
+                    }
+                  }
+                }}
+              />
+            </div>
+            <Show when={commandStatus()}>
+              <div class="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e] whitespace-pre-wrap">
+                {commandStatus()}
+              </div>
+            </Show>
+            <div class="flex justify-between items-center">
+              <div class="flex items-center gap-3">
+                <ModelSelector />
+                <ToolsetSelector />
+                <Show when={conversationStore.isLoading}>
+                  <ThinkingStatus />
+                </Show>
+                <Show when={!conversationStore.isLoading}>
+                  <span class="text-[10px] text-[#484f58]">
+                    {settingsStore.get("chatEnterToSend")
+                      ? "Enter to send"
+                      : "Ctrl+Enter"}
+                  </span>
+                </Show>
+              </div>
+              <div class="flex items-center gap-2">
+                <VoiceInputButton
+                  onTranscript={(text) => {
+                    setInput((prev) => (prev ? `${prev} ${text}` : text));
+                    if (settingsStore.get("voiceAutoSubmit")) {
+                      sendMessage();
+                    } else {
+                      inputRef?.focus();
+                    }
+                  }}
+                />
+                <Show
+                  when={conversationStore.isLoading}
+                  fallback={
+                    <button
+                      type="submit"
+                      class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#2ea043] hover:shadow-[0_2px_8px_rgba(35,134,54,0.3)] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:shadow-none"
+                      disabled={
+                        !input().trim() && attachedImages().length === 0
+                      }
+                    >
+                      Send
+                    </button>
+                  }
+                >
+                  <button
+                    type="button"
+                    class="bg-[#da3633] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#f85149] hover:shadow-[0_2px_8px_rgba(218,54,51,0.3)]"
+                    onClick={cancelStreaming}
+                  >
+                    Stop
+                  </button>
+                </Show>
+              </div>
+            </div>
+          </form>
+        </div>
       </Show>
     </section>
   );

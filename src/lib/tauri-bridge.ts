@@ -672,6 +672,7 @@ export interface StoredMessage {
   content: string;
   model: string | null;
   timestamp: number;
+  metadata: string | null;
 }
 
 /**
@@ -772,6 +773,7 @@ export async function saveMessage(
   content: string,
   model: string | null,
   timestamp: number,
+  metadata?: string | null,
 ): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -784,6 +786,7 @@ export async function saveMessage(
     content,
     model,
     timestamp,
+    metadata: metadata ?? null,
   });
 }
 

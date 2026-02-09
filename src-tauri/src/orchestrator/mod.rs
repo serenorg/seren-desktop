@@ -1,0 +1,16 @@
+// ABOUTME: Orchestrator module for intelligent task routing between workers.
+// ABOUTME: Contains types, worker trait, classifier, router, and worker adapters.
+
+pub mod chat_model_worker;
+pub mod classifier;
+pub mod decomposer;
+pub mod eval;
+pub mod mcp_publisher_worker;
+pub mod router;
+pub mod service;
+pub mod trust;
+pub mod types;
+pub mod worker;
+
+#[cfg(feature = "acp")]
+pub mod acp_worker;

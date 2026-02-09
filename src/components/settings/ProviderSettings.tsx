@@ -49,7 +49,14 @@ export const ProviderSettings: Component = () => {
         const code = urlObj.searchParams.get("code");
         const state = urlObj.searchParams.get("state");
         const error = urlObj.searchParams.get("error");
-        console.log("[ProviderSettings] Callback params - code:", !!code, "state:", !!state, "error:", error);
+        console.log(
+          "[ProviderSettings] Callback params - code:",
+          !!code,
+          "state:",
+          !!state,
+          "error:",
+          error,
+        );
 
         if (error) {
           console.log("[ProviderSettings] OAuth error received:", error);

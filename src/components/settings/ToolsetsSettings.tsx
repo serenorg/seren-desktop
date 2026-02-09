@@ -10,13 +10,13 @@ import {
 } from "solid-js";
 import { listConnections, listStorePublishers } from "@/api";
 import {
-  type Toolset,
-  settingsState,
-  createToolset,
-  updateToolset,
-  deleteToolset,
   addPublisherToToolset,
+  createToolset,
+  deleteToolset,
   removePublisherFromToolset,
+  settingsState,
+  type Toolset,
+  updateToolset,
 } from "@/stores/settings.store";
 
 interface Publisher {
@@ -41,7 +41,9 @@ export const ToolsetsSettings: Component = () => {
   const [publisherSearch, setPublisherSearch] = createSignal("");
 
   // Inline add publisher state
-  const [addingToToolset, setAddingToToolset] = createSignal<string | null>(null);
+  const [addingToToolset, setAddingToToolset] = createSignal<string | null>(
+    null,
+  );
   const [inlineSearch, setInlineSearch] = createSignal("");
 
   // Fetch available publishers
@@ -57,8 +59,8 @@ export const ToolsetsSettings: Component = () => {
     const pubs: Publisher[] = (data?.data || []).map((p) => ({
       slug: p.slug,
       name: p.name,
-      logo_url: p.logo_url,
-      description: p.description,
+      logo_url: p.logo_url ?? null,
+      description: p.description ?? null,
       categories: p.categories || [],
     }));
     return pubs;
@@ -89,15 +91,6 @@ export const ToolsetsSettings: Component = () => {
     setFormPublishers([]);
     setPublisherSearch("");
     setEditingToolset(null);
-    setShowCreateModal(true);
-  };
-
-  const openEditModal = (toolset: Toolset) => {
-    setFormName(toolset.name);
-    setFormDescription(toolset.description);
-    setFormPublishers([...toolset.publisherSlugs]);
-    setPublisherSearch("");
-    setEditingToolset(toolset);
     setShowCreateModal(true);
   };
 
@@ -278,7 +271,9 @@ export const ToolsetsSettings: Component = () => {
                               <button
                                 type="button"
                                 class="ml-0.5 text-muted-foreground hover:text-[#ef4444] transition-colors"
-                                onClick={() => handleInlineRemove(toolset.id, slug)}
+                                onClick={() =>
+                                  handleInlineRemove(toolset.id, slug)
+                                }
                                 title="Remove publisher"
                               >
                                 ×
@@ -294,7 +289,11 @@ export const ToolsetsSettings: Component = () => {
                           type="button"
                           class="px-2 py-1 text-xs text-muted-foreground bg-transparent border border-dashed border-[rgba(148,163,184,0.3)] rounded cursor-pointer transition-colors hover:border-accent hover:text-accent"
                           onClick={() => {
-                            setAddingToToolset(addingToToolset() === toolset.id ? null : toolset.id);
+                            setAddingToToolset(
+                              addingToToolset() === toolset.id
+                                ? null
+                                : toolset.id,
+                            );
                             setInlineSearch("");
                           }}
                           title="Add publisher"
@@ -308,23 +307,38 @@ export const ToolsetsSettings: Component = () => {
                             <input
                               type="text"
                               value={inlineSearch()}
-                              onInput={(e) => setInlineSearch(e.currentTarget.value)}
+                              onInput={(e) =>
+                                setInlineSearch(e.currentTarget.value)
+                              }
                               placeholder="Search publishers..."
                               class="w-full px-3 py-2 bg-transparent border-b border-[rgba(148,163,184,0.2)] text-sm text-foreground focus:outline-none"
                               autofocus
                             />
                             <div class="max-h-40 overflow-y-auto">
-                              <Show when={availablePublishersForToolset(toolset).length === 0}>
+                              <Show
+                                when={
+                                  availablePublishersForToolset(toolset)
+                                    .length === 0
+                                }
+                              >
                                 <div class="px-3 py-2 text-xs text-muted-foreground">
-                                  {inlineSearch() ? "No matches" : "All publishers added"}
+                                  {inlineSearch()
+                                    ? "No matches"
+                                    : "All publishers added"}
                                 </div>
                               </Show>
-                              <For each={availablePublishersForToolset(toolset).slice(0, 10)}>
+                              <For
+                                each={availablePublishersForToolset(
+                                  toolset,
+                                ).slice(0, 10)}
+                              >
                                 {(pub) => (
                                   <button
                                     type="button"
                                     class="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-[rgba(148,163,184,0.1)] transition-colors"
-                                    onClick={() => handleInlineAdd(toolset.id, pub.slug)}
+                                    onClick={() =>
+                                      handleInlineAdd(toolset.id, pub.slug)
+                                    }
                                   >
                                     {pub.name}
                                   </button>
@@ -406,7 +420,8 @@ export const ToolsetsSettings: Component = () => {
                   </label>
                   <Show when={publisherSearch()}>
                     <span class="text-xs text-muted-foreground">
-                      {filteredPublishers().length} of {publishers()?.length ?? 0} shown
+                      {filteredPublishers().length} of{" "}
+                      {publishers()?.length ?? 0} shown
                     </span>
                   </Show>
                 </div>
@@ -444,50 +459,50 @@ export const ToolsetsSettings: Component = () => {
                   <Show when={filteredPublishers().length > 0}>
                     <div class="max-h-[200px] overflow-y-auto border border-[rgba(148,163,184,0.2)] rounded-md">
                       <For each={filteredPublishers()}>
-                      {(pub) => {
-                        const isSelected = () =>
-                          formPublishers().includes(pub.slug);
-                        const status = getConnectionStatus(pub.slug);
-                        return (
-                          <label
-                            class={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-[rgba(148,163,184,0.1)] last:border-b-0 transition-colors ${
-                              isSelected()
-                                ? "bg-[rgba(99,102,241,0.1)]"
-                                : "hover:bg-[rgba(148,163,184,0.05)]"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected()}
-                              onChange={() => togglePublisher(pub.slug)}
-                              class="w-4 h-4 accent-accent cursor-pointer"
-                            />
-                            <div class="flex-1 min-w-0">
-                              <div class="flex items-center gap-2">
-                                <span class="text-sm text-foreground">
-                                  {pub.name}
-                                </span>
-                                <Show when={status === "connected"}>
-                                  <span class="text-[10px] px-1.5 py-0.5 bg-[rgba(34,197,94,0.2)] text-[#22c55e] rounded">
-                                    Connected
+                        {(pub) => {
+                          const isSelected = () =>
+                            formPublishers().includes(pub.slug);
+                          const status = getConnectionStatus(pub.slug);
+                          return (
+                            <label
+                              class={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-[rgba(148,163,184,0.1)] last:border-b-0 transition-colors ${
+                                isSelected()
+                                  ? "bg-[rgba(99,102,241,0.1)]"
+                                  : "hover:bg-[rgba(148,163,184,0.05)]"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected()}
+                                onChange={() => togglePublisher(pub.slug)}
+                                class="w-4 h-4 accent-accent cursor-pointer"
+                              />
+                              <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2">
+                                  <span class="text-sm text-foreground">
+                                    {pub.name}
                                   </span>
-                                </Show>
-                                <Show when={status === "expired"}>
-                                  <span class="text-[10px] px-1.5 py-0.5 bg-[rgba(245,158,11,0.2)] text-[#f59e0b] rounded">
-                                    Expired
-                                  </span>
+                                  <Show when={status === "connected"}>
+                                    <span class="text-[10px] px-1.5 py-0.5 bg-[rgba(34,197,94,0.2)] text-[#22c55e] rounded">
+                                      Connected
+                                    </span>
+                                  </Show>
+                                  <Show when={status === "expired"}>
+                                    <span class="text-[10px] px-1.5 py-0.5 bg-[rgba(245,158,11,0.2)] text-[#f59e0b] rounded">
+                                      Expired
+                                    </span>
+                                  </Show>
+                                </div>
+                                <Show when={pub.description}>
+                                  <p class="m-0 text-xs text-muted-foreground truncate">
+                                    {pub.description}
+                                  </p>
                                 </Show>
                               </div>
-                              <Show when={pub.description}>
-                                <p class="m-0 text-xs text-muted-foreground truncate">
-                                  {pub.description}
-                                </p>
-                              </Show>
-                            </div>
-                          </label>
-                        );
-                      }}
-                    </For>
+                            </label>
+                          );
+                        }}
+                      </For>
                     </div>
                   </Show>
                 </Show>

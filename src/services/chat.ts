@@ -20,14 +20,14 @@ import type {
 } from "@/lib/providers/types";
 import { executeTools, getAllTools } from "@/lib/tools";
 import { getGatewayTools } from "@/services/mcp-gateway";
+import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { projectStore } from "@/stores/project.store";
 import { providerStore } from "@/stores/provider.store";
 import {
   getActiveToolsetPublishers,
   settingsStore,
 } from "@/stores/settings.store";
-import { authStore } from "@/stores/auth.store";
-import { projectStore } from "@/stores/project.store";
 import { skillsStore } from "@/stores/skills.store";
 
 export type ChatRole = "user" | "assistant" | "system";

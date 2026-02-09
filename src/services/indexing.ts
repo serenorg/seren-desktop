@@ -2,7 +2,12 @@
 // ABOUTME: Orchestrates file discovery, chunking, embedding, and vector storage.
 
 import { invoke } from "@tauri-apps/api/core";
-import { EMBEDDING_DIM, embedText, embedTexts, estimateBatchTokens } from "./seren-embed";
+import {
+  EMBEDDING_DIM,
+  embedText,
+  embedTexts,
+  estimateBatchTokens,
+} from "./seren-embed";
 
 /** Index statistics from the backend */
 export interface IndexStats {
@@ -84,7 +89,9 @@ export interface IndexingProgress {
 /**
  * Initialize or get the index for a project.
  */
-export async function initProjectIndex(projectPath: string): Promise<IndexStats> {
+export async function initProjectIndex(
+  projectPath: string,
+): Promise<IndexStats> {
   return invoke<IndexStats>("init_project_index", { projectPath });
 }
 

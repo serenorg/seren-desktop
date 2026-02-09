@@ -188,17 +188,14 @@ export async function createApiKey(): Promise<string> {
     throw new Error("Not authenticated");
   }
 
-  const response = await appFetch(
-    `${apiBase}/organizations/default/api-keys`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name: DESKTOP_API_KEY_NAME }),
+  const response = await appFetch(`${apiBase}/organizations/default/api-keys`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
     },
-  );
+    body: JSON.stringify({ name: DESKTOP_API_KEY_NAME }),
+  });
 
   if (!response.ok) {
     const error: AuthError = await response.json().catch(() => ({

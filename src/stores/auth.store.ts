@@ -1,10 +1,19 @@
 // ABOUTME: Reactive store for authentication state management.
 // ABOUTME: Tracks user session and provides login/logout actions with unified auth flow.
 
+import { listen } from "@tauri-apps/api/event";
 import { createStore } from "solid-js/store";
 import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
-import { clearSerenApiKey, getSerenApiKey, storeSerenApiKey } from "@/lib/tauri-bridge";
-import { logout as authLogout, isLoggedIn, createApiKey } from "@/services/auth";
+import {
+  clearSerenApiKey,
+  getSerenApiKey,
+  storeSerenApiKey,
+} from "@/lib/tauri-bridge";
+import {
+  logout as authLogout,
+  createApiKey,
+  isLoggedIn,
+} from "@/services/auth";
 import { initializeGateway, resetGateway } from "@/services/mcp-gateway";
 
 export interface User {
@@ -69,7 +78,9 @@ async function initializeMcpInBackground(): Promise<void> {
 
     // Trigger auto-connect for local MCP servers
     const { initMcpAutoConnect } = await import("@/lib/mcp/auto-connect");
-    console.log("[Auth Store] Triggering MCP auto-connect for local servers...");
+    console.log(
+      "[Auth Store] Triggering MCP auto-connect for local servers...",
+    );
     const results = await initMcpAutoConnect();
     console.log("[Auth Store] MCP auto-connect results:", results);
   } catch (error) {
@@ -92,7 +103,9 @@ export async function checkAuth(): Promise<void> {
       // Ensure we have an API key for MCP (create if not stored)
       const hasApiKey = await ensureApiKey();
       if (!hasApiKey) {
-        console.warn("[Auth Store] Could not ensure API key - MCP may not work");
+        console.warn(
+          "[Auth Store] Could not ensure API key - MCP may not work",
+        );
       }
 
       // Initialize MCP Gateway in background (non-blocking)
@@ -117,7 +130,9 @@ export async function setAuthenticated(user: User): Promise<void> {
   // Ensure we have an API key for MCP authentication
   const hasApiKey = await ensureApiKey();
   if (!hasApiKey) {
-    console.warn("[Auth Store] Could not ensure API key after login - MCP may not work");
+    console.warn(
+      "[Auth Store] Could not ensure API key after login - MCP may not work",
+    );
   }
 
   // Initialize MCP Gateway in background (non-blocking)
@@ -150,5 +165,12 @@ export async function logout(): Promise<void> {
     mcpConnected: false,
   });
 }
+
+// Listen for session-expired events from Rust backend (e.g. both tokens dead).
+// Sets isAuthenticated = false so the UI shows the sign-in prompt.
+listen("auth:session-expired", () => {
+  console.warn("[Auth Store] Session expired event from backend");
+  setState({ isAuthenticated: false, user: null });
+});
 
 export const authStore = state;

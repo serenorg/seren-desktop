@@ -6,7 +6,6 @@ import { Show } from "solid-js";
 import { acpStore } from "@/stores/acp.store";
 
 export const AgentModeToggle: Component = () => {
-  console.log("[AgentModeToggle] Rendering component");
   const isAgentMode = () => acpStore.agentModeEnabled;
   const hasActiveSession = () => acpStore.activeSession !== null;
   const sessionStatus = () => acpStore.activeSession?.info.status;
@@ -59,7 +58,8 @@ export const AgentModeToggle: Component = () => {
         <div class="flex items-center gap-1.5">
           <span
             class={`w-2 h-2 rounded-full ${statusColor()} ${
-              sessionStatus() === "prompting" || sessionStatus() === "initializing"
+              sessionStatus() === "prompting" ||
+              sessionStatus() === "initializing"
                 ? "animate-pulse"
                 : ""
             }`}

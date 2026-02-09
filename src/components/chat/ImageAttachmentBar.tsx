@@ -31,7 +31,10 @@ export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
         type="button"
         class={`flex items-center gap-1 px-2 py-1 bg-transparent border border-[#30363d] text-[#8b949e] rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3] ${props.isLoading ? "opacity-50 cursor-wait" : ""}`}
         onClick={() => {
-          console.log("[ImageAttachmentBar] Attach button clicked, isLoading:", props.isLoading);
+          console.log(
+            "[ImageAttachmentBar] Attach button clicked, isLoading:",
+            props.isLoading,
+          );
           if (!props.isLoading) {
             props.onAttach();
           }

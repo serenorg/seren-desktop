@@ -20,7 +20,13 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
     }
 
     let conn = Connection::open(path)?;
+    setup_schema(&conn)?;
+    Ok(conn)
+}
 
+/// Create tables and run migrations on a connection.
+/// Extracted from init_db so it can be tested with in-memory SQLite.
+pub fn setup_schema(conn: &Connection) -> Result<()> {
     // Create conversations table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS conversations (
@@ -59,10 +65,70 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
             .ok(); // Ignore error if column already exists
     }
 
-    // Migration: Create default conversation for orphan messages
-    migrate_orphan_messages(&conn)?;
+    // Migration: Add metadata column for orchestrator fields (JSON blob)
+    let has_metadata: bool = conn
+        .prepare("SELECT metadata FROM messages LIMIT 1")
+        .is_ok();
 
-    Ok(conn)
+    if !has_metadata {
+        conn.execute(
+            "ALTER TABLE messages ADD COLUMN metadata TEXT DEFAULT NULL",
+            [],
+        )
+        .ok();
+    }
+
+    // Create eval_signals table for satisfaction feedback
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS eval_signals (
+            message_id TEXT PRIMARY KEY,
+            task_type TEXT NOT NULL,
+            model_id TEXT,
+            worker_type TEXT,
+            satisfaction INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            synced INTEGER DEFAULT 0,
+            FOREIGN KEY (message_id) REFERENCES messages(id)
+        )",
+        [],
+    )?;
+
+    // Create orchestration_plans table for sub-task decomposition
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS orchestration_plans (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            original_prompt TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+        )",
+        [],
+    )?;
+
+    // Create plan_subtasks table for individual sub-task tracking
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plan_subtasks (
+            id TEXT PRIMARY KEY,
+            plan_id TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            task_type TEXT NOT NULL,
+            worker_type TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            depends_on TEXT,
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            FOREIGN KEY (plan_id) REFERENCES orchestration_plans(id)
+        )",
+        [],
+    )?;
+
+    // Migration: Create default conversation for orphan messages
+    migrate_orphan_messages(conn)?;
+
+    Ok(())
 }
 
 /// Migrate messages without a conversation_id to a default conversation
@@ -96,4 +162,137 @@ fn migrate_orphan_messages(conn: &Connection) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schema_creates_metadata_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        // Verify metadata column exists by inserting a row with it
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Test', 1000)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp, metadata)
+             VALUES ('m1', 'c1', 'user', 'hello', 1000, '{\"v\":1,\"worker_type\":\"chat_model\"}')",
+            [],
+        )
+        .unwrap();
+
+        let metadata: Option<String> = conn
+            .query_row("SELECT metadata FROM messages WHERE id = 'm1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+
+        assert!(metadata.is_some());
+        assert!(metadata.unwrap().contains("\"v\":1"));
+    }
+
+    #[test]
+    fn null_metadata_for_pre_orchestrator_messages() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Test', 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Insert message without metadata (simulates pre-migration data)
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp)
+             VALUES ('m1', 'c1', 'user', 'hello', 1000)",
+            [],
+        )
+        .unwrap();
+
+        let metadata: Option<String> = conn
+            .query_row("SELECT metadata FROM messages WHERE id = 'm1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+
+        assert!(metadata.is_none());
+    }
+
+    #[test]
+    fn schema_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+        // Running setup again should not error
+        setup_schema(&conn).unwrap();
+    }
+
+    #[test]
+    fn orchestration_plan_tables_created() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Test', 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Insert a plan
+        conn.execute(
+            "INSERT INTO orchestration_plans (id, conversation_id, original_prompt, status, created_at)
+             VALUES ('p1', 'c1', '1. Research AI 2. Summarize', 'active', 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Insert subtasks
+        conn.execute(
+            "INSERT INTO plan_subtasks (id, plan_id, prompt, task_type, worker_type, model_id, status, depends_on, created_at)
+             VALUES ('s1', 'p1', 'Research AI', 'research', 'chat_model', 'anthropic/claude-sonnet-4', 'pending', NULL, 1000)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO plan_subtasks (id, plan_id, prompt, task_type, worker_type, model_id, status, depends_on, created_at)
+             VALUES ('s2', 'p1', 'Summarize', 'document_generation', 'chat_model', 'anthropic/claude-sonnet-4', 'pending', '[\"s1\"]', 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Verify reads
+        let plan_status: String = conn
+            .query_row(
+                "SELECT status FROM orchestration_plans WHERE id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(plan_status, "active");
+
+        let subtask_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM plan_subtasks WHERE plan_id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(subtask_count, 2);
+
+        let depends_on: Option<String> = conn
+            .query_row(
+                "SELECT depends_on FROM plan_subtasks WHERE id = 's2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(depends_on, Some("[\"s1\"]".to_string()));
+    }
 }

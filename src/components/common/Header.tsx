@@ -5,7 +5,7 @@ import { type Component, For, Show } from "solid-js";
 import { updaterStore } from "@/stores/updater.store";
 import { BalanceDisplay } from "./BalanceDisplay";
 
-export type Panel = "chat" | "editor" | "database" | "settings" | "account";
+export type Panel = "chat" | "explorer" | "database" | "settings" | "account";
 
 interface NavItem {
   id: Panel;
@@ -16,7 +16,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "chat", label: "Chat", icon: "💬" },
-  { id: "editor", label: "Editor", icon: "📝" },
+  { id: "explorer", label: "Explorer", icon: "📁" },
   { id: "database", label: "Database", icon: "🗄️" },
   { id: "settings", label: "Settings", icon: "⚙️" },
 ];

@@ -16,6 +16,7 @@ import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
 import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
+import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
@@ -37,24 +38,6 @@ import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ToolCallCard } from "./ToolCallCard";
-
-/** Check if an error message indicates an auth/login issue */
-function isAuthError(msg: string | null | undefined): boolean {
-  if (!msg) return false;
-  return (
-    /login required/i.test(msg) ||
-    /claude login/i.test(msg) ||
-    /not logged in/i.test(msg) ||
-    /authentication required/i.test(msg) ||
-    /authentication_error/i.test(msg) ||
-    /oauth token has expired/i.test(msg) ||
-    /token has expired/i.test(msg) ||
-    /token expired/i.test(msg) ||
-    /please obtain a new token/i.test(msg) ||
-    /refresh your existing token/i.test(msg) ||
-    /401/i.test(msg)
-  );
-}
 
 interface AgentChatProps {
   onViewDiff?: (diff: DiffEvent) => void;
@@ -89,20 +72,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
   onCleanup(() => {
     window.removeEventListener("seren:pick-images", onPickImages);
-    // Save agent input when component unmounts (e.g., when switching to chat mode)
-    const currentInput = input();
-    if (currentInput) {
-      acpStore.setPendingAgentInput(currentInput);
-    }
-  });
-
-  // Restore pending agent input when component mounts (e.g., when switching back to agent mode)
-  createEffect(() => {
-    const pending = acpStore.pendingAgentInput;
-    if (pending) {
-      setInput(pending);
-      acpStore.setPendingAgentInput(null);
-    }
   });
 
   const hasSession = () => acpStore.activeSession !== null;
@@ -217,7 +186,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     } catch (error) {
       console.error("[AgentChat] handleAttachImages error:", error);
       // Show error status to user
-      setCommandStatus(`Failed to attach files: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setCommandStatus(
+        `Failed to attach files: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
       setTimeout(() => setCommandStatus(null), 5000);
     } finally {
       setIsAttaching(false);
@@ -438,12 +409,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             />
             <Show when={message.duration}>
               {(() => {
-                const { verb, duration } = formatDurationWithVerb(
+                const { verb, duration, costDisplay } = formatDurationWithVerb(
                   message.duration!,
+                  message.cost,
                 );
                 return (
                   <div class="mt-2 text-xs text-[#8b949e]">
                     ✻ {verb} for {duration}
+                    {costDisplay && ` at ${costDisplay}`}
                   </div>
                 );
               })()}

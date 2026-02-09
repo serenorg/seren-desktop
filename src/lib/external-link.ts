@@ -48,7 +48,7 @@ export async function openExternalLink(url: string): Promise<void> {
  */
 export function installExternalLinkInterceptor(): void {
   document.addEventListener("click", (e) => {
-    // Skip if another handler already processed this click (e.g., AgentChat, ChatPanel)
+    // Skip if another handler already processed this click (e.g., AgentChat, ChatContent)
     if (e.defaultPrevented) return;
 
     const anchor = (e.target as HTMLElement).closest("a[href]");

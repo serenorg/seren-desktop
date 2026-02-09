@@ -55,6 +55,8 @@ export interface AgentMessage {
   toolCall?: ToolCallEvent;
   /** Duration in milliseconds for how long the response took */
   duration?: number;
+  /** Total cost in SerenBucks for this message's query, reported by Gateway. */
+  cost?: number;
 }
 
 export interface AgentModelInfo {
@@ -87,8 +89,6 @@ interface AcpState {
   sessions: Record<string, ActiveSession>;
   /** Currently focused session ID */
   activeSessionId: string | null;
-  /** Whether agent mode is enabled in the chat */
-  agentModeEnabled: boolean;
   /** Selected agent type for new sessions */
   selectedAgentType: AgentType;
   /** Loading state */
@@ -101,22 +101,21 @@ interface AcpState {
   pendingPermissions: import("@/services/acp").PermissionRequestEvent[];
   /** Pending diff proposals awaiting user accept/reject */
   pendingDiffProposals: DiffProposalEvent[];
-  /** Pending agent input to restore when switching back to agent mode */
-  pendingAgentInput: string | null;
+  /** Whether agent mode is active (vs chat mode) */
+  agentModeEnabled: boolean;
 }
 
 const [state, setState] = createStore<AcpState>({
   availableAgents: [],
   sessions: {},
   activeSessionId: null,
-  agentModeEnabled: false,
   selectedAgentType: "claude-code",
   isLoading: false,
   error: null,
   installStatus: null,
   pendingPermissions: [],
   pendingDiffProposals: [],
-  pendingAgentInput: null,
+  agentModeEnabled: false,
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
@@ -147,10 +146,6 @@ export const acpStore = {
     return state.sessions[state.activeSessionId] ?? null;
   },
 
-  get agentModeEnabled() {
-    return state.agentModeEnabled;
-  },
-
   get selectedAgentType() {
     return state.selectedAgentType;
   },
@@ -177,8 +172,8 @@ export const acpStore = {
     return state.pendingDiffProposals;
   },
 
-  get pendingAgentInput() {
-    return state.pendingAgentInput;
+  get agentModeEnabled() {
+    return state.agentModeEnabled;
   },
 
   /**
@@ -757,24 +752,14 @@ export const acpStore = {
   // ============================================================================
 
   /**
-   * Toggle agent mode on/off.
+   * Set the selected agent type for new sessions.
    */
   setAgentModeEnabled(enabled: boolean) {
     setState("agentModeEnabled", enabled);
   },
 
-  /**
-   * Set the selected agent type for new sessions.
-   */
   setSelectedAgentType(agentType: AgentType) {
     setState("selectedAgentType", agentType);
-  },
-
-  /**
-   * Set pending agent input to restore when switching back to agent mode.
-   */
-  setPendingAgentInput(input: string | null) {
-    setState("pendingAgentInput", input);
   },
 
   /**
@@ -850,6 +835,7 @@ export const acpStore = {
 
       case "promptComplete":
         this.finalizeStreamingContent(sessionId);
+        this.markPendingToolCallsComplete(sessionId);
         // Transition status back to "ready" so queued messages can be processed
         setState(
           "sessions",
@@ -972,7 +958,13 @@ export const acpStore = {
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
   },
 
-  handleToolResult(sessionId: string, toolCallId: string, status: string, result?: string, error?: string) {
+  handleToolResult(
+    sessionId: string,
+    toolCallId: string,
+    status: string,
+    result?: string,
+    error?: string,
+  ) {
     const session = state.sessions[sessionId];
     if (!session) return;
 
@@ -996,6 +988,42 @@ export const acpStore = {
 
     // Remove from pending
     session.pendingToolCalls.delete(toolCallId);
+  },
+
+  /**
+   * Mark all tool calls that are still "running" or "pending" as "completed".
+   * Called when promptComplete fires — all tool calls must be done by then.
+   */
+  markPendingToolCallsComplete(sessionId: string) {
+    const session = state.sessions[sessionId];
+    if (!session) return;
+
+    const runningStatuses = ["running", "pending", "in_progress"];
+    const hasRunning = session.messages.some(
+      (msg) =>
+        msg.toolCall &&
+        runningStatuses.includes(msg.toolCall.status.toLowerCase()),
+    );
+
+    if (!hasRunning) return;
+
+    setState("sessions", sessionId, "messages", (msgs) =>
+      msgs.map((msg) => {
+        if (
+          msg.toolCall &&
+          runningStatuses.includes(msg.toolCall.status.toLowerCase())
+        ) {
+          return {
+            ...msg,
+            toolCall: { ...msg.toolCall, status: "completed" },
+          };
+        }
+        return msg;
+      }),
+    );
+
+    // Clear pending map
+    session.pendingToolCalls.clear();
   },
 
   handleDiff(sessionId: string, diff: DiffEvent) {

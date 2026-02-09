@@ -1,9 +1,9 @@
 // ABOUTME: Diff proposal review dialog for agent file edits.
 // ABOUTME: Shows Monaco diff editor with accept/reject buttons before writing to disk.
 
+import type * as Monaco from "monaco-editor";
 import type { Component } from "solid-js";
 import { createSignal, onCleanup, onMount } from "solid-js";
-import type * as Monaco from "monaco-editor";
 import { getMonaco } from "@/lib/editor";
 import type { DiffProposalEvent } from "@/stores/acp.store";
 import { acpStore } from "@/stores/acp.store";
@@ -13,7 +13,10 @@ export interface DiffProposalDialogProps {
   proposal: DiffProposalEvent;
 }
 
-function countDiffLines(oldText: string, newText: string): { added: number; removed: number } {
+function countDiffLines(
+  oldText: string,
+  newText: string,
+): { added: number; removed: number } {
   const oldLines = oldText.split("\n");
   const newLines = newText.split("\n");
   const oldSet = new Set(oldLines);
@@ -51,12 +54,15 @@ function guessLanguage(filePath: string): string {
   return map[ext] ?? "plaintext";
 }
 
-export const DiffProposalDialog: Component<DiffProposalDialogProps> = (props) => {
+export const DiffProposalDialog: Component<DiffProposalDialogProps> = (
+  props,
+) => {
   let containerRef: HTMLDivElement | undefined;
   let diffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
-  const [ready, setReady] = createSignal(false);
+  const [_ready, setReady] = createSignal(false);
 
-  const stats = () => countDiffLines(props.proposal.oldText, props.proposal.newText);
+  const stats = () =>
+    countDiffLines(props.proposal.oldText, props.proposal.newText);
   const fileName = () => {
     const parts = props.proposal.path.split("/");
     return parts[parts.length - 1];
@@ -68,8 +74,14 @@ export const DiffProposalDialog: Component<DiffProposalDialogProps> = (props) =>
       const monaco = getMonaco();
       const language = guessLanguage(props.proposal.path);
 
-      const originalModel = monaco.editor.createModel(props.proposal.oldText, language);
-      const modifiedModel = monaco.editor.createModel(props.proposal.newText, language);
+      const originalModel = monaco.editor.createModel(
+        props.proposal.oldText,
+        language,
+      );
+      const modifiedModel = monaco.editor.createModel(
+        props.proposal.newText,
+        language,
+      );
 
       diffEditor = monaco.editor.createDiffEditor(containerRef, {
         readOnly: true,

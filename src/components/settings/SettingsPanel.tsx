@@ -16,8 +16,8 @@ import {
 } from "@/stores/settings.store";
 import { claimDaily, walletState } from "@/stores/wallet.store";
 import { OAuthLogins } from "./OAuthLogins";
-import { ProviderSettings } from "./ProviderSettings";
 import { OpenClawSettings } from "./OpenClawSettings";
+import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
 import { ToolsetsSettings } from "./ToolsetsSettings";
 
@@ -114,7 +114,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   };
 
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
-    { id: "chat", label: "Chat", icon: "💬" },
+    { id: "chat", label: "Window", icon: "🪟" },
     { id: "agent", label: "Agent", icon: "🛡️" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },
@@ -166,7 +166,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       <main class="flex-1 px-8 py-6 overflow-y-auto">
         <Show when={activeSection() === "chat"}>
           <section>
-            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Chat Settings</h3>
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Window Settings</h3>
             <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Configure AI chat behavior and conversation history.
             </p>
@@ -1148,8 +1148,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   </span>
                   <span class="text-[0.8rem] text-muted-foreground">
                     Persist conversations, preferences, and knowledge across
-                    sessions. Memory data is stored in your SerenDB project.
-                    You must be logged in to SerenDB to use this feature.
+                    sessions. Memory data is stored in your SerenDB project. You
+                    must be logged in to SerenDB to use this feature.
                   </span>
                 </span>
               </label>

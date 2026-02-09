@@ -316,7 +316,7 @@ pub enum SessionStatus {
 
 /// Commands sent to the ACP session worker thread
 #[derive(Debug)]
-enum AcpCommand {
+pub(crate) enum AcpCommand {
     Prompt {
         prompt: String,
         context: Option<Vec<serde_json::Value>>,
@@ -337,14 +337,14 @@ enum AcpCommand {
 }
 
 /// Internal session state (stored in main thread)
-struct AcpSession {
-    id: String,
+pub(crate) struct AcpSession {
+    pub(crate) id: String,
     agent_type: AgentType,
     cwd: String,
     status: SessionStatus,
     created_at: jiff::Timestamp,
     /// Channel to send commands to the worker thread
-    command_tx: Option<mpsc::Sender<AcpCommand>>,
+    pub(crate) command_tx: Option<mpsc::Sender<AcpCommand>>,
     /// Handle to the worker thread
     _worker_handle: Option<thread::JoinHandle<()>>,
     /// Pending permission requests awaiting user response (shared with ClientDelegate)
@@ -355,7 +355,7 @@ struct AcpSession {
 
 /// State for managing ACP sessions
 pub struct AcpState {
-    sessions: RwLock<HashMap<String, Arc<Mutex<AcpSession>>>>,
+    pub(crate) sessions: RwLock<HashMap<String, Arc<Mutex<AcpSession>>>>,
 }
 
 impl AcpState {
@@ -878,24 +878,33 @@ fn handle_session_notification(
             log::debug!("[ACP] MESSAGE_CHUNK emit result: {:?}", emit_result);
         }
         SessionUpdate::ToolCall(tool_call) => {
+            let kind_str = serde_json::to_value(&tool_call.kind)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_else(|| "other".to_string());
+            let status_str = serde_json::to_value(&tool_call.status)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_else(|| "pending".to_string());
             log::debug!(
-                "[ACP] Emitting TOOL_CALL: session={}, tool_call_id={}, title={}, kind={:?}, status={:?}",
+                "[ACP] Emitting TOOL_CALL: session={}, tool_call_id={}, title={}, kind={}, status={}",
                 session_id,
                 tool_call.tool_call_id,
                 tool_call.title,
-                tool_call.kind,
-                tool_call.status
+                kind_str,
+                status_str
             );
-            let emit_result = app.emit(
-                events::TOOL_CALL,
-                serde_json::json!({
-                    "sessionId": session_id,
-                    "toolCallId": tool_call.tool_call_id.to_string(),
-                    "title": tool_call.title,
-                    "kind": format!("{:?}", tool_call.kind),
-                    "status": format!("{:?}", tool_call.status)
-                }),
-            );
+            let mut payload = serde_json::json!({
+                "sessionId": session_id,
+                "toolCallId": tool_call.tool_call_id.to_string(),
+                "title": tool_call.title,
+                "kind": kind_str,
+                "status": status_str
+            });
+            if let Some(ref raw_input) = tool_call.raw_input {
+                payload["parameters"] = raw_input.clone();
+            }
+            let emit_result = app.emit(events::TOOL_CALL, payload);
             if let Err(ref e) = emit_result {
                 log::error!(
                     "[ACP] Failed to emit TOOL_CALL {} for session {}: {}",
@@ -909,14 +918,24 @@ fn handle_session_notification(
             // Defensive: if the update has a title, also emit a TOOL_CALL event
             // so the frontend creates a card even if no prior ToolCall was sent.
             if let Some(ref title) = update.fields.title {
+                let kind_str = update.fields.kind
+                    .as_ref()
+                    .and_then(|k| serde_json::to_value(k).ok())
+                    .and_then(|v| v.as_str().map(String::from))
+                    .unwrap_or_else(|| "other".to_string());
+                let status_str = update.fields.status
+                    .as_ref()
+                    .and_then(|s| serde_json::to_value(s).ok())
+                    .and_then(|v| v.as_str().map(String::from))
+                    .unwrap_or_else(|| "pending".to_string());
                 let _ = app.emit(
                     events::TOOL_CALL,
                     serde_json::json!({
                         "sessionId": session_id,
                         "toolCallId": update.tool_call_id.to_string(),
                         "title": title,
-                        "kind": format!("{:?}", update.fields.kind.unwrap_or_default()),
-                        "status": format!("{:?}", update.fields.status.unwrap_or_default())
+                        "kind": kind_str,
+                        "status": status_str
                     }),
                 );
             }
@@ -953,19 +972,53 @@ fn handle_session_notification(
                 }
             }
 
+            // Serialize status using serde (not Debug format) for consistent
+            // values like "in_progress", "completed" that the frontend expects.
+            let result_status_str = update.fields.status
+                .as_ref()
+                .and_then(|s| serde_json::to_value(s).ok())
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_else(|| "running".to_string());
             log::debug!(
-                "[ACP] Emitting TOOL_RESULT: session={}, tool_call_id={}, status={:?}",
+                "[ACP] Emitting TOOL_RESULT: session={}, tool_call_id={}, status={}",
                 session_id,
                 update.tool_call_id,
-                update.fields.status
+                result_status_str
             );
+            let mut result_payload = serde_json::json!({
+                "sessionId": session_id,
+                "toolCallId": update.tool_call_id.to_string(),
+                "status": result_status_str,
+            });
+            // Include text content as result so the frontend can display it
+            if let Some(ref content) = update.fields.content {
+                let text_parts: Vec<String> = content
+                    .iter()
+                    .filter_map(|block| {
+                        if let agent_client_protocol::ToolCallContent::Content(c) = block {
+                            if let ContentBlock::Text(t) = &c.content {
+                                Some(t.text.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !text_parts.is_empty() {
+                    let joined = text_parts.join("\n");
+                    let truncated = if joined.len() > 5000 {
+                        format!("{}... ({} bytes total)", &joined[..5000], joined.len())
+                    } else {
+                        joined
+                    };
+                    result_payload["result"] = serde_json::Value::String(truncated);
+                }
+            }
             let emit_result = app.emit(
                 events::TOOL_RESULT,
-                serde_json::json!({
-                    "sessionId": session_id,
-                    "toolCallId": update.tool_call_id.to_string(),
-                    "status": format!("{:?}", update.fields.status),
-                }),
+                result_payload,
             );
             if let Err(ref e) = emit_result {
                 log::error!(

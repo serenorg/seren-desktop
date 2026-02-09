@@ -76,7 +76,10 @@ async function refreshBalance(): Promise<void> {
   }
 
   // Add stack trace to identify caller
-  console.log("[Wallet Store] refreshBalance called from:", new Error().stack?.split('\n')[2]?.trim());
+  console.log(
+    "[Wallet Store] refreshBalance called from:",
+    new Error().stack?.split("\n")[2]?.trim(),
+  );
   console.log("[Wallet Store] Setting isLoading = true");
   setWalletState("isLoading", true);
   setWalletState("error", null);
@@ -125,7 +128,10 @@ function startAutoRefresh(): void {
     return;
   }
 
-  console.log("[Wallet Store] Starting auto-refresh, called from:", new Error().stack?.split('\n')[2]?.trim());
+  console.log(
+    "[Wallet Store] Starting auto-refresh, called from:",
+    new Error().stack?.split("\n")[2]?.trim(),
+  );
   setWalletState("autoRefreshActive", true);
 
   // Fetch immediately (but only if not already loading)
@@ -277,7 +283,7 @@ function updateBalanceFromError(availableBalanceAtomic: number): void {
     "[Wallet Store] Updating balance from 402 error:",
     availableBalanceAtomic,
     "->",
-    balanceUsd
+    balanceUsd,
   );
   setWalletState({
     balance: availableBalanceAtomic / 1_000_000,

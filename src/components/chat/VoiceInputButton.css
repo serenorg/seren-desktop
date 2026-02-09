@@ -99,7 +99,9 @@
   background: transparent;
   color: #484f58;
   cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
   padding: 0;
   flex-shrink: 0;
 }

@@ -26,6 +26,7 @@ pub struct StoredMessage {
     pub content: String,
     pub model: Option<String>,
     pub timestamp: i64,
+    pub metadata: Option<String>,
 }
 
 // ============================================================================
@@ -194,12 +195,13 @@ pub async fn save_message(
     content: String,
     model: Option<String>,
     timestamp: i64,
+    metadata: Option<String>,
 ) -> Result<(), String> {
     run_db(app, move |conn| {
         conn.execute(
-            "INSERT OR REPLACE INTO messages (id, conversation_id, role, content, model, timestamp)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, conversation_id, role, content, model, timestamp],
+            "INSERT OR REPLACE INTO messages (id, conversation_id, role, content, model, timestamp, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, conversation_id, role, content, model, timestamp, metadata],
         )?;
 
         // Prune old messages only when count exceeds limit
@@ -229,7 +231,7 @@ pub async fn get_messages(
 ) -> Result<Vec<StoredMessage>, String> {
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, conversation_id, role, content, model, timestamp
+            "SELECT id, conversation_id, role, content, model, timestamp, metadata
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY timestamp DESC
@@ -245,6 +247,7 @@ pub async fn get_messages(
                     content: row.get(3)?,
                     model: row.get(4)?,
                     timestamp: row.get(5)?,
+                    metadata: row.get(6)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

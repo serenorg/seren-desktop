@@ -419,7 +419,10 @@ export const chatStore = {
       );
     } catch (error) {
       console.error("[chatStore] Failed to persist message:", error);
-      setState("error", "Failed to save message. Chat history may be incomplete.");
+      setState(
+        "error",
+        "Failed to save message. Chat history may be incomplete.",
+      );
     }
   },
 

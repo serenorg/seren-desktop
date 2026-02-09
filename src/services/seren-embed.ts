@@ -45,7 +45,10 @@ interface GatewayResponse {
  * Generate embeddings for a single text string.
  * Uses SerenEmbed publisher via Seren Gateway.
  */
-export async function embedText(text: string, model?: string): Promise<number[]> {
+export async function embedText(
+  text: string,
+  model?: string,
+): Promise<number[]> {
   const response = await embedTexts([text], model);
   return response.data[0].embedding;
 }

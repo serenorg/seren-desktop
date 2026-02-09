@@ -68,7 +68,7 @@ export const editorStore = {
 
   /**
    * Set a pending action to execute with the selection.
-   * ChatPanel will watch for this and auto-send the appropriate prompt.
+   * ChatContent will watch for this and auto-send the appropriate prompt.
    */
   setPendingAction(action: PendingAction) {
     setState("pendingAction", action);

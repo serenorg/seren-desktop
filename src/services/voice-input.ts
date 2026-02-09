@@ -1,7 +1,7 @@
 // ABOUTME: Voice input service for capturing audio and routing to STT publishers.
 // ABOUTME: Manages microphone access, recording lifecycle, and publisher selection.
 
-export type STTPublisher = 'deepgram' | 'assemblyai' | 'openai-whisper';
+export type STTPublisher = "deepgram" | "assemblyai" | "openai-whisper";
 
 export interface VoiceInputConfig {
   publisher: STTPublisher;

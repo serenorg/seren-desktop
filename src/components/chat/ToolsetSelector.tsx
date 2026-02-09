@@ -4,9 +4,9 @@
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
-  settingsState,
-  setActiveToolset,
   getActiveToolset,
+  setActiveToolset,
+  settingsState,
 } from "@/stores/settings.store";
 
 export const ToolsetSelector: Component = () => {
@@ -48,7 +48,10 @@ export const ToolsetSelector: Component = () => {
       <button
         class="flex items-center gap-2 px-3 py-1.5 bg-popover border border-muted rounded-md text-sm text-foreground cursor-pointer transition-colors hover:border-[rgba(148,163,184,0.4)]"
         onClick={() => setIsOpen(!isOpen())}
-        title={activeToolset()?.description || "Select a toolset to scope available tools"}
+        title={
+          activeToolset()?.description ||
+          "Select a toolset to scope available tools"
+        }
       >
         <span class="text-[14px]">📦</span>
         <span class="text-foreground max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">
