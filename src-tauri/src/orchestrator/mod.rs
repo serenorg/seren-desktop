@@ -6,6 +6,7 @@ pub mod classifier;
 pub mod eval;
 pub mod router;
 pub mod service;
+pub mod trust;
 pub mod types;
 pub mod worker;
 

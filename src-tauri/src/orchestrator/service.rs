@@ -11,9 +11,10 @@ use tokio::sync::{mpsc, Mutex};
 use super::chat_model_worker::ChatModelWorker;
 use super::classifier;
 use super::router;
+use super::trust;
 use super::types::{
-    OrchestratorEvent, RoutingDecision, SkillRef, TransitionEvent, UserCapabilities, WorkerEvent,
-    WorkerType,
+    DelegationType, OrchestratorEvent, RoutingDecision, SkillRef, TransitionEvent,
+    UserCapabilities, WorkerEvent, WorkerType,
 };
 use super::worker::Worker;
 
@@ -77,13 +78,36 @@ pub async fn orchestrate(
     );
 
     // 2. Route to a worker
-    let routing = router::route(&classification, &capabilities);
+    let mut routing = router::route(&classification, &capabilities);
     log::info!(
         "[Orchestrator] Routing: worker={:?}, model={}, skills={}",
         routing.worker_type,
         routing.model_id,
         routing.selected_skills.len()
     );
+
+    // 2b. Check trust graduation — upgrade to FullHandoff if earned
+    let app_for_trust = app.clone();
+    let task_type = classification.task_type.clone();
+    let model_id = routing.model_id.clone();
+    let trusted = tauri::async_runtime::spawn_blocking(move || {
+        match crate::services::database::init_db(&app_for_trust) {
+            Ok(conn) => trust::is_trusted(&conn, &task_type, &model_id),
+            Err(_) => false,
+        }
+    })
+    .await
+    .unwrap_or(false);
+
+    if trusted {
+        routing.delegation = DelegationType::FullHandoff;
+        routing.reason = format!("{} (trusted)", routing.reason);
+        log::info!(
+            "[Orchestrator] Trust graduation: upgraded to FullHandoff for ({}, {})",
+            classification.task_type,
+            routing.model_id
+        );
+    }
 
     // 3. Load selected skill content from disk
     let skill_content = load_skill_content(&routing.selected_skills)?;
