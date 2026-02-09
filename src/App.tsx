@@ -233,7 +233,7 @@ function App() {
                 <div class="flex items-center justify-center py-1.5 border-b border-border">
                   <AgentModeToggle />
                 </div>
-                <div class="flex-1 overflow-hidden">
+                <div class="flex-1 overflow-hidden flex flex-col">
                   <Show
                     when={acpStore.agentModeEnabled}
                     fallback={<ChatContent onSignInClick={handleSignInClick} />}
