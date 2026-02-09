@@ -10,6 +10,7 @@ pub mod commands {
     pub mod chat;
     pub mod indexing;
     pub mod memory;
+    pub mod orchestrator;
     pub mod web;
 }
 
@@ -432,7 +433,8 @@ pub fn run() {
 
     builder = builder
         .manage(mcp::McpState::new())
-        .manage(mcp::HttpMcpState::new());
+        .manage(mcp::HttpMcpState::new())
+        .manage(orchestrator::service::OrchestratorState::new());
 
     #[cfg(feature = "acp")]
     {
@@ -759,6 +761,9 @@ pub fn run() {
             skills::install_skill,
             skills::remove_skill,
             skills::read_skill_content,
+            // Orchestrator commands
+            commands::orchestrator::orchestrate,
+            commands::orchestrator::cancel_orchestration,
             // Memory commands
             commands::memory::memory_bootstrap,
             commands::memory::memory_remember,

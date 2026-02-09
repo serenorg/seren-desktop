@@ -4,6 +4,7 @@
 pub mod chat_model_worker;
 pub mod classifier;
 pub mod router;
+pub mod service;
 pub mod types;
 pub mod worker;
 

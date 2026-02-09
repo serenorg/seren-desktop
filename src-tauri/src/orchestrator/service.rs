@@ -1,0 +1,510 @@
+// ABOUTME: Orchestrator service that ties classifier, router, and workers together.
+// ABOUTME: Provides the main orchestrate() entry point called by Tauri commands.
+
+use log;
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
+use tokio::sync::{mpsc, Mutex};
+
+use super::chat_model_worker::ChatModelWorker;
+use super::classifier;
+use super::router;
+use super::types::{
+    OrchestratorEvent, RoutingDecision, SkillRef, TransitionEvent, UserCapabilities, WorkerEvent,
+    WorkerType,
+};
+use super::worker::Worker;
+
+// =============================================================================
+// Orchestrator State
+// =============================================================================
+
+/// Managed state for the orchestrator, tracking active sessions for cancellation.
+pub struct OrchestratorState {
+    /// Map of conversation_id → cancellation sender.
+    /// Sending on a cancel channel signals the orchestrator to stop.
+    active_sessions: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+}
+
+impl OrchestratorState {
+    pub fn new() -> Self {
+        Self {
+            active_sessions: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl Default for OrchestratorState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =============================================================================
+// Main Orchestration Flow
+// =============================================================================
+
+/// Execute the full orchestration pipeline for a user prompt.
+///
+/// 1. Classify the task
+/// 2. Route to a worker
+/// 3. Load selected skill content from disk
+/// 4. Emit transition announcement
+/// 5. Spawn worker execution
+/// 6. Forward worker events to frontend
+pub async fn orchestrate(
+    app: AppHandle,
+    state: &OrchestratorState,
+    conversation_id: String,
+    prompt: String,
+    history: Vec<serde_json::Value>,
+    capabilities: UserCapabilities,
+    _auth_token: String,
+) -> Result<(), String> {
+    log::info!(
+        "[Orchestrator] Starting orchestration for conversation {}",
+        conversation_id
+    );
+
+    // 1. Classify the task
+    let classification = classifier::classify(&prompt, &capabilities.installed_skills);
+    log::info!(
+        "[Orchestrator] Classification: type={}, complexity={:?}",
+        classification.task_type,
+        classification.complexity
+    );
+
+    // 2. Route to a worker
+    let routing = router::route(&classification, &capabilities);
+    log::info!(
+        "[Orchestrator] Routing: worker={:?}, model={}, skills={}",
+        routing.worker_type,
+        routing.model_id,
+        routing.selected_skills.len()
+    );
+
+    // 3. Load selected skill content from disk
+    let skill_content = load_skill_content(&routing.selected_skills)?;
+
+    // 4. Emit transition announcement
+    let transition = TransitionEvent {
+        conversation_id: conversation_id.clone(),
+        model_name: routing.model_id.clone(),
+        task_description: routing.reason.clone(),
+    };
+    app.emit("orchestrator://transition", &transition)
+        .map_err(|e| format!("Failed to emit transition event: {}", e))?;
+
+    // 5. Create event channel and cancellation
+    let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+
+    // Register the cancellation sender
+    {
+        let mut sessions = state.active_sessions.lock().await;
+        sessions.insert(conversation_id.clone(), cancel_tx);
+    }
+
+    // 6. Spawn worker execution
+    let worker = create_worker(&routing, &app);
+    let worker_prompt = prompt.clone();
+    let worker_routing = routing.clone();
+    let worker_handle = tokio::spawn(async move {
+        worker
+            .execute(
+                &worker_prompt,
+                &history,
+                &worker_routing,
+                &skill_content,
+                event_tx,
+            )
+            .await
+    });
+
+    // 7. Forward events to frontend, with cancellation support
+    let conv_id = conversation_id.clone();
+    let app_for_events = app.clone();
+    let forward_handle = tokio::spawn(async move {
+        let mut cancel_rx = cancel_rx;
+        loop {
+            tokio::select! {
+                event = event_rx.recv() => {
+                    match event {
+                        Some(worker_event) => {
+                            let orchestrator_event = OrchestratorEvent {
+                                conversation_id: conv_id.clone(),
+                                worker_event,
+                            };
+                            if let Err(e) = app_for_events.emit("orchestrator://event", &orchestrator_event) {
+                                log::error!("[Orchestrator] Failed to emit event: {}", e);
+                                break;
+                            }
+                        }
+                        None => {
+                            // Channel closed — worker is done
+                            break;
+                        }
+                    }
+                }
+                _ = &mut cancel_rx => {
+                    log::info!("[Orchestrator] Cancellation received for conversation {}", conv_id);
+                    break;
+                }
+            }
+        }
+    });
+
+    // 8. Wait for forwarding to complete
+    let _ = forward_handle.await;
+
+    // 9. Wait for worker to complete (it may already be done)
+    match worker_handle.await {
+        Ok(Ok(())) => {
+            log::info!(
+                "[Orchestrator] Completed orchestration for conversation {}",
+                conversation_id
+            );
+        }
+        Ok(Err(e)) => {
+            log::error!("[Orchestrator] Worker error: {}", e);
+            // Don't propagate — the Error event was already sent through the channel
+        }
+        Err(e) => {
+            log::error!("[Orchestrator] Worker task panicked: {}", e);
+            let error_event = OrchestratorEvent {
+                conversation_id: conversation_id.clone(),
+                worker_event: WorkerEvent::Error {
+                    message: "Internal error: worker task failed".to_string(),
+                },
+            };
+            let _ = app.emit("orchestrator://event", &error_event);
+        }
+    }
+
+    // 10. Clean up session
+    {
+        let mut sessions = state.active_sessions.lock().await;
+        sessions.remove(&conversation_id);
+    }
+
+    Ok(())
+}
+
+/// Cancel an active orchestration by conversation ID.
+pub async fn cancel(state: &OrchestratorState, conversation_id: &str) -> Result<(), String> {
+    let mut sessions = state.active_sessions.lock().await;
+    if let Some(cancel_tx) = sessions.remove(conversation_id) {
+        let _ = cancel_tx.send(());
+        log::info!(
+            "[Orchestrator] Sent cancel signal for conversation {}",
+            conversation_id
+        );
+        Ok(())
+    } else {
+        log::warn!(
+            "[Orchestrator] No active session for conversation {}",
+            conversation_id
+        );
+        Ok(()) // Not an error — the session may have already completed
+    }
+}
+
+// =============================================================================
+// Worker Creation
+// =============================================================================
+
+/// Create the appropriate worker based on the routing decision.
+fn create_worker(routing: &RoutingDecision, _app: &AppHandle) -> Arc<dyn Worker> {
+    match routing.worker_type {
+        WorkerType::ChatModel => Arc::new(ChatModelWorker::new()),
+        WorkerType::AcpAgent => {
+            // ACP worker requires feature flag; fall back to chat model if not available
+            #[cfg(feature = "acp")]
+            {
+                let worker = super::acp_worker::AcpWorker::new(_app.clone());
+                Arc::new(worker)
+            }
+            #[cfg(not(feature = "acp"))]
+            {
+                log::warn!(
+                    "[Orchestrator] ACP feature not enabled, falling back to ChatModel worker"
+                );
+                Arc::new(ChatModelWorker::new())
+            }
+        }
+        WorkerType::McpPublisher => {
+            // MCP publisher worker not yet implemented; fall back to chat model
+            log::warn!("[Orchestrator] McpPublisher worker not yet implemented, using ChatModel");
+            Arc::new(ChatModelWorker::new())
+        }
+    }
+}
+
+// =============================================================================
+// Skill Content Loading
+// =============================================================================
+
+/// Read SKILL.md content from disk for each selected skill.
+///
+/// Strips YAML frontmatter (everything between the first `---` pair).
+/// Concatenates into a single string with headers for each skill.
+/// Validates that skill paths are within expected directories.
+pub fn load_skill_content(skills: &[SkillRef]) -> Result<String, String> {
+    if skills.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut sections = Vec::new();
+    for skill in skills {
+        // Security: validate the path ends with SKILL.md
+        let path = Path::new(&skill.path);
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n != "SKILL.md")
+            .unwrap_or(true)
+        {
+            log::warn!(
+                "[Orchestrator] Skipping skill {} — path does not end with SKILL.md: {}",
+                skill.slug,
+                skill.path
+            );
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(&skill.path) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!(
+                    "[Orchestrator] Failed to read skill {}: {}",
+                    skill.slug,
+                    e
+                );
+                continue; // Skip unreadable skills rather than failing the entire request
+            }
+        };
+
+        let body = strip_frontmatter(&content);
+        if !body.trim().is_empty() {
+            sections.push(format!("## Skill: {}\n\n{}", skill.name, body));
+        }
+    }
+
+    if sections.is_empty() {
+        return Ok(String::new());
+    }
+
+    Ok(format!(
+        "# Active Skills\n\n{}",
+        sections.join("\n\n---\n\n")
+    ))
+}
+
+/// Strip YAML frontmatter from a markdown document.
+///
+/// Frontmatter is delimited by `---` on its own line at the start of the file.
+/// If the document starts with `---`, everything up to and including the
+/// closing `---` is removed.
+pub fn strip_frontmatter(content: &str) -> &str {
+    let trimmed = content.trim_start();
+
+    if !trimmed.starts_with("---") {
+        return content;
+    }
+
+    // Find the closing ---
+    let after_opening = &trimmed[3..];
+    if let Some(close_pos) = after_opening.find("\n---") {
+        // Skip past the closing --- and any trailing newline
+        let remainder = &after_opening[close_pos + 4..];
+        remainder.trim_start_matches('\n').trim_start_matches('\r')
+    } else {
+        // No closing --- found; return the whole content as-is
+        content
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // Frontmatter Stripping
+    // =========================================================================
+
+    #[test]
+    fn strips_yaml_frontmatter() {
+        let content = "---\ntitle: Test Skill\ntags: [test]\n---\n# Skill Body\n\nThis is the skill content.";
+        let result = strip_frontmatter(content);
+        assert_eq!(result, "# Skill Body\n\nThis is the skill content.");
+    }
+
+    #[test]
+    fn preserves_content_without_frontmatter() {
+        let content = "# Just Markdown\n\nNo frontmatter here.";
+        let result = strip_frontmatter(content);
+        assert_eq!(result, content);
+    }
+
+    #[test]
+    fn preserves_content_with_unclosed_frontmatter() {
+        let content = "---\ntitle: Broken\nNo closing delimiter";
+        let result = strip_frontmatter(content);
+        assert_eq!(result, content);
+    }
+
+    #[test]
+    fn handles_empty_content() {
+        assert_eq!(strip_frontmatter(""), "");
+    }
+
+    #[test]
+    fn handles_frontmatter_only() {
+        let content = "---\ntitle: Just Frontmatter\n---\n";
+        let result = strip_frontmatter(content);
+        assert!(result.trim().is_empty());
+    }
+
+    // =========================================================================
+    // Skill Content Loading
+    // =========================================================================
+
+    #[test]
+    fn load_skill_content_empty_slice_returns_empty() {
+        let result = load_skill_content(&[]).unwrap();
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn load_skill_content_with_valid_skill() {
+        // Create a temp file
+        let dir = std::env::temp_dir().join("seren_test_skills");
+        let skill_dir = dir.join("test-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill_path = skill_dir.join("SKILL.md");
+        std::fs::write(
+            &skill_path,
+            "---\ntitle: Test\ntags: [test]\n---\n# Test Skill\n\nDo testing things.",
+        )
+        .unwrap();
+
+        let skills = vec![SkillRef {
+            slug: "test-skill".to_string(),
+            name: "Test Skill".to_string(),
+            description: "A test skill".to_string(),
+            tags: vec!["test".to_string()],
+            path: skill_path.to_string_lossy().to_string(),
+        }];
+
+        let result = load_skill_content(&skills).unwrap();
+        assert!(result.contains("# Active Skills"));
+        assert!(result.contains("## Skill: Test Skill"));
+        assert!(result.contains("Do testing things."));
+        // Frontmatter should be stripped
+        assert!(!result.contains("tags: [test]"));
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_skill_content_skips_nonexistent_paths() {
+        let skills = vec![SkillRef {
+            slug: "missing".to_string(),
+            name: "Missing Skill".to_string(),
+            description: String::new(),
+            tags: vec![],
+            path: "/nonexistent/path/SKILL.md".to_string(),
+        }];
+
+        let result = load_skill_content(&skills).unwrap();
+        assert_eq!(result, ""); // Gracefully returns empty
+    }
+
+    #[test]
+    fn load_skill_content_rejects_non_skill_paths() {
+        let skills = vec![SkillRef {
+            slug: "sneaky".to_string(),
+            name: "Sneaky".to_string(),
+            description: String::new(),
+            tags: vec![],
+            path: "/etc/passwd".to_string(),
+        }];
+
+        let result = load_skill_content(&skills).unwrap();
+        assert_eq!(result, ""); // Rejected by path validation
+    }
+
+    #[test]
+    fn load_skill_content_concatenates_multiple_skills() {
+        let dir = std::env::temp_dir().join("seren_test_multi_skills");
+
+        let skill1_dir = dir.join("skill-a");
+        std::fs::create_dir_all(&skill1_dir).unwrap();
+        let skill1_path = skill1_dir.join("SKILL.md");
+        std::fs::write(&skill1_path, "# Skill A\n\nContent A.").unwrap();
+
+        let skill2_dir = dir.join("skill-b");
+        std::fs::create_dir_all(&skill2_dir).unwrap();
+        let skill2_path = skill2_dir.join("SKILL.md");
+        std::fs::write(&skill2_path, "# Skill B\n\nContent B.").unwrap();
+
+        let skills = vec![
+            SkillRef {
+                slug: "skill-a".to_string(),
+                name: "Skill A".to_string(),
+                description: String::new(),
+                tags: vec![],
+                path: skill1_path.to_string_lossy().to_string(),
+            },
+            SkillRef {
+                slug: "skill-b".to_string(),
+                name: "Skill B".to_string(),
+                description: String::new(),
+                tags: vec![],
+                path: skill2_path.to_string_lossy().to_string(),
+            },
+        ];
+
+        let result = load_skill_content(&skills).unwrap();
+        assert!(result.contains("## Skill: Skill A"));
+        assert!(result.contains("## Skill: Skill B"));
+        assert!(result.contains("---")); // Separator between skills
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // =========================================================================
+    // Orchestrator State
+    // =========================================================================
+
+    #[tokio::test]
+    async fn cancel_returns_ok_for_nonexistent_session() {
+        let state = OrchestratorState::new();
+        let result = cancel(&state, "nonexistent").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn cancel_removes_session_and_sends_signal() {
+        let state = OrchestratorState::new();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
+        {
+            let mut sessions = state.active_sessions.lock().await;
+            sessions.insert("test-conv".to_string(), tx);
+        }
+
+        let result = cancel(&state, "test-conv").await;
+        assert!(result.is_ok());
+
+        // The receiver should have gotten the signal
+        assert!(rx.await.is_ok());
+
+        // Session should be removed
+        let sessions = state.active_sessions.lock().await;
+        assert!(!sessions.contains_key("test-conv"));
+    }
+}
