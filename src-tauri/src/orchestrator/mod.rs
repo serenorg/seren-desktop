@@ -4,3 +4,6 @@
 pub mod chat_model_worker;
 pub mod types;
 pub mod worker;
+
+#[cfg(feature = "acp")]
+pub mod acp_worker;

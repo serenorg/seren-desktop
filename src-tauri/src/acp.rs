@@ -316,7 +316,7 @@ pub enum SessionStatus {
 
 /// Commands sent to the ACP session worker thread
 #[derive(Debug)]
-enum AcpCommand {
+pub(crate) enum AcpCommand {
     Prompt {
         prompt: String,
         context: Option<Vec<serde_json::Value>>,
@@ -337,14 +337,14 @@ enum AcpCommand {
 }
 
 /// Internal session state (stored in main thread)
-struct AcpSession {
-    id: String,
+pub(crate) struct AcpSession {
+    pub(crate) id: String,
     agent_type: AgentType,
     cwd: String,
     status: SessionStatus,
     created_at: jiff::Timestamp,
     /// Channel to send commands to the worker thread
-    command_tx: Option<mpsc::Sender<AcpCommand>>,
+    pub(crate) command_tx: Option<mpsc::Sender<AcpCommand>>,
     /// Handle to the worker thread
     _worker_handle: Option<thread::JoinHandle<()>>,
     /// Pending permission requests awaiting user response (shared with ClientDelegate)
@@ -355,7 +355,7 @@ struct AcpSession {
 
 /// State for managing ACP sessions
 pub struct AcpState {
-    sessions: RwLock<HashMap<String, Arc<Mutex<AcpSession>>>>,
+    pub(crate) sessions: RwLock<HashMap<String, Arc<Mutex<AcpSession>>>>,
 }
 
 impl AcpState {
