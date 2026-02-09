@@ -20,10 +20,11 @@ import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { ResizableLayout } from "@/components/common/ResizableLayout";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
-import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { GatewayToolApproval } from "@/components/gateway/GatewayToolApproval";
+import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { ShellApproval } from "@/components/shell/ShellApproval";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { FileExplorer } from "@/components/sidebar/FileExplorer";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
@@ -261,6 +262,7 @@ function App() {
         <DailyClaimPopup />
         <X402PaymentApproval />
         <GatewayToolApproval />
+        <ShellApproval />
         <OpenClawApprovalManager />
         <AboutDialog />
       </div>

@@ -2,19 +2,18 @@
 // ABOUTME: Handles tool call parsing, execution, and result formatting.
 
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
 import { callGatewayTool, type PaymentProxyInfo } from "@/services/mcp-gateway";
 import { x402Service } from "@/services/x402";
+import { getApprovalRequirement, requiresApproval } from "./approval-config";
 import {
   parseGatewayToolName,
   parseMcpToolName,
   parseOpenClawToolName,
 } from "./definitions";
-import { getApprovalRequirement, requiresApproval } from "./approval-config";
 
 /**
  * File entry returned by list_directory.
@@ -27,6 +26,7 @@ interface FileEntry {
 
 const OPENCLAW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const GATEWAY_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const SHELL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_RESULT_SIZE = 50_000; // 50KB cap
 const MAX_ARRAY_ITEMS = 25;
 
@@ -50,16 +50,24 @@ function isOAuthTokenError(message: string): boolean {
  * Emit an event to notify the UI that an OAuth connection has expired.
  * The OAuthLogins component listens for this to update the connection status.
  */
-async function notifyOAuthExpired(publisherSlug: string, errorMessage: string): Promise<void> {
+async function notifyOAuthExpired(
+  publisherSlug: string,
+  errorMessage: string,
+): Promise<void> {
   try {
     await emit("oauth-connection-expired", {
       publisherSlug,
       errorMessage,
       timestamp: Date.now(),
     });
-    console.log(`[Tool Executor] Emitted oauth-connection-expired for ${publisherSlug}`);
+    console.log(
+      `[Tool Executor] Emitted oauth-connection-expired for ${publisherSlug}`,
+    );
   } catch (err) {
-    console.error("[Tool Executor] Failed to emit oauth-connection-expired:", err);
+    console.error(
+      "[Tool Executor] Failed to emit oauth-connection-expired:",
+      err,
+    );
   }
 }
 
@@ -80,8 +88,18 @@ function truncateToolResult(content: string): string {
           const record = item as Record<string, unknown>;
           const keys = Object.keys(record);
           const summaryKeys = [
-            "id", "subject", "title", "name", "from", "sender",
-            "date", "timestamp", "created_at", "snippet", "status", "type",
+            "id",
+            "subject",
+            "title",
+            "name",
+            "from",
+            "sender",
+            "date",
+            "timestamp",
+            "created_at",
+            "snippet",
+            "status",
+            "type",
           ];
           const kept: Record<string, unknown> = {};
           for (const k of keys) {
@@ -228,6 +246,68 @@ async function requestGatewayApproval(
 }
 
 /**
+ * Request user approval for a shell command execution.
+ * All shell commands require approval — there is no bypass.
+ */
+async function requestShellApproval(
+  command: string,
+  timeoutSecs: number,
+): Promise<boolean> {
+  const approvalId = `shell-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  console.log(
+    `[Tool Executor] Requesting shell approval (ID: ${approvalId}): ${command}`,
+  );
+
+  try {
+    await emit("shell-command-approval-request", {
+      approvalId,
+      command,
+      timeoutSecs,
+    });
+  } catch (err) {
+    console.error(
+      "[Tool Executor] Failed to emit shell approval request:",
+      err,
+    );
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    let unlisten: UnlistenFn | undefined;
+    const timeout = setTimeout(() => {
+      console.log(`[Tool Executor] Shell approval timeout for ${approvalId}`);
+      unlisten?.();
+      resolve(false);
+    }, SHELL_APPROVAL_TIMEOUT_MS);
+
+    listen<{ id: string; approved: boolean }>(
+      "shell-command-approval-response",
+      (event) => {
+        if (event.payload.id !== approvalId) return;
+        console.log(
+          `[Tool Executor] Shell approval response: ${event.payload.approved}`,
+        );
+        clearTimeout(timeout);
+        unlisten?.();
+        resolve(event.payload.approved);
+      },
+    )
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((err) => {
+        console.error(
+          "[Tool Executor] Failed to listen for shell approval:",
+          err,
+        );
+        clearTimeout(timeout);
+        resolve(false);
+      });
+  });
+}
+
+/**
  * Execute a single tool call and return the result.
  * Routes to MCP servers or file tools based on prefix.
  */
@@ -340,12 +420,47 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         break;
       }
 
+      case "execute_command": {
+        const command = args.command as string;
+        if (!command || typeof command !== "string") {
+          throw new Error("Invalid command: must be a non-empty string");
+        }
+        const timeoutSecs = (args.timeout_secs as number) ?? 30;
+
+        const approved = await requestShellApproval(command, timeoutSecs);
+        if (!approved) {
+          return {
+            tool_call_id: toolCall.id,
+            content: "Command was not approved by user",
+            is_error: true,
+          };
+        }
+
+        const cmdResult = await invoke<{
+          stdout: string;
+          stderr: string;
+          exit_code: number | null;
+          timed_out: boolean;
+        }>("execute_shell_command", { command, timeoutSecs });
+
+        if (cmdResult.timed_out) {
+          result = `Command timed out after ${timeoutSecs} seconds.\nstderr: ${cmdResult.stderr}`;
+        } else {
+          const parts: string[] = [];
+          if (cmdResult.stdout) parts.push(`stdout:\n${cmdResult.stdout}`);
+          if (cmdResult.stderr) parts.push(`stderr:\n${cmdResult.stderr}`);
+          parts.push(`exit_code: ${cmdResult.exit_code ?? "unknown"}`);
+          result = parts.join("\n\n");
+        }
+        break;
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
 
     const resultContent =
-        typeof result === "string" ? result : JSON.stringify(result, null, 2);
+      typeof result === "string" ? result : JSON.stringify(result, null, 2);
     return {
       tool_call_id: toolCall.id,
       content: truncateToolResult(resultContent),
@@ -472,7 +587,10 @@ async function executeOpenClawTool(
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[Tool Executor] OpenClaw tool "${toolName}" failed:`, message);
+    console.error(
+      `[Tool Executor] OpenClaw tool "${toolName}" failed:`,
+      message,
+    );
     return {
       tool_call_id: toolCallId,
       content: `OpenClaw tool error: ${message}`,
@@ -515,7 +633,10 @@ async function executeMcpTool(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[Tool Executor] MCP tool "${serverName}/${toolName}" failed:`, message);
+    console.error(
+      `[Tool Executor] MCP tool "${serverName}/${toolName}" failed:`,
+      message,
+    );
     return {
       tool_call_id: toolCallId,
       content: `MCP tool error: ${message}`,
@@ -644,7 +765,9 @@ async function executeGatewayTool(
 
         return {
           tool_call_id: toolCallId,
-          content: truncateToolResult(retryContent || "Tool executed successfully with payment"),
+          content: truncateToolResult(
+            retryContent || "Tool executed successfully with payment",
+          ),
           is_error: retryResponse.is_error,
         };
       }
@@ -671,7 +794,9 @@ async function executeGatewayTool(
 
         return {
           tool_call_id: toolCallId,
-          content: truncateToolResult(retryContent || "Tool executed successfully"),
+          content: truncateToolResult(
+            retryContent || "Tool executed successfully",
+          ),
           is_error: retryResponse.is_error,
         };
       }
@@ -695,7 +820,10 @@ async function executeGatewayTool(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[Tool Executor] Gateway tool "${publisherSlug}/${toolName}" failed:`, message);
+    console.error(
+      `[Tool Executor] Gateway tool "${publisherSlug}/${toolName}" failed:`,
+      message,
+    );
 
     // Check for OAuth token errors and notify the UI
     if (isOAuthTokenError(message)) {
