@@ -76,13 +76,13 @@ jobs:
       - run: pnpm install
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
-        run: pnpm tauri build
+        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - name: Build (macOS)
         if: matrix.os == 'macos-latest'
-        run: pnpm tauri build
+        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: pnpm tauri build --bundles deb
+        run: pnpm tauri build --bundles deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - uses: actions/upload-artifact@v4
         with:
           name: seren-desktop-${{ matrix.os }}
