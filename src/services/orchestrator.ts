@@ -364,6 +364,12 @@ function handleComplete(
 
   const duration = Date.now() - streamStartTime;
 
+  console.debug(
+    "[orchestrator] complete — duration=%dms, cost=%s",
+    duration,
+    cost != null ? `$${cost}` : "none",
+  );
+
   // Use accumulated streaming content or fall back to final_content
   const content = conversationStore.streamingContent || finalContent;
   const thinkingContent =

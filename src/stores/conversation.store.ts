@@ -308,6 +308,8 @@ export const conversationStore = {
               workerType: metaFields.workerType ?? "chat_model",
               modelId: metaFields.modelId ?? m.model ?? undefined,
               taskType: metaFields.taskType,
+              duration: metaFields.duration,
+              cost: metaFields.cost,
               toolCall: metaFields.toolCall,
               diff: metaFields.diff,
             };

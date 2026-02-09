@@ -259,6 +259,27 @@ describe("serializeMetadata", () => {
     expect(parsed.tool_call?.arguments).toBe('{"path":"/tmp/foo"}');
   });
 
+  it("serializes cost and duration", () => {
+    const msg = makeMessage({
+      workerType: "chat_model",
+      duration: 2500,
+      cost: 0.003,
+    });
+    const json = serializeMetadata(msg);
+    expect(json).not.toBeNull();
+    const parsed = JSON.parse(json!) as MessageMetadata;
+    expect(parsed.duration).toBe(2500);
+    expect(parsed.cost).toBe(0.003);
+  });
+
+  it("omits cost and duration when absent", () => {
+    const msg = makeMessage({ workerType: "chat_model" });
+    const json = serializeMetadata(msg);
+    const parsed = JSON.parse(json!) as MessageMetadata;
+    expect(parsed.duration).toBeNull();
+    expect(parsed.cost).toBeNull();
+  });
+
   it("serializes diff data", () => {
     const msg = makeMessage({
       diff: {
@@ -316,6 +337,25 @@ describe("deserializeMetadata", () => {
     expect(restored.toolCall?.toolCallId).toBe("tc-5");
     expect(restored.toolCall?.name).toBe("run_sql");
     expect(restored.toolCall?.arguments).toBe('{"query":"SELECT 1"}');
+  });
+
+  it("round-trips cost and duration", () => {
+    const msg = makeMessage({
+      workerType: "chat_model",
+      duration: 3200,
+      cost: 0.015,
+    });
+    const json = serializeMetadata(msg);
+    const restored = deserializeMetadata(json);
+    expect(restored.duration).toBe(3200);
+    expect(restored.cost).toBe(0.015);
+  });
+
+  it("omits zero cost and duration from deserialization", () => {
+    const json = JSON.stringify({ v: 1, duration: 0, cost: 0 });
+    const restored = deserializeMetadata(json);
+    expect(restored.duration).toBeUndefined();
+    expect(restored.cost).toBeUndefined();
   });
 
   it("round-trips diff data", () => {

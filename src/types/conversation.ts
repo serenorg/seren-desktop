@@ -88,6 +88,8 @@ export interface MessageMetadata {
   worker_type?: WorkerType | null;
   model_id?: string | null;
   task_type?: string | null;
+  duration?: number | null;
+  cost?: number | null;
   tool_call?: {
     id: string;
     name: string;
@@ -107,7 +109,9 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
     !msg.modelId &&
     !msg.taskType &&
     !msg.toolCall &&
-    !msg.diff
+    !msg.diff &&
+    !msg.duration &&
+    !msg.cost
   ) {
     return null;
   }
@@ -116,6 +120,8 @@ export function serializeMetadata(msg: UnifiedMessage): string | null {
     worker_type: msg.workerType ?? null,
     model_id: msg.modelId ?? null,
     task_type: msg.taskType ?? null,
+    duration: msg.duration ?? null,
+    cost: msg.cost ?? null,
     tool_call: msg.toolCall
       ? {
           id: msg.toolCall.toolCallId,
@@ -150,6 +156,9 @@ export function deserializeMetadata(
     if (meta.worker_type) result.workerType = meta.worker_type as WorkerType;
     if (meta.model_id) result.modelId = meta.model_id as string;
     if (meta.task_type) result.taskType = meta.task_type as string;
+    if (typeof meta.duration === "number" && meta.duration > 0)
+      result.duration = meta.duration;
+    if (typeof meta.cost === "number" && meta.cost > 0) result.cost = meta.cost;
     if (meta.tool_call && typeof meta.tool_call === "object") {
       const tc = meta.tool_call as Record<string, string>;
       result.toolCall = {
