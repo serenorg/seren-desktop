@@ -19,6 +19,7 @@ import type { UnifiedMessage } from "@/types/conversation";
 interface OrchestratorEvent {
   conversation_id: string;
   worker_event: WorkerEvent;
+  subtask_id?: string;
 }
 
 interface TransitionEvent {

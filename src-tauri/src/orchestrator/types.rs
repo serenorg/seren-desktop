@@ -122,11 +122,43 @@ pub struct TransitionEvent {
     pub task_description: String,
 }
 
+/// A sub-task produced by the decomposer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubTask {
+    pub id: String,
+    pub prompt: String,
+    pub classification: TaskClassification,
+    /// IDs of sub-tasks that must complete before this one starts.
+    pub depends_on: Vec<String>,
+}
+
+/// An orchestration plan: the full set of sub-tasks for a prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestrationPlan {
+    pub id: String,
+    pub conversation_id: String,
+    pub original_prompt: String,
+    pub subtasks: Vec<SubTask>,
+    pub status: PlanStatus,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanStatus {
+    Active,
+    Completed,
+    Cancelled,
+    Failed,
+}
+
 /// Wrapper for worker events sent to the frontend with conversation context.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorEvent {
     pub conversation_id: String,
     pub worker_event: WorkerEvent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtask_id: Option<String>,
 }
 
 #[cfg(test)]

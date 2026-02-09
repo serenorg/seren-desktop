@@ -7,15 +7,17 @@ use std::path::Path;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
+use uuid::Uuid;
 
 use super::chat_model_worker::ChatModelWorker;
 use super::classifier;
+use super::decomposer;
 use super::mcp_publisher_worker::McpPublisherWorker;
 use super::router;
 use super::trust;
 use super::types::{
-    DelegationType, ImageAttachment, OrchestratorEvent, RoutingDecision, SkillRef,
-    TransitionEvent, UserCapabilities, WorkerEvent, WorkerType,
+    DelegationType, ImageAttachment, OrchestrationPlan, OrchestratorEvent, PlanStatus,
+    RoutingDecision, SkillRef, SubTask, TransitionEvent, UserCapabilities, WorkerEvent, WorkerType,
 };
 use super::worker::Worker;
 
@@ -51,11 +53,9 @@ impl Default for OrchestratorState {
 /// Execute the full orchestration pipeline for a user prompt.
 ///
 /// 1. Classify the task
-/// 2. Route to a worker
-/// 3. Load selected skill content from disk
-/// 4. Emit transition announcement
-/// 5. Spawn worker execution
-/// 6. Forward worker events to frontend
+/// 2. Decompose into subtasks
+/// 3. Single subtask → fast path (route, trust, execute)
+/// 4. Multiple subtasks → parallel execution by dependency layers
 pub async fn orchestrate(
     app: AppHandle,
     state: &OrchestratorState,
@@ -79,18 +79,80 @@ pub async fn orchestrate(
         classification.complexity
     );
 
-    // 2. Route to a worker
-    let mut routing = router::route(&classification, &capabilities);
+    // 2. Decompose into subtasks
+    let subtasks =
+        decomposer::decompose(&prompt, &classification, &capabilities.installed_skills);
     log::info!(
-        "[Orchestrator] Routing: worker={:?}, model={}, skills={}",
-        routing.worker_type,
-        routing.model_id,
-        routing.selected_skills.len()
+        "[Orchestrator] Decomposed into {} subtask(s)",
+        subtasks.len()
     );
 
-    // 2b. Check trust graduation — upgrade to FullHandoff if earned
+    // 3. Register cancellation
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    {
+        let mut sessions = state.active_sessions.lock().await;
+        sessions.insert(conversation_id.clone(), cancel_tx);
+    }
+
+    // 4. Branch: single task (fast path) vs multi-task (parallel execution)
+    let result = if subtasks.len() <= 1 {
+        execute_single_task(
+            &app,
+            &conversation_id,
+            &subtasks[0],
+            &history,
+            &capabilities,
+            &auth_token,
+            &images,
+            cancel_rx,
+        )
+        .await
+    } else {
+        execute_multi_task(
+            &app,
+            &conversation_id,
+            &prompt,
+            subtasks,
+            &history,
+            &capabilities,
+            &auth_token,
+            &images,
+            cancel_rx,
+        )
+        .await
+    };
+
+    // 5. Clean up session
+    {
+        let mut sessions = state.active_sessions.lock().await;
+        sessions.remove(&conversation_id);
+    }
+
+    result
+}
+
+// =============================================================================
+// Single-Task Execution (Fast Path)
+// =============================================================================
+
+/// Execute a single subtask — the original orchestration path.
+/// No decomposition overhead, no plan persistence.
+async fn execute_single_task(
+    app: &AppHandle,
+    conversation_id: &str,
+    subtask: &SubTask,
+    history: &[serde_json::Value],
+    capabilities: &UserCapabilities,
+    auth_token: &str,
+    images: &[ImageAttachment],
+    cancel_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), String> {
+    // Route
+    let mut routing = router::route(&subtask.classification, capabilities);
+
+    // Trust graduation
     let app_for_trust = app.clone();
-    let task_type = classification.task_type.clone();
+    let task_type = subtask.classification.task_type.clone();
     let model_id = routing.model_id.clone();
     let trusted = tauri::async_runtime::spawn_blocking(move || {
         match crate::services::database::init_db(&app_for_trust) {
@@ -104,56 +166,44 @@ pub async fn orchestrate(
     if trusted {
         routing.delegation = DelegationType::FullHandoff;
         routing.reason = format!("{} (trusted)", routing.reason);
-        log::info!(
-            "[Orchestrator] Trust graduation: upgraded to FullHandoff for ({}, {})",
-            classification.task_type,
-            routing.model_id
-        );
     }
 
-    // 3. Load selected skill content from disk
+    // Load skills
     let skill_content = load_skill_content(&routing.selected_skills)?;
 
-    // 4. Emit transition announcement
+    // Emit transition
     let transition = TransitionEvent {
-        conversation_id: conversation_id.clone(),
+        conversation_id: conversation_id.to_string(),
         model_name: routing.model_id.clone(),
         task_description: routing.reason.clone(),
     };
     app.emit("orchestrator://transition", &transition)
         .map_err(|e| format!("Failed to emit transition event: {}", e))?;
 
-    // 5. Create event channel and cancellation
+    // Create channel and spawn worker
     let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
-    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-
-    // Register the cancellation sender
-    {
-        let mut sessions = state.active_sessions.lock().await;
-        sessions.insert(conversation_id.clone(), cancel_tx);
-    }
-
-    // 6. Spawn worker execution
-    let worker = create_worker(&routing, &app);
-    let worker_prompt = prompt.clone();
+    let worker = create_worker(&routing, app);
+    let worker_prompt = subtask.prompt.clone();
     let worker_routing = routing.clone();
-    let worker_auth_token = auth_token.clone();
+    let worker_auth_token = auth_token.to_string();
+    let worker_images = images.to_vec();
+    let worker_history = history.to_vec();
     let worker_handle = tokio::spawn(async move {
         worker
             .execute(
                 &worker_prompt,
-                &history,
+                &worker_history,
                 &worker_routing,
                 &skill_content,
                 &worker_auth_token,
-                &images,
+                &worker_images,
                 event_tx,
             )
             .await
     });
 
-    // 7. Forward events to frontend, with cancellation support
-    let conv_id = conversation_id.clone();
+    // Forward events to frontend with cancellation support
+    let conv_id = conversation_id.to_string();
     let app_for_events = app.clone();
     let forward_handle = tokio::spawn(async move {
         let mut cancel_rx = cancel_rx;
@@ -165,16 +215,14 @@ pub async fn orchestrate(
                             let orchestrator_event = OrchestratorEvent {
                                 conversation_id: conv_id.clone(),
                                 worker_event,
+                                subtask_id: None,
                             };
                             if let Err(e) = app_for_events.emit("orchestrator://event", &orchestrator_event) {
                                 log::error!("[Orchestrator] Failed to emit event: {}", e);
                                 break;
                             }
                         }
-                        None => {
-                            // Channel closed — worker is done
-                            break;
-                        }
+                        None => break,
                     }
                 }
                 _ = &mut cancel_rx => {
@@ -185,38 +233,294 @@ pub async fn orchestrate(
         }
     });
 
-    // 8. Wait for forwarding to complete
     let _ = forward_handle.await;
 
-    // 9. Wait for worker to complete (it may already be done)
     match worker_handle.await {
         Ok(Ok(())) => {
             log::info!(
-                "[Orchestrator] Completed orchestration for conversation {}",
+                "[Orchestrator] Completed single-task orchestration for conversation {}",
                 conversation_id
             );
         }
         Ok(Err(e)) => {
             log::error!("[Orchestrator] Worker error: {}", e);
-            // Don't propagate — the Error event was already sent through the channel
         }
         Err(e) => {
             log::error!("[Orchestrator] Worker task panicked: {}", e);
             let error_event = OrchestratorEvent {
-                conversation_id: conversation_id.clone(),
+                conversation_id: conversation_id.to_string(),
                 worker_event: WorkerEvent::Error {
                     message: "Internal error: worker task failed".to_string(),
                 },
+                subtask_id: None,
             };
             let _ = app.emit("orchestrator://event", &error_event);
         }
     }
 
-    // 10. Clean up session
-    {
-        let mut sessions = state.active_sessions.lock().await;
-        sessions.remove(&conversation_id);
+    Ok(())
+}
+
+// =============================================================================
+// Multi-Task Execution (Parallel by Dependency Layers)
+// =============================================================================
+
+/// Execute multiple subtasks grouped by dependency layers.
+///
+/// Layer 0 tasks run in parallel, then layer 1, etc.
+/// All worker events are forwarded through a shared channel with subtask_id tagging.
+/// Plan is persisted to SQLite for resumability.
+async fn execute_multi_task(
+    app: &AppHandle,
+    conversation_id: &str,
+    original_prompt: &str,
+    subtasks: Vec<SubTask>,
+    history: &[serde_json::Value],
+    capabilities: &UserCapabilities,
+    auth_token: &str,
+    images: &[ImageAttachment],
+    cancel_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), String> {
+    // Persist plan to SQLite
+    let plan_id = Uuid::new_v4().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    let app_for_db = app.clone();
+    let plan_id_for_db = plan_id.clone();
+    let conv_id_for_db = conversation_id.to_string();
+    let prompt_for_db = original_prompt.to_string();
+    let subtasks_for_db: Vec<(String, String, String)> = subtasks
+        .iter()
+        .map(|st| {
+            let routing = router::route(&st.classification, capabilities);
+            (st.id.clone(), st.prompt.clone(), routing.model_id.clone())
+        })
+        .collect();
+    let subtask_meta: Vec<(String, String, String, String)> = subtasks
+        .iter()
+        .map(|st| {
+            let routing = router::route(&st.classification, capabilities);
+            (
+                st.id.clone(),
+                st.classification.task_type.clone(),
+                format!("{:?}", routing.worker_type),
+                serde_json::to_string(&st.depends_on).unwrap_or_default(),
+            )
+        })
+        .collect();
+
+    let db_now = now;
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(conn) = crate::services::database::init_db(&app_for_db) {
+            let _ = conn.execute(
+                "INSERT INTO orchestration_plans (id, conversation_id, original_prompt, status, created_at) VALUES (?1, ?2, ?3, 'active', ?4)",
+                rusqlite::params![plan_id_for_db, conv_id_for_db, prompt_for_db, db_now],
+            );
+
+            for (i, (id, prompt, _model)) in subtasks_for_db.iter().enumerate() {
+                let (_, task_type, worker_type, depends_on) = &subtask_meta[i];
+                let model_id = &subtasks_for_db[i].2;
+                let deps = if depends_on == "[]" {
+                    None
+                } else {
+                    Some(depends_on.as_str())
+                };
+                let _ = conn.execute(
+                    "INSERT INTO plan_subtasks (id, plan_id, prompt, task_type, worker_type, model_id, status, depends_on, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8)",
+                    rusqlite::params![id, plan_id_for_db, prompt, task_type, worker_type, model_id, deps, db_now],
+                );
+            }
+        }
+    })
+    .await
+    .ok();
+
+    log::info!(
+        "[Orchestrator] Persisted plan {} with {} subtasks",
+        plan_id,
+        subtasks.len()
+    );
+
+    // Shared event channel: all workers send (subtask_id, event) through this
+    let (shared_tx, mut shared_rx) = mpsc::channel::<(String, WorkerEvent)>(256);
+
+    // Spawn event forwarding task
+    let conv_id = conversation_id.to_string();
+    let app_for_events = app.clone();
+    let forward_handle = tokio::spawn(async move {
+        let mut cancel_rx = cancel_rx;
+        loop {
+            tokio::select! {
+                event = shared_rx.recv() => {
+                    match event {
+                        Some((subtask_id, worker_event)) => {
+                            let orchestrator_event = OrchestratorEvent {
+                                conversation_id: conv_id.clone(),
+                                worker_event,
+                                subtask_id: Some(subtask_id),
+                            };
+                            if let Err(e) = app_for_events.emit("orchestrator://event", &orchestrator_event) {
+                                log::error!("[Orchestrator] Failed to emit event: {}", e);
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut cancel_rx => {
+                    log::info!("[Orchestrator] Cancellation received for multi-task conversation {}", conv_id);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Execute subtasks layer by layer
+    let layers = decomposer::dependency_layers(&subtasks);
+
+    for (layer_idx, layer) in layers.iter().enumerate() {
+        log::info!(
+            "[Orchestrator] Executing layer {} with {} subtask(s)",
+            layer_idx,
+            layer.len()
+        );
+
+        let mut handles = Vec::new();
+
+        for subtask in layer {
+            // Route each subtask independently
+            let mut routing = router::route(&subtask.classification, capabilities);
+
+            // Trust graduation per subtask
+            let app_for_trust = app.clone();
+            let task_type = subtask.classification.task_type.clone();
+            let model_id = routing.model_id.clone();
+            let trusted = tauri::async_runtime::spawn_blocking(move || {
+                match crate::services::database::init_db(&app_for_trust) {
+                    Ok(conn) => trust::is_trusted(&conn, &task_type, &model_id),
+                    Err(_) => false,
+                }
+            })
+            .await
+            .unwrap_or(false);
+
+            if trusted {
+                routing.delegation = DelegationType::FullHandoff;
+                routing.reason = format!("{} (trusted)", routing.reason);
+            }
+
+            // Load skill content
+            let skill_content = load_skill_content(&routing.selected_skills)?;
+
+            // Emit transition per subtask
+            let transition = TransitionEvent {
+                conversation_id: conversation_id.to_string(),
+                model_name: routing.model_id.clone(),
+                task_description: routing.reason.clone(),
+            };
+            app.emit("orchestrator://transition", &transition)
+                .map_err(|e| format!("Failed to emit transition: {}", e))?;
+
+            // Spawn worker
+            let worker = create_worker(&routing, app);
+            let subtask_prompt = subtask.prompt.clone();
+            let subtask_id = subtask.id.clone();
+            let worker_routing = routing.clone();
+            let worker_auth_token = auth_token.to_string();
+            let worker_history = history.to_vec();
+            let worker_images = images.to_vec();
+            let layer_tx = shared_tx.clone();
+
+            let handle = tokio::spawn(async move {
+                let (tx, mut rx) = mpsc::channel::<WorkerEvent>(64);
+
+                // Spawn worker execution
+                let exec_handle = tokio::spawn(async move {
+                    worker
+                        .execute(
+                            &subtask_prompt,
+                            &worker_history,
+                            &worker_routing,
+                            &skill_content,
+                            &worker_auth_token,
+                            &worker_images,
+                            tx,
+                        )
+                        .await
+                });
+
+                // Forward events tagged with subtask_id
+                while let Some(event) = rx.recv().await {
+                    if layer_tx.send((subtask_id.clone(), event)).await.is_err() {
+                        break;
+                    }
+                }
+
+                exec_handle.await
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all workers in this layer before starting next
+        for handle in handles {
+            match handle.await {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(e))) => {
+                    log::error!(
+                        "[Orchestrator] Worker error in layer {}: {}",
+                        layer_idx,
+                        e
+                    );
+                }
+                Ok(Err(e)) => {
+                    log::error!(
+                        "[Orchestrator] Worker panicked in layer {}: {}",
+                        layer_idx,
+                        e
+                    );
+                }
+                Err(e) => {
+                    log::error!(
+                        "[Orchestrator] Join error in layer {}: {}",
+                        layer_idx,
+                        e
+                    );
+                }
+            }
+        }
     }
+
+    // Drop shared sender so forwarding loop terminates
+    drop(shared_tx);
+    let _ = forward_handle.await;
+
+    // Mark plan as completed
+    let app_for_complete = app.clone();
+    let plan_id_for_complete = plan_id.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(conn) = crate::services::database::init_db(&app_for_complete) {
+            let completed_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            let _ = conn.execute(
+                "UPDATE orchestration_plans SET status = 'completed', completed_at = ?1 WHERE id = ?2",
+                rusqlite::params![completed_at, plan_id_for_complete],
+            );
+        }
+    })
+    .await
+    .ok();
+
+    log::info!(
+        "[Orchestrator] Completed multi-task orchestration for conversation {} (plan {})",
+        conversation_id,
+        plan_id
+    );
 
     Ok(())
 }

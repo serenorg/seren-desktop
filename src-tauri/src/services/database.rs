@@ -93,6 +93,38 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Create orchestration_plans table for sub-task decomposition
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS orchestration_plans (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            original_prompt TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+        )",
+        [],
+    )?;
+
+    // Create plan_subtasks table for individual sub-task tracking
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plan_subtasks (
+            id TEXT PRIMARY KEY,
+            plan_id TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            task_type TEXT NOT NULL,
+            worker_type TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            depends_on TEXT,
+            created_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            FOREIGN KEY (plan_id) REFERENCES orchestration_plans(id)
+        )",
+        [],
+    )?;
+
     // Migration: Create default conversation for orphan messages
     migrate_orphan_messages(conn)?;
 
@@ -199,5 +231,68 @@ mod tests {
         setup_schema(&conn).unwrap();
         // Running setup again should not error
         setup_schema(&conn).unwrap();
+    }
+
+    #[test]
+    fn orchestration_plan_tables_created() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Test', 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Insert a plan
+        conn.execute(
+            "INSERT INTO orchestration_plans (id, conversation_id, original_prompt, status, created_at)
+             VALUES ('p1', 'c1', '1. Research AI 2. Summarize', 'active', 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Insert subtasks
+        conn.execute(
+            "INSERT INTO plan_subtasks (id, plan_id, prompt, task_type, worker_type, model_id, status, depends_on, created_at)
+             VALUES ('s1', 'p1', 'Research AI', 'research', 'chat_model', 'anthropic/claude-sonnet-4', 'pending', NULL, 1000)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO plan_subtasks (id, plan_id, prompt, task_type, worker_type, model_id, status, depends_on, created_at)
+             VALUES ('s2', 'p1', 'Summarize', 'document_generation', 'chat_model', 'anthropic/claude-sonnet-4', 'pending', '[\"s1\"]', 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Verify reads
+        let plan_status: String = conn
+            .query_row(
+                "SELECT status FROM orchestration_plans WHERE id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(plan_status, "active");
+
+        let subtask_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM plan_subtasks WHERE plan_id = 'p1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(subtask_count, 2);
+
+        let depends_on: Option<String> = conn
+            .query_row(
+                "SELECT depends_on FROM plan_subtasks WHERE id = 's2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(depends_on, Some("[\"s1\"]".to_string()));
     }
 }
