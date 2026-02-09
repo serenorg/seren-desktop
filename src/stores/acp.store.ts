@@ -99,6 +99,8 @@ interface AcpState {
   pendingPermissions: import("@/services/acp").PermissionRequestEvent[];
   /** Pending diff proposals awaiting user accept/reject */
   pendingDiffProposals: DiffProposalEvent[];
+  /** Whether agent mode is active (vs chat mode) */
+  agentModeEnabled: boolean;
 }
 
 const [state, setState] = createStore<AcpState>({
@@ -111,6 +113,7 @@ const [state, setState] = createStore<AcpState>({
   installStatus: null,
   pendingPermissions: [],
   pendingDiffProposals: [],
+  agentModeEnabled: false,
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
@@ -165,6 +168,10 @@ export const acpStore = {
 
   get pendingDiffProposals() {
     return state.pendingDiffProposals;
+  },
+
+  get agentModeEnabled() {
+    return state.agentModeEnabled;
   },
 
   /**
@@ -745,6 +752,10 @@ export const acpStore = {
   /**
    * Set the selected agent type for new sessions.
    */
+  setAgentModeEnabled(enabled: boolean) {
+    setState("agentModeEnabled", enabled);
+  },
+
   setSelectedAgentType(agentType: AgentType) {
     setState("selectedAgentType", agentType);
   },

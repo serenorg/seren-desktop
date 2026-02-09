@@ -12,8 +12,9 @@ import {
   untrack,
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
+import { AgentChat } from "@/components/chat/AgentChat";
+import { AgentModeToggle } from "@/components/chat/AgentModeToggle";
 import { ChatContent } from "@/components/chat/ChatContent";
-// MCP OAuth dialog removed - now using API key auth flow
 import { AboutDialog } from "@/components/common/AboutDialog";
 import { Header, type Panel } from "@/components/common/Header";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
@@ -36,6 +37,7 @@ import {
   stopOpenClawAgent,
 } from "@/services/openclaw-agent";
 import { telemetry } from "@/services/telemetry";
+import { acpStore } from "@/stores/acp.store";
 import {
   authStore,
   checkAuth,
@@ -226,7 +228,21 @@ function App() {
           {/* Three-column resizable layout (always visible) */}
           <ResizableLayout
             left={<FileExplorer />}
-            center={<ChatContent onSignInClick={handleSignInClick} />}
+            center={
+              <div class="flex flex-col h-full">
+                <div class="flex items-center justify-center py-1.5 border-b border-border">
+                  <AgentModeToggle />
+                </div>
+                <div class="flex-1 overflow-hidden">
+                  <Show
+                    when={acpStore.agentModeEnabled}
+                    fallback={<ChatContent onSignInClick={handleSignInClick} />}
+                  >
+                    <AgentChat />
+                  </Show>
+                </div>
+              </div>
+            }
             right={
               showEditor() ? (
                 <EditorContent onClose={() => setShowEditor(false)} />
