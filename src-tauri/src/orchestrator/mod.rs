@@ -2,6 +2,7 @@
 // ABOUTME: Contains types, worker trait, classifier, router, and worker adapters.
 
 pub mod chat_model_worker;
+pub mod classifier;
 pub mod types;
 pub mod worker;
 
