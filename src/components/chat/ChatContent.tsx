@@ -47,6 +47,7 @@ import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { RerouteAnnouncement } from "./RerouteAnnouncement";
 import { SatisfactionSignal } from "./SatisfactionSignal";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
@@ -673,8 +674,16 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             <For each={conversationStore.messages}>
               {(message) => (
                 <Show
-                  when={message.type !== "transition"}
-                  fallback={<TransitionAnnouncement message={message} />}
+                  when={
+                    message.type !== "transition" && message.type !== "reroute"
+                  }
+                  fallback={
+                    message.type === "reroute" ? (
+                      <RerouteAnnouncement message={message} />
+                    ) : (
+                      <TransitionAnnouncement message={message} />
+                    )
+                  }
                 >
                   <article
                     class={`group/msg px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}

@@ -19,6 +19,7 @@ export type MessageType =
   | "diff"
   | "thought"
   | "transition"
+  | "reroute"
   | "error";
 
 export type MessageStatus = "pending" | "streaming" | "complete" | "error";
@@ -182,7 +183,11 @@ export function isToolMessage(msg: UnifiedMessage): boolean {
 
 /** Type guard: is this message from the orchestrator itself? */
 export function isOrchestratorMessage(msg: UnifiedMessage): boolean {
-  return msg.type === "transition" || msg.workerType === "orchestrator";
+  return (
+    msg.type === "transition" ||
+    msg.type === "reroute" ||
+    msg.workerType === "orchestrator"
+  );
 }
 
 /** Temporary adapter: convert legacy Message to UnifiedMessage during migration. */
