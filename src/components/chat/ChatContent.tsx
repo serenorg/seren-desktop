@@ -42,6 +42,7 @@ import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { SatisfactionSignal } from "./SatisfactionSignal";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
@@ -669,7 +670,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     fallback={<TransitionAnnouncement message={message} />}
                   >
                     <article
-                      class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
+                      class={`group/msg px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
                     >
                       <Show when={message.images && message.images.length > 0}>
                         <MessageImages images={message.images ?? []} />
@@ -699,6 +700,16 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                             </div>
                           );
                         })()}
+                      </Show>
+                      <Show
+                        when={
+                          message.role === "assistant" &&
+                          message.status === "complete"
+                        }
+                      >
+                        <div class="mt-1.5 flex justify-end">
+                          <SatisfactionSignal messageId={message.id} />
+                        </div>
                       </Show>
                       <Show when={message.status === "error"}>
                         <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
