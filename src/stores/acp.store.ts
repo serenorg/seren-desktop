@@ -301,6 +301,8 @@ export const acpStore = {
     setState("remoteSessionsLoading", true);
     setState("remoteSessionsError", null);
     try {
+      // Ensure Codex CLI is available before we spawn the ACP sidecar.
+      await acpService.ensureCodexCli();
       const page = await acpService.listRemoteSessions("codex", cwd);
       setState("remoteSessions", page.sessions);
       setState("remoteSessionsNextCursor", page.nextCursor ?? null);
