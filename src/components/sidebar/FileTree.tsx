@@ -56,7 +56,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
   };
 
   // Clipboard state for cut/paste operations
-  const [clipboardNode, setClipboardNode] = createSignal<{
+  const [_clipboardNode, setClipboardNode] = createSignal<{
     node: FileNode;
     operation: "cut" | "copy";
   } | null>(null);

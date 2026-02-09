@@ -59,7 +59,7 @@ export const DiffProposalDialog: Component<DiffProposalDialogProps> = (
 ) => {
   let containerRef: HTMLDivElement | undefined;
   let diffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
-  const [ready, setReady] = createSignal(false);
+  const [_ready, setReady] = createSignal(false);
 
   const stats = () =>
     countDiffLines(props.proposal.oldText, props.proposal.newText);

@@ -69,7 +69,9 @@ function App() {
 
   // Overlay panels (settings, database, account)
   const [overlayPanel, setOverlayPanel] = createSignal<Panel | null>(null);
-  // Toggle editor visibility
+  // Toggle explorer visibility (closed by default for more chat real estate)
+  const [showExplorer, setShowExplorer] = createSignal(false);
+  // Toggle editor visibility (opens when a file is clicked in explorer)
   const [showEditor, setShowEditor] = createSignal(false);
 
   onMount(async () => {
@@ -110,6 +112,7 @@ function App() {
       const p = e.detail as string;
       if (p === "editor") {
         setShowEditor(true);
+        setShowExplorer(true);
         setOverlayPanel(null);
       } else {
         handlePanelChange(p as Panel);
@@ -187,11 +190,10 @@ function App() {
 
   const handlePanelChange = (panel: Panel) => {
     if (panel === "chat") {
-      // Close overlays, keep editor state as is
+      setShowExplorer(false);
       setOverlayPanel(null);
-    } else if (panel === "editor") {
-      // Toggle editor visibility
-      setShowEditor(true);
+    } else if (panel === "explorer") {
+      setShowExplorer((prev) => !prev);
       setOverlayPanel(null);
     } else {
       // Settings, database, account are overlays
@@ -200,11 +202,10 @@ function App() {
   };
 
   // Get the "active" panel for header highlighting
-  // If an overlay is open, show that; if editor is visible, show "editor"; otherwise "chat"
   const activePanel = () => {
     const overlay = overlayPanel();
     if (overlay) return overlay;
-    return showEditor() ? "editor" : "chat";
+    return showExplorer() ? "explorer" : "chat";
   };
 
   return (
@@ -227,7 +228,7 @@ function App() {
         <main class="flex-1 overflow-hidden bg-transparent relative">
           {/* Three-column resizable layout (always visible) */}
           <ResizableLayout
-            left={<FileExplorer />}
+            left={showExplorer() ? <FileExplorer /> : null}
             center={
               <div class="flex flex-col h-full">
                 <div class="flex items-center justify-center py-1.5 border-b border-border">

@@ -114,7 +114,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   };
 
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
-    { id: "chat", label: "Chat", icon: "💬" },
+    { id: "chat", label: "Window", icon: "🪟" },
     { id: "agent", label: "Agent", icon: "🛡️" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },

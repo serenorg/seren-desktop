@@ -116,7 +116,7 @@ describe("UnifiedMessage types", () => {
     const msg = makeMessage({
       type: "user",
       role: "user",
-      images: [{ type: "base64", media_type: "image/png", data: "abc" }],
+      images: [{ name: "test.png", mimeType: "image/png", base64: "abc" }],
     });
     expect(msg.images).toHaveLength(1);
   });

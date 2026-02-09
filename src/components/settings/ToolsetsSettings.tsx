@@ -59,8 +59,8 @@ export const ToolsetsSettings: Component = () => {
     const pubs: Publisher[] = (data?.data || []).map((p) => ({
       slug: p.slug,
       name: p.name,
-      logo_url: p.logo_url,
-      description: p.description,
+      logo_url: p.logo_url ?? null,
+      description: p.description ?? null,
       categories: p.categories || [],
     }));
     return pubs;
@@ -91,15 +91,6 @@ export const ToolsetsSettings: Component = () => {
     setFormPublishers([]);
     setPublisherSearch("");
     setEditingToolset(null);
-    setShowCreateModal(true);
-  };
-
-  const openEditModal = (toolset: Toolset) => {
-    setFormName(toolset.name);
-    setFormDescription(toolset.description);
-    setFormPublishers([...toolset.publisherSlugs]);
-    setPublisherSearch("");
-    setEditingToolset(toolset);
     setShowCreateModal(true);
   };
 

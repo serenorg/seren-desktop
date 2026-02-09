@@ -215,7 +215,7 @@ export const OpenClawSettings: Component = () => {
         </Show>
 
         {/* OpenClaw Dashboard */}
-        <Show when={moltbotStore.isRunning && moltbotStore.port}>
+        <Show when={openclawStore.isRunning && openclawStore.port}>
           <div class="mt-6 pt-6 border-t border-[rgba(148,163,184,0.15)]">
             <h4 class="m-0 mb-2 text-[1rem] font-semibold text-foreground">
               OpenClaw Dashboard
@@ -226,7 +226,7 @@ export const OpenClawSettings: Component = () => {
             </p>
             <div class="rounded-lg border border-[rgba(148,163,184,0.2)] overflow-hidden">
               <iframe
-                src={`http://127.0.0.1:${moltbotStore.port}/`}
+                src={`http://127.0.0.1:${openclawStore.port}/`}
                 style="width: 100%; height: 600px; border: none; background: #1a1a2e;"
                 title="OpenClaw Dashboard"
               />

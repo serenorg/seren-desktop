@@ -137,7 +137,7 @@ describe("conversationStore", () => {
         makeMessage({ content: "message in A" }),
       );
 
-      const convoB = await conversationStore.createConversation("B");
+      await conversationStore.createConversation("B");
       // convoB is now active, its messages should be empty
       expect(conversationStore.messages).toHaveLength(0);
 

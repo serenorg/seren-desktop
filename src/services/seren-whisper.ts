@@ -7,10 +7,6 @@ import { getToken } from "@/services/auth";
 
 const PUBLISHER_SLUG = "seren-whisper";
 
-interface TranscriptionResponse {
-  text: string;
-}
-
 interface MultipartPart {
   name: string;
   value?: string;
