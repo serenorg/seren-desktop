@@ -261,6 +261,25 @@ function handleToolResult(event: {
   content: string;
   is_error: boolean;
 }): void {
+  // Update the original tool_call message's status so the ToolCallCard
+  // transitions from "Running" to "Completed" or "Failed".
+  const messages = conversationStore.messages;
+  const toolCallMsg = messages.find(
+    (m) => m.toolCallId === event.tool_call_id && m.type === "tool_call",
+  );
+  if (toolCallMsg) {
+    const newStatus = event.is_error ? "error" : "completed";
+    conversationStore.updateMessage(toolCallMsg.id, {
+      status: "complete",
+      toolCall: {
+        ...toolCallMsg.toolCall!,
+        status: newStatus,
+        result: event.content,
+        isError: event.is_error,
+      },
+    });
+  }
+
   const resultMessage: UnifiedMessage = {
     id: crypto.randomUUID(),
     type: "tool_result",
@@ -274,7 +293,7 @@ function handleToolResult(event: {
       toolCallId: event.tool_call_id,
       title: "",
       kind: "",
-      status: event.is_error ? "error" : "complete",
+      status: event.is_error ? "error" : "completed",
       isError: event.is_error,
       result: event.content,
     },

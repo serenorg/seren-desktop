@@ -654,10 +654,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             fallback={
               <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
                 <h3 class="m-0 mb-3 text-lg font-medium text-[#e6edf3]">
-                  Start a conversation
+                  Welcome to Seren
                 </h3>
-                <p class="m-0 text-sm text-center max-w-[280px] leading-relaxed">
-                  Ask questions about code or request help with tasks.
+                <p class="m-0 text-sm text-center max-w-[320px] leading-relaxed">
+                  Your AI assistant for everyday work. Try typing:
+                </p>
+                <p class="m-0 mt-2 text-sm text-center max-w-[320px] leading-relaxed italic text-[#e6edf3]">
+                  "Summarize the key points of this article for me"
                 </p>
               </div>
             }

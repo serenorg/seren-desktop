@@ -97,12 +97,45 @@ impl ChatModelWorker {
         body
     }
 
+    /// Extract text from a content value that may be a string, an array of parts,
+    /// or an object with a "text" field (Gemini returns array-of-parts format).
+    fn normalize_content(value: &serde_json::Value) -> Option<String> {
+        if let Some(s) = value.as_str() {
+            return if s.is_empty() { None } else { Some(s.to_string()) };
+        }
+
+        if let Some(arr) = value.as_array() {
+            let combined: String = arr
+                .iter()
+                .filter_map(|piece| {
+                    piece
+                        .as_str()
+                        .map(|s| s.to_string())
+                        .or_else(|| piece.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            return if combined.is_empty() { None } else { Some(combined) };
+        }
+
+        if let Some(text) = value.get("text").and_then(|t| t.as_str()) {
+            return if text.is_empty() { None } else { Some(text.to_string()) };
+        }
+
+        None
+    }
+
     /// Parse a single SSE data line into WorkerEvents.
     fn parse_sse_data(data: &str) -> Vec<WorkerEvent> {
         let parsed: serde_json::Value = match serde_json::from_str(data) {
             Ok(v) => v,
-            Err(_) => return Vec::new(),
+            Err(_) => {
+                log::debug!("[ChatModelWorker] Non-JSON SSE data: {}", &data[..data.len().min(200)]);
+                return Vec::new();
+            }
         };
+
+        log::debug!("[ChatModelWorker] SSE chunk: {}", &data[..data.len().min(300)]);
 
         let mut events = Vec::new();
 
@@ -120,24 +153,30 @@ impl ChatModelWorker {
             }
         }
 
-        // Extract content delta
-        let content = parsed
-            .pointer("/delta/content")
-            .or_else(|| parsed.pointer("/choices/0/delta/content"))
-            .and_then(|v| v.as_str());
+        // If Gateway wraps the SSE event in {status, body, cost}, unwrap body
+        let effective = if parsed.get("body").is_some() && parsed.get("status").is_some() {
+            parsed.pointer("/body").unwrap_or(&parsed)
+        } else {
+            &parsed
+        };
 
-        if let Some(text) = content {
-            if !text.is_empty() {
-                events.push(WorkerEvent::Content {
-                    text: text.to_string(),
-                });
-            }
+        // Extract content delta (handles string, array-of-parts, or object with "text")
+        let content_value = effective
+            .pointer("/delta/content")
+            .or_else(|| effective.pointer("/choices/0/delta/content"));
+
+        let content_text = content_value.and_then(Self::normalize_content);
+
+        if let Some(ref text) = content_text {
+            events.push(WorkerEvent::Content {
+                text: text.clone(),
+            });
         }
 
         // Extract thinking delta (Anthropic extended thinking)
-        let thinking = parsed
+        let thinking = effective
             .pointer("/delta/thinking")
-            .or_else(|| parsed.pointer("/choices/0/delta/thinking"))
+            .or_else(|| effective.pointer("/choices/0/delta/thinking"))
             .and_then(|v| v.as_str());
 
         if let Some(text) = thinking {
@@ -149,9 +188,9 @@ impl ChatModelWorker {
         }
 
         // Extract tool calls from delta
-        if let Some(tool_calls) = parsed
+        if let Some(tool_calls) = effective
             .pointer("/delta/tool_calls")
-            .or_else(|| parsed.pointer("/choices/0/delta/tool_calls"))
+            .or_else(|| effective.pointer("/choices/0/delta/tool_calls"))
             .and_then(|v| v.as_array())
         {
             for tc in tool_calls {
@@ -182,17 +221,25 @@ impl ChatModelWorker {
             }
         }
 
-        // Check for finish_reason
-        let finish_reason = parsed
+        // Check for finish_reason (check both wrapped and unwrapped paths)
+        let finish_reason = effective
             .pointer("/choices/0/finish_reason")
             .and_then(|v| v.as_str());
 
         if let Some("stop") = finish_reason {
-            let final_content = content.unwrap_or("").to_string();
+            let final_content = content_text.clone().unwrap_or_default();
             events.push(WorkerEvent::Complete {
                 final_content,
                 thinking: None,
             });
+        }
+
+        // Log when no events were extracted (helps debug format issues)
+        if events.is_empty() {
+            log::debug!(
+                "[ChatModelWorker] No events extracted from SSE data: {}",
+                &data[..data.len().min(300)]
+            );
         }
 
         events
@@ -210,6 +257,8 @@ impl ChatModelWorker {
         let mut accumulated_thinking = String::new();
         let mut got_complete = false;
 
+        let mut chunk_count = 0u32;
+
         while let Some(chunk_result) = stream.next().await {
             // Check cancellation
             if *self.cancelled.lock().await {
@@ -218,6 +267,18 @@ impl ChatModelWorker {
 
             let chunk = chunk_result.map_err(|e| format!("Stream read error: {}", e))?;
             let text = String::from_utf8_lossy(&chunk);
+            chunk_count += 1;
+
+            // Log first few chunks to diagnose format issues
+            if chunk_count <= 3 {
+                log::info!(
+                    "[ChatModelWorker] Chunk #{} ({} bytes): {}",
+                    chunk_count,
+                    chunk.len(),
+                    &text[..text.len().min(500)]
+                );
+            }
+
             buffer.push_str(&text);
 
             // Process complete lines
@@ -229,9 +290,58 @@ impl ChatModelWorker {
                     continue;
                 }
 
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if data == "[DONE]" {
-                        if !got_complete {
+                // Handle both "data: " (with space) and "data:" (without space)
+                let data_opt = line
+                    .strip_prefix("data: ")
+                    .or_else(|| line.strip_prefix("data:"));
+
+                // Extract SSE data payload, or try raw JSON as fallback
+                let data_str = if let Some(data) = data_opt {
+                    data.to_string()
+                } else if line.starts_with('{') {
+                    // Fallback: raw JSON line without SSE data: prefix (NDJSON)
+                    log::debug!(
+                        "[ChatModelWorker] Raw JSON line (no data: prefix): {}",
+                        &line[..line.len().min(200)]
+                    );
+                    line.clone()
+                } else {
+                    log::debug!(
+                        "[ChatModelWorker] Skipping unrecognized SSE line: {}",
+                        &line[..line.len().min(200)]
+                    );
+                    continue;
+                };
+
+                if data_str.trim() == "[DONE]" {
+                    if !got_complete {
+                        let thinking = if accumulated_thinking.is_empty() {
+                            None
+                        } else {
+                            Some(accumulated_thinking.clone())
+                        };
+                        event_tx
+                            .send(WorkerEvent::Complete {
+                                final_content: accumulated_content.clone(),
+                                thinking,
+                            })
+                            .await
+                            .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                    }
+                    return Ok(());
+                }
+
+                let events = Self::parse_sse_data(&data_str);
+                for event in events {
+                    match &event {
+                        WorkerEvent::Content { text } => {
+                            accumulated_content.push_str(text);
+                        }
+                        WorkerEvent::Thinking { text } => {
+                            accumulated_thinking.push_str(text);
+                        }
+                        WorkerEvent::Complete { .. } => {
+                            got_complete = true;
                             let thinking = if accumulated_thinking.is_empty() {
                                 None
                             } else {
@@ -243,44 +353,105 @@ impl ChatModelWorker {
                                     thinking,
                                 })
                                 .await
-                                .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                                .map_err(|e| {
+                                    format!("Failed to send Complete event: {}", e)
+                                })?;
+                            continue;
                         }
-                        return Ok(());
+                        _ => {}
                     }
+                    event_tx
+                        .send(event)
+                        .await
+                        .map_err(|e| format!("Failed to send event: {}", e))?;
+                }
+            }
+        }
 
-                    let events = Self::parse_sse_data(data);
-                    for event in events {
-                        match &event {
-                            WorkerEvent::Content { text } => {
-                                accumulated_content.push_str(text);
-                            }
-                            WorkerEvent::Thinking { text } => {
-                                accumulated_thinking.push_str(text);
-                            }
-                            WorkerEvent::Complete { .. } => {
-                                got_complete = true;
-                                let thinking = if accumulated_thinking.is_empty() {
-                                    None
-                                } else {
-                                    Some(accumulated_thinking.clone())
-                                };
-                                event_tx
-                                    .send(WorkerEvent::Complete {
-                                        final_content: accumulated_content.clone(),
-                                        thinking,
-                                    })
-                                    .await
-                                    .map_err(|e| {
-                                        format!("Failed to send Complete event: {}", e)
-                                    })?;
-                                continue;
-                            }
-                            _ => {}
+        // Log stream summary for debugging
+        log::info!(
+            "[ChatModelWorker] Stream ended: {} chunks received, {} bytes remaining in buffer, accumulated {} content bytes",
+            chunk_count,
+            buffer.len(),
+            accumulated_content.len()
+        );
+
+        // Handle Gateway non-streaming wrapper format:
+        // The Gateway may return the entire response as a single JSON blob where
+        // the body field is a string containing embedded SSE data:
+        //   {"status":200,"body":"data: {...}\n\ndata: {...}\n\n...[DONE]","cost":"..."}
+        // In this case the buffer has no real newlines (SSE newlines are JSON escapes).
+        if !buffer.is_empty() && accumulated_content.is_empty() && !got_complete {
+            if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                // Log Gateway cost for billing visibility
+                if let Some(cost) = wrapper.get("cost") {
+                    log::info!("[ChatModelWorker] Gateway reported cost: {}", cost);
+                }
+
+                if let Some(body_str) = wrapper.get("body").and_then(|b| b.as_str()) {
+                    log::info!(
+                        "[ChatModelWorker] Gateway returned non-streaming wrapper, extracting embedded SSE ({} bytes)",
+                        body_str.len()
+                    );
+                    // Process the embedded SSE content
+                    for raw_line in body_str.split('\n') {
+                        let line = raw_line.trim();
+                        if line.is_empty() || line.starts_with(':') {
+                            continue;
                         }
-                        event_tx
-                            .send(event)
-                            .await
-                            .map_err(|e| format!("Failed to send event: {}", e))?;
+                        let data = line
+                            .strip_prefix("data: ")
+                            .or_else(|| line.strip_prefix("data:"));
+                        let data_str = if let Some(d) = data {
+                            d
+                        } else if line.starts_with('{') {
+                            line
+                        } else {
+                            continue;
+                        };
+                        if data_str.trim() == "[DONE]" {
+                            break;
+                        }
+                        let events = Self::parse_sse_data(data_str);
+                        for event in events {
+                            match &event {
+                                WorkerEvent::Content { text } => {
+                                    accumulated_content.push_str(text);
+                                }
+                                WorkerEvent::Thinking { text } => {
+                                    accumulated_thinking.push_str(text);
+                                }
+                                WorkerEvent::Complete { .. } => {
+                                    got_complete = true;
+                                }
+                                _ => {}
+                            }
+                            event_tx
+                                .send(event)
+                                .await
+                                .map_err(|e| format!("Failed to send event: {}", e))?;
+                        }
+                    }
+                } else if let Some(body_obj) = wrapper.get("body") {
+                    // body is a JSON object (non-streaming response), extract content directly
+                    if body_obj.is_object() {
+                        log::info!("[ChatModelWorker] Gateway returned non-streaming JSON body");
+                        let events = Self::parse_sse_data(&body_obj.to_string());
+                        for event in events {
+                            match &event {
+                                WorkerEvent::Content { text } => {
+                                    accumulated_content.push_str(text);
+                                }
+                                WorkerEvent::Complete { .. } => {
+                                    got_complete = true;
+                                }
+                                _ => {}
+                            }
+                            event_tx
+                                .send(event)
+                                .await
+                                .map_err(|e| format!("Failed to send event: {}", e))?;
+                        }
                     }
                 }
             }
@@ -610,5 +781,88 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn parses_gemini_array_of_parts_content() {
+        // Gemini returns content as an array of objects with "text" fields
+        let data = r#"{"choices":[{"delta":{"content":[{"text":"Hello from Gemini"}]},"finish_reason":null}]}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WorkerEvent::Content { text } => assert_eq!(text, "Hello from Gemini"),
+            _ => panic!("Expected Content event, got {:?}", events[0]),
+        }
+    }
+
+    #[test]
+    fn parses_gemini_multi_part_content() {
+        // Multiple parts concatenated
+        let data = r#"{"choices":[{"delta":{"content":[{"text":"Hello "},{"text":"world"}]},"finish_reason":null}]}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WorkerEvent::Content { text } => assert_eq!(text, "Hello world"),
+            _ => panic!("Expected Content event"),
+        }
+    }
+
+    #[test]
+    fn parses_gemini_object_with_text_content() {
+        // Content as a single object with "text" field
+        let data = r#"{"choices":[{"delta":{"content":{"text":"Object content"}},"finish_reason":null}]}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WorkerEvent::Content { text } => assert_eq!(text, "Object content"),
+            _ => panic!("Expected Content event"),
+        }
+    }
+
+    #[test]
+    fn ignores_empty_gemini_array_content() {
+        let data = r#"{"choices":[{"delta":{"content":[]},"finish_reason":null}]}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert!(events.iter().all(|e| !matches!(e, WorkerEvent::Content { .. })));
+    }
+
+    #[test]
+    fn parses_gemini_finish_with_array_content() {
+        // Finish with array-of-parts content should include the content in Complete
+        let data = r#"{"choices":[{"delta":{"content":[{"text":"Done"}]},"finish_reason":"stop"}]}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert!(events.iter().any(|e| matches!(e, WorkerEvent::Content { text } if text == "Done")));
+        assert!(events.iter().any(|e| matches!(e, WorkerEvent::Complete { final_content, .. } if final_content == "Done")));
+    }
+
+    #[test]
+    fn parses_gateway_wrapped_content() {
+        // Gateway wraps SSE events in {status, body, cost}
+        let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":"Wrapped hello"},"finish_reason":null}]},"cost":"0.001"}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WorkerEvent::Content { text } => assert_eq!(text, "Wrapped hello"),
+            _ => panic!("Expected Content event, got {:?}", events[0]),
+        }
+    }
+
+    #[test]
+    fn parses_gateway_wrapped_finish() {
+        let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]},"cost":"0.002"}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert!(events.iter().any(|e| matches!(e, WorkerEvent::Complete { .. })));
+    }
+
+    #[test]
+    fn parses_gateway_wrapped_gemini_array_content() {
+        // Gateway-wrapped Gemini array-of-parts format
+        let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":[{"text":"Wrapped Gemini"}]},"finish_reason":null}]},"cost":"0"}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WorkerEvent::Content { text } => assert_eq!(text, "Wrapped Gemini"),
+            _ => panic!("Expected Content event, got {:?}", events[0]),
+        }
     }
 }

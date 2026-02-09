@@ -833,6 +833,7 @@ export const acpStore = {
 
       case "promptComplete":
         this.finalizeStreamingContent(sessionId);
+        this.markPendingToolCallsComplete(sessionId);
         // Transition status back to "ready" so queued messages can be processed
         setState(
           "sessions",
@@ -955,7 +956,13 @@ export const acpStore = {
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
   },
 
-  handleToolResult(sessionId: string, toolCallId: string, status: string, result?: string, error?: string) {
+  handleToolResult(
+    sessionId: string,
+    toolCallId: string,
+    status: string,
+    result?: string,
+    error?: string,
+  ) {
     const session = state.sessions[sessionId];
     if (!session) return;
 
@@ -979,6 +986,42 @@ export const acpStore = {
 
     // Remove from pending
     session.pendingToolCalls.delete(toolCallId);
+  },
+
+  /**
+   * Mark all tool calls that are still "running" or "pending" as "completed".
+   * Called when promptComplete fires — all tool calls must be done by then.
+   */
+  markPendingToolCallsComplete(sessionId: string) {
+    const session = state.sessions[sessionId];
+    if (!session) return;
+
+    const runningStatuses = ["running", "pending", "in_progress"];
+    const hasRunning = session.messages.some(
+      (msg) =>
+        msg.toolCall &&
+        runningStatuses.includes(msg.toolCall.status.toLowerCase()),
+    );
+
+    if (!hasRunning) return;
+
+    setState("sessions", sessionId, "messages", (msgs) =>
+      msgs.map((msg) => {
+        if (
+          msg.toolCall &&
+          runningStatuses.includes(msg.toolCall.status.toLowerCase())
+        ) {
+          return {
+            ...msg,
+            toolCall: { ...msg.toolCall, status: "completed" },
+          };
+        }
+        return msg;
+      }),
+    );
+
+    // Clear pending map
+    session.pendingToolCalls.clear();
   },
 
   handleDiff(sessionId: string, diff: DiffEvent) {

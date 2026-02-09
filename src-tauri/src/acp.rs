@@ -972,19 +972,53 @@ fn handle_session_notification(
                 }
             }
 
+            // Serialize status using serde (not Debug format) for consistent
+            // values like "in_progress", "completed" that the frontend expects.
+            let result_status_str = update.fields.status
+                .as_ref()
+                .and_then(|s| serde_json::to_value(s).ok())
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_else(|| "running".to_string());
             log::debug!(
-                "[ACP] Emitting TOOL_RESULT: session={}, tool_call_id={}, status={:?}",
+                "[ACP] Emitting TOOL_RESULT: session={}, tool_call_id={}, status={}",
                 session_id,
                 update.tool_call_id,
-                update.fields.status
+                result_status_str
             );
+            let mut result_payload = serde_json::json!({
+                "sessionId": session_id,
+                "toolCallId": update.tool_call_id.to_string(),
+                "status": result_status_str,
+            });
+            // Include text content as result so the frontend can display it
+            if let Some(ref content) = update.fields.content {
+                let text_parts: Vec<String> = content
+                    .iter()
+                    .filter_map(|block| {
+                        if let agent_client_protocol::ToolCallContent::Content(c) = block {
+                            if let ContentBlock::Text(t) = &c.content {
+                                Some(t.text.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !text_parts.is_empty() {
+                    let joined = text_parts.join("\n");
+                    let truncated = if joined.len() > 5000 {
+                        format!("{}... ({} bytes total)", &joined[..5000], joined.len())
+                    } else {
+                        joined
+                    };
+                    result_payload["result"] = serde_json::Value::String(truncated);
+                }
+            }
             let emit_result = app.emit(
                 events::TOOL_RESULT,
-                serde_json::json!({
-                    "sessionId": session_id,
-                    "toolCallId": update.tool_call_id.to_string(),
-                    "status": format!("{:?}", update.fields.status),
-                }),
+                result_payload,
             );
             if let Err(ref e) = emit_result {
                 log::error!(
