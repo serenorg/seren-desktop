@@ -10,11 +10,12 @@ use tokio::sync::{mpsc, Mutex};
 
 use super::chat_model_worker::ChatModelWorker;
 use super::classifier;
+use super::mcp_publisher_worker::McpPublisherWorker;
 use super::router;
 use super::trust;
 use super::types::{
-    DelegationType, OrchestratorEvent, RoutingDecision, SkillRef, TransitionEvent,
-    UserCapabilities, WorkerEvent, WorkerType,
+    DelegationType, ImageAttachment, OrchestratorEvent, RoutingDecision, SkillRef,
+    TransitionEvent, UserCapabilities, WorkerEvent, WorkerType,
 };
 use super::worker::Worker;
 
@@ -62,7 +63,8 @@ pub async fn orchestrate(
     prompt: String,
     history: Vec<serde_json::Value>,
     capabilities: UserCapabilities,
-    _auth_token: String,
+    auth_token: String,
+    images: Vec<ImageAttachment>,
 ) -> Result<(), String> {
     log::info!(
         "[Orchestrator] Starting orchestration for conversation {}",
@@ -135,6 +137,7 @@ pub async fn orchestrate(
     let worker = create_worker(&routing, &app);
     let worker_prompt = prompt.clone();
     let worker_routing = routing.clone();
+    let worker_auth_token = auth_token.clone();
     let worker_handle = tokio::spawn(async move {
         worker
             .execute(
@@ -142,6 +145,8 @@ pub async fn orchestrate(
                 &history,
                 &worker_routing,
                 &skill_content,
+                &worker_auth_token,
+                &images,
                 event_tx,
             )
             .await
@@ -258,11 +263,7 @@ fn create_worker(routing: &RoutingDecision, _app: &AppHandle) -> Arc<dyn Worker>
                 Arc::new(ChatModelWorker::new())
             }
         }
-        WorkerType::McpPublisher => {
-            // MCP publisher worker not yet implemented; fall back to chat model
-            log::warn!("[Orchestrator] McpPublisher worker not yet implemented, using ChatModel");
-            Arc::new(ChatModelWorker::new())
-        }
+        WorkerType::McpPublisher => Arc::new(McpPublisherWorker::new()),
     }
 }
 

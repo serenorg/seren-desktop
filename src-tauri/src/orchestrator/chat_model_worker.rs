@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use super::types::{RoutingDecision, WorkerEvent};
+use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
@@ -37,6 +37,7 @@ impl ChatModelWorker {
         routing: &RoutingDecision,
         skill_content: &str,
         tools: &[serde_json::Value],
+        images: &[ImageAttachment],
     ) -> serde_json::Value {
         let mut messages: Vec<serde_json::Value> = Vec::new();
 
@@ -56,11 +57,31 @@ impl ChatModelWorker {
             messages.push(msg.clone());
         }
 
-        // Current user prompt
-        messages.push(serde_json::json!({
-            "role": "user",
-            "content": prompt
-        }));
+        // Current user prompt — multimodal when images are present
+        if images.is_empty() {
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content": prompt
+            }));
+        } else {
+            let mut content_parts: Vec<serde_json::Value> = Vec::new();
+            content_parts.push(serde_json::json!({
+                "type": "text",
+                "text": prompt
+            }));
+            for image in images {
+                content_parts.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:{};base64,{}", image.mime_type, image.base64)
+                    }
+                }));
+            }
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content": content_parts
+            }));
+        }
 
         let mut body = serde_json::json!({
             "model": routing.model_id,
@@ -108,6 +129,20 @@ impl ChatModelWorker {
         if let Some(text) = content {
             if !text.is_empty() {
                 events.push(WorkerEvent::Content {
+                    text: text.to_string(),
+                });
+            }
+        }
+
+        // Extract thinking delta (Anthropic extended thinking)
+        let thinking = parsed
+            .pointer("/delta/thinking")
+            .or_else(|| parsed.pointer("/choices/0/delta/thinking"))
+            .and_then(|v| v.as_str());
+
+        if let Some(text) = thinking {
+            if !text.is_empty() {
+                events.push(WorkerEvent::Thinking {
                     text: text.to_string(),
                 });
             }
@@ -172,6 +207,7 @@ impl ChatModelWorker {
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
         let mut accumulated_content = String::new();
+        let mut accumulated_thinking = String::new();
         let mut got_complete = false;
 
         while let Some(chunk_result) = stream.next().await {
@@ -196,10 +232,15 @@ impl ChatModelWorker {
                 if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
                         if !got_complete {
+                            let thinking = if accumulated_thinking.is_empty() {
+                                None
+                            } else {
+                                Some(accumulated_thinking.clone())
+                            };
                             event_tx
                                 .send(WorkerEvent::Complete {
                                     final_content: accumulated_content.clone(),
-                                    thinking: None,
+                                    thinking,
                                 })
                                 .await
                                 .map_err(|e| format!("Failed to send Complete event: {}", e))?;
@@ -213,13 +254,20 @@ impl ChatModelWorker {
                             WorkerEvent::Content { text } => {
                                 accumulated_content.push_str(text);
                             }
+                            WorkerEvent::Thinking { text } => {
+                                accumulated_thinking.push_str(text);
+                            }
                             WorkerEvent::Complete { .. } => {
                                 got_complete = true;
-                                // Send a Complete with the full accumulated content
+                                let thinking = if accumulated_thinking.is_empty() {
+                                    None
+                                } else {
+                                    Some(accumulated_thinking.clone())
+                                };
                                 event_tx
                                     .send(WorkerEvent::Complete {
                                         final_content: accumulated_content.clone(),
-                                        thinking: None,
+                                        thinking,
                                     })
                                     .await
                                     .map_err(|e| {
@@ -240,10 +288,15 @@ impl ChatModelWorker {
 
         // If stream ended without [DONE], send a Complete
         if !got_complete {
+            let thinking = if accumulated_thinking.is_empty() {
+                None
+            } else {
+                Some(accumulated_thinking)
+            };
             event_tx
                 .send(WorkerEvent::Complete {
                     final_content: accumulated_content,
-                    thinking: None,
+                    thinking,
                 })
                 .await
                 .map_err(|e| format!("Failed to send final Complete event: {}", e))?;
@@ -265,6 +318,8 @@ impl Worker for ChatModelWorker {
         conversation_context: &[serde_json::Value],
         routing: &RoutingDecision,
         skill_content: &str,
+        auth_token: &str,
+        images: &[ImageAttachment],
         event_tx: mpsc::Sender<WorkerEvent>,
     ) -> Result<(), String> {
         // Reset cancellation flag
@@ -285,16 +340,13 @@ impl Worker for ChatModelWorker {
             GATEWAY_BASE_URL, PUBLISHER_SLUG
         );
         let tools: Vec<serde_json::Value> = Vec::new(); // Tools will be populated by the orchestrator
-        let body = self.build_request_body(prompt, conversation_context, routing, skill_content, &tools);
+        let body = self.build_request_body(prompt, conversation_context, routing, skill_content, &tools, images);
 
-        // Auth token is in the routing decision's reason field? No — it's passed separately.
-        // For now, the orchestrator passes the token via the service layer.
-        // TODO: The auth token needs to be passed through the execute interface.
-        // For Phase 2, we define the shape; actual API calls happen in Phase 3.
         let response = self
             .client
             .post(&url)
             .header("Content-Type", "application/json")
+            .bearer_auth(auth_token)
             .body(serde_json::to_string(&body).map_err(|e| e.to_string())?)
             .send()
             .await
@@ -350,6 +402,7 @@ mod tests {
             delegation: super::super::types::DelegationType::InLoop,
             reason: "General chat".to_string(),
             selected_skills: vec![],
+            publisher_slug: None,
         };
 
         let body = worker.build_request_body(
@@ -357,6 +410,7 @@ mod tests {
             &[serde_json::json!({"role": "user", "content": "previous message"})],
             &routing,
             "",
+            &[],
             &[],
         );
 
@@ -379,9 +433,10 @@ mod tests {
             delegation: super::super::types::DelegationType::InLoop,
             reason: "General chat".to_string(),
             selected_skills: vec![],
+            publisher_slug: None,
         };
 
-        let body = worker.build_request_body("Hello", &[], &routing, "# Active Skills\n\n## Skill: Prose", &[]);
+        let body = worker.build_request_body("Hello", &[], &routing, "# Active Skills\n\n## Skill: Prose", &[], &[]);
 
         let system_msg = body["messages"][0]["content"].as_str().unwrap();
         assert!(system_msg.contains("Active Skills"));
@@ -397,6 +452,7 @@ mod tests {
             delegation: super::super::types::DelegationType::InLoop,
             reason: "Research".to_string(),
             selected_skills: vec![],
+            publisher_slug: None,
         };
 
         let tools = vec![serde_json::json!({
@@ -408,7 +464,7 @@ mod tests {
             }
         })];
 
-        let body = worker.build_request_body("Search for news", &[], &routing, "", &tools);
+        let body = worker.build_request_body("Search for news", &[], &routing, "", &tools, &[]);
 
         assert!(body.get("tools").is_some());
         assert_eq!(body["tool_choice"], "auto");
@@ -490,5 +546,69 @@ mod tests {
         let events = ChatModelWorker::parse_sse_data(data);
         // Should not produce a Content event for empty string
         assert!(events.iter().all(|e| !matches!(e, WorkerEvent::Content { .. })));
+    }
+
+    #[test]
+    fn parses_thinking_sse_data() {
+        let data = r#"{"delta":{"thinking":"Let me consider..."}}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WorkerEvent::Thinking { text } => assert_eq!(text, "Let me consider..."),
+            _ => panic!("Expected Thinking event"),
+        }
+    }
+
+    #[test]
+    fn parses_thinking_from_choices_path() {
+        let data = r#"{"choices":[{"delta":{"thinking":"Reasoning step"},"finish_reason":null}]}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WorkerEvent::Thinking { text } => assert_eq!(text, "Reasoning step"),
+            _ => panic!("Expected Thinking event"),
+        }
+    }
+
+    #[test]
+    fn ignores_empty_thinking() {
+        let data = r#"{"choices":[{"delta":{"thinking":""},"finish_reason":null}]}"#;
+        let events = ChatModelWorker::parse_sse_data(data);
+        assert!(events.iter().all(|e| !matches!(e, WorkerEvent::Thinking { .. })));
+    }
+
+    #[test]
+    fn builds_request_with_images() {
+        let worker = ChatModelWorker::new();
+        let routing = RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "anthropic/claude-sonnet-4".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "General chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+        };
+
+        let images = vec![ImageAttachment {
+            name: "screenshot.png".to_string(),
+            mime_type: "image/png".to_string(),
+            base64: "iVBORw0KGgo=".to_string(),
+        }];
+
+        let body = worker.build_request_body("What is in this image?", &[], &routing, "", &[], &images);
+
+        let messages = body["messages"].as_array().unwrap();
+        let user_msg = &messages[messages.len() - 1];
+        assert_eq!(user_msg["role"], "user");
+        // Should be multimodal content array
+        let content = user_msg["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "What is in this image?");
+        assert_eq!(content[1]["type"], "image_url");
+        assert!(content[1]["image_url"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
     }
 }

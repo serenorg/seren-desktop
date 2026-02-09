@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Component } from "solid-js";
 import { createSignal, Show } from "solid-js";
+import { getToken } from "@/lib/tauri-bridge";
 
 interface SatisfactionSignalProps {
   messageId: string;
@@ -25,9 +26,11 @@ export const SatisfactionSignal: Component<SatisfactionSignalProps> = (
 
     setSignal(satisfaction);
     try {
+      const authToken = (await getToken()) ?? "";
       await invoke("submit_eval_signal", {
         messageId: props.messageId,
         satisfaction,
+        authToken,
       });
     } catch (error) {
       console.warn("[SatisfactionSignal] Failed to submit:", error);

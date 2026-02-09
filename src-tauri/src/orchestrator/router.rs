@@ -42,12 +42,15 @@ pub fn route(
     let selected_skills = resolve_skills(classification, capabilities);
     let reason = build_reason(classification, &worker_type, &model_id);
 
+    let publisher_slug = extract_publisher_slug(&worker_type, capabilities);
+
     RoutingDecision {
         worker_type,
         model_id,
         delegation: DelegationType::InLoop,
         reason,
         selected_skills,
+        publisher_slug,
     }
 }
 
@@ -64,8 +67,41 @@ fn select_worker_type(
         return WorkerType::AcpAgent;
     }
 
+    // Task requiring tools + publisher tools available → McpPublisher
+    if classification.requires_tools
+        && capabilities
+            .available_tools
+            .iter()
+            .any(|t| t.starts_with("mcp__"))
+    {
+        return WorkerType::McpPublisher;
+    }
+
     // Everything else → ChatModel
     WorkerType::ChatModel
+}
+
+/// Extract the publisher slug from available MCP tools.
+///
+/// MCP tool names follow the pattern `mcp__<publisher-slug>__<tool-name>`.
+/// Returns the first publisher slug found, or None.
+fn extract_publisher_slug(
+    worker_type: &WorkerType,
+    capabilities: &UserCapabilities,
+) -> Option<String> {
+    if *worker_type != WorkerType::McpPublisher {
+        return None;
+    }
+
+    capabilities
+        .available_tools
+        .iter()
+        .filter_map(|t| {
+            let rest = t.strip_prefix("mcp__")?;
+            let slug_end = rest.find("__")?;
+            Some(rest[..slug_end].to_string())
+        })
+        .next()
 }
 
 /// Select the best available model for the task.
@@ -266,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn routes_research_with_tools_to_chat_model() {
+    fn routes_research_with_non_mcp_tools_to_chat_model() {
         let classification = make_classification("research", true, false);
         let capabilities = make_capabilities(
             false,
@@ -275,6 +311,35 @@ mod tests {
         );
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
+    }
+
+    #[test]
+    fn routes_research_with_mcp_tools_to_mcp_publisher() {
+        let classification = make_classification("research", true, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &["mcp__firecrawl-serenai__scrape"],
+        );
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::McpPublisher);
+        assert_eq!(
+            decision.publisher_slug,
+            Some("firecrawl-serenai".to_string())
+        );
+    }
+
+    #[test]
+    fn mcp_publisher_does_not_trigger_without_requires_tools() {
+        let classification = make_classification("general_chat", false, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &["mcp__firecrawl-serenai__scrape"],
+        );
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
     }
 
     // =========================================================================

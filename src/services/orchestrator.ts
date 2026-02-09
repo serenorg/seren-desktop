@@ -3,6 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { Attachment } from "@/lib/providers/types";
 import { getToken } from "@/lib/tauri-bridge";
 import { getAllTools } from "@/lib/tools";
 import { acpStore } from "@/stores/acp.store";
@@ -92,6 +93,7 @@ let streamStartTime = 0;
 export async function orchestrate(
   conversationId: string,
   prompt: string,
+  images?: Attachment[],
 ): Promise<void> {
   // 1. Build history from conversation store
   const messages = conversationStore.getMessagesFor(conversationId);
@@ -124,12 +126,18 @@ export async function orchestrate(
     );
 
     // 6. Invoke the Rust orchestrator
+    const imagePayload = (images ?? []).map((img) => ({
+      name: img.name,
+      mime_type: img.mimeType,
+      base64: img.base64,
+    }));
     await invoke("orchestrate", {
       conversationId,
       prompt,
       history,
       capabilities,
       authToken: token,
+      images: imagePayload,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

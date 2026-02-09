@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use tokio::sync::{mpsc, Mutex};
 
-use super::types::{RoutingDecision, WorkerEvent};
+use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
 
 /// ACP worker adapter that delegates to the existing ACP session infrastructure.
@@ -47,6 +47,8 @@ impl Worker for AcpWorker {
         _conversation_context: &[Value],
         routing: &RoutingDecision,
         _skill_content: &str,
+        _auth_token: &str,
+        _images: &[ImageAttachment],
         event_tx: mpsc::Sender<WorkerEvent>,
     ) -> Result<(), String> {
         let session_id = self

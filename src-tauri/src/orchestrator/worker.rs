@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use super::types::{RoutingDecision, WorkerEvent};
+use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 
 /// The Worker trait that all worker adapters implement.
 /// Each worker receives a prompt + context and streams events back.
@@ -17,12 +17,16 @@ pub trait Worker: Send + Sync {
     ///
     /// `skill_content` is pre-loaded Markdown from the selected SKILL.md files
     /// (concatenated, ready to inject into system prompt). Empty if no skills selected.
+    /// `auth_token` is the user's Gateway bearer token.
+    /// `images` contains base64-encoded image attachments from the user.
     async fn execute(
         &self,
         prompt: &str,
         conversation_context: &[serde_json::Value],
         routing: &RoutingDecision,
         skill_content: &str,
+        auth_token: &str,
+        images: &[ImageAttachment],
         event_tx: mpsc::Sender<WorkerEvent>,
     ) -> Result<(), String>;
 

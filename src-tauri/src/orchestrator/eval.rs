@@ -28,9 +28,12 @@ pub struct EvalSignal {
     pub created_at: i64,
 }
 
+const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
+
 /// Managed state for the eval signal queue.
 pub struct EvalState {
     queue: Mutex<VecDeque<EvalSignal>>,
+    client: reqwest::Client,
 }
 
 const BATCH_SIZE: usize = 10;
@@ -39,11 +42,16 @@ impl EvalState {
     pub fn new() -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
+            client: reqwest::Client::new(),
         }
     }
 
     /// Add a signal to the queue. Flushes if queue reaches batch size.
-    pub fn enqueue(&self, signal: EvalSignal) {
+    ///
+    /// When the batch threshold is reached, spawns an async task to POST
+    /// the signals to the Gateway. On failure, signals are logged but dropped
+    /// (they remain persisted in SQLite with synced=0).
+    pub fn enqueue(&self, signal: EvalSignal, auth_token: &str) {
         let should_flush = {
             let mut queue = self.queue.lock().unwrap();
             queue.push_back(signal);
@@ -51,27 +59,69 @@ impl EvalState {
         };
 
         if should_flush {
-            self.flush();
+            let signals = self.drain();
+            let client = self.client.clone();
+            let token = auth_token.to_string();
+            tokio::spawn(async move {
+                Self::flush_batch(signals, &client, &token).await;
+            });
         }
     }
 
-    /// Flush the queue (best-effort, drops on failure).
-    pub fn flush(&self) {
-        let signals: Vec<EvalSignal> = {
-            let mut queue = self.queue.lock().unwrap();
-            queue.drain(..).collect()
-        };
+    /// Drain all signals from the queue.
+    fn drain(&self) -> Vec<EvalSignal> {
+        let mut queue = self.queue.lock().unwrap();
+        queue.drain(..).collect()
+    }
 
+    /// POST a batch of signals to the Gateway (best-effort).
+    async fn flush_batch(signals: Vec<EvalSignal>, client: &reqwest::Client, auth_token: &str) {
         if signals.is_empty() {
             return;
         }
 
-        // Gateway sync not yet implemented — signals are stored in SQLite
-        // and will be synced when POST /eval/signals endpoint is available.
-        log::debug!(
-            "[eval] Flushed {} eval signals from queue",
-            signals.len()
-        );
+        let url = format!("{}/eval/signals", GATEWAY_BASE_URL);
+        let count = signals.len();
+
+        match client
+            .post(&url)
+            .bearer_auth(auth_token)
+            .json(&signals)
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                log::info!("[eval] Synced {} signals to Gateway", count);
+            }
+            Ok(resp) => {
+                log::warn!(
+                    "[eval] Gateway returned {} for eval sync ({} signals dropped from queue)",
+                    resp.status(),
+                    count
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "[eval] Failed to sync {} eval signals: {}",
+                    count,
+                    e
+                );
+            }
+        }
+    }
+
+    /// Flush any remaining signals. Called on shutdown or after orchestration.
+    pub fn flush_remaining(&self, auth_token: &str) {
+        let signals = self.drain();
+        if signals.is_empty() {
+            return;
+        }
+
+        let client = self.client.clone();
+        let token = auth_token.to_string();
+        tokio::spawn(async move {
+            Self::flush_batch(signals, &client, &token).await;
+        });
     }
 
     /// Get the current queue length.
@@ -89,6 +139,7 @@ pub fn submit(
     eval_state: &EvalState,
     message_id: &str,
     satisfaction: i32,
+    auth_token: &str,
 ) -> Result<(), String> {
     if satisfaction != 0 && satisfaction != 1 {
         return Err("satisfaction must be 0 or 1".to_string());
@@ -137,7 +188,7 @@ pub fn submit(
         created_at: now,
     };
 
-    eval_state.enqueue(signal);
+    eval_state.enqueue(signal, auth_token);
 
     Ok(())
 }
@@ -212,7 +263,7 @@ mod tests {
             Some(r#"{"v":1,"task_type":"code_generation","model_id":"claude-opus-4-6","worker_type":"chat_model"}"#),
         );
 
-        submit(&conn, &state, "msg1", 1).unwrap();
+        submit(&conn, &state, "msg1", 1, "test-token").unwrap();
 
         let task_type: String = conn
             .query_row(
@@ -231,7 +282,7 @@ mod tests {
         let state = EvalState::new();
         insert_message(&conn, "msg1", None);
 
-        let result = submit(&conn, &state, "msg1", 5);
+        let result = submit(&conn, &state, "msg1", 5, "test-token");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("must be 0 or 1"));
     }
@@ -241,7 +292,7 @@ mod tests {
         let conn = setup_test_db();
         let state = EvalState::new();
 
-        let result = submit(&conn, &state, "nonexistent", 1);
+        let result = submit(&conn, &state, "nonexistent", 1, "test-token");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Message not found"));
     }
@@ -252,7 +303,7 @@ mod tests {
         let state = EvalState::new();
         insert_message(&conn, "msg1", None);
 
-        submit(&conn, &state, "msg1", 0).unwrap();
+        submit(&conn, &state, "msg1", 0, "test-token").unwrap();
 
         let task_type: String = conn
             .query_row(
@@ -274,7 +325,7 @@ mod tests {
             Some(r#"{"v":1,"task_type":"evil_injection"}"#),
         );
 
-        submit(&conn, &state, "msg1", 1).unwrap();
+        submit(&conn, &state, "msg1", 1, "test-token").unwrap();
 
         let task_type: String = conn
             .query_row(
@@ -296,7 +347,7 @@ mod tests {
             Some(r#"{"v":1,"task_type":"research","model_id":"gpt-4o"}"#),
         );
 
-        submit(&conn, &state, "msg1", 1).unwrap();
+        submit(&conn, &state, "msg1", 1, "test-token").unwrap();
 
         // Verify the queued signal doesn't contain message content
         let queue = state.queue.lock().unwrap();
@@ -306,40 +357,47 @@ mod tests {
         assert!(!json.contains("content"));
     }
 
-    #[test]
-    fn queue_flushes_at_batch_size() {
+    #[tokio::test]
+    async fn queue_flushes_at_batch_size() {
         let state = EvalState::new();
         for i in 0..BATCH_SIZE {
-            state.enqueue(EvalSignal {
-                task_type: "general_chat".to_string(),
-                model_id: None,
-                satisfaction: 1,
-                worker_type: None,
-                delegation_type: None,
-                had_tool_errors: false,
-                duration_ms: None,
-                created_at: i as i64,
-            });
+            state.enqueue(
+                EvalSignal {
+                    task_type: "general_chat".to_string(),
+                    model_id: None,
+                    satisfaction: 1,
+                    worker_type: None,
+                    delegation_type: None,
+                    had_tool_errors: false,
+                    duration_ms: None,
+                    created_at: i as i64,
+                },
+                "test-token",
+            );
         }
 
-        // Queue should have been flushed when it hit BATCH_SIZE
+        // Queue should have been drained when it hit BATCH_SIZE
+        // (async flush spawned in background, but drain is synchronous)
         assert_eq!(state.queue_len(), 0);
     }
 
-    #[test]
-    fn queue_does_not_flush_below_batch_size() {
+    #[tokio::test]
+    async fn queue_does_not_flush_below_batch_size() {
         let state = EvalState::new();
         for i in 0..(BATCH_SIZE - 1) {
-            state.enqueue(EvalSignal {
-                task_type: "general_chat".to_string(),
-                model_id: None,
-                satisfaction: 1,
-                worker_type: None,
-                delegation_type: None,
-                had_tool_errors: false,
-                duration_ms: None,
-                created_at: i as i64,
-            });
+            state.enqueue(
+                EvalSignal {
+                    task_type: "general_chat".to_string(),
+                    model_id: None,
+                    satisfaction: 1,
+                    worker_type: None,
+                    delegation_type: None,
+                    had_tool_errors: false,
+                    duration_ms: None,
+                    created_at: i as i64,
+                },
+                "test-token",
+            );
         }
 
         assert_eq!(state.queue_len(), BATCH_SIZE - 1);

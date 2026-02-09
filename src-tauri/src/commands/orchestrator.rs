@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::orchestrator::eval::EvalState;
 use crate::orchestrator::service::OrchestratorState;
-use crate::orchestrator::types::UserCapabilities;
+use crate::orchestrator::types::{ImageAttachment, UserCapabilities};
 use crate::services::database::init_db;
 
 /// Send a prompt through the orchestrator pipeline.
@@ -21,6 +21,7 @@ pub async fn orchestrate(
     history: Vec<serde_json::Value>,
     capabilities: UserCapabilities,
     auth_token: String,
+    images: Vec<ImageAttachment>,
 ) -> Result<(), String> {
     crate::orchestrator::service::orchestrate(
         app,
@@ -30,6 +31,7 @@ pub async fn orchestrate(
         history,
         capabilities,
         auth_token,
+        images,
     )
     .await
 }
@@ -50,11 +52,12 @@ pub async fn submit_eval_signal(
     _eval_state: State<'_, EvalState>,
     message_id: String,
     satisfaction: i32,
+    auth_token: String,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let conn = init_db(&app).map_err(|e| e.to_string())?;
         let eval = app.state::<EvalState>();
-        crate::orchestrator::eval::submit(&conn, &eval, &message_id, satisfaction)
+        crate::orchestrator::eval::submit(&conn, &eval, &message_id, satisfaction, &auth_token)
     })
     .await
     .map_err(|e| e.to_string())?

@@ -76,6 +76,9 @@ pub struct RoutingDecision {
     pub delegation: DelegationType,
     pub reason: String,
     pub selected_skills: Vec<SkillRef>,
+    /// Publisher slug for McpPublisher worker (e.g. "firecrawl-serenai").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher_slug: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -91,6 +94,14 @@ pub enum WorkerType {
 pub enum DelegationType {
     InLoop,
     FullHandoff,
+}
+
+/// Image attachment passed from the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageAttachment {
+    pub name: String,
+    pub mime_type: String,
+    pub base64: String,
 }
 
 /// User capabilities passed from the frontend per-request.
@@ -234,6 +245,7 @@ mod tests {
                 tags: vec!["writing".to_string()],
                 path: "/skills/prose/SKILL.md".to_string(),
             }],
+            publisher_slug: None,
         };
 
         let json = serde_json::to_string(&decision).unwrap();

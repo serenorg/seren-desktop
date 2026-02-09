@@ -473,7 +473,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       prompt = `Context from ${fileLabel}${rangeLabel}:\n\`\`\`\n${context.content}\n\`\`\`\n\n${messageContent}`;
     }
 
-    await orchestrate(conversationId, prompt);
+    await orchestrate(conversationId, prompt, images);
 
     // Check if auto-compact should be triggered
     await chatStore.checkAutoCompact(
@@ -747,6 +747,19 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
           >
             <article class="px-5 py-4 border-b border-[#21262d]">
               <ThinkingStatus />
+            </article>
+          </Show>
+
+          <Show when={conversationStore.streamingThinking}>
+            <article class="px-5 py-4 border-b border-[#21262d]">
+              <details open class="text-xs text-[#8b949e]">
+                <summary class="cursor-pointer select-none mb-1">
+                  Thinking…
+                </summary>
+                <div class="whitespace-pre-wrap opacity-70">
+                  {conversationStore.streamingThinking}
+                </div>
+              </details>
             </article>
           </Show>
 
