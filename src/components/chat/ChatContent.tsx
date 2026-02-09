@@ -14,6 +14,7 @@ import {
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
+import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
@@ -28,7 +29,11 @@ import {
   type Message,
   sendMessageWithRetry,
 } from "@/services/chat";
-import { cancelOrchestration, orchestrate } from "@/services/orchestrator";
+import {
+  cancelOrchestration,
+  orchestrate,
+  retryOrchestration,
+} from "@/services/orchestrator";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -715,25 +720,59 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     </Show>
                     <Show when={message.status === "error"}>
                       <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
-                        <span>{message.error ?? "Message failed"}</span>
-                        <Show when={chatStore.retryingMessageId === message.id}>
-                          <span>
-                            Retrying (
-                            {Math.min(
-                              message.attemptCount ?? 1,
-                              CHAT_MAX_RETRIES,
-                            )}
-                            /{CHAT_MAX_RETRIES})…
-                          </span>
-                        </Show>
-                        <Show when={message.request}>
-                          <button
-                            type="button"
-                            class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
-                            onClick={() => handleManualRetry(message)}
+                        <Show
+                          when={!isAuthError(message.error)}
+                          fallback={
+                            <>
+                              <span>
+                                Session expired. Please sign in to continue.
+                              </span>
+                              <button
+                                type="button"
+                                class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                                onClick={() => setShowSignInPrompt(true)}
+                              >
+                                Sign In
+                              </button>
+                            </>
+                          }
+                        >
+                          <span>{message.error ?? "Message failed"}</span>
+                          <Show
+                            when={chatStore.retryingMessageId === message.id}
                           >
-                            Retry
-                          </button>
+                            <span>
+                              Retrying (
+                              {Math.min(
+                                message.attemptCount ?? 1,
+                                CHAT_MAX_RETRIES,
+                              )}
+                              /{CHAT_MAX_RETRIES})…
+                            </span>
+                          </Show>
+                          <Show when={message.request}>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                              onClick={() => handleManualRetry(message)}
+                            >
+                              Retry
+                            </button>
+                          </Show>
+                          <Show
+                            when={
+                              !message.request &&
+                              message.workerType === "orchestrator"
+                            }
+                          >
+                            <button
+                              type="button"
+                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                              onClick={() => retryOrchestration()}
+                            >
+                              Retry
+                            </button>
+                          </Show>
                         </Show>
                       </div>
                     </Show>

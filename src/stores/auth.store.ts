@@ -1,6 +1,7 @@
 // ABOUTME: Reactive store for authentication state management.
 // ABOUTME: Tracks user session and provides login/logout actions with unified auth flow.
 
+import { listen } from "@tauri-apps/api/event";
 import { createStore } from "solid-js/store";
 import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
 import {
@@ -164,5 +165,12 @@ export async function logout(): Promise<void> {
     mcpConnected: false,
   });
 }
+
+// Listen for session-expired events from Rust backend (e.g. both tokens dead).
+// Sets isAuthenticated = false so the UI shows the sign-in prompt.
+listen("auth:session-expired", () => {
+  console.warn("[Auth Store] Session expired event from backend");
+  setState({ isAuthenticated: false, user: null });
+});
 
 export const authStore = state;

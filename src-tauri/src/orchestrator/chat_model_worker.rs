@@ -489,7 +489,7 @@ impl Worker for ChatModelWorker {
         conversation_context: &[serde_json::Value],
         routing: &RoutingDecision,
         skill_content: &str,
-        auth_token: &str,
+        app: &tauri::AppHandle,
         images: &[ImageAttachment],
         event_tx: mpsc::Sender<WorkerEvent>,
     ) -> Result<(), String> {
@@ -512,16 +512,17 @@ impl Worker for ChatModelWorker {
         );
         let tools: Vec<serde_json::Value> = Vec::new(); // Tools will be populated by the orchestrator
         let body = self.build_request_body(prompt, conversation_context, routing, skill_content, &tools, images);
+        let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .bearer_auth(auth_token)
-            .body(serde_json::to_string(&body).map_err(|e| e.to_string())?)
-            .send()
-            .await
-            .map_err(|e| format!("Gateway API request failed: {}", e))?;
+        // Use authenticated_request for automatic 401 refresh and retry
+        let response = crate::auth::authenticated_request(app, &self.client, |client, token| {
+            client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .bearer_auth(token)
+                .body(body_str.clone())
+        })
+        .await?;
 
         if !response.status().is_success() {
             let status = response.status();

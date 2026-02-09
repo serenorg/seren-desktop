@@ -17,7 +17,7 @@ pub trait Worker: Send + Sync {
     ///
     /// `skill_content` is pre-loaded Markdown from the selected SKILL.md files
     /// (concatenated, ready to inject into system prompt). Empty if no skills selected.
-    /// `auth_token` is the user's Gateway bearer token.
+    /// `app` provides access to the token store for authenticated Gateway requests.
     /// `images` contains base64-encoded image attachments from the user.
     async fn execute(
         &self,
@@ -25,7 +25,7 @@ pub trait Worker: Send + Sync {
         conversation_context: &[serde_json::Value],
         routing: &RoutingDecision,
         skill_content: &str,
-        auth_token: &str,
+        app: &tauri::AppHandle,
         images: &[ImageAttachment],
         event_tx: mpsc::Sender<WorkerEvent>,
     ) -> Result<(), String>;

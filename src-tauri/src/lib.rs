@@ -23,6 +23,7 @@ pub mod services {
 
 #[cfg(feature = "acp")]
 mod acp;
+mod auth;
 mod claude_setup;
 mod embedded_runtime;
 mod files;

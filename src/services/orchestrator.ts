@@ -4,7 +4,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Attachment } from "@/lib/providers/types";
-import { getToken } from "@/lib/tauri-bridge";
 import { getAllTools } from "@/lib/tools";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -82,6 +81,13 @@ let activeMessageId: string | null = null;
 /** Start time for duration tracking. */
 let streamStartTime = 0;
 
+/** Last orchestration params for retry support. */
+let lastOrchestrationParams: {
+  conversationId: string;
+  prompt: string;
+  images?: Attachment[];
+} | null = null;
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -97,6 +103,9 @@ export async function orchestrate(
   prompt: string,
   images?: Attachment[],
 ): Promise<void> {
+  // Save params for retry support
+  lastOrchestrationParams = { conversationId, prompt, images };
+
   // 1. Build history from conversation store
   const messages = conversationStore.getMessagesFor(conversationId);
   const history = serializeHistory(messages);
@@ -104,15 +113,12 @@ export async function orchestrate(
   // 2. Build capabilities
   const capabilities = buildCapabilities();
 
-  // 3. Get auth token
-  let token = (await getToken()) ?? "";
-
-  // 4. Prepare streaming state (message added on completion)
+  // 3. Prepare streaming state (message added on completion)
   activeMessageId = crypto.randomUUID();
   streamStartTime = Date.now();
   conversationStore.setLoading(true);
 
-  // 5. Listen for events
+  // 4. Listen for events
   let unlistenTransition: UnlistenFn | null = null;
   let unlistenEvent: UnlistenFn | null = null;
 
@@ -127,7 +133,7 @@ export async function orchestrate(
       (event) => handleWorkerEvent(event.payload),
     );
 
-    // 6. Invoke the Rust orchestrator
+    // 5. Invoke the Rust orchestrator (auth token read from store on Rust side)
     const imagePayload = (images ?? []).map((img) => ({
       name: img.name,
       mime_type: img.mimeType,
@@ -138,7 +144,6 @@ export async function orchestrate(
       prompt,
       history,
       capabilities,
-      authToken: token,
       images: imagePayload,
     });
   } catch (error) {
@@ -147,7 +152,6 @@ export async function orchestrate(
   } finally {
     unlistenTransition?.();
     unlistenEvent?.();
-    token = "";
 
     // Ensure loading state is cleared
     conversationStore.setLoading(false);
@@ -167,6 +171,20 @@ export async function cancelOrchestration(
   } catch (error) {
     console.warn("[orchestrator] Cancel failed:", error);
   }
+}
+
+/**
+ * Retry the last orchestration that failed.
+ * Re-uses the saved conversationId, prompt, and images.
+ */
+export async function retryOrchestration(): Promise<void> {
+  if (!lastOrchestrationParams) {
+    console.warn("[orchestrator] No previous orchestration to retry");
+    return;
+  }
+
+  const { conversationId, prompt, images } = lastOrchestrationParams;
+  await orchestrate(conversationId, prompt, images);
 }
 
 // =============================================================================

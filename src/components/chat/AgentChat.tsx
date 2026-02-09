@@ -16,6 +16,7 @@ import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
 import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
+import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
@@ -37,24 +38,6 @@ import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ToolCallCard } from "./ToolCallCard";
-
-/** Check if an error message indicates an auth/login issue */
-function isAuthError(msg: string | null | undefined): boolean {
-  if (!msg) return false;
-  return (
-    /login required/i.test(msg) ||
-    /claude login/i.test(msg) ||
-    /not logged in/i.test(msg) ||
-    /authentication required/i.test(msg) ||
-    /authentication_error/i.test(msg) ||
-    /oauth token has expired/i.test(msg) ||
-    /token has expired/i.test(msg) ||
-    /token expired/i.test(msg) ||
-    /please obtain a new token/i.test(msg) ||
-    /refresh your existing token/i.test(msg) ||
-    /401/i.test(msg)
-  );
-}
 
 interface AgentChatProps {
   onViewDiff?: (diff: DiffEvent) => void;

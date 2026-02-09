@@ -47,7 +47,7 @@ impl Worker for AcpWorker {
         _conversation_context: &[Value],
         routing: &RoutingDecision,
         _skill_content: &str,
-        _auth_token: &str,
+        _app: &tauri::AppHandle,
         _images: &[ImageAttachment],
         event_tx: mpsc::Sender<WorkerEvent>,
     ) -> Result<(), String> {

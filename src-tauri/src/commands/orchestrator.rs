@@ -20,7 +20,6 @@ pub async fn orchestrate(
     prompt: String,
     history: Vec<serde_json::Value>,
     capabilities: UserCapabilities,
-    auth_token: String,
     images: Vec<ImageAttachment>,
 ) -> Result<(), String> {
     crate::orchestrator::service::orchestrate(
@@ -30,7 +29,6 @@ pub async fn orchestrate(
         prompt,
         history,
         capabilities,
-        auth_token,
         images,
     )
     .await

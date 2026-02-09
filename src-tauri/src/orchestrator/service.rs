@@ -63,7 +63,6 @@ pub async fn orchestrate(
     prompt: String,
     history: Vec<serde_json::Value>,
     capabilities: UserCapabilities,
-    auth_token: String,
     images: Vec<ImageAttachment>,
 ) -> Result<(), String> {
     log::info!(
@@ -102,7 +101,6 @@ pub async fn orchestrate(
             &subtasks[0],
             &history,
             &capabilities,
-            &auth_token,
             &images,
             cancel_rx,
         )
@@ -115,7 +113,6 @@ pub async fn orchestrate(
             subtasks,
             &history,
             &capabilities,
-            &auth_token,
             &images,
             cancel_rx,
         )
@@ -143,7 +140,6 @@ async fn execute_single_task(
     subtask: &SubTask,
     history: &[serde_json::Value],
     capabilities: &UserCapabilities,
-    auth_token: &str,
     images: &[ImageAttachment],
     cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), String> {
@@ -185,7 +181,7 @@ async fn execute_single_task(
     let worker = create_worker(&routing, app);
     let worker_prompt = subtask.prompt.clone();
     let worker_routing = routing.clone();
-    let worker_auth_token = auth_token.to_string();
+    let worker_app = app.clone();
     let worker_images = images.to_vec();
     let worker_history = history.to_vec();
     let worker_handle = tokio::spawn(async move {
@@ -195,7 +191,7 @@ async fn execute_single_task(
                 &worker_history,
                 &worker_routing,
                 &skill_content,
-                &worker_auth_token,
+                &worker_app,
                 &worker_images,
                 event_tx,
             )
@@ -277,7 +273,6 @@ async fn execute_multi_task(
     subtasks: Vec<SubTask>,
     history: &[serde_json::Value],
     capabilities: &UserCapabilities,
-    auth_token: &str,
     images: &[ImageAttachment],
     cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), String> {
@@ -429,7 +424,7 @@ async fn execute_multi_task(
             let subtask_prompt = subtask.prompt.clone();
             let subtask_id = subtask.id.clone();
             let worker_routing = routing.clone();
-            let worker_auth_token = auth_token.to_string();
+            let worker_app = app.clone();
             let worker_history = history.to_vec();
             let worker_images = images.to_vec();
             let layer_tx = shared_tx.clone();
@@ -445,7 +440,7 @@ async fn execute_multi_task(
                             &worker_history,
                             &worker_routing,
                             &skill_content,
-                            &worker_auth_token,
+                            &worker_app,
                             &worker_images,
                             tx,
                         )
