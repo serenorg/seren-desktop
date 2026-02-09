@@ -53,6 +53,7 @@ import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolStreamingMessage } from "./ToolStreamingMessage";
 import { ToolsetSelector } from "./ToolsetSelector";
+import { TransitionAnnouncement } from "./TransitionAnnouncement";
 import "highlight.js/styles/github-dark.css";
 
 // Keywords that trigger publisher suggestions
@@ -797,63 +798,70 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             >
               <For each={conversationStore.messages}>
                 {(message) => (
-                  <article
-                    class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
+                  <Show
+                    when={message.type !== "transition"}
+                    fallback={<TransitionAnnouncement message={message} />}
                   >
-                    <Show when={message.images && message.images.length > 0}>
-                      <MessageImages images={message.images ?? []} />
-                    </Show>
-                    <div
-                      class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-[#f0f6fc] [&_h1]:border-b [&_h1]:border-[#21262d] [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-[#f0f6fc] [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-[#f0f6fc] [&_code]:bg-[#1c2333] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-[#f0f6fc] [&_strong]:font-semibold"
-                      innerHTML={
-                        message.role === "assistant"
-                          ? renderMarkdown(message.content)
-                          : escapeHtmlWithLinks(message.content)
-                      }
-                    />
-                    <Show
-                      when={
-                        message.role === "assistant" &&
-                        message.status === "complete" &&
-                        message.duration
-                      }
+                    <article
+                      class={`px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
                     >
-                      {(() => {
-                        const { verb, duration } = formatDurationWithVerb(
-                          message.duration!,
-                        );
-                        return (
-                          <div class="mt-2 text-xs text-[#8b949e]">
-                            ✻ {verb} for {duration}
-                          </div>
-                        );
-                      })()}
-                    </Show>
-                    <Show when={message.status === "error"}>
-                      <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
-                        <span>{message.error ?? "Message failed"}</span>
-                        <Show when={chatStore.retryingMessageId === message.id}>
-                          <span>
-                            Retrying (
-                            {Math.min(
-                              message.attemptCount ?? 1,
-                              CHAT_MAX_RETRIES,
-                            )}
-                            /{CHAT_MAX_RETRIES})…
-                          </span>
-                        </Show>
-                        <Show when={message.request}>
-                          <button
-                            type="button"
-                            class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
-                            onClick={() => handleManualRetry(message)}
+                      <Show when={message.images && message.images.length > 0}>
+                        <MessageImages images={message.images ?? []} />
+                      </Show>
+                      <div
+                        class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-[#f0f6fc] [&_h1]:border-b [&_h1]:border-[#21262d] [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-[#f0f6fc] [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-[#f0f6fc] [&_code]:bg-[#1c2333] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-[#f0f6fc] [&_strong]:font-semibold"
+                        innerHTML={
+                          message.role === "assistant"
+                            ? renderMarkdown(message.content)
+                            : escapeHtmlWithLinks(message.content)
+                        }
+                      />
+                      <Show
+                        when={
+                          message.role === "assistant" &&
+                          message.status === "complete" &&
+                          message.duration
+                        }
+                      >
+                        {(() => {
+                          const { verb, duration } = formatDurationWithVerb(
+                            message.duration!,
+                          );
+                          return (
+                            <div class="mt-2 text-xs text-[#8b949e]">
+                              ✻ {verb} for {duration}
+                            </div>
+                          );
+                        })()}
+                      </Show>
+                      <Show when={message.status === "error"}>
+                        <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
+                          <span>{message.error ?? "Message failed"}</span>
+                          <Show
+                            when={chatStore.retryingMessageId === message.id}
                           >
-                            Retry
-                          </button>
-                        </Show>
-                      </div>
-                    </Show>
-                  </article>
+                            <span>
+                              Retrying (
+                              {Math.min(
+                                message.attemptCount ?? 1,
+                                CHAT_MAX_RETRIES,
+                              )}
+                              /{CHAT_MAX_RETRIES})…
+                            </span>
+                          </Show>
+                          <Show when={message.request}>
+                            <button
+                              type="button"
+                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                              onClick={() => handleManualRetry(message)}
+                            >
+                              Retry
+                            </button>
+                          </Show>
+                        </div>
+                      </Show>
+                    </article>
+                  </Show>
                 )}
               </For>
             </Show>
