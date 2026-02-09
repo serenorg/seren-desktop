@@ -806,7 +806,7 @@ impl Client for ClientDelegate {
                 Some(0) => ("Completed", Some(format!("Exit code: 0")), None),
                 Some(code) => ("Failed", None, Some(format!("Exit code: {}", code))),
                 None => {
-                    if let Some(sig) = status.signal {
+                    if let Some(ref sig) = status.signal {
                         ("Failed", None, Some(format!("Terminated by signal {}", sig)))
                     } else {
                         ("Failed", None, Some("Process terminated".to_string()))
