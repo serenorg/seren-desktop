@@ -14,6 +14,7 @@ import {
 } from "solid-js";
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
+import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
@@ -897,7 +898,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   setCommandPopupIndex(0);
                 }}
               />
-              <textarea
+              <ResizableTextarea
                 ref={(el) => {
                   inputRef = el;
                   console.log(
@@ -913,7 +914,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     ? "Type to queue message..."
                     : "Ask Seren anything… (type / for commands)"
                 }
-                class="w-full min-h-[72px] max-h-[50vh] resize-y bg-[#0d1117] border border-[#30363d] rounded-xl text-[#e6edf3] px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-[#58a6ff] focus:shadow-[0_0_0_3px_rgba(88,166,255,0.15)] placeholder:text-[#484f58]"
+                class="w-full bg-[#0d1117] border border-[#30363d] rounded-xl text-[#e6edf3] px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-[#58a6ff] focus:shadow-[0_0_0_3px_rgba(88,166,255,0.15)] placeholder:text-[#484f58]"
+                minHeight={72}
+                maxHeight={window.innerHeight * 0.5}
                 onInput={(event) => {
                   setInput(event.currentTarget.value);
                   setCommandPopupIndex(0);
