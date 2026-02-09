@@ -1,6 +1,7 @@
 // ABOUTME: Settings UI for managing OAuth logins to publisher services.
 // ABOUTME: Lists available OAuth providers (GitHub, etc.) and their connection status.
 
+import { listen } from "@tauri-apps/api/event";
 import {
   type Component,
   createResource,
@@ -10,7 +11,6 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   listConnections,
   listProviders,
@@ -18,13 +18,25 @@ import {
   type PublisherOAuthProviderResponse,
   type UserOAuthConnectionResponse,
 } from "@/api";
+import attioLogo from "@/assets/oauth-logos/attio.svg";
+import githubLogo from "@/assets/oauth-logos/github.svg";
+import googleLogo from "@/assets/oauth-logos/google.svg";
+import linearLogo from "@/assets/oauth-logos/linear.svg";
+import { apiBase } from "@/lib/config";
 import { listenForOAuthCallback } from "@/lib/tauri-bridge";
 import {
   connectPublisher,
   disconnectPublisher,
 } from "@/services/publisher-oauth";
-import { apiBase } from "@/lib/config";
 import { authStore } from "@/stores/auth.store";
+
+/** Local fallback logos for OAuth providers */
+const LOCAL_PROVIDER_LOGOS: Record<string, string> = {
+  github: githubLogo,
+  google: googleLogo,
+  linear: linearLogo,
+  attio: attioLogo,
+};
 
 /** Event payload for oauth-connection-expired */
 interface OAuthExpiredEvent {
@@ -47,7 +59,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
   const [error, setError] = createSignal<string | null>(null);
   // Track providers with expired/invalid tokens (detected from tool call failures)
   const [expiredProviders, setExpiredProviders] = createSignal<Set<string>>(
-    new Set()
+    new Set(),
   );
 
   // Fetch available OAuth providers
@@ -58,7 +70,15 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
       return [];
     }
     const providers = data?.providers || [];
-    console.log("[OAuthLogins] OAuth providers:", providers.map(p => ({ name: p.name, id: p.id, slug: p.slug, logo_url: p.logo_url })));
+    console.log(
+      "[OAuthLogins] OAuth providers:",
+      providers.map((p) => ({
+        name: p.name,
+        id: p.id,
+        slug: p.slug,
+        logo_url: p.logo_url,
+      })),
+    );
     return providers;
   });
 
@@ -71,7 +91,16 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     if (error) return {} as Record<string, string>;
     const logos: Record<string, string> = {};
     const publishers = data?.data || [];
-    console.log("[OAuthLogins] Publishers with OAuth:", publishers.filter(p => p.oauth_provider_id).map(p => ({ name: p.name, oauth_provider_id: p.oauth_provider_id, logo_url: p.logo_url })));
+    console.log(
+      "[OAuthLogins] Publishers with OAuth:",
+      publishers
+        .filter((p) => p.oauth_provider_id)
+        .map((p) => ({
+          name: p.name,
+          oauth_provider_id: p.oauth_provider_id,
+          logo_url: p.logo_url,
+        })),
+    );
     for (const pub of publishers) {
       if (pub.oauth_provider_id && pub.logo_url) {
         const url = pub.logo_url.startsWith("/")
@@ -131,7 +160,14 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
       console.log("[OAuthLogins] Received OAuth callback URL:", url);
       try {
         const urlObj = new URL(url);
-        console.log("[OAuthLogins] Parsed URL - origin:", urlObj.origin, "pathname:", urlObj.pathname, "search:", urlObj.search);
+        console.log(
+          "[OAuthLogins] Parsed URL - origin:",
+          urlObj.origin,
+          "pathname:",
+          urlObj.pathname,
+          "search:",
+          urlObj.search,
+        );
         const errorParam = urlObj.searchParams.get("error");
 
         if (errorParam) {
@@ -144,7 +180,9 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
 
         // Refresh connections after successful OAuth callback
         // The Gateway handles token exchange, we just need to refresh
-        console.log("[OAuthLogins] Refreshing connections after successful OAuth");
+        console.log(
+          "[OAuthLogins] Refreshing connections after successful OAuth",
+        );
         await refetchConnections();
         console.log("[OAuthLogins] Connections refreshed successfully");
         // Clear expired status for this provider since they just reconnected
@@ -195,7 +233,10 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     // Guard against double-clicks while already connecting
     if (connectingProvider()) return;
 
-    console.log("[OAuthLogins] Starting OAuth flow for provider:", provider.slug);
+    console.log(
+      "[OAuthLogins] Starting OAuth flow for provider:",
+      provider.slug,
+    );
     setError(null);
     setConnectingProvider(provider.slug);
 
@@ -213,7 +254,10 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
       // Flow continues via OAuth callback listener
     } catch (err) {
       if (connectTimeout) clearTimeout(connectTimeout);
-      console.error(`[OAuthLogins] OAuth connect error for ${provider.slug}:`, err);
+      console.error(
+        `[OAuthLogins] OAuth connect error for ${provider.slug}:`,
+        err,
+      );
       const errorMessage = err instanceof Error ? err.message : String(err);
       setError(`Failed to connect: ${errorMessage}`);
       setConnectingProvider(null);
@@ -335,7 +379,11 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                   <div class="flex items-center gap-4 flex-1 min-w-0">
                     {/* Publisher Logo */}
                     <Show
-                      when={provider.logo_url || publisherLogos()?.[provider.id]}
+                      when={
+                        provider.logo_url ||
+                        publisherLogos()?.[provider.id] ||
+                        LOCAL_PROVIDER_LOGOS[provider.slug]
+                      }
                       fallback={
                         <div class="w-10 h-10 flex items-center justify-center bg-[rgba(148,163,184,0.1)] rounded-lg text-base font-semibold text-muted-foreground">
                           {provider.name?.charAt(0).toUpperCase() ?? "?"}
@@ -374,7 +422,8 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                       </Show>
                       <Show when={expired()}>
                         <span class="text-[0.75rem] text-[#f59e0b]">
-                          Token expired - please reconnect to continue using this service
+                          Token expired - please reconnect to continue using
+                          this service
                         </span>
                       </Show>
                       <Show when={connection() && !expired()}>
