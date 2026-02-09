@@ -6,11 +6,11 @@ use agent_client_protocol::{
     AuthMethod, AuthenticateRequest, CancelNotification, ClientCapabilities, ContentBlock,
     CreateTerminalRequest, CreateTerminalResponse, EnvVariable, ExtNotification, ExtRequest,
     ExtResponse, Implementation, InitializeRequest, KillTerminalCommandRequest,
-    KillTerminalCommandResponse, LoadSessionRequest, McpServer, McpServerStdio, ModelId,
-    NewSessionRequest, PromptRequest, ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
-    RequestPermissionResponse, SessionModeId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
+    KillTerminalCommandResponse, ListSessionsRequest, LoadSessionRequest, McpServer,
+    McpServerStdio, ModelId, NewSessionRequest, PromptRequest, ProtocolVersion,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionRequest, RequestPermissionResponse, SessionModeId, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
     TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
     WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
@@ -298,6 +298,24 @@ pub struct AcpSessionInfo {
     pub cwd: String,
     pub status: SessionStatus,
     pub created_at: String,
+}
+
+/// Session info returned by ACP `listSessions` (unstable).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpRemoteSessionInfo {
+    pub session_id: String,
+    pub cwd: String,
+    pub title: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+/// Page of ACP sessions returned by `acp_list_remote_sessions`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpRemoteSessionsPage {
+    pub sessions: Vec<AcpRemoteSessionInfo>,
+    pub next_cursor: Option<String>,
 }
 
 /// Session status
@@ -2215,6 +2233,336 @@ pub async fn acp_list_sessions(state: State<'_, AcpState>) -> Result<Vec<AcpSess
     }
 
     Ok(result)
+}
+
+/// List sessions from an agent's underlying session store (ACP `listSessions`).
+///
+/// This is a one-shot operation that spawns the agent sidecar, initializes it,
+/// performs ACP authentication if required, calls `listSessions`, and exits.
+#[tauri::command]
+pub async fn acp_list_remote_sessions(
+    app: AppHandle,
+    agent_type: AgentType,
+    cwd: String,
+    cursor: Option<String>,
+) -> Result<AcpRemoteSessionsPage, String> {
+    let cwd = normalize_cwd(&cwd)?;
+    let app_handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // ACP futures aren't Send; run inside a single-threaded runtime + LocalSet.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Failed to create runtime: {e}"))?;
+        let local = tokio::task::LocalSet::new();
+        local.block_on(&rt, async move {
+            list_remote_sessions_inner(app_handle, agent_type, cwd, cursor).await
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+async fn list_remote_sessions_inner(
+    app: AppHandle,
+    agent_type: AgentType,
+    cwd: String,
+    cursor: Option<String>,
+) -> Result<AcpRemoteSessionsPage, String> {
+    let command = agent_type.command()?;
+
+    log::info!(
+        "[ACP] Listing remote sessions via {:?} in {} (cursor={:?})",
+        command,
+        cwd,
+        cursor
+    );
+
+    // Spawn the agent process
+    let mut cmd = Command::new(&command);
+    cmd.current_dir(&cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true);
+
+    // Ensure the agent can find bundled Node/Git and installed CLI tools.
+    // Mirror `run_session_worker` PATH injection.
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    let cli_tools_bin = get_cli_tools_bin_dir(&app);
+
+    let full_path = match (&cli_tools_bin, embedded_path.is_empty()) {
+        (Some(bin), false) => {
+            let sep = if cfg!(target_os = "windows") {
+                ";"
+            } else {
+                ":"
+            };
+            format!("{}{}{}", bin.display(), sep, embedded_path)
+        }
+        (Some(bin), true) => bin.to_string_lossy().to_string(),
+        (None, false) => embedded_path.to_string(),
+        (None, true) => String::new(),
+    };
+
+    if !full_path.is_empty() {
+        let sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let combined = if system_path.is_empty() {
+            full_path.clone()
+        } else {
+            format!("{}{}{}", full_path, sep, system_path)
+        };
+        cmd.env("PATH", &combined);
+    }
+
+    // Set CLAUDE_CLI_PATH so the SDK can find the Claude CLI directly without relying on PATH.
+    if let Some(ref bin) = cli_tools_bin {
+        let claude_binary = if cfg!(target_os = "windows") {
+            bin.join("claude.cmd")
+        } else {
+            bin.join("claude")
+        };
+        if claude_binary.exists() {
+            cmd.env("CLAUDE_CLI_PATH", &claude_binary);
+            log::info!("[ACP] Set CLAUDE_CLI_PATH to: {}", claude_binary.display());
+        }
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        format!(
+            "Failed to spawn {:?}: {}. Run 'pnpm build:sidecar' to build the acp_agent binary.",
+            command, e
+        )
+    })?;
+
+    let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+    let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+
+    const STDERR_TAIL_MAX_LINES: usize = 200;
+    const STDERR_TAIL_ON_ERROR: usize = 50;
+    let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+
+    // Keep a tail buffer for error messages.
+    let stderr_tail_for_task = Arc::clone(&stderr_tail);
+    tokio::task::spawn_local(async move {
+        let reader = tokio::io::BufReader::new(stderr);
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            {
+                let mut buf = stderr_tail_for_task.lock().await;
+                if buf.len() >= STDERR_TAIL_MAX_LINES {
+                    buf.pop_front();
+                }
+                buf.push_back(line.clone());
+            }
+            log::warn!("[ACP Agent stderr] {}", line);
+        }
+    });
+
+    // Convert tokio streams to futures-compatible streams using compat layer
+    let stdout_compat = stdout.compat();
+    let stdin_compat = stdin.compat_write();
+
+    // Create a mostly-noop client delegate. We suppress session notifications because
+    // `list_sessions` is a non-interactive control-plane call.
+    let terminals = Arc::new(Mutex::new(crate::terminal::TerminalManager::new()));
+    let suppress_session_notifications = Arc::new(AtomicBool::new(true));
+    let pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let delegate = ClientDelegate {
+        app: app.clone(),
+        session_id: format!("list-remote-sessions-{}", Uuid::new_v4()),
+        cwd: cwd.clone(),
+        terminals: Arc::clone(&terminals),
+        sandbox_mode: crate::sandbox::SandboxMode::default(),
+        activity_notify: Arc::new(tokio::sync::Notify::new()),
+        suppress_session_notifications: Arc::clone(&suppress_session_notifications),
+        pending_permissions,
+        pending_diff_proposals,
+        terminal_tool_calls: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let (connection, io_task) =
+        ClientSideConnection::new(delegate, stdin_compat, stdout_compat, |fut| {
+            tokio::task::spawn_local(async move {
+                fut.await;
+            });
+        });
+
+    tokio::task::spawn_local(async move {
+        if let Err(e) = io_task.await {
+            log::error!("[ACP] IO task error: {:?}", e);
+        }
+    });
+
+    // Give the IO task a moment to start
+    tokio::task::yield_now().await;
+
+    let result: Result<AcpRemoteSessionsPage, String> = async {
+        // Initialize the agent (with timeout)
+        let init_request = InitializeRequest::new(ProtocolVersion::LATEST)
+            .client_info(Implementation::new(
+                "seren-desktop",
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .client_capabilities(ClientCapabilities::default());
+
+        let init_future = connection.initialize(init_request);
+        let init_result =
+            tokio::time::timeout(std::time::Duration::from_secs(30), init_future).await;
+
+        let init_response = match init_result {
+            Err(_elapsed) => {
+                return Err(
+                    "Agent initialization timed out after 30 seconds. The agent binary may be hung."
+                        .to_string(),
+                );
+            }
+            Ok(result) => match result {
+                Ok(resp) => resp,
+                Err(e) => {
+                    let exit_status = child.try_wait().ok().flatten();
+                    let stderr_lines = {
+                        let buf = stderr_tail.lock().await;
+                        buf.iter()
+                            .rev()
+                            .take(STDERR_TAIL_ON_ERROR)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect::<Vec<_>>()
+                    };
+
+                    let mut msg = format!("Failed to initialize agent: {:?}", e);
+                    if let Some(status) = exit_status {
+                        msg.push_str(&format!("\nAgent exit status: {status}"));
+                    }
+                    if !stderr_lines.is_empty() {
+                        msg.push_str("\nACP agent stderr (tail):\n");
+                        msg.push_str(&stderr_lines.join("\n"));
+                    }
+                    return Err(msg);
+                }
+            },
+        };
+
+        let pick_auth_method_id = |methods: &[AuthMethod]| -> Option<String> {
+            if methods.is_empty() {
+                return None;
+            }
+
+            // Prefer API-key methods if the corresponding env vars are set.
+            let wants_codex_key = std::env::var("CODEX_API_KEY")
+                .ok()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            let wants_openai_key = std::env::var("OPENAI_API_KEY")
+                .ok()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+
+            if wants_codex_key {
+                if let Some(m) = methods.iter().find(|m| m.id.0.as_ref() == "codex-api-key") {
+                    return Some(m.id.0.to_string());
+                }
+            }
+            if wants_openai_key {
+                if let Some(m) = methods.iter().find(|m| m.id.0.as_ref() == "openai-api-key") {
+                    return Some(m.id.0.to_string());
+                }
+            }
+
+            // Prefer browser-based auth if available.
+            if let Some(m) = methods.iter().find(|m| m.id.0.as_ref() == "chatgpt") {
+                return Some(m.id.0.to_string());
+            }
+
+            Some(methods[0].id.0.to_string())
+        };
+
+        let ensure_authenticated = async || -> Result<(), agent_client_protocol::Error> {
+            let method_id = pick_auth_method_id(&init_response.auth_methods)
+                .ok_or_else(agent_client_protocol::Error::auth_required)?;
+            log::info!("[ACP] Authenticating via ACP method: {}", method_id);
+            connection
+                .authenticate(AuthenticateRequest::new(method_id))
+                .await?;
+            Ok(())
+        };
+
+        let mut did_auth_retry = false;
+        loop {
+            let mut req = ListSessionsRequest::new().cwd(std::path::PathBuf::from(&cwd));
+            if let Some(ref c) = cursor {
+                req = req.cursor(c.clone());
+            }
+
+            match connection.list_sessions(req).await {
+                Ok(resp) => {
+                    let sessions = resp
+                        .sessions
+                        .into_iter()
+                        .map(|s| AcpRemoteSessionInfo {
+                            session_id: s.session_id.to_string(),
+                            cwd: s.cwd.display().to_string(),
+                            title: s.title,
+                            updated_at: s.updated_at,
+                        })
+                        .collect::<Vec<_>>();
+
+                    return Ok(AcpRemoteSessionsPage {
+                        sessions,
+                        next_cursor: resp.next_cursor,
+                    });
+                }
+                Err(e) => {
+                    if e.code == agent_client_protocol::ErrorCode::AuthRequired && !did_auth_retry {
+                        did_auth_retry = true;
+                        ensure_authenticated()
+                            .await
+                            .map_err(|auth_err| format!("ACP authenticate failed: {auth_err:?}"))?;
+                        continue;
+                    }
+
+                    let stderr_lines = {
+                        let buf = stderr_tail.lock().await;
+                        buf.iter()
+                            .rev()
+                            .take(STDERR_TAIL_ON_ERROR)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect::<Vec<_>>()
+                    };
+
+                    let mut msg = format!("Failed to list sessions: {:?}", e);
+                    if !stderr_lines.is_empty() {
+                        msg.push_str("\nACP agent stderr (tail):\n");
+                        msg.push_str(&stderr_lines.join("\n"));
+                    }
+                    return Err(msg);
+                }
+            }
+        }
+    }
+    .await;
+
+    // Ensure the child is not left running.
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+
+    result
 }
 
 /// Set the permission mode for a session

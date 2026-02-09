@@ -36,6 +36,19 @@ export interface AgentInfo {
   unavailableReason?: string;
 }
 
+// Remote sessions (ACP unstable listSessions capability)
+export interface RemoteSessionInfo {
+  sessionId: string;
+  cwd: string;
+  title?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface RemoteSessionsPage {
+  sessions: RemoteSessionInfo[];
+  nextCursor?: string | null;
+}
+
 // Event payloads
 export interface MessageChunkEvent {
   sessionId: string;
@@ -235,6 +248,21 @@ export async function terminateSession(sessionId: string): Promise<void> {
  */
 export async function listSessions(): Promise<AcpSessionInfo[]> {
   return invoke<AcpSessionInfo[]>("acp_list_sessions");
+}
+
+/**
+ * List remote sessions from the agent's underlying session store (ACP listSessions).
+ */
+export async function listRemoteSessions(
+  agentType: AgentType,
+  cwd: string,
+  cursor?: string,
+): Promise<RemoteSessionsPage> {
+  return invoke<RemoteSessionsPage>("acp_list_remote_sessions", {
+    agentType,
+    cwd,
+    cursor: cursor ?? null,
+  });
 }
 
 /**

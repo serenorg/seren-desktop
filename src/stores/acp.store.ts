@@ -33,6 +33,7 @@ import type {
   DiffEvent,
   DiffProposalEvent,
   PlanEntry,
+  RemoteSessionInfo,
   SessionConfigOption,
   SessionStatus,
   SessionStatusEvent,
@@ -110,6 +111,11 @@ interface AcpState {
   selectedAgentType: AgentType;
   /** Recent persisted agent conversations for resuming. */
   recentAgentConversations: DbAgentConversation[];
+  /** Remote sessions listed from the agent's underlying session store (ACP listSessions). */
+  remoteSessions: RemoteSessionInfo[];
+  remoteSessionsNextCursor: string | null;
+  remoteSessionsLoading: boolean;
+  remoteSessionsError: string | null;
   /** Loading state */
   isLoading: boolean;
   /** Error message */
@@ -130,6 +136,10 @@ const [state, setState] = createStore<AcpState>({
   activeSessionId: null,
   selectedAgentType: "claude-code",
   recentAgentConversations: [],
+  remoteSessions: [],
+  remoteSessionsNextCursor: null,
+  remoteSessionsLoading: false,
+  remoteSessionsError: null,
   isLoading: false,
   error: null,
   installStatus: null,
@@ -172,6 +182,22 @@ export const acpStore = {
 
   get recentAgentConversations() {
     return state.recentAgentConversations;
+  },
+
+  get remoteSessions() {
+    return state.remoteSessions;
+  },
+
+  get remoteSessionsNextCursor() {
+    return state.remoteSessionsNextCursor;
+  },
+
+  get remoteSessionsLoading() {
+    return state.remoteSessionsLoading;
+  },
+
+  get remoteSessionsError() {
+    return state.remoteSessionsError;
   },
 
   get isLoading() {
@@ -265,6 +291,43 @@ export const acpStore = {
       setState("recentAgentConversations", rows);
     } catch (error) {
       console.error("Failed to load agent conversation history:", error);
+    }
+  },
+
+  /**
+   * List remote sessions from the agent's underlying store (Codex threads).
+   */
+  async refreshRemoteSessions(cwd: string) {
+    setState("remoteSessionsLoading", true);
+    setState("remoteSessionsError", null);
+    try {
+      const page = await acpService.listRemoteSessions("codex", cwd);
+      setState("remoteSessions", page.sessions);
+      setState("remoteSessionsNextCursor", page.nextCursor ?? null);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error("Failed to list remote sessions:", msg);
+      setState("remoteSessionsError", msg);
+    } finally {
+      setState("remoteSessionsLoading", false);
+    }
+  },
+
+  async loadMoreRemoteSessions(cwd: string) {
+    const cursor = state.remoteSessionsNextCursor;
+    if (!cursor) return;
+    setState("remoteSessionsLoading", true);
+    setState("remoteSessionsError", null);
+    try {
+      const page = await acpService.listRemoteSessions("codex", cwd, cursor);
+      setState("remoteSessions", (prev) => [...prev, ...page.sessions]);
+      setState("remoteSessionsNextCursor", page.nextCursor ?? null);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error("Failed to list more remote sessions:", msg);
+      setState("remoteSessionsError", msg);
+    } finally {
+      setState("remoteSessionsLoading", false);
     }
   },
 
@@ -564,6 +627,36 @@ export const acpStore = {
       setState("sessions", sessionId, "messages", history);
       setState("sessions", sessionId, "streamingContent", "");
       setState("sessions", sessionId, "streamingThinking", "");
+    }
+    return sessionId;
+  },
+
+  /**
+   * Resume a remote Codex session (ACP sessionId / Codex thread id).
+   *
+   * If a local persisted conversation already exists for this remote session,
+   * we resume that; otherwise we create a new local conversation and resume it.
+   */
+  async resumeRemoteSession(
+    remoteSession: RemoteSessionInfo,
+    cwd: string,
+  ): Promise<string | null> {
+    const existing = state.recentAgentConversations.find(
+      (c) => c.agent_type === "codex" && c.agent_session_id === remoteSession.sessionId,
+    );
+    if (existing) {
+      return this.resumeAgentConversation(existing.id, cwd);
+    }
+
+    const title =
+      remoteSession.title?.trim() ||
+      `Codex Session ${remoteSession.sessionId.slice(0, 8)}`;
+    const sessionId = await this.spawnSession(cwd, "codex", {
+      resumeAgentSessionId: remoteSession.sessionId,
+      conversationTitle: title,
+    });
+    if (sessionId) {
+      void this.refreshRecentAgentConversations().catch(() => {});
     }
     return sessionId;
   },

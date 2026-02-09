@@ -635,6 +635,97 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                       </Show>
                     </div>
                   </Show>
+
+                  <Show
+                    when={acpStore.selectedAgentType === "codex" && hasFolderOpen()}
+                  >
+                    <div class="w-full mt-2 pt-3 border-t border-[#21262d]">
+                      <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="text-[10px] uppercase tracking-wider text-[#8b949e] font-medium">
+                          Browse Codex Sessions
+                        </div>
+                        <button
+                          type="button"
+                          class="text-[11px] text-[#58a6ff] hover:underline disabled:opacity-50"
+                          disabled={acpStore.remoteSessionsLoading}
+                          onClick={async () => {
+                            const cwd = getCwd();
+                            if (!cwd) return;
+                            await acpStore.refreshRemoteSessions(cwd);
+                          }}
+                        >
+                          {acpStore.remoteSessionsLoading ? "Loading..." : "Refresh"}
+                        </button>
+                      </div>
+
+                      <Show when={acpStore.remoteSessionsError}>
+                        <div class="w-full px-3 py-2 bg-[#da3633]/10 border border-[#da3633]/30 rounded-md text-xs text-[#f85149]">
+                          {acpStore.remoteSessionsError}
+                        </div>
+                      </Show>
+
+                      <Show
+                        when={acpStore.remoteSessions.length > 0}
+                        fallback={
+                          <div class="text-[11px] text-[#8b949e]">
+                            Click Refresh to list Codex sessions for this folder.
+                          </div>
+                        }
+                      >
+                        <div class="flex flex-col gap-1 w-full">
+                          <For each={acpStore.remoteSessions.slice(0, 10)}>
+                            {(s) => {
+                              const title =
+                                s.title?.trim() ||
+                                `Session ${s.sessionId.slice(0, 8)}`;
+                              return (
+                                <button
+                                  type="button"
+                                  class="w-full px-3 py-2 bg-[#0d1117] border border-[#30363d] rounded-md text-left hover:bg-[#161b22] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  disabled={acpStore.remoteSessionsLoading}
+                                  title="Resume this remote session"
+                                  onClick={async () => {
+                                    const cwd = getCwd();
+                                    if (!cwd) return;
+                                    await acpStore.resumeRemoteSession(s, cwd);
+                                  }}
+                                >
+                                  <div class="flex items-center justify-between gap-2">
+                                    <div class="flex flex-col gap-0.5 min-w-0">
+                                      <div class="text-xs text-[#e6edf3] truncate">
+                                        {title}
+                                      </div>
+                                      <div class="text-[11px] text-[#8b949e] truncate">
+                                        {s.updatedAt ? s.updatedAt : s.sessionId}
+                                      </div>
+                                    </div>
+                                    <div class="text-[11px] text-[#58a6ff] shrink-0">
+                                      Resume
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            }}
+                          </For>
+                        </div>
+
+                        <Show when={acpStore.remoteSessionsNextCursor}>
+                          <button
+                            type="button"
+                            class="mt-2 px-3 py-2 bg-[#161b22] border border-[#30363d] rounded-md text-[11px] text-[#c9d1d9] hover:bg-[#1f242d] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={acpStore.remoteSessionsLoading}
+                            onClick={async () => {
+                              const cwd = getCwd();
+                              if (!cwd) return;
+                              await acpStore.loadMoreRemoteSessions(cwd);
+                            }}
+                          >
+                            {acpStore.remoteSessionsLoading ? "Loading..." : "Load more"}
+                          </button>
+                        </Show>
+                      </Show>
+                    </div>
+                  </Show>
                 </div>
               </div>
             </div>

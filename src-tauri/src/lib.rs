@@ -732,6 +732,8 @@ pub fn run() {
             #[cfg(feature = "acp")]
             acp::acp_list_sessions,
             #[cfg(feature = "acp")]
+            acp::acp_list_remote_sessions,
+            #[cfg(feature = "acp")]
             acp::acp_set_permission_mode,
             #[cfg(feature = "acp")]
             acp::acp_set_model,
