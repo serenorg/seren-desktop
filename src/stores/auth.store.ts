@@ -166,11 +166,19 @@ export async function logout(): Promise<void> {
   });
 }
 
+/**
+ * Show the sign-in prompt by clearing authentication state.
+ * Used by the /login slash command and session-expired events.
+ */
+export function promptLogin(): void {
+  setState({ isAuthenticated: false, user: null });
+}
+
 // Listen for session-expired events from Rust backend (e.g. both tokens dead).
 // Sets isAuthenticated = false so the UI shows the sign-in prompt.
 listen("auth:session-expired", () => {
   console.warn("[Auth Store] Session expired event from backend");
-  setState({ isAuthenticated: false, user: null });
+  promptLogin();
 });
 
 export const authStore = state;

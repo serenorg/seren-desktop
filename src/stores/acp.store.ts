@@ -23,7 +23,9 @@ function isAuthError(msg: string): boolean {
     /please obtain a new token/i.test(msg) ||
     /refresh your existing token/i.test(msg) ||
     /login required/i.test(msg) ||
-    /not logged in/i.test(msg)
+    /not logged in/i.test(msg) ||
+    /does not have access/i.test(msg) ||
+    /please login again/i.test(msg)
   );
 }
 

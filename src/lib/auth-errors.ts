@@ -18,6 +18,8 @@ const AUTH_ERROR_PATTERNS = [
   /please obtain a new token/i,
   /refresh your existing token/i,
   /please sign in/i,
+  /does not have access/i,
+  /please login again/i,
 ];
 
 /**
