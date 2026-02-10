@@ -5,6 +5,32 @@ import { type Component, For, Show } from "solid-js";
 import { updaterStore } from "@/stores/updater.store";
 import { BalanceDisplay } from "./BalanceDisplay";
 
+const DOWNLOAD_QUIPS = [
+  "Warming up the flux capacitor...",
+  "Downloading fresh pixels...",
+  "Convincing the bits to move faster...",
+  "Bribing the electrons...",
+  "Polishing the new version...",
+  "Almost there, hang tight...",
+  "Wrapping things up...",
+];
+
+function quipForPercent(percent: number): string {
+  if (percent < 5) return DOWNLOAD_QUIPS[0];
+  if (percent < 20) return DOWNLOAD_QUIPS[1];
+  if (percent < 40) return DOWNLOAD_QUIPS[2];
+  if (percent < 60) return DOWNLOAD_QUIPS[3];
+  if (percent < 80) return DOWNLOAD_QUIPS[4];
+  if (percent < 95) return DOWNLOAD_QUIPS[5];
+  return DOWNLOAD_QUIPS[6];
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export type Panel = "chat" | "explorer" | "database" | "settings" | "account";
 
 interface NavItem {
@@ -86,11 +112,43 @@ export const Header: Component<HeaderProps> = (props) => {
               </span>
             </button>
           </Show>
-          <Show when={updaterStore.state.status === "installing"}>
-            <span class="flex items-center gap-1.5 py-1 px-2.5 text-[12px] font-medium text-blue-400">
-              <span class="leading-none animate-spin inline-block">⟳</span>
-              <span class="leading-none">Updating...</span>
-            </span>
+          <Show
+            when={
+              updaterStore.state.status === "downloading" ||
+              updaterStore.state.status === "installing"
+            }
+          >
+            <div
+              class="flex items-center gap-2 py-1 px-2.5 text-[11px] font-medium text-blue-300"
+              title={
+                updaterStore.state.totalBytes > 0
+                  ? `${formatBytes(updaterStore.state.downloadedBytes)} / ${formatBytes(updaterStore.state.totalBytes)}`
+                  : "Downloading update..."
+              }
+            >
+              <div class="flex flex-col gap-0.5 min-w-[140px]">
+                <div class="flex justify-between text-[10px]">
+                  <span class="text-blue-300/80 truncate max-w-[110px]">
+                    {updaterStore.state.status === "installing"
+                      ? "Installing..."
+                      : quipForPercent(updaterStore.state.progressPercent)}
+                  </span>
+                  <span class="text-blue-400 font-mono tabular-nums">
+                    {updaterStore.state.progressPercent}%
+                  </span>
+                </div>
+                <div class="w-full h-[4px] bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    class={`h-full rounded-full transition-all duration-300 ease-out ${
+                      updaterStore.state.status === "installing"
+                        ? "updater-bar-installing"
+                        : "updater-bar-downloading"
+                    }`}
+                    style={{ width: `${updaterStore.state.progressPercent}%` }}
+                  />
+                </div>
+              </div>
+            </div>
           </Show>
           <Show when={updaterStore.state.status === "error"}>
             <button

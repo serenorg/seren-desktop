@@ -282,3 +282,21 @@ code {
   background-color: #fb923c;
   animation: permission-pulse 1.5s ease-in-out infinite;
 }
+
+/* Updater progress bar shimmer */
+@keyframes updater-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.updater-bar-downloading {
+  background: linear-gradient(90deg, #3b82f6, #06b6d4, #3b82f6);
+  background-size: 200% 100%;
+  animation: updater-shimmer 1.5s ease-in-out infinite;
+}
+
+.updater-bar-installing {
+  background: linear-gradient(90deg, #818cf8, #a78bfa, #818cf8);
+  background-size: 200% 100%;
+  animation: updater-shimmer 1.5s ease-in-out infinite;
+}
