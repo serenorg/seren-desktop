@@ -11,23 +11,8 @@ const sessionReadyPromises = new Map<
   { promise: Promise<void>; resolve: () => void }
 >();
 
+import { isLikelyAuthError } from "@/lib/auth-errors";
 import { getSerenApiKey } from "@/lib/tauri-bridge";
-
-/** Check if text contains an auth/login error (same patterns as AgentChat) */
-function isAuthError(msg: string): boolean {
-  return (
-    /authentication_error/i.test(msg) ||
-    /oauth token has expired/i.test(msg) ||
-    /token has expired/i.test(msg) ||
-    /token expired/i.test(msg) ||
-    /please obtain a new token/i.test(msg) ||
-    /refresh your existing token/i.test(msg) ||
-    /login required/i.test(msg) ||
-    /not logged in/i.test(msg) ||
-    /does not have access/i.test(msg) ||
-    /please login again/i.test(msg)
-  );
-}
 
 import type {
   AcpEvent,
@@ -1131,9 +1116,10 @@ export const acpStore = {
       };
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
 
-      // If the agent streamed an auth error as text, surface it as a session error
-      // so the error banner with the Login button appears at the top of the chat.
-      if (isAuthError(session.streamingContent)) {
+      // If the agent streamed a short auth error as text, surface it as a session error
+      // so the error banner with the Login button appears. Long messages are skipped
+      // to avoid false positives when the agent discusses auth topics in normal output.
+      if (isLikelyAuthError(session.streamingContent)) {
         setState("sessions", sessionId, "error", session.streamingContent);
       }
 

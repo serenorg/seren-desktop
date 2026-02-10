@@ -373,36 +373,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         );
 
       case "assistant":
-        if (isAuthError(message.content)) {
-          return (
-            <article class="px-5 py-3 border-b border-[#21262d]">
-              <div class="px-3 py-2 border rounded-md text-sm bg-[rgba(210,153,34,0.1)] border-[rgba(210,153,34,0.4)] text-[#d2992a]">
-                <div class="flex items-center justify-between gap-2">
-                  <span>
-                    Authentication expired. Please log in to continue.
-                  </span>
-                  <button
-                    type="button"
-                    class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d] flex-shrink-0"
-                    onClick={async () => {
-                      const agentType =
-                        acpStore.activeSession?.info.agentType ?? "claude-code";
-                      launchLogin(agentType);
-                      const sid = acpStore.activeSessionId;
-                      if (sid) {
-                        await acpStore.terminateSession(sid);
-                      }
-                      acpStore.clearError();
-                      setAwaitingLogin(agentType);
-                    }}
-                  >
-                    Login
-                  </button>
-                </div>
-              </div>
-            </article>
-          );
-        }
         return (
           <article class="px-5 py-4 border-b border-[#21262d]">
             <div
