@@ -1540,6 +1540,20 @@ async fn run_session_worker(
         })
     });
 
+    // Extract mode state from session response (if agent supports mode selection)
+    let modes_json = new_session_response.modes.as_ref().map(|m| {
+        serde_json::json!({
+            "currentModeId": &*m.current_mode_id.0,
+            "availableModes": m.available_modes.iter().map(|mode| {
+                serde_json::json!({
+                    "modeId": &*mode.id.0,
+                    "name": &mode.name,
+                    "description": &mode.description,
+                })
+            }).collect::<Vec<_>>()
+        })
+    });
+
     let emit_result = app.emit(
         events::SESSION_STATUS,
         serde_json::json!({
@@ -1549,10 +1563,42 @@ async fn run_session_worker(
                 "name": agent_info.map(|i| i.name.as_str()).unwrap_or("Unknown"),
                 "version": agent_info.map(|i| i.version.as_str()).unwrap_or("Unknown")
             },
-            "models": models_json
+            "models": models_json,
+            "modes": modes_json
         }),
     );
     log::debug!("[ACP] Emit result: {:?}", emit_result);
+
+    // Auto-set the user's preferred permission mode if the agent advertises modes.
+    // Map Seren sandbox mode names to agent mode IDs by matching name patterns.
+    if let Some(mode_state) = &new_session_response.modes {
+        let preferred = match sandbox_mode {
+            crate::sandbox::SandboxMode::ReadOnly => "read",
+            crate::sandbox::SandboxMode::WorkspaceWrite => "default",
+            crate::sandbox::SandboxMode::FullAccess => "full",
+        };
+
+        let target_mode = mode_state
+            .available_modes
+            .iter()
+            .find(|m| m.name.to_lowercase().contains(preferred))
+            .map(|m| m.id.clone());
+
+        if let Some(mode_id) = target_mode {
+            if mode_id != mode_state.current_mode_id {
+                log::info!(
+                    "[ACP] Auto-setting mode to {:?} (user preference: {:?})",
+                    &*mode_id.0,
+                    preferred
+                );
+                let request = SetSessionModeRequest::new(agent_session_id.clone(), mode_id);
+                match connection.set_session_mode(request).await {
+                    Ok(_) => log::info!("[ACP] Mode set successfully"),
+                    Err(e) => log::warn!("[ACP] Failed to auto-set mode: {:?}", e),
+                }
+            }
+        }
+    }
 
     // Command processing loop
     while let Some(cmd) = command_rx.recv().await {
