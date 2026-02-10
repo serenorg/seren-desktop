@@ -201,6 +201,10 @@ fn auth_error_message(agent_type: AgentType) -> String {
     }
 }
 
+/// Maximum time to wait for an agent prompt to produce any response (2 minutes).
+/// If the agent process is hung or the API is unreachable, this prevents infinite waits.
+const PROMPT_TIMEOUT_SECS: u64 = 120;
+
 /// Debounce window: suppress duplicate login launches within this many seconds.
 const LOGIN_DEBOUNCE_SECS: i64 = 15;
 
@@ -1590,6 +1594,9 @@ async fn run_session_worker(
                 let mut prompt_fut = std::pin::pin!(connection.prompt(prompt_request));
                 let mut cancelled = false;
                 let mut cancel_deadline: Option<tokio::time::Instant> = None;
+                let mut force_stopped = false;
+                let prompt_timeout = tokio::time::sleep(std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS));
+                tokio::pin!(prompt_timeout);
 
                 let prompt_result = loop {
                     // If cancel was sent, enforce a deadline for the prompt to finish
@@ -1599,25 +1606,46 @@ async fn run_session_worker(
                                 break result;
                             }
                             _ = tokio::time::sleep_until(deadline) => {
-                                log::warn!("[ACP] Prompt did not resolve within 5s after cancel — forcing stop");
+                                log::warn!("[ACP] Prompt did not resolve within 5s after cancel — agent unresponsive");
+                                force_stopped = true;
                                 break Err(agent_client_protocol::Error::internal_error().data(
-                                    serde_json::Value::String("Task cancelled. The agent was processing your request and stopped after cancellation was triggered. Any partial work may not have been saved.".into()),
+                                    serde_json::Value::String("Agent unresponsive — session will restart automatically".into()),
                                 ));
                             }
                             cmd = command_rx.recv() => {
-                                if let Some(AcpCommand::Terminate) = cmd {
-                                    log::info!("[ACP] Terminate received after cancel");
-                                    let _ = response_tx.send(Err("Session terminated".to_string()));
-                                    drop(child);
-                                    return Ok(());
+                                match cmd {
+                                    Some(AcpCommand::Terminate) => {
+                                        log::info!("[ACP] Terminate received after cancel");
+                                        let _ = response_tx.send(Err("Session terminated".to_string()));
+                                        drop(child);
+                                        return Ok(());
+                                    }
+                                    Some(AcpCommand::Cancel { response_tx: dup_cancel_tx }) => {
+                                        log::info!("[ACP] Duplicate cancel received — already cancelling");
+                                        let _ = dup_cancel_tx.send(Ok(()));
+                                    }
+                                    _ => {
+                                        // Ignore other commands while waiting for cancel to take effect
+                                    }
                                 }
-                                // Ignore other commands while waiting for cancel to take effect
                             }
                         }
                     } else {
                         tokio::select! {
                             result = &mut prompt_fut => {
                                 break result;
+                            }
+                            _ = &mut prompt_timeout => {
+                                log::warn!(
+                                    "[ACP] Prompt timed out after {}s — agent unresponsive",
+                                    PROMPT_TIMEOUT_SECS
+                                );
+                                force_stopped = true;
+                                break Err(agent_client_protocol::Error::internal_error().data(
+                                    serde_json::Value::String(
+                                        "Agent unresponsive — session will restart automatically".into(),
+                                    ),
+                                ));
                             }
                             cmd = command_rx.recv() => {
                                 match cmd {
@@ -1687,6 +1715,14 @@ async fn run_session_worker(
                         );
                         let _ = response_tx.send(Err(friendly));
                     }
+                }
+
+                // If the agent was force-stopped (timeout or unresponsive cancel),
+                // kill the agent process and exit the worker. The frontend will
+                // detect the dead session and auto-recover with a fresh spawn.
+                if force_stopped {
+                    log::info!("[ACP] Session force-stopped — exiting worker to kill agent process");
+                    break;
                 }
 
                 let _ = app.emit(
