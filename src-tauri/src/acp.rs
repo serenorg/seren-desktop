@@ -1884,6 +1884,12 @@ async fn run_session_worker(
                     agent_session_id
                 );
 
+                // If the user changes model/config while a prompt is active, we can't safely
+                // apply it mid-turn. Queue it and apply once the current prompt completes so
+                // the next prompt uses the new settings.
+                let mut queued_model_id: Option<String> = None;
+                let mut queued_config: HashMap<String, String> = HashMap::new();
+
                 // Run the prompt while remaining responsive to Cancel/Terminate commands.
                 // Without select!, the loop blocks on connection.prompt() and cannot
                 // process cancel requests until the prompt finishes.
@@ -1923,8 +1929,21 @@ async fn run_session_worker(
                                         log::info!("[ACP] Duplicate cancel received — already cancelling");
                                         let _ = dup_cancel_tx.send(Ok(()));
                                     }
-                                    _ => {
-                                        // Ignore other commands while waiting for cancel to take effect
+                                    Some(AcpCommand::Prompt { response_tx: tx, .. }) => {
+                                        let _ = tx.send(Err("Another prompt is already active".to_string()));
+                                    }
+                                    Some(AcpCommand::SetMode { response_tx: tx, .. }) => {
+                                        let _ = tx.send(Err("Cannot change mode while prompt is active".to_string()));
+                                    }
+                                    Some(AcpCommand::SetModel { response_tx: tx, .. }) => {
+                                        let _ = tx.send(Err("Cannot change model while cancellation is pending".to_string()));
+                                    }
+                                    Some(AcpCommand::SetConfigOption { response_tx: tx, .. }) => {
+                                        let _ = tx.send(Err("Cannot change config while cancellation is pending".to_string()));
+                                    }
+                                    None => {
+                                        let _ = response_tx.send(Err("Command channel closed".to_string()));
+                                        return Ok(());
                                     }
                                 }
                             }
@@ -1966,6 +1985,20 @@ async fn run_session_worker(
                                         let _ = response_tx.send(Err("Session terminated".to_string()));
                                         drop(child);
                                         return Ok(());
+                                    }
+                                    Some(AcpCommand::SetModel { model_id, response_tx: tx }) => {
+                                        log::info!("[ACP] Queuing model change during active prompt: {}", model_id);
+                                        queued_model_id = Some(model_id);
+                                        let _ = tx.send(Ok(()));
+                                    }
+                                    Some(AcpCommand::SetConfigOption { config_id, value_id, response_tx: tx }) => {
+                                        log::info!(
+                                            "[ACP] Queuing config change during active prompt: {}={}",
+                                            config_id,
+                                            value_id
+                                        );
+                                        queued_config.insert(config_id, value_id);
+                                        let _ = tx.send(Ok(()));
                                     }
                                     Some(other) => {
                                         log::info!("[ACP] Rejecting command while prompt is active");
@@ -2029,6 +2062,43 @@ async fn run_session_worker(
                         "[ACP] Session force-stopped — exiting worker to kill agent process"
                     );
                     break;
+                }
+
+                // Apply any queued session updates now that the prompt is finished.
+                if let Some(model_id) = queued_model_id.take() {
+                    let request = SetSessionModelRequest::new(
+                        agent_session_id.clone(),
+                        ModelId::new(model_id),
+                    );
+                    if let Err(e) = connection.set_session_model(request).await {
+                        log::error!("[ACP] Failed to apply queued model change: {:?}", e);
+                        let friendly = format_acp_error(&e);
+                        let _ = app.emit(
+                            events::ERROR,
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "error": &friendly
+                            }),
+                        );
+                    }
+                }
+                for (config_id, value_id) in queued_config.drain() {
+                    let request = SetSessionConfigOptionRequest::new(
+                        agent_session_id.clone(),
+                        config_id,
+                        value_id,
+                    );
+                    if let Err(e) = connection.set_session_config_option(request).await {
+                        log::error!("[ACP] Failed to apply queued config option: {:?}", e);
+                        let friendly = format_acp_error(&e);
+                        let _ = app.emit(
+                            events::ERROR,
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "error": &friendly
+                            }),
+                        );
+                    }
                 }
 
                 let _ = app.emit(
