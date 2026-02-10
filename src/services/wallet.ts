@@ -37,7 +37,13 @@ export async function fetchBalance() {
 
   if (error) {
     console.error("[Wallet] Error fetching balance:", error);
-    throw new Error("Failed to fetch balance");
+    const detail =
+      typeof error === "object" && error !== null
+        ? (error as Record<string, unknown>).message ||
+          (error as Record<string, unknown>).statusText ||
+          JSON.stringify(error)
+        : String(error);
+    throw new Error(`Failed to fetch balance: ${detail}`);
   }
 
   if (!data?.data) {
