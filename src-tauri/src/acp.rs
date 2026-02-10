@@ -2070,16 +2070,34 @@ async fn run_session_worker(
                         agent_session_id.clone(),
                         ModelId::new(model_id),
                     );
-                    if let Err(e) = connection.set_session_model(request).await {
-                        log::error!("[ACP] Failed to apply queued model change: {:?}", e);
-                        let friendly = format_acp_error(&e);
-                        let _ = app.emit(
-                            events::ERROR,
-                            serde_json::json!({
-                                "sessionId": session_id,
-                                "error": &friendly
-                            }),
-                        );
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        connection.set_session_model(request),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            log::error!("[ACP] Failed to apply queued model change: {:?}", e);
+                            let friendly = format_acp_error(&e);
+                            let _ = app.emit(
+                                events::ERROR,
+                                serde_json::json!({
+                                    "sessionId": session_id,
+                                    "error": &friendly
+                                }),
+                            );
+                        }
+                        Err(_) => {
+                            log::error!("[ACP] Timed out applying queued model change");
+                            let _ = app.emit(
+                                events::ERROR,
+                                serde_json::json!({
+                                    "sessionId": session_id,
+                                    "error": "Timed out applying model change"
+                                }),
+                            );
+                        }
                     }
                 }
                 for (config_id, value_id) in queued_config.drain() {
@@ -2088,16 +2106,34 @@ async fn run_session_worker(
                         config_id,
                         value_id,
                     );
-                    if let Err(e) = connection.set_session_config_option(request).await {
-                        log::error!("[ACP] Failed to apply queued config option: {:?}", e);
-                        let friendly = format_acp_error(&e);
-                        let _ = app.emit(
-                            events::ERROR,
-                            serde_json::json!({
-                                "sessionId": session_id,
-                                "error": &friendly
-                            }),
-                        );
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        connection.set_session_config_option(request),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            log::error!("[ACP] Failed to apply queued config option: {:?}", e);
+                            let friendly = format_acp_error(&e);
+                            let _ = app.emit(
+                                events::ERROR,
+                                serde_json::json!({
+                                    "sessionId": session_id,
+                                    "error": &friendly
+                                }),
+                            );
+                        }
+                        Err(_) => {
+                            log::error!("[ACP] Timed out applying queued config option");
+                            let _ = app.emit(
+                                events::ERROR,
+                                serde_json::json!({
+                                    "sessionId": session_id,
+                                    "error": "Timed out applying config option"
+                                }),
+                            );
+                        }
                     }
                 }
 
