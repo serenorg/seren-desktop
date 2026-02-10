@@ -91,10 +91,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   const [showSignInPrompt, setShowSignInPrompt] = createSignal(false);
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
+  const [isAttaching, setIsAttaching] = createSignal(false);
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-  const handlePickImages = () => handleAttachImages();
 
   // Click handler for copy buttons and external links (event delegation)
   const handleCopyClick = (event: MouseEvent) => {
@@ -367,11 +367,36 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   const handleAttachImages = async () => {
-    const files = await pickAndReadAttachments();
-    if (files.length > 0) {
-      setAttachedImages((prev) => [...prev, ...files]);
+    // Prevent multiple concurrent attach operations
+    if (isAttaching()) {
+      console.log("[ChatContent] Already attaching, skipping");
+      return;
+    }
+
+    setIsAttaching(true);
+    try {
+      console.log("[ChatContent] handleAttachImages called");
+      const files = await pickAndReadAttachments();
+      console.log(
+        "[ChatContent] pickAndReadAttachments returned:",
+        files.length,
+        "files",
+      );
+      if (files.length > 0) {
+        setAttachedImages((prev) => [...prev, ...files]);
+      }
+    } catch (error) {
+      console.error("[ChatContent] handleAttachImages error:", error);
+      conversationStore.setError(
+        `Failed to attach files: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
+    } finally {
+      setIsAttaching(false);
     }
   };
+
+  // Event handler for slash command - must be defined after handleAttachImages
+  const handlePickImages = () => handleAttachImages();
 
   const handleRemoveImage = (index: number) => {
     setAttachedImages((prev) => prev.filter((_, i) => i !== index));
@@ -871,6 +896,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               images={attachedImages()}
               onAttach={handleAttachImages}
               onRemove={handleRemoveImage}
+              isLoading={isAttaching()}
             />
             <Show when={messageQueue().length > 0}>
               <div class="flex items-center gap-2 px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e]">
