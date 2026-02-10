@@ -65,6 +65,10 @@ const REFRESH_INTERVAL = 60_000;
 // Lock to prevent duplicate top-ups
 let topUpInProgress = false;
 
+// Track consecutive failures to stop refresh after persistent errors
+const MAX_CONSECUTIVE_FAILURES = 5;
+let consecutiveFailures = 0;
+
 /**
  * Refresh the wallet balance from the API.
  */
@@ -86,6 +90,7 @@ async function refreshBalance(): Promise<void> {
 
   try {
     const data: WalletBalance = await fetchBalance();
+    consecutiveFailures = 0;
     console.log("[Wallet Store] Setting isLoading = false (success)");
     setWalletState({
       balance: data.balance_atomic / 1_000_000,
@@ -99,15 +104,23 @@ async function refreshBalance(): Promise<void> {
       walletState.isLoading,
     );
   } catch (err) {
+    consecutiveFailures++;
     const message =
       err instanceof Error ? err.message : "Failed to fetch balance";
     console.error("[Wallet Store] Error refreshing balance:", message);
-    // Stop auto-refresh on auth errors to prevent 401 spam
+    // Stop auto-refresh on auth errors or persistent failures
     if (
       message.includes("expired") ||
       message.includes("401") ||
-      message.includes("Authentication")
+      message.includes("Authentication") ||
+      message.includes("Unauthorized") ||
+      consecutiveFailures >= MAX_CONSECUTIVE_FAILURES
     ) {
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        console.warn(
+          `[Wallet Store] Stopping auto-refresh after ${consecutiveFailures} consecutive failures`,
+        );
+      }
       stopAutoRefresh();
     }
     console.log("[Wallet Store] Setting isLoading = false (error)");
@@ -133,6 +146,7 @@ function startAutoRefresh(): void {
     new Error().stack?.split("\n")[2]?.trim(),
   );
   setWalletState("autoRefreshActive", true);
+  consecutiveFailures = 0;
 
   // Fetch immediately (but only if not already loading)
   if (!walletState.isLoading) {
@@ -270,6 +284,7 @@ function resetWalletState(): void {
   stopAutoRefresh();
   setWalletState(initialState);
   topUpInProgress = false;
+  consecutiveFailures = 0;
 }
 
 /**

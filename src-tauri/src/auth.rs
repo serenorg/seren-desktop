@@ -136,7 +136,14 @@ pub async fn authenticated_request<F>(
 where
     F: Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
 {
-    let token = get_access_token(app)?;
+    // Try to get token; if missing, attempt refresh before giving up.
+    let token = match get_access_token(app) {
+        Ok(t) => t,
+        Err(_) => {
+            log::info!("[auth] No access token in store, attempting refresh...");
+            refresh_access_token(app).await?
+        }
+    };
 
     let response = build_request(client, &token)
         .send()
