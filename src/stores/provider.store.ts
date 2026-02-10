@@ -17,6 +17,9 @@ import {
   storeProviderKey,
 } from "@/lib/tauri-bridge";
 
+/** Sentinel value for automatic model selection by the orchestrator. */
+export const AUTO_MODEL_ID = "auto";
+
 const PROVIDER_SETTINGS_STORE = "provider-settings.json";
 const PROVIDER_SETTINGS_KEY = "provider-settings";
 const BROWSER_PROVIDER_SETTINGS_KEY = "seren_provider_settings";
@@ -162,7 +165,7 @@ const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
 
 const DEFAULT_STATE: ProviderState = {
   activeProvider: "seren",
-  activeModel: "google/gemini-3-flash-preview",
+  activeModel: AUTO_MODEL_ID,
   configuredProviders: ["seren"],
   oauthProviders: [],
   providerModels: { ...DEFAULT_MODELS },
@@ -516,6 +519,9 @@ export const providerStore = {
   },
   get isLoading() {
     return state.isLoading;
+  },
+  get isAutoModel() {
+    return state.activeModel === AUTO_MODEL_ID;
   },
 
   // Functions

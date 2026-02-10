@@ -7,7 +7,7 @@ import type { Attachment } from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
-import { providerStore } from "@/stores/provider.store";
+import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { skillsStore } from "@/stores/skills.store";
 import type { UnifiedMessage } from "@/types/conversation";
 
@@ -519,7 +519,7 @@ function buildCapabilities(): UserCapabilities {
   return {
     has_acp_agent: acpStore.availableAgents.length > 0,
     agent_type: acpStore.selectedAgentType ?? null,
-    selected_model: providerStore.activeModel,
+    selected_model: providerStore.activeModel === AUTO_MODEL_ID ? null : providerStore.activeModel,
     available_models: activeModels.map((m) => m.id),
     available_tools: tools.map((t) => t.function.name),
     installed_skills: enabledSkills.map((s) => ({

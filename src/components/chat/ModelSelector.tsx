@@ -18,7 +18,7 @@ import {
 } from "@/lib/providers";
 import { type Model, modelsService } from "@/services/models";
 import { chatStore } from "@/stores/chat.store";
-import { providerStore } from "@/stores/provider.store";
+import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 
 export const ModelSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
@@ -79,8 +79,12 @@ export const ModelSelector: Component = () => {
   });
 
   const currentModel = () => {
-    const models = defaultModels();
     const activeModel = providerStore.activeModel;
+    if (activeModel === AUTO_MODEL_ID) {
+      return { id: AUTO_MODEL_ID, name: "Auto", contextWindow: 0 };
+    }
+
+    const models = defaultModels();
     // First check defaults, then check full OpenRouter list for Seren
     const found = models.find((model) => model.id === activeModel);
     if (found) return found;
@@ -164,10 +168,19 @@ export const ModelSelector: Component = () => {
           }
         }}
       >
-        <span class="inline-flex items-center justify-center w-[18px] h-[18px] bg-accent text-white rounded text-[11px] font-semibold">
-          {getProviderIcon(currentProvider())}
-        </span>
-        <span class="text-foreground">
+        <Show
+          when={providerStore.isAutoModel}
+          fallback={
+            <span class="inline-flex items-center justify-center w-[18px] h-[18px] bg-accent text-white rounded text-[11px] font-semibold">
+              {getProviderIcon(currentProvider())}
+            </span>
+          }
+        >
+          <span class="inline-flex items-center justify-center w-[18px] h-[18px] bg-[#238636] text-white rounded text-[11px] font-semibold">
+            A
+          </span>
+        </Show>
+        <span class={providerStore.isAutoModel ? "text-[#7ee787]" : "text-foreground"}>
           {currentModel()?.name || "Select model"}
         </span>
         <span class="text-[10px] text-muted-foreground">
@@ -235,6 +248,26 @@ export const ModelSelector: Component = () => {
 
           {/* Models for selected provider */}
           <div class="max-h-[300px] overflow-y-auto py-1 bg-[#1e1e1e]">
+            {/* Auto option — only when not searching */}
+            <Show when={!searchQuery()}>
+              <button
+                type="button"
+                class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-[rgba(148,163,184,0.1)] border-b border-b-[#3c3c3c] ${providerStore.isAutoModel ? "bg-[rgba(34,134,54,0.15)]" : ""}`}
+                onClick={() => selectModel(AUTO_MODEL_ID)}
+              >
+                <div class="flex flex-col gap-0.5 min-w-0 flex-1">
+                  <span class="text-[#7ee787] font-medium">Auto</span>
+                  <span class="text-[11px] text-muted-foreground">
+                    Best model for each task
+                  </span>
+                </div>
+                <Show when={providerStore.isAutoModel}>
+                  <span class="text-[#7ee787] text-sm font-semibold">
+                    &#10003;
+                  </span>
+                </Show>
+              </button>
+            </Show>
             <Show
               when={filteredModels().length > 0}
               fallback={
