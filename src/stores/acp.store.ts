@@ -570,8 +570,15 @@ export const acpStore = {
           "[AcpStore] Session appears dead, attempting auto-recovery...",
         );
 
-        // Preserve conversation history and cwd before cleanup
-        const existingMessages = [...session.messages];
+        // Preserve conversation history and cwd before cleanup.
+        // Filter out any "unresponsive" error messages that the event handler
+        // may have added before this catch block ran — restoring them would
+        // create duplicate banners in the new session.
+        const existingMessages = [...session.messages].filter(
+          (m) =>
+            m.id !== userMessage.id &&
+            !(m.type === "error" && m.content.includes("unresponsive")),
+        );
         const cwd = session.cwd;
         const agentType = session.info.agentType;
 
@@ -581,25 +588,30 @@ export const acpStore = {
         // Spawn a fresh session
         const newSessionId = await this.spawnSession(cwd, agentType);
         if (newSessionId) {
-          // Restore conversation history to the new session (excluding the
-          // user message we just added, since we'll retry the prompt)
-          const historyToRestore = existingMessages.filter(
-            (m) => m.id !== userMessage.id,
-          );
-          if (historyToRestore.length > 0) {
-            setState("sessions", newSessionId, "messages", historyToRestore);
+          // Restore conversation history to the new session
+          if (existingMessages.length > 0) {
+            setState("sessions", newSessionId, "messages", existingMessages);
           }
+
+          // Show recovery indicator so the user knows what happened
+          const recoveryMsg: AgentMessage = {
+            id: crypto.randomUUID(),
+            type: "assistant",
+            content:
+              "Agent session restarted due to inactivity timeout. Retrying your message...",
+            timestamp: Date.now(),
+          };
+          setState("sessions", newSessionId, "messages", (msgs) => [
+            ...msgs,
+            recoveryMsg,
+            userMessage,
+          ]);
 
           // Retry the prompt on the new session
           console.info(
             `[AcpStore] Retrying prompt on new session ${newSessionId}`,
           );
           try {
-            // Add the user message to the new session
-            setState("sessions", newSessionId, "messages", (msgs) => [
-              ...msgs,
-              userMessage,
-            ]);
             await acpService.sendPrompt(newSessionId, prompt, context);
             console.log("[AcpStore] Retry succeeded on new session");
             return;
@@ -609,7 +621,10 @@ export const acpStore = {
               retryError instanceof Error
                 ? retryError.message
                 : String(retryError);
-            this.addErrorMessage(newSessionId, retryMessage);
+            this.addErrorMessage(
+              newSessionId,
+              `Recovery failed: ${retryMessage}. Please try sending your message again.`,
+            );
             return;
           }
         }
@@ -892,6 +907,14 @@ export const acpStore = {
             ...msgs,
             cancelMsg,
           ]);
+        } else if (String(event.data.error).includes("unresponsive")) {
+          // "Agent unresponsive" errors are handled by the sendPrompt catch
+          // block which spawns a fresh session and retries. Adding the error
+          // here would create duplicate banners when the recovery code
+          // restores message history to the new session.
+          console.info(
+            "[AcpStore] Skipping error message for unresponsive agent — sendPrompt handles recovery",
+          );
         } else {
           this.addErrorMessage(sessionId, event.data.error);
         }

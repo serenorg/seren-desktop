@@ -402,6 +402,8 @@ struct ClientDelegate {
     pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     /// Maps terminal IDs to tool call IDs for tracking command activity in the UI
     terminal_tool_calls: Arc<Mutex<HashMap<String, String>>>,
+    /// Signalled on every session notification so the prompt timeout resets on activity
+    activity_notify: Arc<tokio::sync::Notify>,
 }
 
 impl ClientDelegate {
@@ -840,6 +842,7 @@ impl Client for ClientDelegate {
     }
 
     async fn session_notification(&self, args: SessionNotification) -> AcpResult<()> {
+        self.activity_notify.notify_one();
         handle_session_notification(&self.app, &self.session_id, args);
         Ok(())
     }
@@ -1398,6 +1401,7 @@ async fn run_session_worker(
 
     // Create client delegate (keep terminals ref for cleanup on session exit)
     let terminals = Arc::new(Mutex::new(crate::terminal::TerminalManager::new()));
+    let activity_notify = Arc::new(tokio::sync::Notify::new());
     let delegate = ClientDelegate {
         app: app.clone(),
         session_id: session_id.clone(),
@@ -1407,6 +1411,7 @@ async fn run_session_worker(
         pending_permissions,
         pending_diff_proposals,
         terminal_tool_calls: Arc::new(Mutex::new(HashMap::new())),
+        activity_notify: Arc::clone(&activity_notify),
     };
 
     // Create ACP connection - use spawn_local since we're in a LocalSet
@@ -1641,8 +1646,11 @@ async fn run_session_worker(
                 let mut cancelled = false;
                 let mut cancel_deadline: Option<tokio::time::Instant> = None;
                 let mut force_stopped = false;
-                let prompt_timeout = tokio::time::sleep(std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS));
-                tokio::pin!(prompt_timeout);
+                // Activity-aware timeout: resets whenever the agent sends a
+                // notification (message chunk, tool call, tool result, etc.).
+                // Only fires when the agent is truly silent for PROMPT_TIMEOUT_SECS.
+                let mut idle_deadline = tokio::time::Instant::now()
+                    + std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS);
 
                 let prompt_result = loop {
                     // If cancel was sent, enforce a deadline for the prompt to finish
@@ -1681,9 +1689,9 @@ async fn run_session_worker(
                             result = &mut prompt_fut => {
                                 break result;
                             }
-                            _ = &mut prompt_timeout => {
+                            _ = tokio::time::sleep_until(idle_deadline) => {
                                 log::warn!(
-                                    "[ACP] Prompt timed out after {}s — agent unresponsive",
+                                    "[ACP] Prompt timed out after {}s of inactivity — agent unresponsive",
                                     PROMPT_TIMEOUT_SECS
                                 );
                                 force_stopped = true;
@@ -1692,6 +1700,11 @@ async fn run_session_worker(
                                         "Agent unresponsive — session will restart automatically".into(),
                                     ),
                                 ));
+                            }
+                            _ = activity_notify.notified() => {
+                                // Agent sent a notification — reset the idle deadline
+                                idle_deadline = tokio::time::Instant::now()
+                                    + std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS);
                             }
                             cmd = command_rx.recv() => {
                                 match cmd {
