@@ -490,6 +490,37 @@ jobs:
           name: Seren-Desktop-${{ matrix.name }}.AppImage
           path: src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
 
+      # Rename macOS updater artifacts to include architecture so both can coexist
+      # in the same GitHub release (both aarch64 and x86_64 generate "SerenDesktop.app.tar.gz")
+      - name: Rename macOS updater artifacts per architecture
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          if [ ! -d "$BUNDLE_DIR" ]; then
+            echo "No macos bundle directory found"
+            exit 0
+          fi
+
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin) ARCH="aarch64" ;;
+            x86_64-apple-darwin) ARCH="x64" ;;
+            *) echo "Unknown macOS target: ${{ matrix.target }}"; exit 1 ;;
+          esac
+
+          if [ -f "$BUNDLE_DIR/SerenDesktop.app.tar.gz" ]; then
+            mv "$BUNDLE_DIR/SerenDesktop.app.tar.gz" "$BUNDLE_DIR/SerenDesktop_${ARCH}.app.tar.gz"
+            echo "Renamed: SerenDesktop.app.tar.gz -> SerenDesktop_${ARCH}.app.tar.gz"
+          fi
+
+          if [ -f "$BUNDLE_DIR/SerenDesktop.app.tar.gz.sig" ]; then
+            mv "$BUNDLE_DIR/SerenDesktop.app.tar.gz.sig" "$BUNDLE_DIR/SerenDesktop_${ARCH}.app.tar.gz.sig"
+            echo "Renamed: SerenDesktop.app.tar.gz.sig -> SerenDesktop_${ARCH}.app.tar.gz.sig"
+          fi
+
+          echo "Files in $BUNDLE_DIR:"
+          ls -la "$BUNDLE_DIR/" || true
+
       # Upload updater artifacts (tar.gz/zip bundles + signatures)
       - name: Upload macOS updater bundle
         if: matrix.os == 'macos-latest'
@@ -619,7 +650,7 @@ jobs:
             });
             const existingNames = new Set(existingAssets.data.map(a => a.name));
 
-            // Upload all artifact files
+            // Upload all artifact files (track names to prevent duplicates within this run)
             const uploadAsset = async (filePath, fileName) => {
               if (existingNames.has(fileName)) {
                 console.log(`Skipping ${fileName} - already exists`);
@@ -633,6 +664,7 @@ jobs:
                 name: fileName,
                 data: content
               });
+              existingNames.add(fileName);
             };
 
             // Walk through artifacts directory
