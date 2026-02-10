@@ -3,7 +3,6 @@
 
 /** Patterns that indicate an authentication/session error. */
 const AUTH_ERROR_PATTERNS = [
-  /401/i,
   /login required/i,
   /claude login/i,
   /not logged in/i,
@@ -23,11 +22,29 @@ const AUTH_ERROR_PATTERNS = [
 ];
 
 /**
+ * Max length of a genuine auth error message. Real auth errors from CLI tools
+ * are short (< 500 chars). Longer messages are normal assistant responses that
+ * happen to contain auth-related phrases in tool output or code discussion.
+ */
+const AUTH_ERROR_MAX_LENGTH = 500;
+
+/**
  * Check if an error message indicates an authentication/session failure.
- * Used by both ChatContent and AgentChat to detect auth errors
- * and show appropriate recovery UI (re-login prompts).
+ * Use for messages already known to be errors (error events, session errors).
  */
 export function isAuthError(msg: string | null | undefined): boolean {
   if (!msg) return false;
+  return AUTH_ERROR_PATTERNS.some((pattern) => pattern.test(msg));
+}
+
+/**
+ * Stricter check for auth errors in streamed assistant content.
+ * Real auth errors from CLI tools are short messages. Long assistant
+ * responses that mention "token expired" in tool output or code
+ * discussion should not trigger the auth error banner.
+ */
+export function isLikelyAuthError(msg: string | null | undefined): boolean {
+  if (!msg) return false;
+  if (msg.length > AUTH_ERROR_MAX_LENGTH) return false;
   return AUTH_ERROR_PATTERNS.some((pattern) => pattern.test(msg));
 }
