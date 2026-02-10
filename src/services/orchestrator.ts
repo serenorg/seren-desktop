@@ -3,7 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Attachment } from "@/lib/providers/types";
+import type { Attachment, ToolDefinition } from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -71,6 +71,7 @@ interface UserCapabilities {
   selected_model: string | null;
   available_models: string[];
   available_tools: string[];
+  tool_definitions: ToolDefinition[];
   installed_skills: SkillRef[];
 }
 
@@ -522,6 +523,7 @@ function buildCapabilities(): UserCapabilities {
     selected_model: providerStore.activeModel === AUTO_MODEL_ID ? null : providerStore.activeModel,
     available_models: activeModels.map((m) => m.id),
     available_tools: tools.map((t) => t.function.name),
+    tool_definitions: tools,
     installed_skills: enabledSkills.map((s) => ({
       slug: s.slug,
       name: s.name,

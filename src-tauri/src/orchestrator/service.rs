@@ -219,7 +219,7 @@ async fn execute_single_task(
 
         // Create channel and spawn worker
         let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
-        let worker = create_worker(&routing, app);
+        let worker = create_worker(&routing, app, &capabilities);
         let worker_prompt = subtask.prompt.clone();
         let worker_routing = routing.clone();
         let worker_app = app.clone();
@@ -607,7 +607,7 @@ async fn execute_multi_task(
                 .map_err(|e| format!("Failed to emit transition: {}", e))?;
 
             // Spawn worker
-            let worker = create_worker(&routing, app);
+            let worker = create_worker(&routing, app, capabilities);
             let subtask_prompt = subtask.prompt.clone();
             let subtask_id = subtask.id.clone();
             let worker_routing = routing.clone();
@@ -731,9 +731,11 @@ pub async fn cancel(state: &OrchestratorState, conversation_id: &str) -> Result<
 // =============================================================================
 
 /// Create the appropriate worker based on the routing decision.
-fn create_worker(routing: &RoutingDecision, _app: &AppHandle) -> Arc<dyn Worker> {
+fn create_worker(routing: &RoutingDecision, _app: &AppHandle, capabilities: &UserCapabilities) -> Arc<dyn Worker> {
     match routing.worker_type {
-        WorkerType::ChatModel => Arc::new(ChatModelWorker::new()),
+        WorkerType::ChatModel => {
+            Arc::new(ChatModelWorker::with_tools(capabilities.tool_definitions.clone()))
+        }
         WorkerType::AcpAgent => {
             // ACP worker requires feature flag; fall back to chat model if not available
             #[cfg(feature = "acp")]
@@ -746,7 +748,7 @@ fn create_worker(routing: &RoutingDecision, _app: &AppHandle) -> Arc<dyn Worker>
                 log::warn!(
                     "[Orchestrator] ACP feature not enabled, falling back to ChatModel worker"
                 );
-                Arc::new(ChatModelWorker::new())
+                Arc::new(ChatModelWorker::with_tools(capabilities.tool_definitions.clone()))
             }
         }
         WorkerType::McpPublisher => Arc::new(McpPublisherWorker::new()),

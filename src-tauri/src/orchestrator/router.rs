@@ -367,6 +367,7 @@ mod tests {
             selected_model: None,
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: tools.iter().map(|t| t.to_string()).collect(),
+            tool_definitions: vec![],
             installed_skills: vec![],
             model_rankings: vec![],
         }
@@ -387,6 +388,7 @@ mod tests {
             selected_model: None,
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: vec![],
+            tool_definitions: vec![],
             installed_skills: skills,
             model_rankings: vec![],
         }
