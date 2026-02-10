@@ -11,6 +11,7 @@ export type UpdateStatus =
   | "up_to_date"
   | "available"
   | "deferred"
+  | "downloading"
   | "installing"
   | "error";
 
@@ -19,11 +20,17 @@ interface UpdaterState {
   availableVersion?: string;
   lastChecked?: number;
   error?: string | null;
+  downloadedBytes: number;
+  totalBytes: number;
+  progressPercent: number;
 }
 
 const [state, setState] = createStore<UpdaterState>({
   status: "idle",
   error: null,
+  downloadedBytes: 0,
+  totalBytes: 0,
+  progressPercent: 0,
 });
 
 let initialized = false;
@@ -97,7 +104,14 @@ async function installAvailableUpdate(): Promise<void> {
   }
 
   console.log("[Updater] Starting download and install...");
-  setState({ status: "installing", error: null });
+  let downloaded = 0;
+  setState({
+    status: "downloading",
+    error: null,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    progressPercent: 0,
+  });
 
   try {
     await pendingUpdate.downloadAndInstall(
@@ -106,15 +120,22 @@ async function installAvailableUpdate(): Promise<void> {
         data: { contentLength?: number; chunkLength?: number };
       }) => {
         if (progress.event === "Started" && progress.data.contentLength) {
-          console.log(
-            `[Updater] Download started, size: ${progress.data.contentLength} bytes`,
-          );
-        } else if (progress.event === "Progress") {
-          console.log(
-            `[Updater] Downloaded ${progress.data.chunkLength} bytes`,
-          );
+          const total = progress.data.contentLength;
+          console.log(`[Updater] Download started, size: ${total} bytes`);
+          setState({ totalBytes: total });
+        } else if (
+          progress.event === "Progress" &&
+          progress.data.chunkLength
+        ) {
+          downloaded += progress.data.chunkLength;
+          const percent =
+            state.totalBytes > 0
+              ? Math.min(Math.round((downloaded / state.totalBytes) * 100), 100)
+              : 0;
+          setState({ downloadedBytes: downloaded, progressPercent: percent });
         } else if (progress.event === "Finished") {
           console.log("[Updater] Download finished, installing...");
+          setState({ status: "installing", progressPercent: 100 });
         }
       },
     );
