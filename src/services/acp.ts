@@ -107,6 +107,14 @@ export interface SessionStatusEvent {
     currentModelId: string;
     availableModels: Array<{ modelId: string; name: string }>;
   };
+  modes?: {
+    currentModeId: string;
+    availableModes: Array<{
+      modeId: string;
+      name: string;
+      description?: string;
+    }>;
+  };
 }
 
 export interface DiffProposalEvent {

@@ -51,6 +51,12 @@ export interface AgentModelInfo {
   name: string;
 }
 
+export interface AgentModeInfo {
+  modeId: string;
+  name: string;
+  description?: string;
+}
+
 export interface ActiveSession {
   info: AcpSessionInfo;
   messages: AgentMessage[];
@@ -65,6 +71,10 @@ export interface ActiveSession {
   currentModelId?: string;
   /** Available models reported by the agent */
   availableModels?: AgentModelInfo[];
+  /** Currently selected mode ID (if agent supports mode selection) */
+  currentModeId?: string;
+  /** Available modes reported by the agent */
+  availableModes?: AgentModeInfo[];
   /** Session-specific error message */
   error?: string | null;
 }
@@ -623,12 +633,13 @@ export const acpStore = {
   /**
    * Set permission mode for the active session.
    */
-  async setPermissionMode(mode: string) {
+  async setPermissionMode(modeId: string) {
     const sessionId = state.activeSessionId;
     if (!sessionId) return;
 
     try {
-      await acpService.setPermissionMode(sessionId, mode);
+      await acpService.setPermissionMode(sessionId, modeId);
+      setState("sessions", sessionId, "currentModeId", modeId);
     } catch (error) {
       console.error("Failed to set permission mode:", error);
     }
@@ -1070,6 +1081,16 @@ export const acpStore = {
         "availableModels",
         models.availableModels,
       );
+    }
+
+    // Extract mode state from session status events (e.g. ready with modes)
+    if (data?.modes) {
+      const modes = data.modes as {
+        currentModeId: string;
+        availableModes: AgentModeInfo[];
+      };
+      setState("sessions", sessionId, "currentModeId", modes.currentModeId);
+      setState("sessions", sessionId, "availableModes", modes.availableModes);
     }
 
     if (status === "ready") {

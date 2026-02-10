@@ -29,6 +29,7 @@ import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
 import { AgentModelSelector } from "./AgentModelSelector";
+import { AgentModeSelector } from "./AgentModeSelector";
 import { AgentSelector } from "./AgentSelector";
 import { AgentTabBar } from "./AgentTabBar";
 import { DiffCard } from "./DiffCard";
@@ -851,6 +852,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <div class="flex items-center gap-3">
                 <AgentSelector />
                 <AgentModelSelector />
+                <AgentModeSelector />
                 <Show when={isPrompting()}>
                   <ThinkingStatus />
                 </Show>
