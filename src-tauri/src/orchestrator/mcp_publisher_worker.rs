@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use log;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
@@ -21,7 +22,10 @@ pub struct McpPublisherWorker {
 impl McpPublisherWorker {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(30))
+                .build()
+                .unwrap_or_default(),
             cancelled: Arc::new(Mutex::new(false)),
         }
     }

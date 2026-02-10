@@ -176,11 +176,6 @@ async fn execute_single_task(
         .map(|r| (r.model_id.clone(), r.score))
         .collect();
 
-    let user_explicitly_selected = capabilities
-        .selected_model
-        .as_ref()
-        .is_some_and(|m| !m.is_empty());
-
     // Route with rankings-enriched capabilities
     let mut routing = router::route(&subtask.classification, &capabilities);
 
@@ -337,9 +332,10 @@ async fn execute_single_task(
             }
         }
 
-        // Attempt reroute if we got a transient error
-        let should_reroute = !user_explicitly_selected
-            && reroute_count < router::MAX_REROUTE_ATTEMPTS
+        // Attempt reroute if we got a transient error.
+        // Always reroute on 408/429/5xx — even when the user pinned a model,
+        // a transient server error is better handled by a fallback than an error message.
+        let should_reroute = reroute_count < router::MAX_REROUTE_ATTEMPTS
             && reroutable_error
                 .as_ref()
                 .is_some_and(|msg| router::is_reroutable_error(msg));
