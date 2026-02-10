@@ -451,7 +451,23 @@ impl ChatModelWorker {
                                     accumulated_thinking.push_str(text);
                                 }
                                 WorkerEvent::Complete { .. } => {
+                                    // Intercept to inject accumulated cost (same as streaming path)
                                     got_complete = true;
+                                    let thinking = if accumulated_thinking.is_empty() {
+                                        None
+                                    } else {
+                                        Some(accumulated_thinking.clone())
+                                    };
+                                    let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
+                                    event_tx
+                                        .send(WorkerEvent::Complete {
+                                            final_content: accumulated_content.clone(),
+                                            thinking,
+                                            cost,
+                                        })
+                                        .await
+                                        .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                                    continue;
                                 }
                                 _ => {}
                             }
@@ -475,7 +491,23 @@ impl ChatModelWorker {
                                     accumulated_content.push_str(text);
                                 }
                                 WorkerEvent::Complete { .. } => {
+                                    // Intercept to inject accumulated cost (same as streaming path)
                                     got_complete = true;
+                                    let thinking = if accumulated_thinking.is_empty() {
+                                        None
+                                    } else {
+                                        Some(accumulated_thinking.clone())
+                                    };
+                                    let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
+                                    event_tx
+                                        .send(WorkerEvent::Complete {
+                                            final_content: accumulated_content.clone(),
+                                            thinking,
+                                            cost,
+                                        })
+                                        .await
+                                        .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                                    continue;
                                 }
                                 _ => {}
                             }

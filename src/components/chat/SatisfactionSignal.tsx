@@ -38,21 +38,21 @@ export const SatisfactionSignal: Component<SatisfactionSignalProps> = (
   };
 
   return (
-    <div class="inline-flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-150">
+    <div class="inline-flex items-center gap-2">
       <Show when={signal() === null || signal() === 1}>
         <button
           type="button"
-          class={`bg-transparent border-none cursor-pointer p-0.5 rounded transition-colors ${
+          class={`bg-transparent border border-[#30363d] cursor-pointer px-2 py-1 rounded-md transition-all ${
             signal() === 1
-              ? "text-[#3fb950]"
-              : "text-[#484f58] hover:text-[#3fb950]"
+              ? "text-[#3fb950] border-[#238636] bg-[rgba(35,134,54,0.1)]"
+              : "text-[#8b949e] hover:text-[#3fb950] hover:border-[#238636] hover:bg-[rgba(35,134,54,0.05)]"
           }`}
           onClick={() => submit(1)}
-          title="Helpful"
+          title="This response was helpful — your feedback helps Seren route to the best models for you"
         >
           <svg
-            width="14"
-            height="14"
+            width="18"
+            height="18"
             viewBox="0 0 24 24"
             fill="currentColor"
             aria-hidden="true"
@@ -64,17 +64,17 @@ export const SatisfactionSignal: Component<SatisfactionSignalProps> = (
       <Show when={signal() === null || signal() === 0}>
         <button
           type="button"
-          class={`bg-transparent border-none cursor-pointer p-0.5 rounded transition-colors ${
+          class={`bg-transparent border border-[#30363d] cursor-pointer px-2 py-1 rounded-md transition-all ${
             signal() === 0
-              ? "text-[#f85149]"
-              : "text-[#484f58] hover:text-[#f85149]"
+              ? "text-[#f85149] border-[#da3633] bg-[rgba(218,54,51,0.1)]"
+              : "text-[#8b949e] hover:text-[#f85149] hover:border-[#da3633] hover:bg-[rgba(218,54,51,0.05)]"
           }`}
           onClick={() => submit(0)}
-          title="Not helpful"
+          title="This response was not helpful — your feedback helps Seren avoid poor models"
         >
           <svg
-            width="14"
-            height="14"
+            width="18"
+            height="18"
             viewBox="0 0 24 24"
             fill="currentColor"
             aria-hidden="true"
