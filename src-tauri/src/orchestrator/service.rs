@@ -146,13 +146,43 @@ async fn execute_single_task(
     images: &[ImageAttachment],
     cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), String> {
+    // Compute Thompson sampling rankings before routing
+    let mut capabilities = capabilities.clone();
+    let app_for_db = app.clone();
+    let task_type_for_db = subtask.classification.task_type.clone();
+    let available_models = capabilities.available_models.clone();
+
+    let (rankings, _) = tauri::async_runtime::spawn_blocking(move || {
+        match crate::services::database::init_db(&app_for_db) {
+            Ok(conn) => {
+                let mut rng = rand::rng();
+                let rankings = trust::get_model_rankings(
+                    &conn,
+                    &mut rng,
+                    &task_type_for_db,
+                    &available_models,
+                    0.1,
+                );
+                (rankings, true)
+            }
+            Err(_) => (vec![], false),
+        }
+    })
+    .await
+    .unwrap_or((vec![], false));
+
+    capabilities.model_rankings = rankings
+        .iter()
+        .map(|r| (r.model_id.clone(), r.score))
+        .collect();
+
     let user_explicitly_selected = capabilities
         .selected_model
         .as_ref()
         .is_some_and(|m| !m.is_empty());
 
-    // Route
-    let mut routing = router::route(&subtask.classification, capabilities);
+    // Route with rankings-enriched capabilities
+    let mut routing = router::route(&subtask.classification, &capabilities);
 
     // Trust graduation
     let app_for_trust = app.clone();
@@ -518,8 +548,37 @@ async fn execute_multi_task(
         let mut handles = Vec::new();
 
         for subtask in layer {
-            // Route each subtask independently
-            let mut routing = router::route(&subtask.classification, capabilities);
+            // Compute rankings for this subtask's task_type
+            let mut subtask_caps = capabilities.clone();
+            let app_for_rank = app.clone();
+            let task_type_for_rank = subtask.classification.task_type.clone();
+            let models_for_rank = subtask_caps.available_models.clone();
+
+            let rankings = tauri::async_runtime::spawn_blocking(move || {
+                match crate::services::database::init_db(&app_for_rank) {
+                    Ok(conn) => {
+                        let mut rng = rand::rng();
+                        trust::get_model_rankings(
+                            &conn,
+                            &mut rng,
+                            &task_type_for_rank,
+                            &models_for_rank,
+                            0.1,
+                        )
+                    }
+                    Err(_) => vec![],
+                }
+            })
+            .await
+            .unwrap_or_default();
+
+            subtask_caps.model_rankings = rankings
+                .iter()
+                .map(|r| (r.model_id.clone(), r.score))
+                .collect();
+
+            // Route each subtask independently with rankings
+            let mut routing = router::route(&subtask.classification, &subtask_caps);
 
             // Trust graduation per subtask
             let app_for_trust = app.clone();

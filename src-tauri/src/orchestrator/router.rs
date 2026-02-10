@@ -107,19 +107,31 @@ fn extract_publisher_slug(
 
 /// Select the best available model for the task.
 ///
-/// If the user explicitly selected a model in the UI, respect that choice.
-/// Otherwise, fall back to heuristic-based selection by task complexity.
+/// Priority:
+/// 1. User's explicit selection from the UI
+/// 2. Thompson sampling rankings (satisfaction-driven, computed by service layer)
+/// 3. Hardcoded preference lists (cold start fallback)
 fn select_model(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
 ) -> String {
-    // Respect the user's explicit model selection
+    // 1. Respect the user's explicit model selection
     if let Some(ref selected) = capabilities.selected_model {
         if !selected.is_empty() {
             return selected.clone();
         }
     }
 
+    // 2. Use satisfaction-driven rankings when available
+    if !capabilities.model_rankings.is_empty() {
+        for (model_id, _score) in &capabilities.model_rankings {
+            if capabilities.available_models.iter().any(|m| m == model_id) {
+                return model_id.clone();
+            }
+        }
+    }
+
+    // 3. Fallback to hardcoded preference lists (cold start)
     let preferred = match classification.complexity {
         TaskComplexity::Complex | TaskComplexity::Moderate => CODE_PREFERRED_MODELS,
         TaskComplexity::Simple => SIMPLE_PREFERRED_MODELS,
@@ -356,6 +368,7 @@ mod tests {
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: tools.iter().map(|t| t.to_string()).collect(),
             installed_skills: vec![],
+            model_rankings: vec![],
         }
     }
 
@@ -375,6 +388,7 @@ mod tests {
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: vec![],
             installed_skills: skills,
+            model_rankings: vec![],
         }
     }
 
@@ -648,6 +662,81 @@ mod tests {
 
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.selected_skills.len(), 2);
+    }
+
+    // =========================================================================
+    // Model Rankings (Thompson Sampling)
+    // =========================================================================
+
+    #[test]
+    fn uses_model_rankings_when_provided() {
+        let classification = make_classification("general_chat", false, false);
+        let mut capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4", "google/gemini-2.5-flash", "openai/gpt-5"],
+            &[],
+        );
+        // Rankings override hardcoded preferences
+        capabilities.model_rankings = vec![
+            ("openai/gpt-5".to_string(), 0.95),
+            ("anthropic/claude-sonnet-4".to_string(), 0.80),
+            ("google/gemini-2.5-flash".to_string(), 0.60),
+        ];
+
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.model_id, "openai/gpt-5");
+    }
+
+    #[test]
+    fn rankings_skip_unavailable_models() {
+        let classification = make_classification("general_chat", false, false);
+        let mut capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4", "google/gemini-2.5-flash"],
+            &[],
+        );
+        // Top-ranked model is not in available_models
+        capabilities.model_rankings = vec![
+            ("openai/gpt-5".to_string(), 0.95),
+            ("anthropic/claude-sonnet-4".to_string(), 0.80),
+        ];
+
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
+    }
+
+    #[test]
+    fn user_selection_overrides_rankings() {
+        let classification = make_classification("general_chat", false, false);
+        let mut capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4", "google/gemini-2.5-flash"],
+            &[],
+        );
+        capabilities.model_rankings = vec![
+            ("google/gemini-2.5-flash".to_string(), 0.95),
+            ("anthropic/claude-sonnet-4".to_string(), 0.80),
+        ];
+        capabilities.selected_model = Some("anthropic/claude-sonnet-4".to_string());
+
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
+    }
+
+    #[test]
+    fn empty_rankings_falls_back_to_hardcoded() {
+        let classification = make_classification("general_chat", false, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4", "google/gemini-2.5-flash"],
+            &[],
+        );
+        // model_rankings is empty (default) — cold start behavior
+        assert!(capabilities.model_rankings.is_empty());
+
+        let decision = route(&classification, &capabilities);
+        // Should use SIMPLE_PREFERRED_MODELS fallback
+        assert_eq!(decision.model_id, "google/gemini-2.5-flash");
     }
 
     // =========================================================================

@@ -124,6 +124,10 @@ pub struct UserCapabilities {
     pub available_models: Vec<String>,
     pub available_tools: Vec<String>,
     pub installed_skills: Vec<SkillRef>,
+    /// Pre-computed model rankings from Thompson sampling.
+    /// Empty means no data; router falls back to hardcoded preference lists.
+    #[serde(default)]
+    pub model_rankings: Vec<(String, f64)>,
 }
 
 /// Transition event emitted when the orchestrator switches models.
@@ -386,5 +390,7 @@ mod tests {
         assert_eq!(caps.available_tools.len(), 2);
         assert_eq!(caps.installed_skills.len(), 1);
         assert_eq!(caps.installed_skills[0].slug, "prose");
+        // model_rankings defaults to empty when not in JSON (frontend compat)
+        assert!(caps.model_rankings.is_empty());
     }
 }
