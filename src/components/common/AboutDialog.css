@@ -97,3 +97,44 @@
 .about-btn-copy:hover {
   opacity: 0.9;
 }
+
+.about-btn-check-updates {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.about-btn-check-updates:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.about-btn-check-updates:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.about-btn-install-update {
+  background: #238636;
+  color: white;
+  border-color: #238636;
+}
+
+.about-btn-install-update:hover {
+  background: #2ea043;
+}
+
+.about-dialog-small {
+  width: 360px;
+}
+
+.about-content-centered {
+  padding: 0 24px 16px;
+  text-align: center;
+}
+
+.about-content-centered p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted-foreground);
+  line-height: 1.6;
+}
