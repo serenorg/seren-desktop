@@ -286,42 +286,69 @@ mod tests {
 
     #[test]
     fn test_workspace_write_allows_gpg_agent() {
-        let config = SandboxConfig::from_mode(SandboxMode::WorkspaceWrite, Path::new("/workspace"));
+        // Use explicit paths to avoid dependency on filesystem state in CI.
+        // generate_seatbelt_profile skips deny rules when path.exists() is
+        // false, so we use /tmp paths that always exist.
+        let gnupg = PathBuf::from("/tmp");
+        let private_keys_dir = PathBuf::from("/tmp");
+        let revocs_dir = PathBuf::from("/tmp");
+
+        let config = SandboxConfig {
+            mode: SandboxMode::WorkspaceWrite,
+            writable_paths: vec![
+                PathBuf::from("/workspace"),
+                PathBuf::from("/tmp"),
+                gnupg.clone(),
+            ],
+            sensitive_read_paths: vec![
+                private_keys_dir.clone(),
+                revocs_dir.clone(),
+            ],
+            network_allowed: false,
+            allowed_socket_paths: vec![gnupg.clone()],
+        };
         let profile = generate_seatbelt_profile(&config);
 
-        // Private keys must still be blocked
-        let home = dirs_home(Path::new("/workspace"));
-        let private_keys = format!(
+        // Private key dirs must be denied
+        let deny_rule = format!(
             "(deny file-read* (subpath \"{}\"))",
-            escape_seatbelt_path(&home.join(".gnupg/private-keys-v1.d"))
+            escape_seatbelt_path(&private_keys_dir)
         );
-        let revocs = format!(
-            "(deny file-read* (subpath \"{}\"))",
-            escape_seatbelt_path(&home.join(".gnupg/openpgp-revocs.d"))
-        );
-        assert!(profile.contains(&private_keys));
-        assert!(profile.contains(&revocs));
-
-        // Broad .gnupg deny must NOT be present (would block agent socket)
-        let broad_deny = format!(
-            "(deny file-read* (subpath \"{}\"))",
-            escape_seatbelt_path(&home.join(".gnupg"))
-        );
-        assert!(!profile.contains(&broad_deny));
+        assert!(profile.contains(&deny_rule));
 
         // Write access for lock files
         let gnupg_write = format!(
             "(allow file-write* (subpath \"{}\"))",
-            escape_seatbelt_path(&home.join(".gnupg"))
+            escape_seatbelt_path(&gnupg)
         );
         assert!(profile.contains(&gnupg_write));
 
         // Unix socket access for gpg-agent
         let socket_allow = format!(
             "(allow network-outbound (remote unix-socket (subpath \"{}\")))",
-            escape_seatbelt_path(&home.join(".gnupg"))
+            escape_seatbelt_path(&gnupg)
         );
         assert!(profile.contains(&socket_allow));
+
+        // Network should be denied overall
+        assert!(profile.contains("(deny network*)"));
+    }
+
+    #[test]
+    fn test_from_mode_excludes_broad_gnupg_deny() {
+        // Verify from_mode puts targeted subdirs in sensitive_read_paths,
+        // not the broad ~/.gnupg directory.
+        let config = SandboxConfig::from_mode(SandboxMode::WorkspaceWrite, Path::new("/workspace"));
+        let home = dirs_home(Path::new("/workspace"));
+
+        let has_broad = config.sensitive_read_paths.iter().any(|p| *p == home.join(".gnupg"));
+        assert!(!has_broad, "sensitive_read_paths should not contain broad ~/.gnupg");
+
+        let has_private = config.sensitive_read_paths.iter().any(|p| *p == home.join(".gnupg/private-keys-v1.d"));
+        assert!(has_private, "sensitive_read_paths should contain ~/.gnupg/private-keys-v1.d");
+
+        let has_socket = config.allowed_socket_paths.iter().any(|p| *p == home.join(".gnupg"));
+        assert!(has_socket, "allowed_socket_paths should contain ~/.gnupg");
     }
 
     #[test]

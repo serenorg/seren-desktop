@@ -10,13 +10,18 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 ### AI Chat
 
 - **Multi-model support** — Claude, GPT-4, Gemini via Seren Gateway or direct API keys
+- **Smart model routing** — Satisfaction-driven model selection using Thompson sampling
+- **Auto-reroute on failure** — Falls back to satisfaction-ranked model on 408/timeout errors
+- **Task classification** — Routes prompts to the optimal worker (chat, agent, or publisher)
 - **Free tier included** — Start chatting with Gemini 2.0 Flash (Free), no payment required
 - **Multi-tab conversations** — Work on multiple chats simultaneously
 - **Streaming responses** — Real-time token-by-token output
 - **Thinking display** — Toggle chain-of-thought reasoning visibility
+- **Query cost tracking** — Shows Gateway cost alongside response duration
 - **Image attachments** — Attach images to chat messages
 - **Voice input** — Speech-to-text via Seren Whisper publisher with auto-submit option
-- **Slash commands** — `/` command autocomplete in chat input
+- **Slash commands** — `/` command autocomplete with `/login`, `/clear`, `/new`, `/copy`
+- **Satisfaction signals** — Thumbs up/down feedback that trains the model router
 - **Semantic code context** — AI retrieves relevant code from your indexed codebase
 - **Smart balance warnings** — Prompts to top up or switch to free model when low on credits
 - **Conversation persistence** — Chat history saved locally
@@ -29,7 +34,8 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 - **Tool execution** — Agents read files, execute commands, and make edits
 - **Permission system** — User approval for sensitive operations with risk levels
 - **Sandbox modes** — ReadOnly, WorkspaceWrite, or FullAccess execution tiers
-- **Cancel with deadline** — Force-stop agents that don't respond to cancel within 5 seconds
+- **GPG signing support** — Sandbox allows gpg-agent access for signed commits
+- **Cancel with cleanup** — Force-stop agents, clear tool spinners, flush queued messages
 - **Auth error detection** — Auto-launches `claude login` when authentication is needed
 - **Thinking animation** — Bouncing dot indicator with rotating status words
 
@@ -100,10 +106,17 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 - **Auto top-up** — Configure automatic balance refresh
 - **Crypto payments** — x402 USDC payments on Base network
 
+### Auto-Updater
+
+- **In-app updates** — Check for and install updates without leaving the app
+- **Download progress** — Progress bar with quips during update download
+- **Cross-platform** — Signed updates for macOS, Windows, and Linux
+
 ### Security
 
 - **Encrypted storage** — Tokens stored via Tauri secure storage
 - **Sandboxed execution** — macOS seatbelt profiles for agent commands
+- **Targeted deny lists** — Private keys blocked, GPG agent access preserved
 - **Secure IPC** — Tauri's secure inter-process communication
 - **HTTPS only** — All API calls over TLS
 
@@ -180,10 +193,11 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  │ Claude   │  │ 90+ Tools│  │ Payments │  │ Browser  │ │
 │  │ Codex    │  │ + OAuth  │  │ + Crypto │  │          │ │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐  ┌──────────┐                              │
-│  │ Indexing │  │ Sandbox  │                              │
-│  │sqlite-vec│  │ Terminal │                              │
-│  └──────────┘  └──────────┘                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐               │
+│  │Orchestr. │  │ Indexing │  │ Sandbox  │               │
+│  │ Router   │  │sqlite-vec│  │ Terminal │               │
+│  │ Classify │  │          │  │          │               │
+│  └──────────┘  └──────────┘  └──────────┘               │
 │                                                          │
 │  Backend: Rust/Tauri  │  Frontend: SolidJS/TypeScript    │
 │  Embedded: Node.js + Git (bundled per platform)          │
@@ -225,13 +239,13 @@ seren-desktop/
 ├── src-tauri/               # Rust backend
 │   ├── src/
 │   │   ├── acp.rs           # Agent Client Protocol
+│   │   ├── orchestrator/    # Task classifier, model router, workers
 │   │   ├── openclaw.rs      # OpenClaw messaging integration
 │   │   ├── terminal.rs      # Terminal process management
-│   │   ├── sandbox.rs       # macOS sandbox profiles
+│   │   ├── sandbox.rs       # macOS sandbox profiles (GPG-aware)
 │   │   ├── mcp.rs           # MCP server management
 │   │   ├── embedded_runtime.rs  # Bundled Node.js/Git runtime
 │   │   ├── oauth.rs         # OAuth callback server
-│   │   ├── sync.rs          # Sync functionality
 │   │   ├── commands/        # Tauri commands (chat, indexing, web)
 │   │   ├── services/        # Vector store, chunker, indexer
 │   │   └── wallet/          # x402 payments, Ethereum signing
