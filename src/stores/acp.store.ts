@@ -526,14 +526,18 @@ export const acpStore = {
       console.error("[AcpStore] sendPrompt error:", error);
       const message = error instanceof Error ? error.message : String(error);
 
-      // Auto-recover from dead/zombie sessions
-      // NOTE: Cancellation messages ("Task cancelled") are excluded because
-      // they're from user-initiated cancellation, not a dead session
+      // Auto-recover from dead/zombie sessions.
+      // "unresponsive" = agent force-stopped after timeout (prompt or cancel deadline).
+      // Other patterns = session died unexpectedly.
+      // NOTE: "Task cancelled" (graceful cancel) is excluded — not a dead session.
+      const isForceStop = message.includes("unresponsive");
+      const isDeadSession =
+        message.includes("Worker thread dropped") ||
+        message.includes("not found") ||
+        message.includes("Session not initialized");
       if (
-        !message.includes("Task cancelled") &&
-        (message.includes("Worker thread dropped") ||
-          message.includes("not found") ||
-          message.includes("Session not initialized"))
+        isForceStop ||
+        (!message.includes("Task cancelled") && isDeadSession)
       ) {
         console.info(
           "[AcpStore] Session appears dead, attempting auto-recovery...",
