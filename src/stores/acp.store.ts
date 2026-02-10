@@ -1185,6 +1185,10 @@ export const acpStore = {
         );
         break;
 
+
+      case "configOptionsUpdate":
+        setState("sessions", sessionId, "configOptions", event.data.configOptions);
+        break;
       case "sessionStatus":
         this.handleStatusChange(sessionId, event.data.status, event.data);
         break;

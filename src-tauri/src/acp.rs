@@ -402,6 +402,7 @@ mod events {
     pub const PROMPT_COMPLETE: &str = "acp://prompt-complete";
     pub const PERMISSION_REQUEST: &str = "acp://permission-request";
     pub const SESSION_STATUS: &str = "acp://session-status";
+    pub const CONFIG_OPTIONS_UPDATE: &str = "acp://config-options-update";
     pub const ERROR: &str = "acp://error";
     pub const DIFF_PROPOSAL: &str = "acp://diff-proposal";
 }
@@ -1146,6 +1147,16 @@ fn handle_session_notification(
                     }
                 }),
             );
+        }
+        SessionUpdate::ConfigOptionUpdate(update) => {
+            let emit_result = app.emit(
+                events::CONFIG_OPTIONS_UPDATE,
+                serde_json::json!({
+                    "sessionId": session_id,
+                    "configOptions": update.config_options,
+                }),
+            );
+            log::debug!("[ACP] CONFIG_OPTIONS_UPDATE emit result: {:?}", emit_result);
         }
         _ => {
             log::debug!("[ACP] Unhandled session update: {:?}", notification.update);
