@@ -77,6 +77,8 @@ export interface ActiveSession {
   availableModes?: AgentModeInfo[];
   /** Session-specific error message */
   error?: string | null;
+  /** Title derived from the first user prompt */
+  title?: string;
 }
 
 interface AcpState {
@@ -527,6 +529,21 @@ export const acpStore = {
     ]);
     setState("sessions", sessionId, "streamingContent", "");
     setState("sessions", sessionId, "streamingThinking", "");
+
+    // Derive tab title from the first user prompt
+    if (!state.sessions[sessionId]?.title) {
+      const maxLen = 30;
+      const trimmed = prompt.trim().replace(/\s+/g, " ");
+      const title =
+        trimmed.length <= maxLen
+          ? trimmed
+          : (() => {
+              const t = trimmed.slice(0, maxLen);
+              const sp = t.lastIndexOf(" ");
+              return `${sp > 10 ? t.slice(0, sp) : t}\u2026`;
+            })();
+      setState("sessions", sessionId, "title", title);
+    }
 
     console.log("[AcpStore] Calling acpService.sendPrompt...");
     try {

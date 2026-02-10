@@ -32,6 +32,7 @@ export const AgentTabBar: Component<AgentTabBarProps> = (props) => {
 
   const sessionLabel = (id: string, index: number) => {
     const session = acpStore.sessions[id];
+    if (session?.title) return session.title;
     const agentType = session?.info?.agentType ?? "Agent";
     const label =
       agentType === "claude-code"
