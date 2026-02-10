@@ -2,6 +2,7 @@
 // ABOUTME: Commands are organized by tier and registered at module load.
 
 import { acpStore } from "@/stores/acp.store";
+import { promptLogin } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { providerStore } from "@/stores/provider.store";
@@ -152,6 +153,18 @@ registry.register({
     window.dispatchEvent(new CustomEvent("seren:open-deposit"));
     ctx.clearInput();
     ctx.showStatus("Opening deposit...");
+    return true;
+  },
+});
+
+registry.register({
+  name: "login",
+  description: "Sign in to your account",
+  panels: ["chat", "agent"],
+  execute: (ctx) => {
+    promptLogin();
+    ctx.clearInput();
+    ctx.showStatus("Opening sign in...");
     return true;
   },
 });
