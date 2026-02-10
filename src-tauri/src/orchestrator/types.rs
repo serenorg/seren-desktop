@@ -123,6 +123,10 @@ pub struct UserCapabilities {
     pub selected_model: Option<String>,
     pub available_models: Vec<String>,
     pub available_tools: Vec<String>,
+    /// Full OpenAI-format tool definitions from the frontend.
+    /// ChatModelWorker passes these to the LLM for function calling.
+    #[serde(default)]
+    pub tool_definitions: Vec<serde_json::Value>,
     pub installed_skills: Vec<SkillRef>,
     /// Pre-computed model rankings from Thompson sampling.
     /// Empty means no data; router falls back to hardcoded preference lists.
