@@ -456,32 +456,39 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Build custom menu with About item that emits to frontend
-            #[cfg(target_os = "macos")]
+            // Build native menu bar for all platforms
             {
                 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 
                 let about = MenuItem::with_id(app, "about", "About Seren", true, None::<&str>)?;
                 let separator = PredefinedMenuItem::separator(app)?;
                 let quit = PredefinedMenuItem::quit(app, Some("Quit Seren"))?;
-                let hide = PredefinedMenuItem::hide(app, Some("Hide Seren"))?;
-                let hide_others = PredefinedMenuItem::hide_others(app, None)?;
-                let show_all = PredefinedMenuItem::show_all(app, None)?;
 
-                let app_menu = Submenu::with_items(
-                    app,
-                    "Seren",
-                    true,
-                    &[
-                        &about,
-                        &separator,
-                        &hide,
-                        &hide_others,
-                        &show_all,
-                        &separator,
-                        &quit,
-                    ],
-                )?;
+                // macOS app menu includes Hide/Show items; Windows/Linux just About + Quit
+                #[cfg(target_os = "macos")]
+                let app_menu = {
+                    let hide = PredefinedMenuItem::hide(app, Some("Hide Seren"))?;
+                    let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+                    let show_all = PredefinedMenuItem::show_all(app, None)?;
+                    Submenu::with_items(
+                        app,
+                        "Seren",
+                        true,
+                        &[
+                            &about,
+                            &separator,
+                            &hide,
+                            &hide_others,
+                            &show_all,
+                            &separator,
+                            &quit,
+                        ],
+                    )?
+                };
+
+                #[cfg(not(target_os = "macos"))]
+                let app_menu =
+                    Submenu::with_items(app, "Seren", true, &[&about, &separator, &quit])?;
 
                 let edit_menu = {
                     let undo = PredefinedMenuItem::undo(app, None)?;
