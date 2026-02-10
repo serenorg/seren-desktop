@@ -603,7 +603,12 @@ export const acpStore = {
         return;
       }
 
-      this.addErrorMessage(sessionId, message);
+      // Skip addErrorMessage for cancellation — the error event handler
+      // already recorded it in chat history. Adding it again here would
+      // create a duplicate banner.
+      if (!message.includes("Task cancelled")) {
+        this.addErrorMessage(sessionId, message);
+      }
     }
   },
 
@@ -853,7 +858,26 @@ export const acpStore = {
         break;
 
       case "error":
-        this.addErrorMessage(sessionId, event.data.error);
+        // Clean up any in-flight streaming and tool cards
+        this.finalizeStreamingContent(sessionId);
+        this.markPendingToolCallsComplete(sessionId);
+
+        if (String(event.data.error).includes("Task cancelled")) {
+          // User-initiated cancellation: record in chat history but don't
+          // show the persistent error banner (it's not a real error).
+          const cancelMsg: AgentMessage = {
+            id: crypto.randomUUID(),
+            type: "error",
+            content: event.data.error,
+            timestamp: Date.now(),
+          };
+          setState("sessions", sessionId, "messages", (msgs) => [
+            ...msgs,
+            cancelMsg,
+          ]);
+        } else {
+          this.addErrorMessage(sessionId, event.data.error);
+        }
         break;
 
       case "permissionRequest": {

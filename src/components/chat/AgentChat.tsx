@@ -270,6 +270,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
 
   const handleCancel = async () => {
+    // Clear queued messages so they don't auto-send after cancellation
+    setMessageQueue([]);
     await acpStore.cancelPrompt();
   };
 
