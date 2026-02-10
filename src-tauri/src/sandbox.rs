@@ -40,6 +40,9 @@ pub struct SandboxConfig {
     pub writable_paths: Vec<PathBuf>,
     pub sensitive_read_paths: Vec<PathBuf>,
     pub network_allowed: bool,
+    /// Paths where Unix domain socket connections are allowed even when
+    /// network access is otherwise denied (e.g. ~/.gnupg for gpg-agent).
+    pub allowed_socket_paths: Vec<PathBuf>,
 }
 
 impl SandboxConfig {
@@ -53,12 +56,17 @@ impl SandboxConfig {
                 workspace.to_path_buf(),
                 PathBuf::from("/tmp"),
                 PathBuf::from("/private/tmp"),
+                // GPG needs write access for lock files (~/.gnupg/.#lk*)
+                home.join(".gnupg"),
             ],
         };
 
+        // Block private key material but allow GPG config, public keyring,
+        // and agent sockets so git signed commits work in the sandbox.
         let sensitive_read_paths = vec![
             home.join(".ssh"),
-            home.join(".gnupg"),
+            home.join(".gnupg/private-keys-v1.d"),
+            home.join(".gnupg/openpgp-revocs.d"),
             home.join(".aws"),
             home.join(".config/gcloud"),
             home.join("Library/Keychains"),
@@ -66,11 +74,15 @@ impl SandboxConfig {
 
         let network_allowed = matches!(mode, SandboxMode::FullAccess);
 
+        // Allow gpg-agent Unix socket connections for commit signing
+        let allowed_socket_paths = vec![home.join(".gnupg")];
+
         Self {
             mode,
             writable_paths,
             sensitive_read_paths,
             network_allowed,
+            allowed_socket_paths,
         }
     }
 }
@@ -144,6 +156,13 @@ pub fn generate_seatbelt_profile(config: &SandboxConfig) -> String {
         lines.push("(allow network*)".to_string());
     } else {
         lines.push("(deny network*)".to_string());
+        // Allow Unix domain socket connections to specific paths (e.g. gpg-agent)
+        for path in &config.allowed_socket_paths {
+            lines.push(format!(
+                "(allow network-outbound (remote unix-socket (subpath \"{}\")))",
+                escape_seatbelt_path(path)
+            ));
+        }
     }
 
     lines.join("\n")
@@ -257,11 +276,52 @@ mod tests {
                 writable_paths: vec![],
                 sensitive_read_paths: vec![],
                 network_allowed: true,
+                allowed_socket_paths: vec![],
             },
         );
 
         assert_eq!(cmd, "echo");
         assert_eq!(args, vec!["hello"]);
+    }
+
+    #[test]
+    fn test_workspace_write_allows_gpg_agent() {
+        let config = SandboxConfig::from_mode(SandboxMode::WorkspaceWrite, Path::new("/workspace"));
+        let profile = generate_seatbelt_profile(&config);
+
+        // Private keys must still be blocked
+        let home = dirs_home(Path::new("/workspace"));
+        let private_keys = format!(
+            "(deny file-read* (subpath \"{}\"))",
+            escape_seatbelt_path(&home.join(".gnupg/private-keys-v1.d"))
+        );
+        let revocs = format!(
+            "(deny file-read* (subpath \"{}\"))",
+            escape_seatbelt_path(&home.join(".gnupg/openpgp-revocs.d"))
+        );
+        assert!(profile.contains(&private_keys));
+        assert!(profile.contains(&revocs));
+
+        // Broad .gnupg deny must NOT be present (would block agent socket)
+        let broad_deny = format!(
+            "(deny file-read* (subpath \"{}\"))",
+            escape_seatbelt_path(&home.join(".gnupg"))
+        );
+        assert!(!profile.contains(&broad_deny));
+
+        // Write access for lock files
+        let gnupg_write = format!(
+            "(allow file-write* (subpath \"{}\"))",
+            escape_seatbelt_path(&home.join(".gnupg"))
+        );
+        assert!(profile.contains(&gnupg_write));
+
+        // Unix socket access for gpg-agent
+        let socket_allow = format!(
+            "(allow network-outbound (remote unix-socket (subpath \"{}\")))",
+            escape_seatbelt_path(&home.join(".gnupg"))
+        );
+        assert!(profile.contains(&socket_allow));
     }
 
     #[test]
