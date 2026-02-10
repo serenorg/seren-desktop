@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { updaterStore } from "@/stores/updater.store";
 import "./AboutDialog.css";
 
 interface BuildInfo {
@@ -22,6 +23,8 @@ export function AboutDialog() {
   const [isOpen, setIsOpen] = createSignal(false);
   const [info, setInfo] = createSignal<BuildInfo | null>(null);
   const [copied, setCopied] = createSignal(false);
+  const [showUpToDate, setShowUpToDate] = createSignal(false);
+  const [isCheckingManually, setIsCheckingManually] = createSignal(false);
 
   onMount(() => {
     const unlisten = listen("open-about", async () => {
@@ -42,6 +45,8 @@ export function AboutDialog() {
   function close() {
     setIsOpen(false);
     setCopied(false);
+    setShowUpToDate(false);
+    setIsCheckingManually(false);
   }
 
   function handleBackdropClick(e: MouseEvent) {
@@ -70,39 +75,111 @@ export function AboutDialog() {
     });
   }
 
+  async function checkForUpdates() {
+    setIsCheckingManually(true);
+    await updaterStore.checkForUpdates(true);
+    setIsCheckingManually(false);
+
+    if (updaterStore.state.status === "up_to_date") {
+      setShowUpToDate(true);
+    }
+  }
+
+  function closeUpToDate() {
+    setShowUpToDate(false);
+  }
+
+  function installUpdate() {
+    updaterStore.installAvailableUpdate();
+  }
+
   return (
-    <Show when={isOpen()}>
-      <div class="about-overlay" onClick={handleBackdropClick}>
-        <div class="about-dialog">
-          <div class="about-header">
-            <h2>Seren</h2>
-          </div>
-          <Show when={info()}>
-            {(data) => (
-              <div class="about-content">
-                <Row label="Version" value={data().app_version} />
-                <Row label="Release" value={data().release_tag} />
-                <Row label="Commit" value={data().commit} />
-                <Row label="Date" value={data().build_date} />
-                <Row label="Build Type" value={data().build_type} />
-                <Row label="Tauri" value={data().tauri_version} />
-                <Row label="WebView" value={data().webview} />
-                <Row label="Rust" value={data().rust_version} />
-                <Row label="OS" value={data().os} />
-              </div>
-            )}
-          </Show>
-          <div class="about-footer">
-            <button class="about-btn-ok" onClick={close}>
-              OK
-            </button>
-            <button class="about-btn-copy" onClick={copyInfo}>
-              {copied() ? "Copied!" : "Copy"}
-            </button>
+    <>
+      <Show when={isOpen()}>
+        <div class="about-overlay" onClick={handleBackdropClick}>
+          <div class="about-dialog">
+            <div class="about-header">
+              <h2>Seren</h2>
+            </div>
+            <Show when={info()}>
+              {(data) => (
+                <div class="about-content">
+                  <Row label="Version" value={data().app_version} />
+                  <Row label="Release" value={data().release_tag} />
+                  <Row label="Commit" value={data().commit} />
+                  <Row label="Date" value={data().build_date} />
+                  <Row label="Build Type" value={data().build_type} />
+                  <Row label="Tauri" value={data().tauri_version} />
+                  <Row label="WebView" value={data().webview} />
+                  <Row label="Rust" value={data().rust_version} />
+                  <Row label="OS" value={data().os} />
+                </div>
+              )}
+            </Show>
+            <div class="about-footer">
+              <button type="button" class="about-btn-ok" onClick={close}>
+                OK
+              </button>
+              <Show
+                when={
+                  updaterStore.state.status !== "unsupported" &&
+                  updaterStore.state.status !== "available"
+                }
+              >
+                <button
+                  type="button"
+                  class="about-btn-check-updates"
+                  onClick={checkForUpdates}
+                  disabled={
+                    isCheckingManually() ||
+                    updaterStore.state.status === "checking"
+                  }
+                >
+                  {isCheckingManually() ||
+                  updaterStore.state.status === "checking"
+                    ? "Checking..."
+                    : "Check for Updates"}
+                </button>
+              </Show>
+              <Show when={updaterStore.state.status === "available"}>
+                <button
+                  type="button"
+                  class="about-btn-install-update"
+                  onClick={installUpdate}
+                >
+                  Install Update {updaterStore.state.availableVersion}
+                </button>
+              </Show>
+              <button type="button" class="about-btn-copy" onClick={copyInfo}>
+                {copied() ? "Copied!" : "Copy"}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    </Show>
+      </Show>
+
+      <Show when={showUpToDate()}>
+        <div class="about-overlay" onClick={closeUpToDate}>
+          <div class="about-dialog about-dialog-small">
+            <div class="about-header">
+              <h2>All Up to Date!</h2>
+            </div>
+            <div class="about-content-centered">
+              <p>You're running the latest version of Seren.</p>
+            </div>
+            <div class="about-footer">
+              <button
+                type="button"
+                class="about-btn-ok"
+                onClick={closeUpToDate}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+    </>
   );
 }
 
