@@ -819,8 +819,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 panel="agent"
                 selectedIndex={commandPopupIndex()}
                 onSelect={(cmd) => {
-                  setInput(`/${cmd.name} `);
-                  inputRef?.focus();
+                  if (cmd.argHint) {
+                    setInput(`/${cmd.name} `);
+                    inputRef?.focus();
+                  } else {
+                    executeSlashCommand(`/${cmd.name}`);
+                  }
                   setCommandPopupIndex(0);
                 }}
               />
