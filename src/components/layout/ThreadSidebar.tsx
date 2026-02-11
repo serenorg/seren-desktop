@@ -193,57 +193,97 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </Show>
       </div>
 
-      {/* Thread list */}
+      {/* Thread list grouped by project */}
       <div class="thread-sidebar__list">
         <Show
-          when={threadStore.threads.length > 0}
+          when={threadStore.groupedThreads.length > 0}
           fallback={
             <div class="thread-sidebar__empty">
               <p>No threads yet</p>
             </div>
           }
         >
-          <For each={threadStore.threads}>
-            {(thread) => (
-              <button
-                class="thread-sidebar__item"
-                classList={{
-                  "thread-sidebar__item--active":
-                    thread.id === threadStore.activeThreadId,
-                  "thread-sidebar__item--running": thread.status === "running",
-                }}
-                onClick={() => handleSelectThread(thread)}
-              >
-                <div class="thread-sidebar__item-icon">
-                  <Show
-                    when={thread.kind === "agent"}
-                    fallback={
-                      <span class="thread-sidebar__kind-badge thread-sidebar__kind-badge--chat">
-                        💬
-                      </span>
-                    }
+          <For each={threadStore.groupedThreads}>
+            {(group) => (
+              <div class="thread-sidebar__group">
+                <Show when={threadStore.groupedThreads.length > 1}>
+                  <div
+                    class="thread-sidebar__group-header"
+                    classList={{
+                      "thread-sidebar__group-header--current":
+                        group.projectRoot === fileTreeState.rootPath,
+                    }}
+                    title={group.projectRoot || undefined}
                   >
-                    <span class="thread-sidebar__kind-badge thread-sidebar__kind-badge--agent">
-                      {thread.agentType === "codex" ? "⚡" : "🤖"}
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      role="img"
+                      aria-label="Folder"
+                    >
+                      <path
+                        d="M2 4.5A1.5 1.5 0 013.5 3H6l1.5 2h5A1.5 1.5 0 0114 6.5v5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 11.5v-7z"
+                        stroke="currentColor"
+                        stroke-width="1.2"
+                      />
+                    </svg>
+                    <span class="thread-sidebar__group-name">
+                      {group.folderName}
                     </span>
-                  </Show>
-                </div>
-                <div class="thread-sidebar__item-content">
-                  <span class="thread-sidebar__item-title">{thread.title}</span>
-                  <span class="thread-sidebar__item-meta">
-                    {formatTime(thread.timestamp)}
-                  </span>
-                </div>
-                <Show when={thread.status === "running"}>
-                  <span class="thread-sidebar__status-dot thread-sidebar__status-dot--running" />
+                    <span class="thread-sidebar__group-count">
+                      {group.threads.length}
+                    </span>
+                  </div>
                 </Show>
-                <Show when={thread.status === "waiting-input"}>
-                  <span class="thread-sidebar__status-dot thread-sidebar__status-dot--waiting" />
-                </Show>
-                <Show when={thread.status === "error"}>
-                  <span class="thread-sidebar__status-dot thread-sidebar__status-dot--error" />
-                </Show>
-              </button>
+                <For each={group.threads}>
+                  {(thread) => (
+                    <button
+                      class="thread-sidebar__item"
+                      classList={{
+                        "thread-sidebar__item--active":
+                          thread.id === threadStore.activeThreadId,
+                        "thread-sidebar__item--running":
+                          thread.status === "running",
+                      }}
+                      onClick={() => handleSelectThread(thread)}
+                    >
+                      <div class="thread-sidebar__item-icon">
+                        <Show
+                          when={thread.kind === "agent"}
+                          fallback={
+                            <span class="thread-sidebar__kind-badge thread-sidebar__kind-badge--chat">
+                              💬
+                            </span>
+                          }
+                        >
+                          <span class="thread-sidebar__kind-badge thread-sidebar__kind-badge--agent">
+                            {thread.agentType === "codex" ? "⚡" : "🤖"}
+                          </span>
+                        </Show>
+                      </div>
+                      <div class="thread-sidebar__item-content">
+                        <span class="thread-sidebar__item-title">
+                          {thread.title}
+                        </span>
+                        <span class="thread-sidebar__item-meta">
+                          {formatTime(thread.timestamp)}
+                        </span>
+                      </div>
+                      <Show when={thread.status === "running"}>
+                        <span class="thread-sidebar__status-dot thread-sidebar__status-dot--running" />
+                      </Show>
+                      <Show when={thread.status === "waiting-input"}>
+                        <span class="thread-sidebar__status-dot thread-sidebar__status-dot--waiting" />
+                      </Show>
+                      <Show when={thread.status === "error"}>
+                        <span class="thread-sidebar__status-dot thread-sidebar__status-dot--error" />
+                      </Show>
+                    </button>
+                  )}
+                </For>
+              </div>
             )}
           </For>
         </Show>

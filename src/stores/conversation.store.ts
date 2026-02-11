@@ -332,9 +332,10 @@ export const conversationStore = {
         }
       }
 
-      if (conversations.length > 0) {
+      // Only set active conversation if none is currently selected
+      if (!state.activeConversationId && conversations.length > 0) {
         setState("activeConversationId", conversations[0].id);
-      } else {
+      } else if (conversations.length === 0) {
         await this.createConversation();
       }
     } catch (error) {

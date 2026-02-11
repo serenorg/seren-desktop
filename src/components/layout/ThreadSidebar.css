@@ -205,6 +205,44 @@
   opacity: 0.6;
 }
 
+/* Thread groups */
+.thread-sidebar__group {
+  margin-bottom: 4px;
+}
+
+.thread-sidebar__group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-bottom: 2px;
+  color: var(--muted-foreground, #64748b);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.thread-sidebar__group-header--current {
+  color: var(--primary, #38bdf8);
+}
+
+.thread-sidebar__group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-sidebar__group-count {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted-foreground, #64748b);
+  opacity: 0.6;
+}
+
 /* Thread item */
 .thread-sidebar__item {
   display: flex;

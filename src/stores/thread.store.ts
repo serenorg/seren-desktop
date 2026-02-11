@@ -25,6 +25,12 @@ export interface Thread {
   isLive: boolean;
 }
 
+export interface ThreadGroup {
+  projectRoot: string | null;
+  folderName: string;
+  threads: Thread[];
+}
+
 interface ThreadState {
   activeThreadId: string | null;
   activeThreadKind: "chat" | "agent" | null;
@@ -130,6 +136,64 @@ export const threadStore = {
       : all;
 
     return filtered.sort((a, b) => b.timestamp - a.timestamp);
+  },
+
+  /**
+   * Threads grouped by project directory.
+   * The current project's group comes first, then others, then ungrouped.
+   */
+  get groupedThreads(): ThreadGroup[] {
+    const threads = this.threads;
+    const currentRoot = fileTreeState.rootPath;
+
+    // Group by projectRoot
+    const groups = new Map<string | null, Thread[]>();
+    for (const t of threads) {
+      const key = t.projectRoot;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(t);
+    }
+
+    const result: ThreadGroup[] = [];
+
+    // Current project first
+    if (currentRoot && groups.has(currentRoot)) {
+      result.push({
+        projectRoot: currentRoot,
+        folderName: currentRoot.split("/").pop() || currentRoot,
+        threads: groups.get(currentRoot)!,
+      });
+      groups.delete(currentRoot);
+    }
+
+    // Other projects (sorted by most recent thread)
+    const otherRoots = [...groups.entries()]
+      .filter(([key]) => key !== null)
+      .sort(
+        ([, a], [, b]) =>
+          Math.max(...b.map((t) => t.timestamp)) -
+          Math.max(...a.map((t) => t.timestamp)),
+      );
+
+    for (const [root, rootThreads] of otherRoots) {
+      result.push({
+        projectRoot: root,
+        folderName: (root as string).split("/").pop() || (root as string),
+        threads: rootThreads,
+      });
+    }
+
+    // Ungrouped threads (no project)
+    const ungrouped = groups.get(null);
+    if (ungrouped && ungrouped.length > 0) {
+      result.push({
+        projectRoot: null,
+        folderName: "No project",
+        threads: ungrouped,
+      });
+    }
+
+    return result;
   },
 
   /**
