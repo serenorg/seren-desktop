@@ -203,6 +203,7 @@ function convertMcpToolToDefinition(
         type: schema.type,
         description: schema.description,
         enum: schema.enum,
+        items: schema.items,
       };
     }
   }
@@ -238,6 +239,7 @@ function convertGatewayToolToDefinition(
         type: schema.type,
         description: schema.description,
         enum: schema.enum,
+        items: schema.items,
       };
     }
   }

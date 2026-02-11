@@ -547,6 +547,28 @@ impl ChatModelWorker {
                     accumulated_cost += wrapper_cost;
                 }
 
+                // Check wrapper status for errors before processing body
+                if let Some(status) = wrapper.get("status").and_then(|s| s.as_u64()) {
+                    if status >= 400 {
+                        let error_msg = wrapper
+                            .pointer("/body/error/message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Gateway API error");
+                        log::error!("[ChatModelWorker] Non-streaming wrapper error: HTTP {} — {}", status, error_msg);
+                        event_tx
+                            .send(WorkerEvent::Error {
+                                message: format!("HTTP {}: {}", status, error_msg),
+                            })
+                            .await
+                            .map_err(|e| format!("Failed to send error event: {}", e))?;
+                        return Ok(StreamOutcome::Complete {
+                            final_content: String::new(),
+                            thinking: None,
+                            cost: accumulated_cost,
+                        });
+                    }
+                }
+
                 if let Some(body_str) = wrapper.get("body").and_then(|b| b.as_str()) {
                     log::info!(
                         "[ChatModelWorker] Gateway returned non-streaming wrapper, extracting embedded SSE ({} bytes)",
