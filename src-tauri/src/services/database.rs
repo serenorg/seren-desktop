@@ -144,6 +144,18 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     )
     .ok();
 
+    // Migration cleanup: early Claude ACP builds stored local placeholders like
+    // "session-0" instead of real Claude session ids. These are not resumable.
+    conn.execute(
+        "UPDATE conversations
+         SET agent_session_id = NULL
+         WHERE kind = 'agent'
+           AND agent_type = 'claude-code'
+           AND agent_session_id GLOB 'session-[0-9]*'",
+        [],
+    )
+    .ok();
+
     // Helpful indexes for agent history lookups (safe to run repeatedly).
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_kind_created_at ON conversations(kind, created_at DESC)",

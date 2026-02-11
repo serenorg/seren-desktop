@@ -415,8 +415,8 @@ struct ClientDelegate {
     terminals: Arc<Mutex<crate::terminal::TerminalManager>>,
     sandbox_mode: crate::sandbox::SandboxMode,
     /// When true, suppress forwarding session/update notifications to the frontend.
-    /// Used to avoid duplicating history during `load_session` when the UI is
-    /// already rendering from local persistence.
+    /// Used by non-interactive control-plane requests (e.g. list_sessions probes)
+    /// that should not emit chat transcript events into the active UI.
     suppress_session_notifications: Arc<AtomicBool>,
     pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
     /// Pending diff proposals awaiting user accept/reject
@@ -1669,11 +1669,7 @@ async fn run_session_worker(
                 log::info!("[ACP] Loading existing agent session: {}", resume_id);
                 let load_req =
                     LoadSessionRequest::new(resume_id.clone(), &cwd).mcp_servers(mcp_servers);
-                // When resuming, we render the local persisted transcript and suppress the
-                // agent's history replay notifications to avoid duplicated UI messages.
-                suppress_session_notifications.store(true, Ordering::Relaxed);
                 let load_result = connection.load_session(load_req).await;
-                suppress_session_notifications.store(false, Ordering::Relaxed);
                 match load_result {
                     Ok(load_resp) => {
                         // Extract model state from response (if agent supports model selection)

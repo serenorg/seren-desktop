@@ -71,10 +71,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const onPickImages = () => handleAttachImages();
   onMount(() => {
     window.addEventListener("seren:pick-images", onPickImages);
-    void acpStore.refreshRecentAgentConversations(
-      10,
-      fileTreeState.rootPath ?? undefined,
-    );
+    if (fileTreeState.rootPath) {
+      void acpStore.refreshRemoteSessions(
+        fileTreeState.rootPath,
+        acpStore.selectedAgentType,
+      );
+    }
   });
   onCleanup(() => {
     window.removeEventListener("seren:pick-images", onPickImages);
@@ -92,14 +94,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const hasFolderOpen = () => Boolean(fileTreeState.rootPath);
 
-  // Refresh project-scoped recent conversations and focus any live
-  // session tied to the newly selected folder.
+  // Refresh project-scoped remote sessions (agent source-of-truth) and focus
+  // any live session tied to the selected folder.
   createEffect(
     on(
-      () => fileTreeState.rootPath,
-      (newPath: string | null) => {
-        void acpStore.refreshRecentAgentConversations(10, newPath ?? undefined);
+      () => [fileTreeState.rootPath, acpStore.selectedAgentType] as const,
+      ([newPath, agentType]) => {
         if (newPath) {
+          void acpStore.refreshRemoteSessions(newPath, agentType);
           acpStore.focusProjectSession(newPath);
         }
       },
@@ -581,68 +583,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                       : "Start Agent"}
                   </button>
 
-                  <Show when={acpStore.recentAgentConversations.length > 0}>
-                    <div class="w-full mt-2 pt-3 border-t border-[#21262d]">
-                      <div class="text-[10px] uppercase tracking-wider text-[#8b949e] font-medium mb-2">
-                        Resume Recent
-                      </div>
-                      <div class="flex flex-col gap-1 w-full">
-                        <For
-                          each={acpStore.recentAgentConversations.slice(0, 5)}
-                        >
-                          {(convo) => {
-                            const label =
-                              convo.agent_type === "codex"
-                                ? "Codex"
-                                : convo.agent_type === "claude-code"
-                                  ? "Claude"
-                                  : convo.agent_type;
-                            const resumable = Boolean(convo.agent_session_id);
-                            return (
-                              <button
-                                type="button"
-                                class="w-full px-3 py-2 bg-[#0d1117] border border-[#30363d] rounded-md text-left hover:bg-[#161b22] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                disabled={!hasFolderOpen() || !resumable}
-                                title={
-                                  resumable
-                                    ? "Resume this session"
-                                    : "Session id missing (not resumable yet)"
-                                }
-                                onClick={async () => {
-                                  const cwd = getCwd();
-                                  if (!cwd) return;
-                                  await acpStore.resumeAgentConversation(
-                                    convo.id,
-                                    cwd,
-                                  );
-                                }}
-                              >
-                                <div class="flex items-center justify-between gap-2">
-                                  <div class="flex flex-col gap-0.5 min-w-0">
-                                    <div class="text-xs text-[#e6edf3] truncate">
-                                      {convo.title || "Agent Session"}
-                                    </div>
-                                    <div class="text-[11px] text-[#8b949e]">
-                                      {label}
-                                    </div>
-                                  </div>
-                                  <div class="text-[11px] text-[#58a6ff] shrink-0">
-                                    Resume
-                                  </div>
-                                </div>
-                              </button>
-                            );
-                          }}
-                        </For>
-                      </div>
-                      <Show when={!hasFolderOpen()}>
-                        <div class="mt-2 text-[11px] text-[#8b949e]">
-                          Open a folder to resume an agent session.
-                        </div>
-                      </Show>
-                    </div>
-                  </Show>
-
                   <Show when={hasFolderOpen()}>
                     <div class="w-full mt-2 pt-3 border-t border-[#21262d]">
                       <div class="flex items-center justify-between gap-2 mb-2">
@@ -682,11 +622,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                         when={acpStore.remoteSessions.length > 0}
                         fallback={
                           <div class="text-[11px] text-[#8b949e]">
-                            Click Refresh to list{" "}
+                            No{" "}
                             {acpStore.selectedAgentType === "codex"
                               ? "Codex"
                               : "Claude"}{" "}
-                            sessions for this folder.
+                            sessions found for this folder yet.
                           </div>
                         }
                       >

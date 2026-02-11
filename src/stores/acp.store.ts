@@ -17,10 +17,7 @@ import {
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
   getAgentConversations,
-  getMessages,
   getSerenApiKey,
-  type StoredMessage,
-  saveMessage as saveMessageDb,
   setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
 } from "@/lib/tauri-bridge";
@@ -149,6 +146,32 @@ const [state, setState] = createStore<AcpState>({
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
+const pendingSessionEvents = new Map<string, AcpEvent[]>();
+const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
+const REMOTE_SESSION_SCAN_MAX_PAGES = 20;
+const PENDING_SESSION_EVENT_LIMIT = 500;
+
+async function findRemoteSessionById(
+  cwd: string,
+  agentType: AgentType,
+  sessionId: string,
+): Promise<RemoteSessionInfo | null> {
+  const ensureFn =
+    agentType === "claude-code"
+      ? acpService.ensureClaudeCli
+      : acpService.ensureCodexCli;
+  await ensureFn();
+
+  let cursor: string | undefined;
+  for (let pageNum = 0; pageNum < REMOTE_SESSION_SCAN_MAX_PAGES; pageNum += 1) {
+    const page = await acpService.listRemoteSessions(agentType, cwd, cursor);
+    const match = page.sessions.find((s) => s.sessionId === sessionId);
+    if (match) return match;
+    if (!page.nextCursor) return null;
+    cursor = page.nextCursor ?? undefined;
+  }
+  return null;
+}
 
 // ============================================================================
 // Store
@@ -308,8 +331,29 @@ export const acpStore = {
           : acpService.ensureCodexCli;
       await ensureFn();
 
-      const page = await acpService.listRemoteSessions(resolvedAgentType, cwd);
-      setState("remoteSessions", page.sessions);
+      const [page, localRows] = await Promise.all([
+        acpService.listRemoteSessions(resolvedAgentType, cwd),
+        getAgentConversations(200, cwd),
+      ]);
+
+      setState("recentAgentConversations", localRows);
+      const titleOverrides = new Map(
+        localRows
+          .filter(
+            (c) =>
+              c.agent_type === resolvedAgentType &&
+              c.agent_session_id &&
+              c.title.trim().length > 0,
+          )
+          .map((c) => [c.agent_session_id as string, c.title]),
+      );
+
+      const mergedSessions = page.sessions.map((s) => ({
+        ...s,
+        title: titleOverrides.get(s.sessionId) ?? s.title,
+      }));
+
+      setState("remoteSessions", mergedSessions);
       setState("remoteSessionsNextCursor", page.nextCursor ?? null);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -332,7 +376,21 @@ export const acpStore = {
         cwd,
         cursor,
       );
-      setState("remoteSessions", (prev) => [...prev, ...page.sessions]);
+      const titleOverrides = new Map(
+        state.recentAgentConversations
+          .filter(
+            (c) =>
+              c.agent_type === resolvedAgentType &&
+              c.agent_session_id &&
+              c.title.trim().length > 0,
+          )
+          .map((c) => [c.agent_session_id as string, c.title]),
+      );
+      const mergedSessions = page.sessions.map((s) => ({
+        ...s,
+        title: titleOverrides.get(s.sessionId) ?? s.title,
+      }));
+      setState("remoteSessions", (prev) => [...prev, ...mergedSessions]);
       setState("remoteSessionsNextCursor", page.nextCursor ?? null);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -395,9 +453,8 @@ export const acpStore = {
       resolveReady = resolve;
     });
 
-    // Listen to all session status events temporarily.
-    // This also captures `agentSessionId` in case the "ready" event arrives
-    // before the global event router is installed.
+    // Listen to session status events temporarily so ready-state resolution does
+    // not depend on global event routing order.
     const tempUnsubscribe =
       await acpService.subscribeToEvent<SessionStatusEvent>(
         "sessionStatus",
@@ -411,6 +468,26 @@ export const acpStore = {
           }
         },
       );
+
+    // Subscribe once to all ACP events before spawning, so early replay events
+    // from load_session are buffered instead of dropped.
+    if (!globalUnsubscribe) {
+      globalUnsubscribe = await acpService.subscribeToAllEvents((event) => {
+        const eventSessionId = event.data.sessionId;
+        if (!eventSessionId) return;
+        if (state.sessions[eventSessionId]) {
+          this.handleSessionEvent(eventSessionId, event);
+          return;
+        }
+
+        const pending = pendingSessionEvents.get(eventSessionId) ?? [];
+        pending.push(event);
+        if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
+          pending.shift();
+        }
+        pendingSessionEvents.set(eventSessionId, pending);
+      });
+    }
 
     try {
       // Ensure the underlying CLI is installed and up-to-date before spawning
@@ -492,6 +569,14 @@ export const acpStore = {
       setState("sessions", info.id, session);
       setState("activeSessionId", info.id);
 
+      const pendingEvents = pendingSessionEvents.get(info.id);
+      if (pendingEvents?.length) {
+        for (const pendingEvent of pendingEvents) {
+          this.handleSessionEvent(info.id, pendingEvent);
+        }
+        pendingSessionEvents.delete(info.id);
+      }
+
       // Create a ready promise that sendPrompt can await
       let readyResolve: () => void;
       const readyPromiseObj = {
@@ -501,17 +586,6 @@ export const acpStore = {
         resolve: () => readyResolve(),
       };
       sessionReadyPromises.set(info.id, readyPromiseObj);
-
-      // Subscribe once to all ACP events and route by sessionId.
-      // This avoids missing chunks due to filtering and scales better across sessions.
-      if (!globalUnsubscribe) {
-        globalUnsubscribe = await acpService.subscribeToAllEvents((event) => {
-          const eventSessionId = event.data.sessionId;
-          if (!eventSessionId) return;
-          if (!state.sessions[eventSessionId]) return;
-          this.handleSessionEvent(eventSessionId, event);
-        });
-      }
 
       // Wait for ready event with timeout (agent initialization can take a moment)
       const timeoutPromise = new Promise<string>((_, reject) => {
@@ -590,57 +664,53 @@ export const acpStore = {
       setState("error", "Agent conversation not found");
       return null;
     }
-    if (!convo.agent_session_id) {
+    const agentType: AgentType =
+      convo.agent_type === "codex" || convo.agent_type === "claude-code"
+        ? (convo.agent_type as AgentType)
+        : state.selectedAgentType;
+
+    const remoteSessionId = convo.agent_session_id?.trim();
+    if (!remoteSessionId) {
       setState(
         "error",
         "This agent conversation does not have a resumable session id yet.",
       );
       return null;
     }
-
-    let storedMessages: StoredMessage[] = [];
-    try {
-      storedMessages = await getMessages(conversationId, 1000);
-    } catch (error) {
-      console.warn("Failed to load persisted agent messages:", error);
+    if (
+      agentType === "claude-code" &&
+      LEGACY_CLAUDE_LOCAL_SESSION_ID_RE.test(remoteSessionId)
+    ) {
+      setState(
+        "error",
+        "This conversation references a legacy local Claude id. Use Browse Claude Sessions and resume the real remote session.",
+      );
+      return null;
     }
 
-    const history: AgentMessage[] = storedMessages
-      .map((m) => {
-        const t = m.role as AgentMessage["type"];
-        const type: AgentMessage["type"] =
-          t === "user" ||
-          t === "assistant" ||
-          t === "thought" ||
-          t === "tool" ||
-          t === "diff" ||
-          t === "error"
-            ? t
-            : "assistant";
-        return {
-          id: m.id,
-          type,
-          content: m.content,
-          timestamp: m.timestamp,
-        };
-      })
-      // Best-effort: ignore empty messages
-      .filter((m) => m.content.trim().length > 0);
-
-    const agentType: AgentType =
-      convo.agent_type === "codex" || convo.agent_type === "claude-code"
-        ? (convo.agent_type as AgentType)
-        : state.selectedAgentType;
+    let remoteMatch: RemoteSessionInfo | null = null;
+    try {
+      remoteMatch = await findRemoteSessionById(cwd, agentType, remoteSessionId);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setState("error", `Failed to validate remote session: ${msg}`);
+      return null;
+    }
+    if (!remoteMatch) {
+      setState(
+        "error",
+        "This conversation's remote session was not found for the current project folder.",
+      );
+      return null;
+    }
 
     const sessionId = await this.spawnSession(cwd, agentType, {
       localSessionId: conversationId,
-      resumeAgentSessionId: convo.agent_session_id,
+      resumeAgentSessionId: remoteMatch.sessionId,
       conversationTitle: convo.title,
     });
     if (sessionId) {
-      setState("sessions", sessionId, "messages", history);
-      setState("sessions", sessionId, "streamingContent", "");
-      setState("sessions", sessionId, "streamingThinking", "");
+      void this.refreshRecentAgentConversations(50, cwd).catch(() => {});
     }
     return sessionId;
   },
@@ -661,19 +731,21 @@ export const acpStore = {
         c.agent_type === resolvedAgentType &&
         c.agent_session_id === remoteSession.sessionId,
     );
-    if (existing) {
-      return this.resumeAgentConversation(existing.id, cwd);
+    if (existing && state.sessions[existing.id]) {
+      setState("activeSessionId", existing.id);
+      return existing.id;
     }
 
     const title =
       remoteSession.title?.trim() ||
       `${resolvedAgentType === "codex" ? "Codex" : "Claude"} Session ${remoteSession.sessionId.slice(0, 8)}`;
     const sessionId = await this.spawnSession(cwd, resolvedAgentType, {
+      localSessionId: existing?.id,
       resumeAgentSessionId: remoteSession.sessionId,
-      conversationTitle: title,
+      conversationTitle: existing?.title?.trim() || title,
     });
     if (sessionId) {
-      void this.refreshRecentAgentConversations(10, cwd).catch(() => {});
+      void this.refreshRecentAgentConversations(50, cwd).catch(() => {});
     }
     return sessionId;
   },
@@ -693,6 +765,7 @@ export const acpStore = {
 
     // Clean up ready promise if still pending
     sessionReadyPromises.delete(sessionId);
+    pendingSessionEvents.delete(sessionId);
 
     // Remove from state using produce to properly delete the key
     setState(
@@ -713,6 +786,7 @@ export const acpStore = {
     if (Object.keys(state.sessions).length === 0 && globalUnsubscribe) {
       globalUnsubscribe();
       globalUnsubscribe = null;
+      pendingSessionEvents.clear();
     }
   },
 
@@ -809,16 +883,6 @@ export const acpStore = {
       ...msgs,
       userMessage,
     ]);
-    void saveMessageDb(
-      userMessage.id,
-      session.conversationId,
-      userMessage.type,
-      userMessage.content,
-      session.currentModelId ?? null,
-      userMessage.timestamp,
-    ).catch((error) => {
-      console.warn("Failed to persist agent message", error);
-    });
     setState("sessions", sessionId, "streamingContent", "");
     setState("sessions", sessionId, "streamingThinking", "");
 
@@ -1550,16 +1614,6 @@ export const acpStore = {
         ...msgs,
         thinkingMessage,
       ]);
-      void saveMessageDb(
-        thinkingMessage.id,
-        session.conversationId,
-        thinkingMessage.type,
-        thinkingMessage.content,
-        session.currentModelId ?? null,
-        thinkingMessage.timestamp,
-      ).catch((error) => {
-        console.warn("Failed to persist agent message", error);
-      });
       setState("sessions", sessionId, "streamingThinking", "");
     }
 
@@ -1578,16 +1632,6 @@ export const acpStore = {
         duration,
       };
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
-      void saveMessageDb(
-        message.id,
-        session.conversationId,
-        message.type,
-        message.content,
-        session.currentModelId ?? null,
-        message.timestamp,
-      ).catch((error) => {
-        console.warn("Failed to persist agent message", error);
-      });
 
       // If the agent streamed a short auth error as text, surface it as a session error
       // so the error banner with the Login button appears. Long messages are skipped
@@ -1611,19 +1655,6 @@ export const acpStore = {
     };
 
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
-    const session = state.sessions[sessionId];
-    if (session) {
-      void saveMessageDb(
-        message.id,
-        session.conversationId,
-        message.type,
-        message.content,
-        session.currentModelId ?? null,
-        message.timestamp,
-      ).catch((persistErr) => {
-        console.warn("Failed to persist agent message", persistErr);
-      });
-    }
     // Set session-specific error instead of global error
     setState("sessions", sessionId, "error", error);
   },
