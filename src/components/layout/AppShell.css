@@ -1,0 +1,156 @@
+/* ABOUTME: Layout styles for the main application shell. */
+/* ABOUTME: Defines the titlebar, body grid, and panel positioning. */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Titlebar */
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--titlebar-height, 40px);
+  padding: 0 12px;
+  background: var(--surface-1, var(--card));
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  user-select: none;
+  /* macOS traffic light offset */
+  padding-left: 78px;
+}
+
+.titlebar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titlebar__brand {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--foreground);
+}
+
+.titlebar__center {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+}
+
+.titlebar__folder {
+  font-size: 12px;
+  color: var(--muted-foreground, #94a3b8);
+  font-weight: 500;
+}
+
+.titlebar__no-project {
+  font-size: 12px;
+  color: var(--muted-foreground, #64748b);
+  opacity: 0.6;
+}
+
+.titlebar__right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.titlebar__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground, #94a3b8);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast, 100ms ease),
+    color var(--transition-fast, 100ms ease);
+}
+
+.titlebar__btn:hover {
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+  color: var(--foreground);
+}
+
+.titlebar__btn--sign-in {
+  width: auto;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.titlebar__update-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--primary-muted, rgba(56, 189, 248, 0.15));
+  color: var(--primary, #38bdf8);
+  font-weight: 500;
+}
+
+/* App body */
+.app-shell__body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.app-shell__main {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Thread content */
+.thread-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.thread-content__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: var(--muted-foreground, #64748b);
+}
+
+.thread-content__empty-icon {
+  opacity: 0.4;
+}
+
+.thread-content__empty-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--foreground);
+  opacity: 0.7;
+  margin: 0;
+}
+
+.thread-content__empty-desc {
+  font-size: 13px;
+  opacity: 0.5;
+  margin: 0;
+  max-width: 280px;
+  text-align: center;
+  line-height: 1.5;
+}
