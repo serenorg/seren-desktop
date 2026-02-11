@@ -763,6 +763,8 @@ pub fn run() {
             openclaw::openclaw_set_trust,
             #[cfg(feature = "openclaw")]
             openclaw::openclaw_grant_approval,
+            #[cfg(feature = "openclaw")]
+            openclaw::openclaw_launch_channel_login,
             // Skills commands
             skills::get_seren_skills_dir,
             skills::get_claude_skills_dir,
