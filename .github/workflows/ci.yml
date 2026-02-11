@@ -51,6 +51,8 @@ jobs:
 
   build:
     needs: [lint, test-frontend, test-rust]
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]

@@ -1,29 +1,36 @@
-import loader from "@monaco-editor/loader";
-import type * as Monaco from "monaco-editor";
+import * as monaco from "monaco-editor";
+import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
+import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
+import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
+import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 
-let monacoInstance: typeof Monaco | null = null;
+// Configure Monaco to use locally bundled workers (avoids CDN + CSP issues)
+self.MonacoEnvironment = {
+  getWorker(_: string, label: string) {
+    if (label === "json") return new jsonWorker();
+    if (label === "css" || label === "scss" || label === "less")
+      return new cssWorker();
+    if (label === "html" || label === "handlebars" || label === "razor")
+      return new htmlWorker();
+    if (label === "typescript" || label === "javascript") return new tsWorker();
+    return new editorWorker();
+  },
+};
+
+let initialized = false;
 
 /**
  * Initialize Monaco Editor with optimized configuration.
  * Call this once at app startup before rendering any editors.
  */
-export async function initMonaco(): Promise<typeof Monaco> {
-  if (monacoInstance) {
-    return monacoInstance;
+export async function initMonaco(): Promise<typeof monaco> {
+  if (initialized) {
+    return monaco;
   }
 
-  // Configure Monaco loader to use local files (bundled with app)
-  loader.config({
-    paths: {
-      vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs",
-    },
-  });
-
-  const monaco = await loader.init();
-  monacoInstance = monaco;
-
-  // Register custom themes
-  registerThemes(monaco);
+  initialized = true;
+  registerThemes();
 
   return monaco;
 }
@@ -31,17 +38,17 @@ export async function initMonaco(): Promise<typeof Monaco> {
 /**
  * Get the Monaco instance. Throws if not initialized.
  */
-export function getMonaco(): typeof Monaco {
-  if (!monacoInstance) {
+export function getMonaco(): typeof monaco {
+  if (!initialized) {
     throw new Error("Monaco not initialized. Call initMonaco() first.");
   }
-  return monacoInstance;
+  return monaco;
 }
 
 /**
  * Register custom editor themes matching Seren Desktop design.
  */
-function registerThemes(monaco: typeof Monaco): void {
+function registerThemes(): void {
   // Seren Dark Theme
   monaco.editor.defineTheme("seren-dark", {
     base: "vs-dark",
@@ -95,7 +102,7 @@ function registerThemes(monaco: typeof Monaco): void {
 /**
  * Default editor options for Seren Desktop.
  */
-export const defaultEditorOptions: Monaco.editor.IStandaloneEditorConstructionOptions =
+export const defaultEditorOptions: monaco.editor.IStandaloneEditorConstructionOptions =
   {
     theme: "seren-dark",
     fontSize: 14,
