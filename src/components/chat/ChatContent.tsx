@@ -550,14 +550,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   return (
-    <section class="flex flex-col h-full bg-[#0d1117] text-[#e6edf3] border-l border-[#21262d]">
+    <section class="flex flex-col h-full bg-background text-foreground border-l border-surface-2">
       <Show when={showSignInPrompt()}>
         <div class="flex-1 flex flex-col items-center justify-center gap-6 p-6">
           <div class="text-center max-w-[280px]">
-            <h2 class="m-0 mb-2 text-lg font-semibold text-[#e6edf3]">
+            <h2 class="m-0 mb-2 text-lg font-semibold text-foreground">
               Sign in to use Seren
             </h2>
-            <p class="m-0 text-sm text-[#8b949e] leading-normal">
+            <p class="m-0 text-sm text-muted-foreground leading-normal">
               Sign in to chat with Seren, or add your own API key in Settings.
             </p>
           </div>
@@ -569,7 +569,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
           />
           <button
             type="button"
-            class="bg-transparent border border-[#30363d] text-[#8b949e] px-3 py-1.5 rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3]"
+            class="bg-transparent border border-border text-muted-foreground px-3 py-1.5 rounded text-xs cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
             onClick={() => setShowSignInPrompt(false)}
           >
             Cancel
@@ -577,12 +577,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         </div>
       </Show>
       <Show when={!showSignInPrompt()}>
-        <header class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[#21262d] bg-[#161b22]">
+        <header class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-surface-2 bg-surface-1">
           <div class="flex items-center gap-3">
             <Show when={chatStore.messages.length > 0}>
-              <div class="flex items-center gap-1.5 text-[10px] text-[#484f58]">
+              <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                 <div
-                  class="w-12 h-1.5 bg-[#21262d] rounded-full overflow-hidden"
+                  class="w-12 h-1.5 bg-surface-2 rounded-full overflow-hidden"
                   title={`Context: ${chatStore.contextUsagePercent}% (${chatStore.estimatedTokens.toLocaleString()} tokens)`}
                 >
                   <div
@@ -591,7 +591,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                         ? "bg-[#f85149]"
                         : chatStore.contextUsagePercent >= 50
                           ? "bg-[#d29922]"
-                          : "bg-[#238636]"
+                          : "bg-success"
                     }`}
                     style={{ width: `${chatStore.contextUsagePercent}%` }}
                   />
@@ -610,7 +610,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             >
               <button
                 type="button"
-                class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed"
+                class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={() =>
                   chatStore.compactConversation(
                     settingsStore.get("autoCompactPreserveMessages"),
@@ -623,7 +623,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             </Show>
             <button
               type="button"
-              class="bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#21262d] hover:text-[#e6edf3]"
+              class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
               onClick={clearHistory}
             >
               Clear
@@ -650,14 +650,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               chatStore.compactedSummary
             }
             fallback={
-              <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
-                <h3 class="m-0 mb-3 text-lg font-medium text-[#e6edf3]">
+              <div class="flex-1 flex flex-col items-center justify-center p-10 text-muted-foreground">
+                <h3 class="m-0 mb-3 text-lg font-medium text-foreground">
                   Welcome to Seren
                 </h3>
                 <p class="m-0 text-sm text-center max-w-[320px] leading-relaxed">
                   Your AI assistant for everyday work. Try typing:
                 </p>
-                <p class="m-0 mt-2 text-sm text-center max-w-[320px] leading-relaxed italic text-[#e6edf3]">
+                <p class="m-0 mt-2 text-sm text-center max-w-[320px] leading-relaxed italic text-foreground">
                   "Summarize the key points of this article for me"
                 </p>
               </div>
@@ -691,13 +691,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   }
                 >
                   <article
-                    class={`group/msg px-5 py-4 border-b border-[#21262d] last:border-b-0 ${message.role === "user" ? "bg-[#161b22]" : "bg-transparent"}`}
+                    class={`group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
                   >
                     <Show when={message.images && message.images.length > 0}>
                       <MessageImages images={message.images ?? []} />
                     </Show>
                     <div
-                      class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-[#f0f6fc] [&_h1]:border-b [&_h1]:border-[#21262d] [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-[#f0f6fc] [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-[#f0f6fc] [&_code]:bg-[#1c2333] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-[#f0f6fc] [&_strong]:font-semibold"
+                      class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-[#f0f6fc] [&_h1]:border-b [&_h1]:border-surface-2 [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-[#f0f6fc] [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-[#f0f6fc] [&_code]:bg-[#1c2333] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-[#f0f6fc] [&_strong]:font-semibold"
                       innerHTML={
                         message.role === "assistant"
                           ? renderMarkdown(message.content)
@@ -717,7 +717,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                         const { verb, duration, costDisplay } =
                           formatDurationWithVerb(dur, message.cost);
                         return (
-                          <div class="mt-2 text-xs text-[#8b949e]">
+                          <div class="mt-2 text-xs text-muted-foreground">
                             ✻ {verb} for {duration}
                             {costDisplay && ` at ${costDisplay}`}
                           </div>
@@ -735,7 +735,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       </div>
                     </Show>
                     <Show when={message.status === "error"}>
-                      <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-[#f85149]">
+                      <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-destructive">
                         <Show
                           when={!isAuthError(message.error)}
                           fallback={
@@ -745,7 +745,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                               </span>
                               <button
                                 type="button"
-                                class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                                class="bg-transparent border border-[rgba(248,81,73,0.4)] text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
                                 onClick={() => setShowSignInPrompt(true)}
                               >
                                 Sign In
@@ -769,7 +769,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                           <Show when={message.request}>
                             <button
                               type="button"
-                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
                               onClick={() => handleManualRetry(message)}
                             >
                               Retry
@@ -783,7 +783,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                           >
                             <button
                               type="button"
-                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-[#f85149] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
+                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
                               onClick={() => retryOrchestration()}
                             >
                               Retry
@@ -804,14 +804,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               conversationStore.isLoading && !conversationStore.streamingContent
             }
           >
-            <article class="px-5 py-4 border-b border-[#21262d]">
+            <article class="px-5 py-4 border-b border-surface-2">
               <ThinkingStatus />
             </article>
           </Show>
 
           <Show when={conversationStore.streamingThinking}>
-            <article class="px-5 py-4 border-b border-[#21262d]">
-              <details open class="text-xs text-[#8b949e]">
+            <article class="px-5 py-4 border-b border-surface-2">
+              <details open class="text-xs text-muted-foreground">
                 <summary class="cursor-pointer select-none mb-1">
                   Thinking…
                 </summary>
@@ -823,8 +823,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
           </Show>
 
           <Show when={conversationStore.streamingContent}>
-            <article class="px-5 py-4 border-b border-[#21262d]">
-              <div class="chat-message-content text-[14px] leading-[1.7] text-[#e6edf3] break-words whitespace-pre-wrap">
+            <article class="px-5 py-4 border-b border-surface-2">
+              <div class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words whitespace-pre-wrap">
                 {conversationStore.streamingContent}
                 <Show when={conversationStore.isLoading}>
                   <span class="inline-block w-[6px] h-[14px] bg-[#58a6ff] ml-0.5 animate-pulse" />
@@ -836,8 +836,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
         <Show when={contextPreview()}>
           {(ctx) => (
-            <div class="mx-3 my-2 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
-              <div class="flex justify-between items-center px-2 py-1.5 bg-[#21262d] text-xs text-[#8b949e]">
+            <div class="mx-3 my-2 bg-surface-1 border border-border rounded-lg overflow-hidden">
+              <div class="flex justify-between items-center px-2 py-1.5 bg-surface-2 text-xs text-muted-foreground">
                 <span>
                   Context from {ctx().file ?? "selection"}
                   {ctx().range &&
@@ -845,7 +845,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 </span>
                 <button
                   type="button"
-                  class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1 py-0.5 text-sm leading-none hover:text-[#e6edf3]"
+                  class="bg-transparent border-none text-muted-foreground cursor-pointer px-1 py-0.5 text-sm leading-none hover:text-foreground"
                   onClick={() => editorStore.clearSelection()}
                 >
                   ×
@@ -858,7 +858,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
           )}
         </Show>
 
-        <div class="shrink-0 px-4 py-3.5 border-t border-[#21262d] bg-[#161b22]">
+        <div class="shrink-0 px-4 py-3.5 border-t border-surface-2 bg-surface-1">
           <form
             class="flex flex-col gap-2"
             onSubmit={(event) => {
@@ -879,14 +879,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               isLoading={isAttaching()}
             />
             <Show when={messageQueue().length > 0}>
-              <div class="flex items-center gap-2 px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e]">
+              <div class="flex items-center gap-2 px-3 py-2 bg-surface-2 border border-border rounded-lg text-xs text-muted-foreground">
                 <span>
                   {messageQueue().length} message
                   {messageQueue().length > 1 ? "s" : ""} queued
                 </span>
                 <button
                   type="button"
-                  class="ml-auto bg-transparent border border-[#30363d] text-[#8b949e] px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[#30363d] hover:text-[#e6edf3]"
+                  class="ml-auto bg-transparent border border-border text-muted-foreground px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[#30363d] hover:text-foreground"
                   onClick={() => setMessageQueue([])}
                 >
                   Clear Queue
@@ -924,7 +924,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     ? "Type to queue message..."
                     : "Ask Seren anything… (type / for commands)"
                 }
-                class="w-full bg-[#0d1117] border border-[#30363d] rounded-xl text-[#e6edf3] px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-[#58a6ff] focus:shadow-[0_0_0_3px_rgba(88,166,255,0.15)] placeholder:text-[#484f58]"
+                class="w-full bg-background border border-border rounded-xl text-foreground px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-[#58a6ff] focus:shadow-[0_0_0_3px_rgba(88,166,255,0.15)] placeholder:text-muted-foreground"
                 minHeight={72}
                 maxHeight={window.innerHeight * 0.5}
                 onInput={(event) => {
@@ -1038,7 +1038,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               />
             </div>
             <Show when={commandStatus()}>
-              <div class="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e] whitespace-pre-wrap">
+              <div class="px-3 py-2 bg-surface-2 border border-border rounded-lg text-xs text-muted-foreground whitespace-pre-wrap">
                 {commandStatus()}
               </div>
             </Show>
@@ -1050,7 +1050,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   <ThinkingStatus />
                 </Show>
                 <Show when={!conversationStore.isLoading}>
-                  <span class="text-[10px] text-[#484f58]">
+                  <span class="text-[10px] text-muted-foreground">
                     {settingsStore.get("chatEnterToSend")
                       ? "Enter to send"
                       : "Ctrl+Enter"}
@@ -1073,7 +1073,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   fallback={
                     <button
                       type="submit"
-                      class="bg-[#238636] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#2ea043] hover:shadow-[0_2px_8px_rgba(35,134,54,0.3)] disabled:bg-[#21262d] disabled:text-[#484f58] disabled:shadow-none"
+                      class="bg-success text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-emerald-700 hover:shadow-[0_2px_8px_rgba(35,134,54,0.3)] disabled:bg-surface-2 disabled:text-muted-foreground disabled:shadow-none"
                       disabled={
                         !input().trim() && attachedImages().length === 0
                       }
@@ -1084,7 +1084,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 >
                   <button
                     type="button"
-                    class="bg-[#da3633] text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#f85149] hover:shadow-[0_2px_8px_rgba(218,54,51,0.3)]"
+                    class="bg-destructive text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#f85149] hover:shadow-[0_2px_8px_rgba(218,54,51,0.3)]"
                     onClick={cancelStreaming}
                   >
                     Stop
