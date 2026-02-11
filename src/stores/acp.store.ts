@@ -13,6 +13,10 @@ const sessionReadyPromises = new Map<
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
+  isRateLimitError,
+  performRateLimitFallback,
+} from "@/lib/rate-limit-fallback";
+import {
   createAgentConversation,
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
@@ -105,6 +109,8 @@ export interface ActiveSession {
   error?: string | null;
   /** Title derived from the first user prompt */
   title?: string;
+  /** Set when the agent hits a rate limit — triggers the fallback-to-chat prompt. */
+  rateLimitHit?: boolean;
 }
 
 interface AcpState {
@@ -1244,6 +1250,44 @@ export const acpStore = {
   },
 
   /**
+   * Whether the active session hit a rate limit (triggers chat fallback prompt).
+   */
+  get rateLimitHit(): boolean {
+    const session = this.activeSession;
+    return session?.rateLimitHit === true;
+  },
+
+  /**
+   * Dismiss the rate-limit prompt without switching to Chat.
+   */
+  dismissRateLimitPrompt() {
+    const sessionId = state.activeSessionId;
+    if (sessionId) {
+      setState("sessions", sessionId, "rateLimitHit", false);
+    }
+  },
+
+  /**
+   * Accept the rate-limit prompt: switch agent history to a Chat conversation.
+   */
+  async acceptRateLimitFallback(): Promise<string | null> {
+    const session = this.activeSession;
+    if (!session) return null;
+
+    const agentType = session.info.agentType;
+    const messages = [...session.messages];
+    const title = session.title;
+
+    // Clear the flag first so the banner disappears immediately
+    const sessionId = state.activeSessionId;
+    if (sessionId) {
+      setState("sessions", sessionId, "rateLimitHit", false);
+    }
+
+    return performRateLimitFallback(agentType, messages, title);
+  },
+
+  /**
    * Clear error state for the active session.
    */
   clearError() {
@@ -1368,6 +1412,14 @@ export const acpStore = {
           console.info(
             "[AcpStore] Skipping error message for unresponsive agent — sendPrompt handles recovery",
           );
+        } else if (isRateLimitError(String(event.data.error))) {
+          // Rate limit detected — flag the session so the UI shows the
+          // "Continue in Chat" prompt instead of a generic error banner.
+          console.info(
+            "[AcpStore] Rate limit detected, flagging session for chat fallback",
+          );
+          setState("sessions", sessionId, "rateLimitHit", true);
+          this.addErrorMessage(sessionId, event.data.error);
         } else {
           this.addErrorMessage(sessionId, event.data.error);
         }
@@ -1383,7 +1435,8 @@ export const acpStore = {
             permEvent.sessionId +
             ", tool=" +
             JSON.stringify(
-              (permEvent.toolCall as Record<string, unknown>)?.name ?? "unknown",
+              (permEvent.toolCall as Record<string, unknown>)?.name ??
+                "unknown",
             ),
         );
         setState("pendingPermissions", [
@@ -1442,10 +1495,20 @@ export const acpStore = {
       this.flushPendingUserMessage(sessionId);
     }
 
-    setState("sessions", sessionId, "pendingUserMessage", (current) => current + text);
+    setState(
+      "sessions",
+      sessionId,
+      "pendingUserMessage",
+      (current) => current + text,
+    );
 
     if (!session.pendingUserMessageId && incomingMessageId) {
-      setState("sessions", sessionId, "pendingUserMessageId", incomingMessageId);
+      setState(
+        "sessions",
+        sessionId,
+        "pendingUserMessageId",
+        incomingMessageId,
+      );
     }
     if (session.pendingUserMessageTimestamp === undefined) {
       setState(

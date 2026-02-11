@@ -116,8 +116,14 @@ export const conversationStore = {
   // === Conversation management ===
 
   async createConversation(title = "New Chat"): Promise<Conversation> {
+    return this.createConversationWithModel(title, DEFAULT_MODEL);
+  },
+
+  async createConversationWithModel(
+    title: string,
+    model: string,
+  ): Promise<Conversation> {
     const id = crypto.randomUUID();
-    const model = DEFAULT_MODEL;
 
     try {
       await createConversationDb(id, title, model);

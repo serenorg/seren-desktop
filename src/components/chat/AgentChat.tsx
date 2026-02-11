@@ -792,6 +792,60 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         </div>
       </Show>
 
+      {/* Rate Limit Fallback Banner */}
+      <Show when={acpStore.rateLimitHit}>
+        {(() => {
+          const agentType =
+            acpStore.activeSession?.info.agentType ?? "claude-code";
+          const modelName = agentType === "codex" ? "GPT-5" : "Claude Opus 4.5";
+          const agentName = agentType === "codex" ? "Codex" : "Claude Code";
+          return (
+            <div class="mx-4 mb-2 px-3 py-3 border rounded-md text-sm bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.4)] text-[#58a6ff]">
+              <div class="flex items-start gap-3">
+                <svg
+                  class="w-5 h-5 mt-0.5 flex-shrink-0"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                  role="img"
+                  aria-label="Info"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+                <div class="flex-1">
+                  <p class="m-0 mb-2 font-medium text-[#e6edf3]">
+                    {agentName} hit its rate limit
+                  </p>
+                  <p class="m-0 mb-3 text-xs text-[#8b949e]">
+                    Your conversation history will be preserved. You can
+                    continue in Chat mode with {modelName} via Seren.
+                  </p>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      class="px-3 py-1.5 text-xs font-medium bg-[#238636] text-white rounded-md hover:bg-[#2ea043] transition-colors"
+                      onClick={() => acpStore.acceptRateLimitFallback()}
+                    >
+                      Continue in Chat
+                    </button>
+                    <button
+                      type="button"
+                      class="px-3 py-1.5 text-xs font-medium bg-transparent text-[#8b949e] border border-[#30363d] rounded-md hover:text-[#e6edf3] hover:border-[#8b949e] transition-colors"
+                      onClick={() => acpStore.dismissRateLimitPrompt()}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </Show>
+
       {/* Error Display */}
       <Show when={sessionError()}>
         <div
