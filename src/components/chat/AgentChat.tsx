@@ -92,12 +92,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const hasFolderOpen = () => Boolean(fileTreeState.rootPath);
 
-  // Refresh project-scoped recent agent conversations when folder context changes.
+  // Refresh project-scoped recent conversations and focus any live
+  // session tied to the newly selected folder.
   createEffect(
     on(
       () => fileTreeState.rootPath,
       (newPath: string | null) => {
         void acpStore.refreshRecentAgentConversations(10, newPath ?? undefined);
+        if (newPath) {
+          acpStore.focusProjectSession(newPath);
+        }
       },
       { defer: true },
     ),
@@ -129,19 +133,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   createEffect(() => {
     if (hasSession()) setAwaitingLogin(null);
   });
-
-  // Sync agent cwd when the user opens a different folder
-  createEffect(
-    on(
-      () => fileTreeState.rootPath,
-      (newPath: string | null) => {
-        if (newPath && hasSession()) {
-          acpStore.updateCwd(newPath);
-        }
-      },
-      { defer: true },
-    ),
-  );
 
   const startSession = async (agentType?: AgentType) => {
     const cwd = getCwd();

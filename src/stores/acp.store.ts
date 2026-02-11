@@ -723,6 +723,22 @@ export const acpStore = {
     setState("activeSessionId", sessionId);
   },
 
+  /**
+   * Focus an already-running session that belongs to the given project cwd.
+   * Returns true when a matching session is found.
+   */
+  focusProjectSession(cwd: string): boolean {
+    const match = Object.entries(state.sessions).find(
+      ([, session]) => session.cwd === cwd,
+    );
+    if (!match) return false;
+    const [sessionId] = match;
+    if (state.activeSessionId !== sessionId) {
+      setState("activeSessionId", sessionId);
+    }
+    return true;
+  },
+
   // ============================================================================
   // Messaging
   // ============================================================================
