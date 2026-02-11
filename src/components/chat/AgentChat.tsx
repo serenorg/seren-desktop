@@ -796,8 +796,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         </div>
       </Show>
 
-      {/* Rate Limit Fallback Banner */}
-      <Show when={acpStore.rateLimitHit}>
+      {/* Agent Fallback Banner (rate limit or context window full) */}
+      <Show when={acpStore.agentFallbackNeeded}>
         {(() => {
           const agentType =
             acpStore.activeSession?.info.agentType ?? "claude-code";
@@ -805,6 +805,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           const chatModelId = mapAgentModelToChat(agentModelId, agentType);
           const modelName = getModelDisplayName(chatModelId);
           const agentName = agentType === "codex" ? "Codex" : "Claude Code";
+          const reason = acpStore.agentFallbackReason;
+          const title =
+            reason === "prompt_too_long"
+              ? `${agentName}'s context window is full`
+              : `${agentName} hit its rate limit`;
+          const description =
+            reason === "prompt_too_long"
+              ? `The conversation is too long for the agent to continue. You can pick up in Chat mode with ${modelName} via Seren.`
+              : `Your conversation history will be preserved. You can continue in Chat mode with ${modelName} via Seren.`;
           return (
             <div class="mx-4 mb-2 px-3 py-3 border rounded-md text-sm bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.4)] text-[#58a6ff]">
               <div class="flex items-start gap-3">
@@ -822,13 +831,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   />
                 </svg>
                 <div class="flex-1">
-                  <p class="m-0 mb-2 font-medium text-[#e6edf3]">
-                    {agentName} hit its rate limit
-                  </p>
-                  <p class="m-0 mb-3 text-xs text-[#8b949e]">
-                    Your conversation history will be preserved. You can
-                    continue in Chat mode with {modelName} via Seren.
-                  </p>
+                  <p class="m-0 mb-2 font-medium text-[#e6edf3]">{title}</p>
+                  <p class="m-0 mb-3 text-xs text-[#8b949e]">{description}</p>
                   <div class="flex items-center gap-2">
                     <button
                       type="button"

@@ -1,4 +1,4 @@
-// ABOUTME: Detects agent rate-limit errors and orchestrates fallback to Chat mode.
+// ABOUTME: Detects agent rate-limit and prompt-too-long errors, orchestrates fallback to Chat mode.
 // ABOUTME: Converts agent messages to unified format and creates a chat conversation.
 
 import type { AgentType } from "@/services/acp";
@@ -26,6 +26,37 @@ const RATE_LIMIT_PATTERNS = [
 export function isRateLimitError(message: string): boolean {
   const lower = message.toLowerCase();
   return RATE_LIMIT_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+/** Patterns that indicate the agent's context window is exhausted. */
+const PROMPT_TOO_LONG_PATTERNS = [
+  "prompt is too long",
+  "prompt too long",
+  "context length exceeded",
+  "context_length_exceeded",
+  "maximum context length",
+  "token limit",
+  "max_tokens",
+  "input too long",
+  "request too large",
+  "content too large",
+  "exceeds the model",
+];
+
+/**
+ * Check whether a message indicates the agent's context window is full.
+ */
+export function isPromptTooLongError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return PROMPT_TOO_LONG_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+/**
+ * Check whether a message indicates any agent-level failure that warrants
+ * falling back to Chat mode (rate limit OR context exhaustion).
+ */
+export function isAgentFallbackError(message: string): boolean {
+  return isRateLimitError(message) || isPromptTooLongError(message);
 }
 
 /**
@@ -137,15 +168,20 @@ export function agentMessagesToUnified(
 export function buildRedirectMessage(
   agentType: AgentType,
   modelDisplayName: string,
+  reason: "rate_limit" | "prompt_too_long" = "rate_limit",
 ): UnifiedMessage {
   const agentName = agentType === "codex" ? "Codex" : "Claude Code";
+  const reasonText =
+    reason === "prompt_too_long"
+      ? `${agentName} agent's context window is full.`
+      : `${agentName} agent hit its rate limit.`;
 
   return {
     id: crypto.randomUUID(),
     type: "reroute",
     role: "system",
     content:
-      `${agentName} agent hit its rate limit. ` +
+      `${reasonText} ` +
       `Your conversation has been moved here so you can continue in Chat with ${modelDisplayName}. ` +
       "Pick up where you left off — your full history is preserved above.",
     timestamp: Date.now(),
@@ -165,11 +201,12 @@ export function buildRedirectMessage(
  *
  * Returns the new conversation ID, or null if the switchover failed.
  */
-export async function performRateLimitFallback(
+export async function performAgentFallback(
   agentType: AgentType,
   agentMessages: AgentMessage[],
   agentModelId?: string,
   sessionTitle?: string,
+  reason: "rate_limit" | "prompt_too_long" = "rate_limit",
 ): Promise<string | null> {
   // Lazy imports to avoid circular dependency between stores
   const { conversationStore } = await import("@/stores/conversation.store");
@@ -190,7 +227,11 @@ export async function performRateLimitFallback(
 
     // Convert and import agent history
     const unifiedMessages = agentMessagesToUnified(agentMessages);
-    const redirectNotice = buildRedirectMessage(agentType, modelDisplayName);
+    const redirectNotice = buildRedirectMessage(
+      agentType,
+      modelDisplayName,
+      reason,
+    );
 
     conversationStore.setMessages(conversation.id, [
       ...unifiedMessages,
@@ -216,12 +257,15 @@ export async function performRateLimitFallback(
     acpStore.setAgentModeEnabled(false);
 
     console.info(
-      `[RateLimitFallback] Switched to chat: conversation=${conversation.id}, model=${chatModelId} (from agent model ${agentModelId ?? "unknown"})`,
+      `[AgentFallback] Switched to chat: conversation=${conversation.id}, model=${chatModelId}, reason=${reason} (from agent model ${agentModelId ?? "unknown"})`,
     );
 
     return conversation.id;
   } catch (error) {
-    console.error("[RateLimitFallback] Failed to perform fallback:", error);
+    console.error("[AgentFallback] Failed to perform fallback:", error);
     return null;
   }
 }
+
+/** @deprecated Use performAgentFallback instead */
+export const performRateLimitFallback = performAgentFallback;
