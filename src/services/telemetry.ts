@@ -93,7 +93,7 @@ class TelemetryService {
       timestamp: new Date().toISOString(),
       appVersion: this.getAppVersion(),
       platform: this.getPlatform(),
-      context,
+      context: context ? scrubContext(context) : undefined,
     };
 
     this.errorQueue.push(report);
@@ -198,6 +198,23 @@ class TelemetryService {
     if (ua.includes("Linux")) return "linux";
     return "unknown";
   }
+}
+
+/**
+ * Recursively scrub string values in a context object before telemetry.
+ */
+function scrubContext(ctx: Record<string, unknown>): Record<string, unknown> {
+  const scrubbed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(ctx)) {
+    if (typeof value === "string") {
+      scrubbed[key] = scrubSensitive(value);
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      scrubbed[key] = scrubContext(value as Record<string, unknown>);
+    } else {
+      scrubbed[key] = value;
+    }
+  }
+  return scrubbed;
 }
 
 // Default singleton instance

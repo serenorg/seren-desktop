@@ -7,6 +7,27 @@ const API_KEY_STORAGE_KEY = "seren_api_key";
 const DEFAULT_ORG_ID_STORAGE_KEY = "seren_default_org_id";
 
 /**
+ * Development-only localStorage wrapper.
+ * In production builds, all operations are no-ops to prevent
+ * credentials from being stored insecurely outside Tauri.
+ */
+const devStorage = {
+  getItem: (key: string): string | null =>
+    import.meta.env.DEV ? localStorage.getItem(key) : null,
+  setItem: (key: string, value: string): void => {
+    if (import.meta.env.DEV) localStorage.setItem(key, value);
+  },
+  removeItem: (key: string): void => {
+    if (import.meta.env.DEV) localStorage.removeItem(key);
+  },
+  get length(): number {
+    return import.meta.env.DEV ? localStorage.length : 0;
+  },
+  key: (index: number): string | null =>
+    import.meta.env.DEV ? localStorage.key(index) : null,
+};
+
+/**
  * Check if running in Tauri runtime (vs browser).
  * Tauri 2.x uses __TAURI_INTERNALS__ for IPC communication.
  */
@@ -40,7 +61,7 @@ export async function storeToken(token: string): Promise<void> {
     await invoke("store_token", { token });
   } else {
     // Browser fallback for testing
-    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    devStorage.setItem(TOKEN_STORAGE_KEY, token);
   }
 }
 
@@ -54,7 +75,7 @@ export async function getToken(): Promise<string | null> {
     return await invoke<string | null>("get_token");
   }
   // Browser fallback for testing
-  return localStorage.getItem(TOKEN_STORAGE_KEY);
+  return devStorage.getItem(TOKEN_STORAGE_KEY);
 }
 
 /**
@@ -66,7 +87,7 @@ export async function clearToken(): Promise<void> {
     await invoke("clear_token");
   } else {
     // Browser fallback for testing
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    devStorage.removeItem(TOKEN_STORAGE_KEY);
   }
 }
 
@@ -80,7 +101,7 @@ export async function storeRefreshToken(token: string): Promise<void> {
     await invoke("store_refresh_token", { token });
   } else {
     // Browser fallback for testing
-    localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, token);
+    devStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, token);
   }
 }
 
@@ -94,7 +115,7 @@ export async function getRefreshToken(): Promise<string | null> {
     return await invoke<string | null>("get_refresh_token");
   }
   // Browser fallback for testing
-  return localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+  return devStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
 }
 
 /**
@@ -106,7 +127,7 @@ export async function clearRefreshToken(): Promise<void> {
     await invoke("clear_refresh_token");
   } else {
     // Browser fallback for testing
-    localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+    devStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
   }
 }
 
@@ -128,7 +149,7 @@ export async function storeSerenApiKey(apiKey: string): Promise<void> {
     });
   } else {
     // Browser fallback for testing
-    localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+    devStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
   }
 }
 
@@ -146,7 +167,7 @@ export async function getSerenApiKey(): Promise<string | null> {
     return result && result.length > 0 ? result : null;
   }
   // Browser fallback for testing
-  return localStorage.getItem(API_KEY_STORAGE_KEY);
+  return devStorage.getItem(API_KEY_STORAGE_KEY);
 }
 
 /**
@@ -162,7 +183,7 @@ export async function clearSerenApiKey(): Promise<void> {
     });
   } else {
     // Browser fallback for testing
-    localStorage.removeItem(API_KEY_STORAGE_KEY);
+    devStorage.removeItem(API_KEY_STORAGE_KEY);
   }
 }
 
@@ -184,7 +205,7 @@ export async function storeDefaultOrganizationId(orgId: string): Promise<void> {
     });
   } else {
     // Browser fallback for testing
-    localStorage.setItem(DEFAULT_ORG_ID_STORAGE_KEY, orgId);
+    devStorage.setItem(DEFAULT_ORG_ID_STORAGE_KEY, orgId);
   }
 }
 
@@ -202,7 +223,7 @@ export async function getDefaultOrganizationId(): Promise<string | null> {
     return result && result.length > 0 ? result : null;
   }
   // Browser fallback for testing
-  return localStorage.getItem(DEFAULT_ORG_ID_STORAGE_KEY);
+  return devStorage.getItem(DEFAULT_ORG_ID_STORAGE_KEY);
 }
 
 /**
@@ -218,7 +239,7 @@ export async function clearDefaultOrganizationId(): Promise<void> {
     });
   } else {
     // Browser fallback for testing
-    localStorage.removeItem(DEFAULT_ORG_ID_STORAGE_KEY);
+    devStorage.removeItem(DEFAULT_ORG_ID_STORAGE_KEY);
   }
 }
 
@@ -357,7 +378,7 @@ export async function storeProviderKey(
     await invoke("store_provider_key", { provider, apiKey });
   } else {
     // Browser fallback for testing
-    localStorage.setItem(`provider_key_${provider}`, apiKey);
+    devStorage.setItem(`provider_key_${provider}`, apiKey);
   }
 }
 
@@ -371,7 +392,7 @@ export async function getProviderKey(provider: string): Promise<string | null> {
     return await invoke<string | null>("get_provider_key", { provider });
   }
   // Browser fallback for testing
-  return localStorage.getItem(`provider_key_${provider}`);
+  return devStorage.getItem(`provider_key_${provider}`);
 }
 
 /**
@@ -383,7 +404,7 @@ export async function clearProviderKey(provider: string): Promise<void> {
     await invoke("clear_provider_key", { provider });
   } else {
     // Browser fallback for testing
-    localStorage.removeItem(`provider_key_${provider}`);
+    devStorage.removeItem(`provider_key_${provider}`);
   }
 }
 
@@ -397,8 +418,8 @@ export async function getConfiguredProviders(): Promise<string[]> {
   }
   // Browser fallback for testing - scan localStorage
   const providers: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
+  for (let i = 0; i < devStorage.length; i++) {
+    const key = devStorage.key(i);
     if (key?.startsWith("provider_key_")) {
       providers.push(key.replace("provider_key_", ""));
     }
@@ -424,7 +445,7 @@ export async function storeOAuthCredentials(
     await invoke("store_oauth_credentials", { provider, credentials });
   } else {
     // Browser fallback for testing
-    localStorage.setItem(`oauth_creds_${provider}`, credentials);
+    devStorage.setItem(`oauth_creds_${provider}`, credentials);
   }
 }
 
@@ -440,7 +461,7 @@ export async function getOAuthCredentials(
     return await invoke<string | null>("get_oauth_credentials", { provider });
   }
   // Browser fallback for testing
-  return localStorage.getItem(`oauth_creds_${provider}`);
+  return devStorage.getItem(`oauth_creds_${provider}`);
 }
 
 /**
@@ -452,7 +473,7 @@ export async function clearOAuthCredentials(provider: string): Promise<void> {
     await invoke("clear_oauth_credentials", { provider });
   } else {
     // Browser fallback for testing
-    localStorage.removeItem(`oauth_creds_${provider}`);
+    devStorage.removeItem(`oauth_creds_${provider}`);
   }
 }
 
@@ -466,8 +487,8 @@ export async function getOAuthProviders(): Promise<string[]> {
   }
   // Browser fallback for testing - scan localStorage
   const providers: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
+  for (let i = 0; i < devStorage.length; i++) {
+    const key = devStorage.key(i);
     if (key?.startsWith("oauth_creds_")) {
       providers.push(key.replace("oauth_creds_", ""));
     }
@@ -544,7 +565,7 @@ export async function storeCryptoPrivateKey(
     return result.data;
   }
   // Browser fallback - just store a placeholder (can't derive address without alloy)
-  localStorage.setItem(CRYPTO_WALLET_ADDRESS_KEY, "browser-fallback");
+  devStorage.setItem(CRYPTO_WALLET_ADDRESS_KEY, "browser-fallback");
   return "browser-fallback";
 }
 
@@ -564,7 +585,7 @@ export async function getCryptoWalletAddress(): Promise<string | null> {
     return result.data ?? null;
   }
   // Browser fallback
-  return localStorage.getItem(CRYPTO_WALLET_ADDRESS_KEY);
+  return devStorage.getItem(CRYPTO_WALLET_ADDRESS_KEY);
 }
 
 /**
@@ -581,7 +602,7 @@ export async function clearCryptoWallet(): Promise<void> {
     }
   } else {
     // Browser fallback
-    localStorage.removeItem(CRYPTO_WALLET_ADDRESS_KEY);
+    devStorage.removeItem(CRYPTO_WALLET_ADDRESS_KEY);
   }
 }
 

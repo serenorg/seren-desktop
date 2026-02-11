@@ -91,7 +91,12 @@ async fn get_oauth_redirect_url(url: String, bearer_token: String) -> Result<Str
         }
     }
 
-    log::error!("[OAuth] {} response from Gateway: {}", status, body_text);
+    let truncated = if body_text.len() > 200 {
+        format!("{}...[truncated]", &body_text[..200])
+    } else {
+        body_text.clone()
+    };
+    log::error!("[OAuth] {} response from Gateway: {}", status, truncated);
     Err(format!(
         "Unexpected response status: {} - {}",
         status, body_text
@@ -258,6 +263,30 @@ fn get_oauth_providers(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(providers)
 }
 
+/// Redact sensitive query parameters from an OAuth URL for safe logging.
+fn redact_auth_url(url: &str) -> String {
+    let sensitive_params = [
+        "code_challenge",
+        "state",
+        "nonce",
+        "code_verifier",
+        "client_id",
+    ];
+    let mut result = url.to_string();
+    for param in &sensitive_params {
+        let pattern = format!("{}=", param);
+        if let Some(start) = result.find(&pattern) {
+            let value_start = start + pattern.len();
+            let value_end = result[value_start..]
+                .find('&')
+                .map(|i| value_start + i)
+                .unwrap_or(result.len());
+            result.replace_range(value_start..value_end, "[REDACTED]");
+        }
+    }
+    result
+}
+
 /// Start OAuth flow with browser and loopback server.
 /// Opens the auth URL in the default browser and starts a local server to receive the callback.
 /// The auth_url must already contain a redirect_uri with the port to listen on.
@@ -277,7 +306,7 @@ async fn start_oauth_browser_flow(
     let port = extract_port_from_redirect_uri(&auth_url)?;
 
     info!("[OAuth] Starting browser flow on port: {}", port);
-    info!("[OAuth] Auth URL: {}", auth_url);
+    info!("[OAuth] Auth URL: {}", redact_auth_url(&auth_url));
 
     // Open the browser with the original auth URL (don't modify it)
     app.opener()

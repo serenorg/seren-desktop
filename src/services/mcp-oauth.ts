@@ -141,7 +141,7 @@ async function getOrRegisterClient(): Promise<string> {
   }
 
   const registration: ClientRegistrationResponse = await response.json();
-  console.log("[MCP OAuth] Client registered:", registration.client_id);
+  console.log("[MCP OAuth] Client registered successfully");
 
   // Store client ID
   await storeClientId(registration.client_id);
@@ -550,7 +550,7 @@ export async function startOAuthBrowserFlow(): Promise<TokenResponse> {
   const port = await invoke<number>("get_oauth_callback_port");
   const redirectUri = `http://127.0.0.1:${port}/oauth/callback`;
 
-  console.log("[MCP OAuth] Browser flow - redirect URI:", redirectUri);
+  console.log("[MCP OAuth] Browser flow - using loopback redirect");
 
   // Register client with the actual redirect URI we'll use
   console.log("[MCP OAuth] Registering OAuth client...");
@@ -578,7 +578,7 @@ export async function startOAuthBrowserFlow(): Promise<TokenResponse> {
 
   const registration: ClientRegistrationResponse =
     await registerResponse.json();
-  console.log("[MCP OAuth] Client registered:", registration.client_id);
+  console.log("[MCP OAuth] Client registered successfully");
 
   // Generate PKCE values
   const codeVerifier = generateCodeVerifier();
@@ -613,7 +613,7 @@ export async function startOAuthBrowserFlow(): Promise<TokenResponse> {
     },
   );
 
-  console.log("[MCP OAuth] Callback received, state:", callbackResult.state);
+  console.log("[MCP OAuth] Callback received");
 
   // Verify state
   if (callbackResult.state !== state) {
