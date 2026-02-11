@@ -43,11 +43,7 @@ impl TrustScore {
 ///
 /// Computes the score directly from eval_signals table aggregation.
 /// Returns None if no signals exist for this pair.
-pub fn get_trust_score(
-    conn: &Connection,
-    task_type: &str,
-    model_id: &str,
-) -> Option<TrustScore> {
+pub fn get_trust_score(conn: &Connection, task_type: &str, model_id: &str) -> Option<TrustScore> {
     let result = conn
         .query_row(
             "SELECT
@@ -201,12 +197,8 @@ fn query_signals(
 }
 
 /// Accumulate time-decayed weighted stats per model from raw signal rows.
-fn accumulate_stats(
-    rows: &[SignalRow],
-    now: i64,
-) -> std::collections::HashMap<String, ModelStats> {
-    let mut stats: std::collections::HashMap<String, ModelStats> =
-        std::collections::HashMap::new();
+fn accumulate_stats(rows: &[SignalRow], now: i64) -> std::collections::HashMap<String, ModelStats> {
+    let mut stats: std::collections::HashMap<String, ModelStats> = std::collections::HashMap::new();
 
     for row in rows {
         let age_ms = (now - row.created_at).max(0) as f64;
@@ -280,7 +272,11 @@ fn sample_and_rank<R: Rng>(
         })
         .collect();
 
-    rankings.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    rankings.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     rankings
 }
 
@@ -315,7 +311,15 @@ mod tests {
         model_id: &str,
         satisfaction: i32,
     ) {
-        insert_eval_signal_at(conn, message_id, task_type, model_id, satisfaction, None, now_ms());
+        insert_eval_signal_at(
+            conn,
+            message_id,
+            task_type,
+            model_id,
+            satisfaction,
+            None,
+            now_ms(),
+        );
     }
 
     fn insert_eval_signal_at(

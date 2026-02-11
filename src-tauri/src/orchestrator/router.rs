@@ -7,10 +7,7 @@ use super::types::{
 };
 
 /// Preferred models for code tasks (ordered by capability).
-const CODE_PREFERRED_MODELS: &[&str] = &[
-    "anthropic/claude-opus-4-6",
-    "openai/gpt-5.3",
-];
+const CODE_PREFERRED_MODELS: &[&str] = &["anthropic/claude-opus-4-6", "openai/gpt-5.3"];
 
 /// Preferred models for simple Q&A (ordered by speed/cost).
 const SIMPLE_PREFERRED_MODELS: &[&str] = &[
@@ -118,10 +115,7 @@ fn extract_publisher_slug(
 /// 1. User's explicit selection from the UI
 /// 2. Thompson sampling rankings (satisfaction-driven, computed by service layer)
 /// 3. Hardcoded preference lists (cold start fallback)
-fn select_model(
-    classification: &TaskClassification,
-    capabilities: &UserCapabilities,
-) -> String {
+fn select_model(classification: &TaskClassification, capabilities: &UserCapabilities) -> String {
     // 1. Respect the user's explicit model selection
     if let Some(ref selected) = capabilities.selected_model {
         if !selected.is_empty() {
@@ -411,7 +405,11 @@ mod tests {
         }
     }
 
-    fn make_classification(task_type: &str, requires_tools: bool, requires_fs: bool) -> TaskClassification {
+    fn make_classification(
+        task_type: &str,
+        requires_tools: bool,
+        requires_fs: bool,
+    ) -> TaskClassification {
         TaskClassification {
             task_type: task_type.to_string(),
             requires_tools,
@@ -442,11 +440,7 @@ mod tests {
     #[test]
     fn routes_code_generation_with_agent_to_acp() {
         let classification = make_classification("code_generation", true, true);
-        let capabilities = make_capabilities(
-            true,
-            &["anthropic/claude-opus-4-6"],
-            &["firecrawl"],
-        );
+        let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &["firecrawl"]);
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::AcpAgent);
     }
@@ -468,11 +462,7 @@ mod tests {
     #[test]
     fn routes_code_generation_without_agent_to_chat_model() {
         let classification = make_classification("code_generation", true, true);
-        let capabilities = make_capabilities(
-            false,
-            &["anthropic/claude-sonnet-4"],
-            &["firecrawl"],
-        );
+        let capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &["firecrawl"]);
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
@@ -480,11 +470,7 @@ mod tests {
     #[test]
     fn routes_general_chat_to_chat_model() {
         let classification = make_classification("general_chat", false, false);
-        let capabilities = make_capabilities(
-            true,
-            &["anthropic/claude-sonnet-4"],
-            &[],
-        );
+        let capabilities = make_capabilities(true, &["anthropic/claude-sonnet-4"], &[]);
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
@@ -492,11 +478,8 @@ mod tests {
     #[test]
     fn routes_research_with_non_mcp_tools_to_chat_model() {
         let classification = make_classification("research", true, false);
-        let capabilities = make_capabilities(
-            false,
-            &["anthropic/claude-sonnet-4"],
-            &["web_search"],
-        );
+        let capabilities =
+            make_capabilities(false, &["anthropic/claude-sonnet-4"], &["web_search"]);
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
@@ -561,11 +544,7 @@ mod tests {
     #[test]
     fn falls_back_to_first_available_model() {
         let classification = make_classification("general_chat", false, false);
-        let capabilities = make_capabilities(
-            false,
-            &["some/unknown-model"],
-            &[],
-        );
+        let capabilities = make_capabilities(false, &["some/unknown-model"], &[]);
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.model_id, "some/unknown-model");
     }
@@ -583,7 +562,11 @@ mod tests {
         let classification = make_classification("general_chat", false, false);
         let mut capabilities = make_capabilities(
             false,
-            &["anthropic/claude-sonnet-4", "google/gemini-2.5-flash", "openai/gpt-5"],
+            &[
+                "anthropic/claude-sonnet-4",
+                "google/gemini-2.5-flash",
+                "openai/gpt-5",
+            ],
             &[],
         );
         // Without selection, router picks gemini flash for simple tasks
@@ -604,11 +587,7 @@ mod tests {
     #[test]
     fn acp_agent_uses_full_handoff_delegation() {
         let classification = make_classification("code_generation", true, true);
-        let capabilities = make_capabilities(
-            true,
-            &["anthropic/claude-opus-4-6"],
-            &[],
-        );
+        let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &[]);
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::AcpAgent);
         assert_eq!(decision.delegation, DelegationType::FullHandoff);
@@ -634,11 +613,7 @@ mod tests {
     #[test]
     fn reason_is_human_readable() {
         let classification = make_classification("code_generation", true, true);
-        let capabilities = make_capabilities(
-            true,
-            &["anthropic/claude-opus-4-6"],
-            &[],
-        );
+        let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &[]);
         let decision = route(&classification, &capabilities);
         assert!(decision.reason.contains("agent"));
         assert!(decision.reason.contains("code generation"));
@@ -647,11 +622,7 @@ mod tests {
     #[test]
     fn reason_includes_model_name_for_chat() {
         let classification = make_classification("research", true, false);
-        let capabilities = make_capabilities(
-            false,
-            &["anthropic/claude-sonnet-4"],
-            &[],
-        );
+        let capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &[]);
         let decision = route(&classification, &capabilities);
         assert!(decision.reason.contains("Claude Sonnet"));
         assert!(decision.reason.contains("research"));
@@ -695,8 +666,7 @@ mod tests {
     #[test]
     fn resolves_multiple_skills() {
         let mut classification = make_classification("code_generation", true, true);
-        classification.relevant_skills =
-            vec!["prose".to_string(), "git-commit".to_string()];
+        classification.relevant_skills = vec!["prose".to_string(), "git-commit".to_string()];
 
         let capabilities = make_capabilities_with_skills(
             false,
@@ -720,7 +690,11 @@ mod tests {
         let classification = make_classification("general_chat", false, false);
         let mut capabilities = make_capabilities(
             false,
-            &["anthropic/claude-sonnet-4", "google/gemini-2.5-flash", "openai/gpt-5"],
+            &[
+                "anthropic/claude-sonnet-4",
+                "google/gemini-2.5-flash",
+                "openai/gpt-5",
+            ],
             &[],
         );
         // Rankings override hardcoded preferences
@@ -792,7 +766,9 @@ mod tests {
 
     #[test]
     fn detects_408_as_reroutable() {
-        assert!(is_reroutable_error("Gateway returned HTTP 408 Request Timeout"));
+        assert!(is_reroutable_error(
+            "Gateway returned HTTP 408 Request Timeout"
+        ));
     }
 
     #[test]

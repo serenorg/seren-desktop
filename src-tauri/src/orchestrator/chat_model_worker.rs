@@ -1,14 +1,12 @@
 // ABOUTME: Chat model worker adapter that calls the Seren Gateway API.
-// ABOUTME: Streams SSE responses with tool execution loop for function calling.
+// ABOUTME: Streams SSE responses and translates them into WorkerEvent types.
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use log;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
@@ -16,90 +14,18 @@ use super::worker::Worker;
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const PUBLISHER_SLUG: &str = "seren-models";
 
-/// Maximum number of tool execution rounds before forcing completion.
-const MAX_TOOL_ROUNDS: usize = 10;
-
-// =============================================================================
-// Types for SSE Parsing and Tool Execution
-// =============================================================================
-
-/// A tool call accumulated across SSE streaming chunks.
-#[derive(Debug, Clone)]
-struct AccumulatedToolCall {
-    id: String,
-    name: String,
-    arguments: String,
-}
-
-/// Raw tool call chunk from a single SSE event.
-#[derive(Debug, Clone)]
-struct ToolCallChunk {
-    index: usize,
-    id: Option<String>,
-    name: Option<String>,
-    arguments: String,
-}
-
-/// Result of parsing a single SSE data line.
-struct ParseResult {
-    events: Vec<WorkerEvent>,
-    cost: Option<f64>,
-    tool_call_chunks: Vec<ToolCallChunk>,
-    finish_reason: Option<String>,
-}
-
-/// Outcome of streaming an API response.
-#[derive(Debug)]
-enum StreamOutcome {
-    /// Model finished naturally (finish_reason: "stop" or stream ended).
-    Complete {
-        final_content: String,
-        thinking: Option<String>,
-        cost: f64,
-    },
-    /// Model wants tool results before continuing (finish_reason: "tool_calls").
-    ToolCallsPending {
-        tool_calls: Vec<AccumulatedToolCall>,
-        accumulated_content: String,
-        accumulated_thinking: String,
-        accumulated_cost: f64,
-    },
-}
-
-// =============================================================================
-// ChatModelWorker
-// =============================================================================
-
 /// Chat model worker that routes through the Seren Gateway API.
 pub struct ChatModelWorker {
     client: reqwest::Client,
     /// Cancellation flag shared with the streaming loop.
     cancelled: Arc<Mutex<bool>>,
-    /// OpenAI-format tool definitions passed to the LLM for function calling.
-    tool_definitions: Vec<serde_json::Value>,
 }
 
 impl ChatModelWorker {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            client: reqwest::Client::new(),
             cancelled: Arc::new(Mutex::new(false)),
-            tool_definitions: Vec::new(),
-        }
-    }
-
-    /// Create a worker with tool definitions for function calling.
-    pub fn with_tools(tools: Vec<serde_json::Value>) -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
-            cancelled: Arc::new(Mutex::new(false)),
-            tool_definitions: tools,
         }
     }
 
@@ -175,53 +101,73 @@ impl ChatModelWorker {
     /// or an object with a "text" field (Gemini returns array-of-parts format).
     fn normalize_content(value: &serde_json::Value) -> Option<String> {
         if let Some(s) = value.as_str() {
-            return if s.is_empty() { None } else { Some(s.to_string()) };
+            return if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            };
         }
 
         if let Some(arr) = value.as_array() {
             let combined: String = arr
                 .iter()
                 .filter_map(|piece| {
-                    piece
-                        .as_str()
-                        .map(|s| s.to_string())
-                        .or_else(|| piece.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+                    piece.as_str().map(|s| s.to_string()).or_else(|| {
+                        piece
+                            .get("text")
+                            .and_then(|t| t.as_str())
+                            .map(|s| s.to_string())
+                    })
                 })
                 .collect::<Vec<_>>()
                 .join("");
-            return if combined.is_empty() { None } else { Some(combined) };
+            return if combined.is_empty() {
+                None
+            } else {
+                Some(combined)
+            };
         }
 
         if let Some(text) = value.get("text").and_then(|t| t.as_str()) {
-            return if text.is_empty() { None } else { Some(text.to_string()) };
+            return if text.is_empty() {
+                None
+            } else {
+                Some(text.to_string())
+            };
         }
 
         None
     }
 
-    /// Parse a single SSE data line into events, cost, tool call chunks, and finish reason.
-    fn parse_sse_data(data: &str) -> ParseResult {
-        let mut result = ParseResult {
-            events: Vec::new(),
-            cost: None,
-            tool_call_chunks: Vec::new(),
-            finish_reason: None,
-        };
-
+    /// Parse a single SSE data line into WorkerEvents and optional cost.
+    ///
+    /// Returns `(events, cost)` where cost is extracted from the Gateway wrapper's
+    /// `"cost"` field (e.g. `{"status":200,"body":{...},"cost":"0.003"}`).
+    fn parse_sse_data(data: &str) -> (Vec<WorkerEvent>, Option<f64>) {
         let parsed: serde_json::Value = match serde_json::from_str(data) {
             Ok(v) => v,
             Err(_) => {
-                log::debug!("[ChatModelWorker] Non-JSON SSE data: {}", &data[..data.len().min(200)]);
-                return result;
+                log::debug!(
+                    "[ChatModelWorker] Non-JSON SSE data: {}",
+                    &data[..data.len().min(200)]
+                );
+                return (Vec::new(), None);
             }
         };
 
-        log::debug!("[ChatModelWorker] SSE chunk: {}", &data[..data.len().min(300)]);
+        log::debug!(
+            "[ChatModelWorker] SSE chunk: {}",
+            &data[..data.len().min(300)]
+        );
+
+        let mut events = Vec::new();
 
         // Extract cost from Gateway wrapper (present at top level)
-        result.cost = parsed
-            .get("cost")
-            .and_then(|v| v.as_str().and_then(|s| s.parse::<f64>().ok()).or_else(|| v.as_f64()));
+        let chunk_cost = parsed.get("cost").and_then(|v| {
+            v.as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .or_else(|| v.as_f64())
+        });
 
         // Check for wrapped error status from Gateway
         if let Some(status) = parsed.get("status").and_then(|s| s.as_u64()) {
@@ -230,10 +176,10 @@ impl ChatModelWorker {
                     .pointer("/body/error/message")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Gateway API error");
-                result.events.push(WorkerEvent::Error {
+                events.push(WorkerEvent::Error {
                     message: format!("HTTP {}: {}", status, error_msg),
                 });
-                return result;
+                return (events, chunk_cost);
             }
         }
 
@@ -252,9 +198,7 @@ impl ChatModelWorker {
         let content_text = content_value.and_then(Self::normalize_content);
 
         if let Some(ref text) = content_text {
-            result.events.push(WorkerEvent::Content {
-                text: text.clone(),
-            });
+            events.push(WorkerEvent::Content { text: text.clone() });
         }
 
         // Extract thinking delta (Anthropic extended thinking)
@@ -265,190 +209,90 @@ impl ChatModelWorker {
 
         if let Some(text) = thinking {
             if !text.is_empty() {
-                result.events.push(WorkerEvent::Thinking {
+                events.push(WorkerEvent::Thinking {
                     text: text.to_string(),
                 });
             }
         }
 
-        // Extract tool call chunks from delta (streaming format)
+        // Extract tool calls from delta
         if let Some(tool_calls) = effective
             .pointer("/delta/tool_calls")
             .or_else(|| effective.pointer("/choices/0/delta/tool_calls"))
             .and_then(|v| v.as_array())
         {
             for tc in tool_calls {
-                let index = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let id = tc.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let id = tc
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let name = tc
                     .pointer("/function/name")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                    .unwrap_or("")
+                    .to_string();
                 let arguments = tc
                     .pointer("/function/arguments")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
 
-                // Store raw chunk for accumulation in stream_response
-                result.tool_call_chunks.push(ToolCallChunk {
-                    index,
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments: arguments.clone(),
-                });
-
-                // Emit ToolCall event for frontend display (first chunk with id+name)
-                let id_str = id.unwrap_or_default();
-                let name_str = name.unwrap_or_default();
-                if !id_str.is_empty() && !name_str.is_empty() {
-                    result.events.push(WorkerEvent::ToolCall {
-                        tool_call_id: id_str,
-                        name: name_str.clone(),
+                if !id.is_empty() && !name.is_empty() {
+                    events.push(WorkerEvent::ToolCall {
+                        tool_call_id: id.clone(),
+                        name: name.clone(),
                         arguments,
-                        title: name_str,
+                        title: name,
                     });
                 }
             }
         }
 
-        // Extract finish_reason (any value: "stop", "tool_calls", "length", etc.)
-        result.finish_reason = effective
+        // Check for finish_reason (check both wrapped and unwrapped paths)
+        let finish_reason = effective
             .pointer("/choices/0/finish_reason")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .and_then(|v| v.as_str());
+
+        if let Some("stop") = finish_reason {
+            let final_content = content_text.clone().unwrap_or_default();
+            events.push(WorkerEvent::Complete {
+                final_content,
+                thinking: None,
+                cost: None, // Cost set by stream_response from accumulated total
+            });
+        }
 
         // Log when no events were extracted (helps debug format issues)
-        if result.events.is_empty() && result.tool_call_chunks.is_empty() && result.finish_reason.is_none() {
+        if events.is_empty() {
             log::debug!(
                 "[ChatModelWorker] No events extracted from SSE data: {}",
                 &data[..data.len().min(300)]
             );
         }
 
-        result
+        (events, chunk_cost)
     }
 
-    /// Build a StreamOutcome from accumulated state.
-    fn build_stream_outcome(
-        finish_reason: &Option<String>,
-        pending_tool_calls: HashMap<usize, AccumulatedToolCall>,
-        content: String,
-        thinking: String,
-        cost: f64,
-    ) -> StreamOutcome {
-        if finish_reason.as_deref() == Some("tool_calls") && !pending_tool_calls.is_empty() {
-            let mut indexed: Vec<(usize, AccumulatedToolCall)> =
-                pending_tool_calls.into_iter().collect();
-            indexed.sort_by_key(|(idx, _)| *idx);
-            let tool_calls = indexed.into_iter().map(|(_, tc)| tc).collect();
-
-            StreamOutcome::ToolCallsPending {
-                tool_calls,
-                accumulated_content: content,
-                accumulated_thinking: thinking,
-                accumulated_cost: cost,
-            }
-        } else {
-            StreamOutcome::Complete {
-                final_content: content,
-                thinking: if thinking.is_empty() {
-                    None
-                } else {
-                    Some(thinking)
-                },
-                cost,
-            }
-        }
-    }
-
-    /// Process a ParseResult: accumulate tool call chunks and forward events.
-    async fn process_parse_result(
-        result: &ParseResult,
-        pending_tool_calls: &mut HashMap<usize, AccumulatedToolCall>,
-        accumulated_content: &mut String,
-        accumulated_thinking: &mut String,
-        accumulated_cost: &mut f64,
-        last_finish_reason: &mut Option<String>,
-        event_tx: &mpsc::Sender<WorkerEvent>,
-    ) -> Result<(), String> {
-        if let Some(c) = result.cost {
-            *accumulated_cost += c;
-        }
-
-        // Accumulate tool call chunks by index
-        for chunk in &result.tool_call_chunks {
-            let entry = pending_tool_calls
-                .entry(chunk.index)
-                .or_insert_with(|| AccumulatedToolCall {
-                    id: String::new(),
-                    name: String::new(),
-                    arguments: String::new(),
-                });
-            if let Some(ref id) = chunk.id {
-                if !id.is_empty() {
-                    entry.id = id.clone();
-                }
-            }
-            if let Some(ref name) = chunk.name {
-                if !name.is_empty() {
-                    entry.name = name.clone();
-                }
-            }
-            entry.arguments.push_str(&chunk.arguments);
-        }
-
-        // Track finish reason
-        if let Some(ref reason) = result.finish_reason {
-            *last_finish_reason = Some(reason.clone());
-        }
-
-        // Forward events (Content, Thinking, ToolCall) to frontend
-        for event in &result.events {
-            match event {
-                WorkerEvent::Content { text } => {
-                    accumulated_content.push_str(text);
-                }
-                WorkerEvent::Thinking { text } => {
-                    accumulated_thinking.push_str(text);
-                }
-                _ => {}
-            }
-            event_tx
-                .send(event.clone())
-                .await
-                .map_err(|e| format!("Failed to send event: {}", e))?;
-        }
-
-        Ok(())
-    }
-
-    /// Stream SSE response and return the outcome (complete or tool calls pending).
+    /// Stream SSE response and forward events.
     async fn stream_response(
         &self,
         response: reqwest::Response,
         event_tx: &mpsc::Sender<WorkerEvent>,
-    ) -> Result<StreamOutcome, String> {
+    ) -> Result<(), String> {
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
         let mut accumulated_content = String::new();
         let mut accumulated_thinking = String::new();
         let mut accumulated_cost: f64 = 0.0;
-        let mut pending_tool_calls: HashMap<usize, AccumulatedToolCall> = HashMap::new();
-        let mut last_finish_reason: Option<String> = None;
+        let mut got_complete = false;
 
         let mut chunk_count = 0u32;
 
         while let Some(chunk_result) = stream.next().await {
             // Check cancellation
             if *self.cancelled.lock().await {
-                return Ok(Self::build_stream_outcome(
-                    &last_finish_reason,
-                    pending_tool_calls,
-                    accumulated_content,
-                    accumulated_thinking,
-                    accumulated_cost,
-                ));
+                return Ok(());
             }
 
             let chunk = chunk_result.map_err(|e| format!("Stream read error: {}", e))?;
@@ -500,26 +344,75 @@ impl ChatModelWorker {
                 };
 
                 if data_str.trim() == "[DONE]" {
-                    return Ok(Self::build_stream_outcome(
-                        &last_finish_reason,
-                        pending_tool_calls,
-                        accumulated_content,
-                        accumulated_thinking,
-                        accumulated_cost,
-                    ));
+                    if !got_complete {
+                        let thinking = if accumulated_thinking.is_empty() {
+                            None
+                        } else {
+                            Some(accumulated_thinking.clone())
+                        };
+                        let cost = if accumulated_cost > 0.0 {
+                            Some(accumulated_cost)
+                        } else {
+                            None
+                        };
+                        log::debug!(
+                            "[ChatModelWorker] Stream complete — accumulated_cost={}, sending cost={:?}",
+                            accumulated_cost,
+                            cost
+                        );
+                        event_tx
+                            .send(WorkerEvent::Complete {
+                                final_content: accumulated_content.clone(),
+                                thinking,
+                                cost,
+                            })
+                            .await
+                            .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                    }
+                    return Ok(());
                 }
 
-                let result = Self::parse_sse_data(&data_str);
-                Self::process_parse_result(
-                    &result,
-                    &mut pending_tool_calls,
-                    &mut accumulated_content,
-                    &mut accumulated_thinking,
-                    &mut accumulated_cost,
-                    &mut last_finish_reason,
-                    event_tx,
-                )
-                .await?;
+                let (events, chunk_cost) = Self::parse_sse_data(&data_str);
+                if let Some(c) = chunk_cost {
+                    accumulated_cost += c;
+                }
+                for event in events {
+                    match &event {
+                        WorkerEvent::Content { text } => {
+                            accumulated_content.push_str(text);
+                        }
+                        WorkerEvent::Thinking { text } => {
+                            accumulated_thinking.push_str(text);
+                        }
+                        WorkerEvent::Complete { .. } => {
+                            got_complete = true;
+                            let thinking = if accumulated_thinking.is_empty() {
+                                None
+                            } else {
+                                Some(accumulated_thinking.clone())
+                            };
+                            let cost = if accumulated_cost > 0.0 {
+                                Some(accumulated_cost)
+                            } else {
+                                None
+                            };
+                            event_tx
+                                .send(WorkerEvent::Complete {
+                                    final_content: accumulated_content.clone(),
+                                    thinking,
+                                    cost,
+                                })
+                                .await
+                                .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    event_tx
+                        .send(event)
+                        .await
+                        .map_err(|e| format!("Failed to send event: {}", e))?;
+                }
             }
         }
 
@@ -536,37 +429,16 @@ impl ChatModelWorker {
         // the body field is a string containing embedded SSE data:
         //   {"status":200,"body":"data: {...}\n\ndata: {...}\n\n...[DONE]","cost":"..."}
         // In this case the buffer has no real newlines (SSE newlines are JSON escapes).
-        if !buffer.is_empty() && accumulated_content.is_empty() && last_finish_reason.is_none() {
+        if !buffer.is_empty() && accumulated_content.is_empty() && !got_complete {
             if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(&buffer) {
                 // Extract cost from the non-streaming wrapper
-                if let Some(wrapper_cost) = wrapper
-                    .get("cost")
-                    .and_then(|v| v.as_str().and_then(|s| s.parse::<f64>().ok()).or_else(|| v.as_f64()))
-                {
+                if let Some(wrapper_cost) = wrapper.get("cost").and_then(|v| {
+                    v.as_str()
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .or_else(|| v.as_f64())
+                }) {
                     log::info!("[ChatModelWorker] Gateway reported cost: {}", wrapper_cost);
                     accumulated_cost += wrapper_cost;
-                }
-
-                // Check wrapper status for errors before processing body
-                if let Some(status) = wrapper.get("status").and_then(|s| s.as_u64()) {
-                    if status >= 400 {
-                        let error_msg = wrapper
-                            .pointer("/body/error/message")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Gateway API error");
-                        log::error!("[ChatModelWorker] Non-streaming wrapper error: HTTP {} — {}", status, error_msg);
-                        event_tx
-                            .send(WorkerEvent::Error {
-                                message: format!("HTTP {}: {}", status, error_msg),
-                            })
-                            .await
-                            .map_err(|e| format!("Failed to send error event: {}", e))?;
-                        return Ok(StreamOutcome::Complete {
-                            final_content: String::new(),
-                            thinking: None,
-                            cost: accumulated_cost,
-                        });
-                    }
                 }
 
                 if let Some(body_str) = wrapper.get("body").and_then(|b| b.as_str()) {
@@ -593,165 +465,85 @@ impl ChatModelWorker {
                         if data_str.trim() == "[DONE]" {
                             break;
                         }
-                        let result = Self::parse_sse_data(data_str);
-                        Self::process_parse_result(
-                            &result,
-                            &mut pending_tool_calls,
-                            &mut accumulated_content,
-                            &mut accumulated_thinking,
-                            &mut accumulated_cost,
-                            &mut last_finish_reason,
-                            event_tx,
-                        )
-                        .await?;
+                        let (events, chunk_cost) = Self::parse_sse_data(data_str);
+                        if let Some(c) = chunk_cost {
+                            accumulated_cost += c;
+                        }
+                        for event in events {
+                            match &event {
+                                WorkerEvent::Content { text } => {
+                                    accumulated_content.push_str(text);
+                                }
+                                WorkerEvent::Thinking { text } => {
+                                    accumulated_thinking.push_str(text);
+                                }
+                                WorkerEvent::Complete { .. } => {
+                                    got_complete = true;
+                                }
+                                _ => {}
+                            }
+                            event_tx
+                                .send(event)
+                                .await
+                                .map_err(|e| format!("Failed to send event: {}", e))?;
+                        }
                     }
                 } else if let Some(body_obj) = wrapper.get("body") {
                     // body is a JSON object (non-streaming response), extract content directly
                     if body_obj.is_object() {
                         log::info!("[ChatModelWorker] Gateway returned non-streaming JSON body");
-                        let result = Self::parse_sse_data(&body_obj.to_string());
-                        Self::process_parse_result(
-                            &result,
-                            &mut pending_tool_calls,
-                            &mut accumulated_content,
-                            &mut accumulated_thinking,
-                            &mut accumulated_cost,
-                            &mut last_finish_reason,
-                            event_tx,
-                        )
-                        .await?;
-                    }
-                }
-            }
-        }
-
-        Ok(Self::build_stream_outcome(
-            &last_finish_reason,
-            pending_tool_calls,
-            accumulated_content,
-            accumulated_thinking,
-            accumulated_cost,
-        ))
-    }
-
-    // =========================================================================
-    // Tool Execution
-    // =========================================================================
-
-    /// Execute a tool by name with the given arguments.
-    /// Returns (result_content, is_error).
-    async fn execute_tool(name: &str, arguments: &str) -> (String, bool) {
-        let args: serde_json::Value = match serde_json::from_str(arguments) {
-            Ok(v) => v,
-            Err(e) => {
-                return (
-                    format!("Failed to parse tool arguments: {}", e),
-                    true,
-                );
-            }
-        };
-
-        match name {
-            "read_file" => {
-                let path = args["path"].as_str().unwrap_or("").to_string();
-                if path.is_empty() {
-                    return ("Missing required parameter: path".to_string(), true);
-                }
-                match crate::files::read_file(path) {
-                    Ok(content) => (content, false),
-                    Err(e) => (e, true),
-                }
-            }
-            "write_file" => {
-                let path = args["path"].as_str().unwrap_or("").to_string();
-                let content = args["content"].as_str().unwrap_or("").to_string();
-                if path.is_empty() {
-                    return ("Missing required parameter: path".to_string(), true);
-                }
-                match crate::files::write_file(path.clone(), content) {
-                    Ok(()) => (format!("Successfully wrote file: {}", path), false),
-                    Err(e) => (e, true),
-                }
-            }
-            "list_directory" => {
-                let path = args["path"].as_str().unwrap_or("").to_string();
-                if path.is_empty() {
-                    return ("Missing required parameter: path".to_string(), true);
-                }
-                match crate::files::list_directory(path) {
-                    Ok(entries) => match serde_json::to_string_pretty(&entries) {
-                        Ok(s) => (s, false),
-                        Err(e) => (format!("Failed to serialize listing: {}", e), true),
-                    },
-                    Err(e) => (e, true),
-                }
-            }
-            "path_exists" => {
-                let path = args["path"].as_str().unwrap_or("").to_string();
-                if path.is_empty() {
-                    return ("Missing required parameter: path".to_string(), true);
-                }
-                let exists = crate::files::path_exists(path);
-                (format!("{}", exists), false)
-            }
-            "create_directory" => {
-                let path = args["path"].as_str().unwrap_or("").to_string();
-                if path.is_empty() {
-                    return ("Missing required parameter: path".to_string(), true);
-                }
-                match crate::files::create_directory(path.clone()) {
-                    Ok(()) => (format!("Successfully created directory: {}", path), false),
-                    Err(e) => (e, true),
-                }
-            }
-            "seren_web_fetch" => {
-                let url = args["url"].as_str().unwrap_or("").to_string();
-                if url.is_empty() {
-                    return ("Missing required parameter: url".to_string(), true);
-                }
-                let timeout_ms = args["timeout_ms"].as_u64();
-                match crate::commands::web::web_fetch(url, timeout_ms).await {
-                    Ok(fetch_result) => (fetch_result.content, false),
-                    Err(e) => (e, true),
-                }
-            }
-            "execute_command" => {
-                let command = args["command"].as_str().unwrap_or("").to_string();
-                if command.is_empty() {
-                    return ("Missing required parameter: command".to_string(), true);
-                }
-                let timeout_secs = args["timeout_secs"].as_u64();
-                match crate::shell::execute_shell_command(command, timeout_secs).await {
-                    Ok(cmd_result) => {
-                        let mut output = String::new();
-                        if !cmd_result.stdout.is_empty() {
-                            output.push_str(&cmd_result.stdout);
+                        let (events, chunk_cost) = Self::parse_sse_data(&body_obj.to_string());
+                        if let Some(c) = chunk_cost {
+                            accumulated_cost += c;
                         }
-                        if !cmd_result.stderr.is_empty() {
-                            if !output.is_empty() {
-                                output.push('\n');
+                        for event in events {
+                            match &event {
+                                WorkerEvent::Content { text } => {
+                                    accumulated_content.push_str(text);
+                                }
+                                WorkerEvent::Complete { .. } => {
+                                    got_complete = true;
+                                }
+                                _ => {}
                             }
-                            output.push_str("stderr: ");
-                            output.push_str(&cmd_result.stderr);
+                            event_tx
+                                .send(event)
+                                .await
+                                .map_err(|e| format!("Failed to send event: {}", e))?;
                         }
-                        if cmd_result.timed_out {
-                            output = format!("Command timed out.\n{}", output);
-                        }
-                        if output.is_empty() {
-                            output = "(no output)".to_string();
-                        }
-                        let is_error = cmd_result.timed_out
-                            || cmd_result.exit_code.map_or(true, |c| c != 0);
-                        (output, is_error)
                     }
-                    Err(e) => (e, true),
                 }
             }
-            _ => (
-                format!("Tool '{}' is not available in chat mode", name),
-                true,
-            ),
         }
+
+        // If stream ended without [DONE], send a Complete
+        if !got_complete {
+            let thinking = if accumulated_thinking.is_empty() {
+                None
+            } else {
+                Some(accumulated_thinking)
+            };
+            let cost = if accumulated_cost > 0.0 {
+                Some(accumulated_cost)
+            } else {
+                None
+            };
+            log::debug!(
+                "[ChatModelWorker] Final complete — accumulated_cost={}, sending cost={:?}",
+                accumulated_cost,
+                cost
+            );
+            event_tx
+                .send(WorkerEvent::Complete {
+                    final_content: accumulated_content,
+                    thinking,
+                    cost,
+                })
+                .await
+                .map_err(|e| format!("Failed to send final Complete event: {}", e))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -775,200 +567,64 @@ impl Worker for ChatModelWorker {
         *self.cancelled.lock().await = false;
 
         log::info!(
-            "[ChatModelWorker] Executing with model: {}, tools: {}",
-            routing.model_id,
-            self.tool_definitions.len()
+            "[ChatModelWorker] Executing with model: {}",
+            routing.model_id
         );
         log::debug!(
             "[ChatModelWorker] Prompt preview: {}",
             &prompt[..prompt.len().min(50)]
         );
 
+        // Build request
         let url = format!(
             "{}/publishers/{}/chat/completions",
             GATEWAY_BASE_URL, PUBLISHER_SLUG
         );
-        let tools = &self.tool_definitions;
+        // TODO: ChatModel worker doesn't pass tools to the LLM yet. The frontend
+        // sends tool names in capabilities.available_tools, but this worker needs
+        // full tool definitions (name, description, parameters schema). To fix this,
+        // the frontend should send complete tool definitions, or the orchestrator
+        // should resolve definitions from names. For now, tool-requiring requests
+        // are routed to McpPublisher or AcpAgent workers instead.
+        let tools: Vec<serde_json::Value> = Vec::new();
+        let body = self.build_request_body(
+            prompt,
+            conversation_context,
+            routing,
+            skill_content,
+            &tools,
+            images,
+        );
+        let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
 
-        // Build initial request body (includes system prompt, history, user message, images)
-        let initial_body =
-            self.build_request_body(prompt, conversation_context, routing, skill_content, tools, images);
+        // Use authenticated_request for automatic 401 refresh and retry
+        let response = crate::auth::authenticated_request(app, &self.client, |client, token| {
+            client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .bearer_auth(token)
+                .body(body_str.clone())
+        })
+        .await?;
 
-        // Extract messages for the tool execution loop
-        let mut messages: Vec<serde_json::Value> = initial_body["messages"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-
-        let mut total_cost: f64 = 0.0;
-
-        for round in 0..=MAX_TOOL_ROUNDS {
-            // Check cancellation
-            if *self.cancelled.lock().await {
-                return Ok(());
-            }
-
-            // Build request body
-            let mut body = serde_json::json!({
-                "model": routing.model_id,
-                "messages": messages,
-                "stream": true
-            });
-            if !tools.is_empty() {
-                body["tools"] = serde_json::json!(tools);
-                body["tool_choice"] = serde_json::json!("auto");
-            }
-
-            let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-
-            // Use authenticated_request for automatic 401 refresh and retry
-            let response =
-                crate::auth::authenticated_request(app, &self.client, |client, token| {
-                    client
-                        .post(&url)
-                        .header("Content-Type", "application/json")
-                        .bearer_auth(token)
-                        .body(body_str.clone())
+        if !response.status().is_success() {
+            let status = response.status();
+            let body_text = response.text().await.unwrap_or_default();
+            log::error!("[ChatModelWorker] HTTP {} from Gateway", status);
+            event_tx
+                .send(WorkerEvent::Error {
+                    message: format!("Gateway returned HTTP {}", status),
                 })
-                .await?;
-
-            if !response.status().is_success() {
-                let status = response.status();
-                let body_text = response.text().await.unwrap_or_default();
-                log::error!("[ChatModelWorker] HTTP {} from Gateway", status);
-                event_tx
-                    .send(WorkerEvent::Error {
-                        message: format!("Gateway returned HTTP {}", status),
-                    })
-                    .await
-                    .map_err(|e| format!("Failed to send error event: {}", e))?;
-                return Err(format!(
-                    "Gateway returned HTTP {}: {}",
-                    status,
-                    &body_text[..body_text.len().min(200)]
-                ));
-            }
-
-            // Stream the response
-            let outcome = self.stream_response(response, &event_tx).await?;
-
-            match outcome {
-                StreamOutcome::Complete {
-                    final_content,
-                    thinking,
-                    cost,
-                } => {
-                    total_cost += cost;
-                    let total = if total_cost > 0.0 {
-                        Some(total_cost)
-                    } else {
-                        None
-                    };
-                    log::debug!(
-                        "[ChatModelWorker] Complete — round={}, cost={:?}",
-                        round,
-                        total
-                    );
-                    event_tx
-                        .send(WorkerEvent::Complete {
-                            final_content,
-                            thinking,
-                            cost: total,
-                        })
-                        .await
-                        .map_err(|e| format!("Failed to send Complete event: {}", e))?;
-                    break;
-                }
-                StreamOutcome::ToolCallsPending {
-                    tool_calls,
-                    accumulated_content,
-                    accumulated_thinking: _,
-                    accumulated_cost,
-                } => {
-                    total_cost += accumulated_cost;
-
-                    if round == MAX_TOOL_ROUNDS {
-                        log::warn!(
-                            "[ChatModelWorker] Max tool rounds ({}) reached, forcing completion",
-                            MAX_TOOL_ROUNDS
-                        );
-                        event_tx
-                            .send(WorkerEvent::Complete {
-                                final_content: accumulated_content,
-                                thinking: None,
-                                cost: if total_cost > 0.0 {
-                                    Some(total_cost)
-                                } else {
-                                    None
-                                },
-                            })
-                            .await
-                            .map_err(|e| format!("Failed to send Complete event: {}", e))?;
-                        break;
-                    }
-
-                    log::info!(
-                        "[ChatModelWorker] Tool round {} — {} tool call(s) pending",
-                        round,
-                        tool_calls.len()
-                    );
-
-                    // Build assistant message with tool_calls for the API
-                    let tool_calls_json: Vec<serde_json::Value> = tool_calls
-                        .iter()
-                        .map(|tc| {
-                            serde_json::json!({
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.name,
-                                    "arguments": tc.arguments,
-                                }
-                            })
-                        })
-                        .collect();
-
-                    let mut assistant_msg = serde_json::json!({
-                        "role": "assistant",
-                        "tool_calls": tool_calls_json
-                    });
-                    if !accumulated_content.is_empty() {
-                        assistant_msg["content"] =
-                            serde_json::json!(accumulated_content);
-                    }
-                    messages.push(assistant_msg);
-
-                    // Execute each tool and build result messages
-                    for tc in &tool_calls {
-                        log::info!(
-                            "[ChatModelWorker] Executing tool: {} (id: {})",
-                            tc.name,
-                            tc.id
-                        );
-                        let (result_content, is_error) =
-                            Self::execute_tool(&tc.name, &tc.arguments).await;
-
-                        // Emit ToolResult event to frontend
-                        let _ = event_tx
-                            .send(WorkerEvent::ToolResult {
-                                tool_call_id: tc.id.clone(),
-                                content: result_content.clone(),
-                                is_error,
-                            })
-                            .await;
-
-                        // Add tool result message for the next API call
-                        messages.push(serde_json::json!({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result_content
-                        }));
-                    }
-                }
-            }
+                .await
+                .map_err(|e| format!("Failed to send error event: {}", e))?;
+            return Err(format!(
+                "Gateway returned HTTP {}: {}",
+                status,
+                &body_text[..body_text.len().min(200)]
+            ));
         }
 
-        Ok(())
+        self.stream_response(response, &event_tx).await
     }
 
     async fn cancel(&self) -> Result<(), String> {
@@ -1036,7 +692,14 @@ mod tests {
             publisher_slug: None,
         };
 
-        let body = worker.build_request_body("Hello", &[], &routing, "# Active Skills\n\n## Skill: Prose", &[], &[]);
+        let body = worker.build_request_body(
+            "Hello",
+            &[],
+            &routing,
+            "# Active Skills\n\n## Skill: Prose",
+            &[],
+            &[],
+        );
 
         let system_msg = body["messages"][0]["content"].as_str().unwrap();
         assert!(system_msg.contains("Active Skills"));
@@ -1073,9 +736,9 @@ mod tests {
     #[test]
     fn parses_content_sse_data() {
         let data = r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Hello"),
             _ => panic!("Expected Content event"),
         }
@@ -1084,9 +747,9 @@ mod tests {
     #[test]
     fn parses_content_from_delta_shorthand() {
         let data = r#"{"delta":{"content":"World"}}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "World"),
             _ => panic!("Expected Content event"),
         }
@@ -1094,10 +757,10 @@ mod tests {
 
     #[test]
     fn parses_tool_call_sse_data() {
-        let data = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_1","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"news\"}"}}]},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let data = r#"{"choices":[{"delta":{"tool_calls":[{"id":"tc_1","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"news\"}"}}]},"finish_reason":null}]}"#;
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::ToolCall {
                 tool_call_id,
                 name,
@@ -1111,54 +774,26 @@ mod tests {
             }
             _ => panic!("Expected ToolCall event"),
         }
-        // Also check tool_call_chunks
-        assert_eq!(result.tool_call_chunks.len(), 1);
-        assert_eq!(result.tool_call_chunks[0].index, 0);
-        assert_eq!(result.tool_call_chunks[0].id, Some("tc_1".to_string()));
-        assert_eq!(result.tool_call_chunks[0].name, Some("web_search".to_string()));
     }
 
     #[test]
-    fn accumulates_tool_call_argument_chunks() {
-        // First chunk: has id and name, partial arguments
-        let data1 = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_1","type":"function","function":{"name":"write_file","arguments":"{\"path"}}]},"finish_reason":null}]}"#;
-        let result1 = ChatModelWorker::parse_sse_data(data1);
-        assert_eq!(result1.tool_call_chunks.len(), 1);
-        assert_eq!(result1.tool_call_chunks[0].arguments, "{\"path");
-        // First chunk emits a ToolCall event (has id+name)
-        assert_eq!(result1.events.len(), 1);
-
-        // Continuation chunk: only arguments, no id/name
-        let data2 = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":\"/tmp/test.txt\""}}]},"finish_reason":null}]}"#;
-        let result2 = ChatModelWorker::parse_sse_data(data2);
-        assert_eq!(result2.tool_call_chunks.len(), 1);
-        assert_eq!(result2.tool_call_chunks[0].arguments, "\":\"/tmp/test.txt\"");
-        assert_eq!(result2.tool_call_chunks[0].id, None);
-        assert_eq!(result2.tool_call_chunks[0].name, None);
-        // Continuation chunk should NOT emit a ToolCall event
-        assert!(result2.events.is_empty());
-    }
-
-    #[test]
-    fn detects_tool_calls_finish_reason() {
-        let data = r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.finish_reason, Some("tool_calls".to_string()));
-    }
-
-    #[test]
-    fn detects_stop_finish_reason() {
+    fn parses_finish_stop_as_complete() {
         let data = r#"{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.finish_reason, Some("stop".to_string()));
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, WorkerEvent::Complete { .. }))
+        );
     }
 
     #[test]
     fn parses_gateway_error_response() {
-        let data = r#"{"status":402,"body":{"error":{"message":"Insufficient credits"}},"cost":"0"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let data =
+            r#"{"status":402,"body":{"error":{"message":"Insufficient credits"}},"cost":"0"}"#;
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Error { message } => {
                 assert!(message.contains("402"));
                 assert!(message.contains("Insufficient credits"));
@@ -1169,25 +804,29 @@ mod tests {
 
     #[test]
     fn ignores_invalid_json() {
-        let result = ChatModelWorker::parse_sse_data("not json at all");
-        assert!(result.events.is_empty());
-        assert!(result.cost.is_none());
+        let (events, cost) = ChatModelWorker::parse_sse_data("not json at all");
+        assert!(events.is_empty());
+        assert!(cost.is_none());
     }
 
     #[test]
     fn ignores_empty_content() {
         let data = r#"{"choices":[{"delta":{"content":""},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
         // Should not produce a Content event for empty string
-        assert!(result.events.iter().all(|e| !matches!(e, WorkerEvent::Content { .. })));
+        assert!(
+            events
+                .iter()
+                .all(|e| !matches!(e, WorkerEvent::Content { .. }))
+        );
     }
 
     #[test]
     fn parses_thinking_sse_data() {
         let data = r#"{"delta":{"thinking":"Let me consider..."}}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Thinking { text } => assert_eq!(text, "Let me consider..."),
             _ => panic!("Expected Thinking event"),
         }
@@ -1196,9 +835,9 @@ mod tests {
     #[test]
     fn parses_thinking_from_choices_path() {
         let data = r#"{"choices":[{"delta":{"thinking":"Reasoning step"},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Thinking { text } => assert_eq!(text, "Reasoning step"),
             _ => panic!("Expected Thinking event"),
         }
@@ -1207,8 +846,12 @@ mod tests {
     #[test]
     fn ignores_empty_thinking() {
         let data = r#"{"choices":[{"delta":{"thinking":""},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert!(result.events.iter().all(|e| !matches!(e, WorkerEvent::Thinking { .. })));
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert!(
+            events
+                .iter()
+                .all(|e| !matches!(e, WorkerEvent::Thinking { .. }))
+        );
     }
 
     #[test]
@@ -1229,7 +872,8 @@ mod tests {
             base64: "iVBORw0KGgo=".to_string(),
         }];
 
-        let body = worker.build_request_body("What is in this image?", &[], &routing, "", &[], &images);
+        let body =
+            worker.build_request_body("What is in this image?", &[], &routing, "", &[], &images);
 
         let messages = body["messages"].as_array().unwrap();
         let user_msg = &messages[messages.len() - 1];
@@ -1240,21 +884,23 @@ mod tests {
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "What is in this image?");
         assert_eq!(content[1]["type"], "image_url");
-        assert!(content[1]["image_url"]["url"]
-            .as_str()
-            .unwrap()
-            .starts_with("data:image/png;base64,"));
+        assert!(
+            content[1]["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
     }
 
     #[test]
     fn parses_gemini_array_of_parts_content() {
         // Gemini returns content as an array of objects with "text" fields
         let data = r#"{"choices":[{"delta":{"content":[{"text":"Hello from Gemini"}]},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Hello from Gemini"),
-            _ => panic!("Expected Content event, got {:?}", result.events[0]),
+            _ => panic!("Expected Content event, got {:?}", events[0]),
         }
     }
 
@@ -1262,9 +908,9 @@ mod tests {
     fn parses_gemini_multi_part_content() {
         // Multiple parts concatenated
         let data = r#"{"choices":[{"delta":{"content":[{"text":"Hello "},{"text":"world"}]},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Hello world"),
             _ => panic!("Expected Content event"),
         }
@@ -1273,10 +919,11 @@ mod tests {
     #[test]
     fn parses_gemini_object_with_text_content() {
         // Content as a single object with "text" field
-        let data = r#"{"choices":[{"delta":{"content":{"text":"Object content"}},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let data =
+            r#"{"choices":[{"delta":{"content":{"text":"Object content"}},"finish_reason":null}]}"#;
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Object content"),
             _ => panic!("Expected Content event"),
         }
@@ -1285,194 +932,78 @@ mod tests {
     #[test]
     fn ignores_empty_gemini_array_content() {
         let data = r#"{"choices":[{"delta":{"content":[]},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert!(result.events.iter().all(|e| !matches!(e, WorkerEvent::Content { .. })));
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert!(
+            events
+                .iter()
+                .all(|e| !matches!(e, WorkerEvent::Content { .. }))
+        );
     }
 
     #[test]
     fn parses_gemini_finish_with_array_content() {
-        // Finish with array-of-parts content should include the content and set finish_reason
-        let data = r#"{"choices":[{"delta":{"content":[{"text":"Done"}]},"finish_reason":"stop"}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert!(result.events.iter().any(|e| matches!(e, WorkerEvent::Content { text } if text == "Done")));
-        assert_eq!(result.finish_reason, Some("stop".to_string()));
+        // Finish with array-of-parts content should include the content in Complete
+        let data =
+            r#"{"choices":[{"delta":{"content":[{"text":"Done"}]},"finish_reason":"stop"}]}"#;
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, WorkerEvent::Content { text } if text == "Done"))
+        );
+        assert!(events.iter().any(
+            |e| matches!(e, WorkerEvent::Complete { final_content, .. } if final_content == "Done")
+        ));
     }
 
     #[test]
     fn parses_gateway_wrapped_content() {
         // Gateway wraps SSE events in {status, body, cost}
         let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":"Wrapped hello"},"finish_reason":null}]},"cost":"0.001"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let (events, cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Wrapped hello"),
-            _ => panic!("Expected Content event, got {:?}", result.events[0]),
+            _ => panic!("Expected Content event, got {:?}", events[0]),
         }
-        assert_eq!(result.cost, Some(0.001));
+        assert_eq!(cost, Some(0.001));
     }
 
     #[test]
     fn parses_gateway_wrapped_finish() {
         let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]},"cost":"0.002"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.finish_reason, Some("stop".to_string()));
-        assert_eq!(result.cost, Some(0.002));
+        let (events, cost) = ChatModelWorker::parse_sse_data(data);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, WorkerEvent::Complete { .. }))
+        );
+        assert_eq!(cost, Some(0.002));
     }
 
     #[test]
     fn extracts_zero_cost_from_gateway() {
         let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":"test"},"finish_reason":null}]},"cost":"0"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.cost, Some(0.0));
+        let (_events, cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(cost, Some(0.0));
     }
 
     #[test]
     fn no_cost_when_absent_from_response() {
         let data = r#"{"choices":[{"delta":{"content":"no wrapper"},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert!(result.cost.is_none());
+        let (_events, cost) = ChatModelWorker::parse_sse_data(data);
+        assert!(cost.is_none());
     }
 
     #[test]
     fn parses_gateway_wrapped_gemini_array_content() {
         // Gateway-wrapped Gemini array-of-parts format
         let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":[{"text":"Wrapped Gemini"}]},"finish_reason":null}]},"cost":"0"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
+        let (events, _cost) = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Wrapped Gemini"),
-            _ => panic!("Expected Content event, got {:?}", result.events[0]),
+            _ => panic!("Expected Content event, got {:?}", events[0]),
         }
-    }
-
-    #[test]
-    fn build_stream_outcome_returns_complete_for_stop() {
-        let outcome = ChatModelWorker::build_stream_outcome(
-            &Some("stop".to_string()),
-            HashMap::new(),
-            "Hello".to_string(),
-            String::new(),
-            0.005,
-        );
-        match outcome {
-            StreamOutcome::Complete {
-                final_content,
-                thinking,
-                cost,
-            } => {
-                assert_eq!(final_content, "Hello");
-                assert!(thinking.is_none());
-                assert_eq!(cost, 0.005);
-            }
-            _ => panic!("Expected Complete outcome"),
-        }
-    }
-
-    #[test]
-    fn build_stream_outcome_returns_tool_calls_pending() {
-        let mut pending = HashMap::new();
-        pending.insert(
-            0,
-            AccumulatedToolCall {
-                id: "tc_1".to_string(),
-                name: "write_file".to_string(),
-                arguments: r#"{"path":"/tmp/test.txt","content":"hello"}"#.to_string(),
-            },
-        );
-
-        let outcome = ChatModelWorker::build_stream_outcome(
-            &Some("tool_calls".to_string()),
-            pending,
-            String::new(),
-            String::new(),
-            0.003,
-        );
-        match outcome {
-            StreamOutcome::ToolCallsPending {
-                tool_calls,
-                accumulated_cost,
-                ..
-            } => {
-                assert_eq!(tool_calls.len(), 1);
-                assert_eq!(tool_calls[0].name, "write_file");
-                assert_eq!(accumulated_cost, 0.003);
-            }
-            _ => panic!("Expected ToolCallsPending outcome"),
-        }
-    }
-
-    #[test]
-    fn build_stream_outcome_complete_when_no_pending_tool_calls() {
-        // Even if finish_reason is "tool_calls", if no pending tool calls, return Complete
-        let outcome = ChatModelWorker::build_stream_outcome(
-            &Some("tool_calls".to_string()),
-            HashMap::new(),
-            "content".to_string(),
-            String::new(),
-            0.0,
-        );
-        match outcome {
-            StreamOutcome::Complete { .. } => {}
-            _ => panic!("Expected Complete outcome when no pending tool calls"),
-        }
-    }
-
-    #[tokio::test]
-    async fn execute_tool_read_file_missing_path() {
-        let (content, is_error) = ChatModelWorker::execute_tool("read_file", "{}").await;
-        assert!(is_error);
-        assert!(content.contains("Missing required parameter"));
-    }
-
-    #[tokio::test]
-    async fn execute_tool_unknown_tool() {
-        let (content, is_error) =
-            ChatModelWorker::execute_tool("nonexistent_tool", "{}").await;
-        assert!(is_error);
-        assert!(content.contains("not available in chat mode"));
-    }
-
-    #[tokio::test]
-    async fn execute_tool_invalid_arguments() {
-        let (content, is_error) =
-            ChatModelWorker::execute_tool("read_file", "not json").await;
-        assert!(is_error);
-        assert!(content.contains("Failed to parse tool arguments"));
-    }
-
-    #[tokio::test]
-    async fn execute_tool_path_exists() {
-        // Check a path that definitely exists
-        let args = serde_json::json!({"path": "/"}).to_string();
-        let (content, is_error) = ChatModelWorker::execute_tool("path_exists", &args).await;
-        assert!(!is_error);
-        assert_eq!(content, "true");
-    }
-
-    #[tokio::test]
-    async fn execute_tool_path_not_exists() {
-        let args = serde_json::json!({"path": "/definitely/not/a/real/path/12345"}).to_string();
-        let (content, is_error) =
-            ChatModelWorker::execute_tool("path_exists", &args).await;
-        assert!(!is_error);
-        assert_eq!(content, "false");
-    }
-
-    #[test]
-    fn with_tools_stores_definitions() {
-        let tools = vec![serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": "read_file",
-                "description": "Read a file",
-                "parameters": {"type": "object", "properties": {}}
-            }
-        })];
-        let worker = ChatModelWorker::with_tools(tools.clone());
-        assert_eq!(worker.tool_definitions.len(), 1);
-        assert_eq!(
-            worker.tool_definitions[0]["function"]["name"],
-            "read_file"
-        );
     }
 }

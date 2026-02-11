@@ -5,8 +5,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use log;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
@@ -22,10 +21,7 @@ pub struct McpPublisherWorker {
 impl McpPublisherWorker {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            client: reqwest::Client::new(),
             cancelled: Arc::new(Mutex::new(false)),
         }
     }
@@ -79,9 +75,11 @@ impl McpPublisherWorker {
         let mut events = Vec::new();
 
         // Extract cost from Gateway wrapper
-        let chunk_cost = parsed
-            .get("cost")
-            .and_then(|v| v.as_str().and_then(|s| s.parse::<f64>().ok()).or_else(|| v.as_f64()));
+        let chunk_cost = parsed.get("cost").and_then(|v| {
+            v.as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .or_else(|| v.as_f64())
+        });
 
         // Check for wrapped error status from Gateway
         if let Some(status) = parsed.get("status").and_then(|s| s.as_u64()) {
@@ -201,7 +199,11 @@ impl McpPublisherWorker {
                 if let Some(data) = line.strip_prefix("data: ") {
                     if data == "[DONE]" {
                         if !got_complete {
-                            let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
+                            let cost = if accumulated_cost > 0.0 {
+                                Some(accumulated_cost)
+                            } else {
+                                None
+                            };
                             event_tx
                                 .send(WorkerEvent::Complete {
                                     final_content: accumulated_content.clone(),
@@ -225,7 +227,11 @@ impl McpPublisherWorker {
                             }
                             WorkerEvent::Complete { .. } => {
                                 got_complete = true;
-                                let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
+                                let cost = if accumulated_cost > 0.0 {
+                                    Some(accumulated_cost)
+                                } else {
+                                    None
+                                };
                                 event_tx
                                     .send(WorkerEvent::Complete {
                                         final_content: accumulated_content.clone(),
@@ -233,9 +239,7 @@ impl McpPublisherWorker {
                                         cost,
                                     })
                                     .await
-                                    .map_err(|e| {
-                                        format!("Failed to send Complete event: {}", e)
-                                    })?;
+                                    .map_err(|e| format!("Failed to send Complete event: {}", e))?;
                                 continue;
                             }
                             _ => {}
@@ -250,7 +254,11 @@ impl McpPublisherWorker {
         }
 
         if !got_complete {
-            let cost = if accumulated_cost > 0.0 { Some(accumulated_cost) } else { None };
+            let cost = if accumulated_cost > 0.0 {
+                Some(accumulated_cost)
+            } else {
+                None
+            };
             event_tx
                 .send(WorkerEvent::Complete {
                     final_content: accumulated_content,
@@ -283,10 +291,9 @@ impl Worker for McpPublisherWorker {
     ) -> Result<(), String> {
         *self.cancelled.lock().await = false;
 
-        let publisher_slug = routing
-            .publisher_slug
-            .as_deref()
-            .ok_or_else(|| "McpPublisher worker requires a publisher_slug in routing".to_string())?;
+        let publisher_slug = routing.publisher_slug.as_deref().ok_or_else(|| {
+            "McpPublisher worker requires a publisher_slug in routing".to_string()
+        })?;
 
         log::info!(
             "[McpPublisherWorker] Executing with publisher: {}, model: {}",
@@ -422,9 +429,11 @@ mod tests {
     fn parses_finish_stop_as_complete() {
         let data = r#"{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}"#;
         let (events, _cost) = McpPublisherWorker::parse_sse_data(data);
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, WorkerEvent::Complete { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, WorkerEvent::Complete { .. }))
+        );
     }
 
     #[test]
@@ -434,9 +443,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         match &events[0] {
             WorkerEvent::ToolCall {
-                tool_call_id,
-                name,
-                ..
+                tool_call_id, name, ..
             } => {
                 assert_eq!(tool_call_id, "tc_pub");
                 assert_eq!(name, "scrape");

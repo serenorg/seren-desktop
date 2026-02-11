@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
 use super::chat_model_worker::ChatModelWorker;
@@ -16,7 +16,7 @@ use super::mcp_publisher_worker::McpPublisherWorker;
 use super::router;
 use super::trust;
 use super::types::{
-    DelegationType, ImageAttachment, OrchestratorEvent,
+    DelegationType, ImageAttachment, OrchestrationPlan, OrchestratorEvent, PlanStatus,
     RoutingDecision, SkillRef, SubTask, TransitionEvent, UserCapabilities, WorkerEvent, WorkerType,
 };
 use super::worker::Worker;
@@ -70,23 +70,34 @@ pub async fn orchestrate(
         conversation_id
     );
 
-    // Register cancellation early so it's available for all paths
+    // 1. Classify the task
+    let classification = classifier::classify(&prompt, &capabilities.installed_skills);
+    log::info!(
+        "[Orchestrator] Classification: type={}, complexity={:?}",
+        classification.task_type,
+        classification.complexity
+    );
+
+    // 2. Decompose into subtasks
+    let subtasks = decomposer::decompose(&prompt, &classification, &capabilities.installed_skills);
+    log::info!(
+        "[Orchestrator] Decomposed into {} subtask(s)",
+        subtasks.len()
+    );
+
+    // 3. Register cancellation
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     {
         let mut sessions = state.active_sessions.lock().await;
         sessions.insert(conversation_id.clone(), cancel_tx);
     }
 
-    // Fast-path: if routing to ACP agent, skip classification/decomposition/DB
-    // The agent has its own reasoning — orchestrator overhead is pure latency here.
-    let result = if capabilities.has_acp_agent
-        && capabilities.active_acp_session_id.is_some()
-    {
-        log::info!("[Orchestrator] ACP fast-path: skipping classify/decompose/DB");
-        execute_acp_fast_path(
+    // 4. Branch: single task (fast path) vs multi-task (parallel execution)
+    let result = if subtasks.len() <= 1 {
+        execute_single_task(
             &app,
             &conversation_id,
-            &prompt,
+            &subtasks[0],
             &history,
             &capabilities,
             &images,
@@ -94,45 +105,17 @@ pub async fn orchestrate(
         )
         .await
     } else {
-        // Standard path: classify → decompose → route → execute
-        let classification = classifier::classify(&prompt, &capabilities.installed_skills);
-        log::info!(
-            "[Orchestrator] Classification: type={}, complexity={:?}",
-            classification.task_type,
-            classification.complexity
-        );
-
-        let subtasks =
-            decomposer::decompose(&prompt, &classification, &capabilities.installed_skills);
-        log::info!(
-            "[Orchestrator] Decomposed into {} subtask(s)",
-            subtasks.len()
-        );
-
-        if subtasks.len() <= 1 {
-            execute_single_task(
-                &app,
-                &conversation_id,
-                &subtasks[0],
-                &history,
-                &capabilities,
-                &images,
-                cancel_rx,
-            )
-            .await
-        } else {
-            execute_multi_task(
-                &app,
-                &conversation_id,
-                &prompt,
-                subtasks,
-                &history,
-                &capabilities,
-                &images,
-                cancel_rx,
-            )
-            .await
-        }
+        execute_multi_task(
+            &app,
+            &conversation_id,
+            &prompt,
+            subtasks,
+            &history,
+            &capabilities,
+            &images,
+            cancel_rx,
+        )
+        .await
     };
 
     // 5. Clean up session
@@ -142,130 +125,6 @@ pub async fn orchestrate(
     }
 
     result
-}
-
-// =============================================================================
-// ACP Fast Path (skip classify/decompose/DB)
-// =============================================================================
-
-/// Execute a prompt directly through the ACP agent, bypassing classification,
-/// decomposition, and Thompson sampling. The agent has its own reasoning —
-/// orchestrator overhead is pure latency for this path.
-async fn execute_acp_fast_path(
-    app: &AppHandle,
-    conversation_id: &str,
-    prompt: &str,
-    history: &[serde_json::Value],
-    capabilities: &UserCapabilities,
-    images: &[ImageAttachment],
-    cancel_rx: tokio::sync::oneshot::Receiver<()>,
-) -> Result<(), String> {
-    let routing = RoutingDecision {
-        worker_type: WorkerType::AcpAgent,
-        model_id: capabilities
-            .selected_model
-            .clone()
-            .unwrap_or_else(|| "anthropic/claude-opus-4-6".to_string()),
-        delegation: DelegationType::FullHandoff,
-        reason: "Working with agent".to_string(),
-        selected_skills: vec![],
-        publisher_slug: None,
-    };
-
-    // Emit transition
-    let transition = TransitionEvent {
-        conversation_id: conversation_id.to_string(),
-        model_name: routing.model_id.clone(),
-        task_description: routing.reason.clone(),
-    };
-    app.emit("orchestrator://transition", &transition)
-        .map_err(|e| format!("Failed to emit transition event: {}", e))?;
-
-    // Create channel and spawn worker
-    let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
-    let worker = create_worker(&routing, app, capabilities);
-    let worker_prompt = prompt.to_string();
-    let worker_routing = routing;
-    let worker_app = app.clone();
-    let worker_images = images.to_vec();
-    let worker_history = history.to_vec();
-    let worker_handle = tokio::spawn(async move {
-        worker
-            .execute(
-                &worker_prompt,
-                &worker_history,
-                &worker_routing,
-                "",
-                &worker_app,
-                &worker_images,
-                event_tx,
-            )
-            .await
-    });
-
-    // Forward events to frontend
-    let conv_id = conversation_id.to_string();
-    let app_for_events = app.clone();
-    let forward_handle = tokio::spawn(async move {
-        let mut cancel_rx = cancel_rx;
-        loop {
-            tokio::select! {
-                event = event_rx.recv() => {
-                    match event {
-                        Some(worker_event) => {
-                            let orchestrator_event = OrchestratorEvent {
-                                conversation_id: conv_id.clone(),
-                                worker_event,
-                                subtask_id: None,
-                            };
-                            if let Err(e) = app_for_events.emit("orchestrator://event", &orchestrator_event) {
-                                log::error!("[Orchestrator] Failed to emit event: {}", e);
-                                break;
-                            }
-                        }
-                        None => break,
-                    }
-                }
-                _ = &mut cancel_rx => {
-                    log::info!("[Orchestrator] Cancellation received for ACP fast-path conversation {}", conv_id);
-                    break;
-                }
-            }
-        }
-    });
-
-    let _ = forward_handle.await;
-
-    match worker_handle.await {
-        Ok(Ok(())) => {
-            log::info!(
-                "[Orchestrator] ACP fast-path completed for conversation {}",
-                conversation_id
-            );
-        }
-        Ok(Err(e)) => {
-            log::error!("[Orchestrator] ACP fast-path worker error: {}", e);
-            let error_event = OrchestratorEvent {
-                conversation_id: conversation_id.to_string(),
-                worker_event: WorkerEvent::Error { message: e },
-                subtask_id: None,
-            };
-            let _ = app.emit("orchestrator://event", &error_event);
-        }
-        Err(e) => {
-            log::error!("[Orchestrator] ACP fast-path worker task panicked: {}", e);
-            let error_event = OrchestratorEvent {
-                conversation_id: conversation_id.to_string(),
-                worker_event: WorkerEvent::Error {
-                    message: "Internal error: worker task failed".to_string(),
-                },
-                subtask_id: None,
-            };
-            let _ = app.emit("orchestrator://event", &error_event);
-        }
-    }
-
-    Ok(())
 }
 
 // =============================================================================
@@ -286,52 +145,56 @@ async fn execute_single_task(
     images: &[ImageAttachment],
     cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), String> {
-    // Compute rankings, route, and check trust in a single blocking call
-    // to avoid two separate spawn_blocking dispatches and two DB opens.
-    let capabilities = capabilities.clone();
+    // Compute Thompson sampling rankings before routing
+    let mut capabilities = capabilities.clone();
     let app_for_db = app.clone();
-    let classification_for_db = subtask.classification.clone();
-    let capabilities_for_db = capabilities.clone();
+    let task_type_for_db = subtask.classification.task_type.clone();
+    let available_models = capabilities.available_models.clone();
 
-    let (mut routing, trusted) = tauri::async_runtime::spawn_blocking(move || {
-        let mut caps = capabilities_for_db;
-
-        // Thompson sampling rankings
-        if let Ok(conn) = crate::services::database::init_db(&app_for_db) {
-            let mut rng = rand::rng();
-            let rankings = trust::get_model_rankings(
-                &conn,
-                &mut rng,
-                &classification_for_db.task_type,
-                &caps.available_models,
-                0.1,
-            );
-            caps.model_rankings = rankings
-                .iter()
-                .map(|r| (r.model_id.clone(), r.score))
-                .collect();
-
-            // Route with rankings-enriched capabilities
-            let routing = router::route(&classification_for_db, &caps);
-
-            // Trust graduation (same DB connection, no second open)
-            let trusted =
-                trust::is_trusted(&conn, &classification_for_db.task_type, &routing.model_id);
-
-            (routing, trusted)
-        } else {
-            // DB unavailable — route without rankings or trust
-            let routing = router::route(&classification_for_db, &caps);
-            (routing, false)
+    let (rankings, _) = tauri::async_runtime::spawn_blocking(move || {
+        match crate::services::database::init_db(&app_for_db) {
+            Ok(conn) => {
+                let mut rng = rand::rng();
+                let rankings = trust::get_model_rankings(
+                    &conn,
+                    &mut rng,
+                    &task_type_for_db,
+                    &available_models,
+                    0.1,
+                );
+                (rankings, true)
+            }
+            Err(_) => (vec![], false),
         }
     })
     .await
-    .unwrap_or_else(|_| {
-        (
-            router::route(&subtask.classification, &capabilities),
-            false,
-        )
-    });
+    .unwrap_or((vec![], false));
+
+    capabilities.model_rankings = rankings
+        .iter()
+        .map(|r| (r.model_id.clone(), r.score))
+        .collect();
+
+    let user_explicitly_selected = capabilities
+        .selected_model
+        .as_ref()
+        .is_some_and(|m| !m.is_empty());
+
+    // Route with rankings-enriched capabilities
+    let mut routing = router::route(&subtask.classification, &capabilities);
+
+    // Trust graduation
+    let app_for_trust = app.clone();
+    let task_type = subtask.classification.task_type.clone();
+    let model_id = routing.model_id.clone();
+    let trusted = tauri::async_runtime::spawn_blocking(move || {
+        match crate::services::database::init_db(&app_for_trust) {
+            Ok(conn) => trust::is_trusted(&conn, &task_type, &model_id),
+            Err(_) => false,
+        }
+    })
+    .await
+    .unwrap_or(false);
 
     if trusted {
         routing.delegation = DelegationType::FullHandoff;
@@ -360,7 +223,7 @@ async fn execute_single_task(
 
         // Create channel and spawn worker
         let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
-        let worker = create_worker(&routing, app, &capabilities);
+        let worker = create_worker(&routing, app);
         let worker_prompt = subtask.prompt.clone();
         let worker_routing = routing.clone();
         let worker_app = app.clone();
@@ -430,7 +293,9 @@ async fn execute_single_task(
                                 worker_event,
                                 subtask_id: None,
                             };
-                            if let Err(e) = app_for_events.emit("orchestrator://event", &orchestrator_event) {
+                            if let Err(e) =
+                                app_for_events.emit("orchestrator://event", &orchestrator_event)
+                            {
                                 log::error!("[Orchestrator] Failed to emit event: {}", e);
                                 break;
                             }
@@ -473,10 +338,9 @@ async fn execute_single_task(
             }
         }
 
-        // Attempt reroute if we got a transient error.
-        // Always reroute on 408/429/5xx — even when the user pinned a model,
-        // a transient server error is better handled by a fallback than an error message.
-        let should_reroute = reroute_count < router::MAX_REROUTE_ATTEMPTS
+        // Attempt reroute if we got a transient error
+        let should_reroute = !user_explicitly_selected
+            && reroute_count < router::MAX_REROUTE_ATTEMPTS
             && reroutable_error
                 .as_ref()
                 .is_some_and(|msg| router::is_reroutable_error(msg));
@@ -501,8 +365,10 @@ async fn execute_single_task(
         let available_for_reroute = capabilities.available_models.clone();
         let classification_for_reroute = subtask.classification.clone();
 
-        let reroute_result = tauri::async_runtime::spawn_blocking(move || {
-            match crate::services::database::init_db(&app_for_reroute) {
+        let reroute_result =
+            tauri::async_runtime::spawn_blocking(move || match crate::services::database::init_db(
+                &app_for_reroute,
+            ) {
                 Ok(conn) => router::reroute_on_failure(
                     &conn,
                     &task_type_for_reroute,
@@ -511,10 +377,9 @@ async fn execute_single_task(
                     &classification_for_reroute,
                 ),
                 Err(_) => None,
-            }
-        })
-        .await
-        .unwrap_or(None);
+            })
+            .await
+            .unwrap_or(None);
 
         match reroute_result {
             Some((new_model, reason)) => {
@@ -685,47 +550,50 @@ async fn execute_multi_task(
         let mut handles = Vec::new();
 
         for subtask in layer {
-            // Compute rankings, route, and check trust in a single blocking call
-            let subtask_caps = capabilities.clone();
-            let app_for_db = app.clone();
-            let classification_for_db = subtask.classification.clone();
+            // Compute rankings for this subtask's task_type
+            let mut subtask_caps = capabilities.clone();
+            let app_for_rank = app.clone();
+            let task_type_for_rank = subtask.classification.task_type.clone();
+            let models_for_rank = subtask_caps.available_models.clone();
 
-            let (mut routing, trusted) = tauri::async_runtime::spawn_blocking(move || {
-                let mut caps = subtask_caps;
-
-                if let Ok(conn) = crate::services::database::init_db(&app_for_db) {
-                    let mut rng = rand::rng();
-                    let rankings = trust::get_model_rankings(
-                        &conn,
-                        &mut rng,
-                        &classification_for_db.task_type,
-                        &caps.available_models,
-                        0.1,
-                    );
-                    caps.model_rankings = rankings
-                        .iter()
-                        .map(|r| (r.model_id.clone(), r.score))
-                        .collect();
-
-                    let routing = router::route(&classification_for_db, &caps);
-                    let trusted = trust::is_trusted(
-                        &conn,
-                        &classification_for_db.task_type,
-                        &routing.model_id,
-                    );
-                    (routing, trusted)
-                } else {
-                    let routing = router::route(&classification_for_db, &caps);
-                    (routing, false)
+            let rankings = tauri::async_runtime::spawn_blocking(move || {
+                match crate::services::database::init_db(&app_for_rank) {
+                    Ok(conn) => {
+                        let mut rng = rand::rng();
+                        trust::get_model_rankings(
+                            &conn,
+                            &mut rng,
+                            &task_type_for_rank,
+                            &models_for_rank,
+                            0.1,
+                        )
+                    }
+                    Err(_) => vec![],
                 }
             })
             .await
-            .unwrap_or_else(|_| {
-                (
-                    router::route(&subtask.classification, capabilities),
-                    false,
-                )
-            });
+            .unwrap_or_default();
+
+            subtask_caps.model_rankings = rankings
+                .iter()
+                .map(|r| (r.model_id.clone(), r.score))
+                .collect();
+
+            // Route each subtask independently with rankings
+            let mut routing = router::route(&subtask.classification, &subtask_caps);
+
+            // Trust graduation per subtask
+            let app_for_trust = app.clone();
+            let task_type = subtask.classification.task_type.clone();
+            let model_id = routing.model_id.clone();
+            let trusted = tauri::async_runtime::spawn_blocking(move || {
+                match crate::services::database::init_db(&app_for_trust) {
+                    Ok(conn) => trust::is_trusted(&conn, &task_type, &model_id),
+                    Err(_) => false,
+                }
+            })
+            .await
+            .unwrap_or(false);
 
             if trusted {
                 routing.delegation = DelegationType::FullHandoff;
@@ -745,7 +613,7 @@ async fn execute_multi_task(
                 .map_err(|e| format!("Failed to emit transition: {}", e))?;
 
             // Spawn worker
-            let worker = create_worker(&routing, app, capabilities);
+            let worker = create_worker(&routing, app);
             let subtask_prompt = subtask.prompt.clone();
             let subtask_id = subtask.id.clone();
             let worker_routing = routing.clone();
@@ -790,11 +658,7 @@ async fn execute_multi_task(
             match handle.await {
                 Ok(Ok(Ok(()))) => {}
                 Ok(Ok(Err(e))) => {
-                    log::error!(
-                        "[Orchestrator] Worker error in layer {}: {}",
-                        layer_idx,
-                        e
-                    );
+                    log::error!("[Orchestrator] Worker error in layer {}: {}", layer_idx, e);
                 }
                 Ok(Err(e)) => {
                     log::error!(
@@ -804,11 +668,7 @@ async fn execute_multi_task(
                     );
                 }
                 Err(e) => {
-                    log::error!(
-                        "[Orchestrator] Join error in layer {}: {}",
-                        layer_idx,
-                        e
-                    );
+                    log::error!("[Orchestrator] Join error in layer {}: {}", layer_idx, e);
                 }
             }
         }
@@ -869,23 +729,14 @@ pub async fn cancel(state: &OrchestratorState, conversation_id: &str) -> Result<
 // =============================================================================
 
 /// Create the appropriate worker based on the routing decision.
-fn create_worker(
-    routing: &RoutingDecision,
-    _app: &AppHandle,
-    capabilities: &UserCapabilities,
-) -> Arc<dyn Worker> {
+fn create_worker(routing: &RoutingDecision, _app: &AppHandle) -> Arc<dyn Worker> {
     match routing.worker_type {
-        WorkerType::ChatModel => {
-            Arc::new(ChatModelWorker::with_tools(capabilities.tool_definitions.clone()))
-        }
+        WorkerType::ChatModel => Arc::new(ChatModelWorker::new()),
         WorkerType::AcpAgent => {
             // ACP worker requires feature flag; fall back to chat model if not available
             #[cfg(feature = "acp")]
             {
-                let worker = super::acp_worker::AcpWorker::new(
-                    _app.clone(),
-                    capabilities.active_acp_session_id.clone(),
-                );
+                let worker = super::acp_worker::AcpWorker::new(_app.clone(), None);
                 Arc::new(worker)
             }
             #[cfg(not(feature = "acp"))]
@@ -893,7 +744,7 @@ fn create_worker(
                 log::warn!(
                     "[Orchestrator] ACP feature not enabled, falling back to ChatModel worker"
                 );
-                Arc::new(ChatModelWorker::with_tools(capabilities.tool_definitions.clone()))
+                Arc::new(ChatModelWorker::new())
             }
         }
         WorkerType::McpPublisher => Arc::new(McpPublisherWorker::new()),
@@ -935,11 +786,7 @@ pub fn load_skill_content(skills: &[SkillRef]) -> Result<String, String> {
         let content = match std::fs::read_to_string(&skill.path) {
             Ok(c) => c,
             Err(e) => {
-                log::warn!(
-                    "[Orchestrator] Failed to read skill {}: {}",
-                    skill.slug,
-                    e
-                );
+                log::warn!("[Orchestrator] Failed to read skill {}: {}", skill.slug, e);
                 continue; // Skip unreadable skills rather than failing the entire request
             }
         };
@@ -994,7 +841,8 @@ mod tests {
 
     #[test]
     fn strips_yaml_frontmatter() {
-        let content = "---\ntitle: Test Skill\ntags: [test]\n---\n# Skill Body\n\nThis is the skill content.";
+        let content =
+            "---\ntitle: Test Skill\ntags: [test]\n---\n# Skill Body\n\nThis is the skill content.";
         let result = strip_frontmatter(content);
         assert_eq!(result, "# Skill Body\n\nThis is the skill content.");
     }

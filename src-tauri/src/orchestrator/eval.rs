@@ -101,11 +101,7 @@ impl EvalState {
                 );
             }
             Err(e) => {
-                log::warn!(
-                    "[eval] Failed to sync {} eval signals: {}",
-                    count,
-                    e
-                );
+                log::warn!("[eval] Failed to sync {} eval signals: {}", count, e);
             }
         }
     }
@@ -285,7 +281,9 @@ mod tests {
         insert_message(
             &conn,
             "msg1",
-            Some(r#"{"v":1,"task_type":"code_generation","model_id":"claude-opus-4-6","worker_type":"chat_model"}"#),
+            Some(
+                r#"{"v":1,"task_type":"code_generation","model_id":"claude-opus-4-6","worker_type":"chat_model"}"#,
+            ),
         );
 
         submit(&conn, &state, "msg1", 1, "test-token").unwrap();

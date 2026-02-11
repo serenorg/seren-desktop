@@ -188,8 +188,7 @@ fn contains_keyword(text: &str, keyword: &str) -> bool {
         let abs_pos = start + pos;
         let end_pos = abs_pos + keyword.len();
 
-        let boundary_before =
-            abs_pos == 0 || !text_bytes[abs_pos - 1].is_ascii_alphanumeric();
+        let boundary_before = abs_pos == 0 || !text_bytes[abs_pos - 1].is_ascii_alphanumeric();
         let boundary_after =
             end_pos >= text_bytes.len() || !text_bytes[end_pos].is_ascii_alphanumeric();
 
@@ -466,14 +465,22 @@ mod tests {
 
     #[test]
     fn selects_skill_by_tag() {
-        let skills = vec![make_skill("git-commit", "Git Commit", &["git", "version-control"])];
+        let skills = vec![make_skill(
+            "git-commit",
+            "Git Commit",
+            &["git", "version-control"],
+        )];
         let result = select_relevant_skills("help me with git", &skills);
         assert_eq!(result, vec!["git-commit"]);
     }
 
     #[test]
     fn selects_skill_by_slug() {
-        let skills = vec![make_skill("prose", "Prose Helper", &["ai", "orchestration"])];
+        let skills = vec![make_skill(
+            "prose",
+            "Prose Helper",
+            &["ai", "orchestration"],
+        )];
         let result = select_relevant_skills("prose run my_workflow", &skills);
         assert_eq!(result, vec!["prose"]);
     }
@@ -509,7 +516,11 @@ mod tests {
 
     #[test]
     fn classify_includes_relevant_skills() {
-        let skills = vec![make_skill("git-commit", "Git Commit", &["git", "version-control"])];
+        let skills = vec![make_skill(
+            "git-commit",
+            "Git Commit",
+            &["git", "version-control"],
+        )];
         let result = classify("Help me git commit my code changes", &skills);
         assert_eq!(result.task_type, "code_generation");
         assert_eq!(result.relevant_skills, vec!["git-commit"]);

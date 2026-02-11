@@ -6,7 +6,7 @@ use log;
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
@@ -113,9 +113,7 @@ impl Worker for AcpWorker {
             }
             Err(e) => {
                 event_tx
-                    .send(WorkerEvent::Error {
-                        message: e.clone(),
-                    })
+                    .send(WorkerEvent::Error { message: e.clone() })
                     .await
                     .map_err(|send_err| format!("Failed to send Error event: {}", send_err))?;
                 Err(e)
@@ -217,8 +215,8 @@ pub fn map_tool_result(payload: &Value) -> Option<WorkerEvent> {
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
 
-    let is_error = status.to_lowercase().contains("error")
-        || status.to_lowercase().contains("fail");
+    let is_error =
+        status.to_lowercase().contains("error") || status.to_lowercase().contains("fail");
 
     Some(WorkerEvent::ToolResult {
         tool_call_id,

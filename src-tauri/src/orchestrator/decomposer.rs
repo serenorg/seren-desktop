@@ -142,7 +142,13 @@ fn try_sequential_conjunction(prompt: &str, skills: &[SkillRef]) -> Option<Vec<S
     let lower = prompt.to_lowercase();
 
     // Try splitting on sequential markers (ordered by specificity)
-    let markers = [" and then ", ", then ", ". then ", ". after that, ", ". after that "];
+    let markers = [
+        " and then ",
+        ", then ",
+        ". then ",
+        ". after that, ",
+        ". after that ",
+    ];
 
     for marker in &markers {
         if let Some(pos) = lower.find(marker) {
@@ -263,12 +269,57 @@ fn looks_like_clause(text: &str) -> bool {
     let first_word = lower.split_whitespace().next().unwrap_or("");
 
     const CLAUSE_STARTERS: &[&str] = &[
-        "search", "scrape", "find", "write", "create", "read", "delete", "move", "copy", "run",
-        "build", "deploy", "implement", "add", "remove", "update", "fix", "refactor", "test",
-        "check", "list", "show", "get", "set", "make", "help", "explain", "summarize", "draft",
-        "review", "analyze", "compare", "fetch", "download", "upload", "install", "configure",
-        "generate", "convert", "translate", "parse", "compile", "debug", "research", "look",
-        "open", "close", "save", "load", "send", "publish",
+        "search",
+        "scrape",
+        "find",
+        "write",
+        "create",
+        "read",
+        "delete",
+        "move",
+        "copy",
+        "run",
+        "build",
+        "deploy",
+        "implement",
+        "add",
+        "remove",
+        "update",
+        "fix",
+        "refactor",
+        "test",
+        "check",
+        "list",
+        "show",
+        "get",
+        "set",
+        "make",
+        "help",
+        "explain",
+        "summarize",
+        "draft",
+        "review",
+        "analyze",
+        "compare",
+        "fetch",
+        "download",
+        "upload",
+        "install",
+        "configure",
+        "generate",
+        "convert",
+        "translate",
+        "parse",
+        "compile",
+        "debug",
+        "research",
+        "look",
+        "open",
+        "close",
+        "save",
+        "load",
+        "send",
+        "publish",
     ];
 
     CLAUSE_STARTERS.contains(&first_word)
@@ -665,7 +716,10 @@ mod tests {
 
         assert_eq!(result.len(), 2);
         // First item contains "and then" but is treated as a single item
-        assert_eq!(result[0].prompt, "Research the topic and then read the file");
+        assert_eq!(
+            result[0].prompt,
+            "Research the topic and then read the file"
+        );
         assert_eq!(result[1].prompt, "Write a summary");
     }
 
