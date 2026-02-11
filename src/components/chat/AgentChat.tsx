@@ -324,7 +324,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           event.preventDefault();
           const selected = matches[commandPopupIndex()];
           if (selected) {
-            setInput(`/${selected.name} `);
+            if (event.key === "Tab" || selected.argHint) {
+              setInput(`/${selected.name} `);
+            } else {
+              executeSlashCommand(`/${selected.name}`);
+            }
             setCommandPopupIndex(0);
           }
           return;
