@@ -5,7 +5,7 @@ import { createStore } from "solid-js/store";
 import type { AgentType, SessionStatus } from "@/services/acp";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
-import { fileTreeState } from "@/stores/fileTree";
+import { fileTreeState, setRootPath } from "@/stores/fileTree";
 
 // ============================================================================
 // Types
@@ -222,6 +222,12 @@ export const threadStore = {
   selectThread(id: string, kind: "chat" | "agent") {
     setState({ activeThreadId: id, activeThreadKind: kind });
 
+    // If the thread has a projectRoot and no folder is open, open it
+    const thread = this.threads.find((t) => t.id === id);
+    if (thread?.projectRoot && !fileTreeState.rootPath) {
+      setRootPath(thread.projectRoot);
+    }
+
     if (kind === "chat") {
       conversationStore.setActiveConversation(id);
     } else {
@@ -231,6 +237,9 @@ export const threadStore = {
       );
       if (liveSession) {
         acpStore.setActiveSession(liveSession.info.id);
+      } else {
+        // No live session — clear active so AgentChat shows the start/resume UI
+        acpStore.setActiveSession(null);
       }
     }
   },
