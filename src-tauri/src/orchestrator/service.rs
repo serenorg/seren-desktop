@@ -204,6 +204,8 @@ async fn execute_single_task(
     // Track tried models for reroute
     let mut tried_models: Vec<String> = vec![routing.model_id.clone()];
     let mut reroute_count: usize = 0;
+    let mut same_model_retry_count: usize = 0;
+    const MAX_SAME_MODEL_RETRIES: usize = 1;
 
     // Wrap cancel_rx in Arc<Mutex> so it survives reroute iterations
     let cancel_rx = Arc::new(Mutex::new(Some(cancel_rx)));
@@ -338,18 +340,53 @@ async fn execute_single_task(
             }
         }
 
-        // Attempt reroute if we got a transient error
-        let should_reroute = !user_explicitly_selected
-            && reroute_count < router::MAX_REROUTE_ATTEMPTS
-            && reroutable_error
-                .as_ref()
-                .is_some_and(|msg| router::is_reroutable_error(msg));
+        // Check if we got a transient error eligible for retry/reroute
+        let is_transient = reroutable_error
+            .as_ref()
+            .is_some_and(|msg| router::is_reroutable_error(msg));
 
-        if !should_reroute {
+        if !is_transient {
             break;
         }
 
         let error_msg = reroutable_error.unwrap();
+
+        // When user explicitly selected a model, retry the same model once
+        // instead of rerouting to a different one.
+        if user_explicitly_selected {
+            if same_model_retry_count >= MAX_SAME_MODEL_RETRIES {
+                log::warn!(
+                    "[Orchestrator] Transient error on explicitly-selected model {} after {} retry, giving up: {}",
+                    routing.model_id,
+                    same_model_retry_count,
+                    error_msg,
+                );
+                break;
+            }
+
+            same_model_retry_count += 1;
+            log::info!(
+                "[Orchestrator] Retrying explicitly-selected model {} (attempt {}/{}): {}",
+                routing.model_id,
+                same_model_retry_count,
+                MAX_SAME_MODEL_RETRIES,
+                error_msg,
+            );
+
+            // Brief backoff before retry
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            continue;
+        }
+
+        // Auto-selected model: reroute to a different model
+        if reroute_count >= router::MAX_REROUTE_ATTEMPTS {
+            log::warn!(
+                "[Orchestrator] Giving up after {} reroute attempts",
+                reroute_count
+            );
+            break;
+        }
+
         let failed_model = routing.model_id.clone();
         log::info!(
             "[Orchestrator] Attempting reroute #{} after error on {}: {}",
