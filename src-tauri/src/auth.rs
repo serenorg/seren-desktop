@@ -75,8 +75,8 @@ pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, Stri
     // the refresh already happened — just return the new token.
     // (Callers should compare with their stale token if they want to skip.)
 
-    let refresh_token = get_refresh_token(app)?
-        .ok_or_else(|| "No refresh token available".to_string())?;
+    let refresh_token =
+        get_refresh_token(app)?.ok_or_else(|| "No refresh token available".to_string())?;
 
     let client = reqwest::Client::new();
     let response = client
@@ -94,10 +94,7 @@ pub async fn refresh_access_token(app: &tauri::AppHandle) -> Result<String, Stri
     }
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Token refresh failed: HTTP {}",
-            response.status()
-        ));
+        return Err(format!("Token refresh failed: HTTP {}", response.status()));
     }
 
     let body: serde_json::Value = response

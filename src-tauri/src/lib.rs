@@ -29,10 +29,10 @@ mod embedded_runtime;
 mod files;
 mod mcp;
 mod oauth;
-mod orchestrator;
 mod oauth_callback_server;
 #[cfg(feature = "openclaw")]
 mod openclaw;
+mod orchestrator;
 mod polymarket;
 mod sandbox;
 mod shell;

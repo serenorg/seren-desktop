@@ -156,11 +156,7 @@ pub async fn memory_recall(
         .as_deref()
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
 
-    match state
-        .client
-        .recall(&query, project_uuid, limit)
-        .await
-    {
+    match state.client.recall(&query, project_uuid, limit).await {
         Ok(results) => Ok(results
             .into_iter()
             .map(|r| RecallOutput {

@@ -330,7 +330,9 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
     let pid = child.id();
     log::info!(
         "[OpenClaw] Process spawned: pid={:?}, port={}, openclaw_mjs={:?}",
-        pid, port, openclaw_mjs
+        pid,
+        port,
+        openclaw_mjs
     );
 
     // Store process
@@ -574,7 +576,11 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
 
 /// Connect to OpenClaw's WebSocket gateway and forward events to the frontend.
 /// Retries connection with backoff since OpenClaw takes a few seconds to initialize.
-pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) -> tokio::task::JoinHandle<()> {
+pub fn spawn_ws_listener(
+    app: AppHandle,
+    port: u16,
+    hook_token: String,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let max_retries = 10;
         let mut attempt = 0;
@@ -612,7 +618,8 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) -> tokio
                     if attempt >= max_retries {
                         log::info!(
                             "[OpenClaw WS] Failed to connect after {} attempts: {}",
-                            max_retries, e
+                            max_retries,
+                            e
                         );
                         let _ = app.emit(
                             "openclaw://error",
@@ -624,7 +631,9 @@ pub fn spawn_ws_listener(app: AppHandle, port: u16, hook_token: String) -> tokio
                     }
                     log::info!(
                         "[OpenClaw WS] Connection attempt {}/{} failed: {}",
-                        attempt, max_retries, e
+                        attempt,
+                        max_retries,
+                        e
                     );
                 }
             }

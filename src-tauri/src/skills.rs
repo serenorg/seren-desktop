@@ -68,8 +68,8 @@ pub fn list_skill_dirs(skills_dir: String) -> Result<Vec<String>, String> {
         return Ok(vec![]);
     }
 
-    let entries = fs::read_dir(&dir_path)
-        .map_err(|e| format!("Failed to read skills directory: {}", e))?;
+    let entries =
+        fs::read_dir(&dir_path).map_err(|e| format!("Failed to read skills directory: {}", e))?;
 
     let mut slugs = Vec::new();
     for entry in entries.flatten() {
@@ -100,8 +100,7 @@ pub fn install_skill(skills_dir: String, slug: String, content: String) -> Resul
         .map_err(|e| format!("Failed to create skill directory: {}", e))?;
 
     // Write SKILL.md content
-    fs::write(&skill_file, content)
-        .map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
+    fs::write(&skill_file, content).map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
 
     Ok(skill_file.to_string_lossy().to_string())
 }
@@ -132,8 +131,8 @@ pub fn read_skill_content(skills_dir: String, slug: String) -> Result<Option<Str
         return Ok(None);
     }
 
-    let content = fs::read_to_string(&skill_file)
-        .map_err(|e| format!("Failed to read SKILL.md: {}", e))?;
+    let content =
+        fs::read_to_string(&skill_file).map_err(|e| format!("Failed to read SKILL.md: {}", e))?;
 
     Ok(Some(content))
 }

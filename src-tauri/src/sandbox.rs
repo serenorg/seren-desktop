@@ -300,10 +300,7 @@ mod tests {
                 PathBuf::from("/tmp"),
                 gnupg.clone(),
             ],
-            sensitive_read_paths: vec![
-                private_keys_dir.clone(),
-                revocs_dir.clone(),
-            ],
+            sensitive_read_paths: vec![private_keys_dir.clone(), revocs_dir.clone()],
             network_allowed: false,
             allowed_socket_paths: vec![gnupg.clone()],
         };
@@ -341,13 +338,28 @@ mod tests {
         let config = SandboxConfig::from_mode(SandboxMode::WorkspaceWrite, Path::new("/workspace"));
         let home = dirs_home(Path::new("/workspace"));
 
-        let has_broad = config.sensitive_read_paths.iter().any(|p| *p == home.join(".gnupg"));
-        assert!(!has_broad, "sensitive_read_paths should not contain broad ~/.gnupg");
+        let has_broad = config
+            .sensitive_read_paths
+            .iter()
+            .any(|p| *p == home.join(".gnupg"));
+        assert!(
+            !has_broad,
+            "sensitive_read_paths should not contain broad ~/.gnupg"
+        );
 
-        let has_private = config.sensitive_read_paths.iter().any(|p| *p == home.join(".gnupg/private-keys-v1.d"));
-        assert!(has_private, "sensitive_read_paths should contain ~/.gnupg/private-keys-v1.d");
+        let has_private = config
+            .sensitive_read_paths
+            .iter()
+            .any(|p| *p == home.join(".gnupg/private-keys-v1.d"));
+        assert!(
+            has_private,
+            "sensitive_read_paths should contain ~/.gnupg/private-keys-v1.d"
+        );
 
-        let has_socket = config.allowed_socket_paths.iter().any(|p| *p == home.join(".gnupg"));
+        let has_socket = config
+            .allowed_socket_paths
+            .iter()
+            .any(|p| *p == home.join(".gnupg"));
         assert!(has_socket, "allowed_socket_paths should contain ~/.gnupg");
     }
 
