@@ -919,8 +919,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 panel="chat"
                 selectedIndex={commandPopupIndex()}
                 onSelect={(cmd) => {
-                  setInput(`/${cmd.name} `);
-                  inputRef?.focus();
+                  if (cmd.argHint) {
+                    setInput(`/${cmd.name} `);
+                    inputRef?.focus();
+                  } else {
+                    executeSlashCommand(`/${cmd.name}`);
+                  }
                   setCommandPopupIndex(0);
                 }}
               />

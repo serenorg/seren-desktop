@@ -350,35 +350,21 @@ const PlatformPicker: Component<{
 };
 
 // ============================================================================
-// QR Code Flow (WhatsApp)
+// Terminal Login Flow (WhatsApp and other QR-based platforms)
 // ============================================================================
 
 const QrCodeFlow: Component<{
   platform: PlatformDef;
   onConnected: () => void;
 }> = (props) => {
-  const [qrData, setQrData] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);
-  const [loading, setLoading] = createSignal(true);
-  const [polling, setPolling] = createSignal(true);
+  const [launched, setLaunched] = createSignal(false);
+  const [launching, setLaunching] = createSignal(false);
 
   let pollInterval: ReturnType<typeof setInterval> | undefined;
 
-  const fetchQr = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const qr = await openclawStore.getQrCode(props.platform.id);
-      setQrData(qr);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const startPolling = () => {
-    // Poll for channel connection status
+    if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(async () => {
       try {
         await openclawStore.refreshChannels();
@@ -386,7 +372,6 @@ const QrCodeFlow: Component<{
           (c) => c.platform === props.platform.id && c.status === "connected",
         );
         if (connected) {
-          setPolling(false);
           clearInterval(pollInterval);
           props.onConnected();
         }
@@ -396,10 +381,19 @@ const QrCodeFlow: Component<{
     }, 3000);
   };
 
-  // Fetch QR code and start polling on mount
-  fetchQr().then(() => {
-    if (!error()) startPolling();
-  });
+  const handleLaunch = async () => {
+    setLaunching(true);
+    setError(null);
+    try {
+      await openclawStore.launchChannelLogin(props.platform.id);
+      setLaunched(true);
+      startPolling();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLaunching(false);
+    }
+  };
 
   onCleanup(() => {
     if (pollInterval) clearInterval(pollInterval);
@@ -408,7 +402,9 @@ const QrCodeFlow: Component<{
   return (
     <div class="flex flex-col items-center gap-4">
       <p class="m-0 text-[0.9rem] text-muted-foreground text-center">
-        Scan this QR code with your {props.platform.name} app to connect.
+        {props.platform.name} requires an interactive login session. A terminal
+        window will open where you can scan the QR code with your{" "}
+        {props.platform.name} app.
       </p>
 
       <Show when={error()}>
@@ -417,37 +413,31 @@ const QrCodeFlow: Component<{
         </div>
       </Show>
 
-      <Show when={loading()}>
-        <div class="w-[240px] h-[240px] flex items-center justify-center bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg">
-          <span class="text-muted-foreground text-[0.9rem]">
-            Loading QR code...
-          </span>
+      <Show when={launched()}>
+        <div class="px-4 py-3 bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.3)] rounded-lg text-[0.85rem] text-[#4ade80] w-full text-center">
+          Terminal opened — scan the QR code there, then this window will update
+          automatically.
         </div>
-      </Show>
-
-      <Show when={!loading() && qrData()}>
-        <div class="p-4 bg-white rounded-lg">
-          <img
-            src={qrData() ?? ""}
-            alt={`${props.platform.name} QR code`}
-            class="w-[200px] h-[200px]"
-          />
-        </div>
-      </Show>
-
-      <Show when={polling() && !loading()}>
-        <p class="m-0 text-[0.8rem] text-muted-foreground">
-          Waiting for scan...
-        </p>
       </Show>
 
       <button
         type="button"
-        class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-[0.85rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
-        onClick={fetchQr}
+        class="px-4 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+        onClick={handleLaunch}
+        disabled={launching()}
       >
-        Refresh QR Code
+        {launching()
+          ? "Opening Terminal..."
+          : launched()
+            ? "Relaunch Terminal Login"
+            : "Launch Terminal Login"}
       </button>
+
+      <Show when={launched()}>
+        <p class="m-0 text-[0.8rem] text-muted-foreground animate-pulse">
+          Waiting for connection...
+        </p>
+      </Show>
     </div>
   );
 };

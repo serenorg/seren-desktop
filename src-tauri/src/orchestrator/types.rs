@@ -118,11 +118,19 @@ pub struct ImageAttachment {
 pub struct UserCapabilities {
     pub has_acp_agent: bool,
     pub agent_type: Option<String>,
+    /// The active ACP session ID, if one exists. Enables the ACP fast-path
+    /// to skip classification/decomposition when routing to the agent.
+    #[serde(default)]
+    pub active_acp_session_id: Option<String>,
     /// The model the user explicitly selected in the UI.
     #[serde(default)]
     pub selected_model: Option<String>,
     pub available_models: Vec<String>,
     pub available_tools: Vec<String>,
+    /// Full OpenAI-format tool definitions from the frontend.
+    /// ChatModelWorker passes these to the LLM for function calling.
+    #[serde(default)]
+    pub tool_definitions: Vec<serde_json::Value>,
     pub installed_skills: Vec<SkillRef>,
     /// Pre-computed model rankings from Thompson sampling.
     /// Empty means no data; router falls back to hardcoded preference lists.
@@ -390,7 +398,8 @@ mod tests {
         assert_eq!(caps.available_tools.len(), 2);
         assert_eq!(caps.installed_skills.len(), 1);
         assert_eq!(caps.installed_skills[0].slug, "prose");
-        // model_rankings defaults to empty when not in JSON (frontend compat)
+        // Optional fields default when not in JSON (frontend compat)
+        assert!(caps.active_acp_session_id.is_none());
         assert!(caps.model_rankings.is_empty());
     }
 }
