@@ -350,6 +350,10 @@ export const openclawStore = {
     return invoke<string>("openclaw_get_qr", { platform });
   },
 
+  async launchChannelLogin(platform: string) {
+    return invoke("openclaw_launch_channel_login", { platform });
+  },
+
   async disconnectChannel(channelId: string) {
     await invoke("openclaw_disconnect_channel", { channelId });
     // Remove from local state

@@ -1133,9 +1133,73 @@ async fn request_channel_connect(
 /// is not yet supported through the Seren UI.
 async fn request_qr_code(_port: u16, _hook_token: &str, platform: &str) -> Result<String, String> {
     Err(format!(
-        "QR-based login for {} is not yet supported. Use the openclaw CLI: openclaw channels login --channel {}",
-        platform, platform
+        "QR-based login for {} is not yet supported. Use the \"Launch Terminal Login\" button to authenticate in a terminal window.",
+        platform
     ))
+}
+
+/// Open a native terminal running `openclaw channels login --channel <platform>`.
+/// Follows the same pattern as `launch_claude_login()` / `launch_codex_login()` in acp.rs.
+fn launch_channel_login(platform: &str) -> Result<(), String> {
+    let openclaw_mjs = find_openclaw_mjs()?;
+    let openclaw_path = openclaw_mjs.to_string_lossy().to_string();
+
+    // Build the command with embedded PATH so `node` is found
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    let shell_cmd = if embedded_path.is_empty() {
+        format!("node '{}' channels login --channel {}", openclaw_path, platform)
+    } else {
+        format!(
+            "export PATH='{}'; node '{}' channels login --channel {}",
+            embedded_path, openclaw_path, platform
+        )
+    };
+
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    r#"tell application "Terminal"
+activate
+do script "{}"
+end tell"#,
+                    shell_cmd.replace('\\', "\\\\").replace('"', "\\\"")
+                ),
+            ])
+            .spawn()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "cmd", "/k", &shell_cmd])
+            .spawn()
+    } else {
+        std::process::Command::new("x-terminal-emulator")
+            .args(["-e", &format!("bash -c '{}'", shell_cmd)])
+            .spawn()
+    };
+
+    match result {
+        Ok(_) => {
+            log::info!(
+                "[OpenClaw] Launched channel login terminal for {}",
+                platform
+            );
+            Ok(())
+        }
+        Err(e) => {
+            log::warn!(
+                "[OpenClaw] Failed to launch channel login terminal: {}",
+                e
+            );
+            Err(format!("Failed to open terminal: {}", e))
+        }
+    }
+}
+
+/// Launch a terminal for interactive channel login (e.g. WhatsApp QR scan).
+#[tauri::command]
+pub fn openclaw_launch_channel_login(platform: String) -> Result<(), String> {
+    launch_channel_login(&platform)
 }
 
 /// Connect a messaging channel (Tauri command)
