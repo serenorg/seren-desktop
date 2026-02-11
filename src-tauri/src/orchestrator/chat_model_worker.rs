@@ -53,6 +53,7 @@ struct ParseResult {
 
 /// Outcome of streaming an API response.
 #[derive(Debug)]
+#[allow(dead_code)]
 enum StreamOutcome {
     /// Model finished naturally (finish_reason: "stop" or stream ended).
     Complete {
@@ -85,12 +86,11 @@ pub struct ChatModelWorker {
 impl ChatModelWorker {
     #[cfg(test)]
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            client,
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(30))
+                .build()
+                .unwrap_or_default(),
             cancelled: Arc::new(Mutex::new(false)),
             tool_definitions: Vec::new(),
         }
@@ -578,6 +578,32 @@ impl ChatModelWorker {
                 }) {
                     log::info!("[ChatModelWorker] Gateway reported cost: {}", wrapper_cost);
                     accumulated_cost += wrapper_cost;
+                }
+
+                // Check wrapper status for errors before processing body
+                if let Some(status) = wrapper.get("status").and_then(|s| s.as_u64()) {
+                    if status >= 400 {
+                        let error_msg = wrapper
+                            .pointer("/body/error/message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Gateway API error");
+                        log::error!(
+                            "[ChatModelWorker] Non-streaming wrapper error: HTTP {} — {}",
+                            status,
+                            error_msg
+                        );
+                        event_tx
+                            .send(WorkerEvent::Error {
+                                message: format!("HTTP {}: {}", status, error_msg),
+                            })
+                            .await
+                            .map_err(|e| format!("Failed to send error event: {}", e))?;
+                        return Ok(StreamOutcome::Complete {
+                            final_content: String::new(),
+                            thinking: None,
+                            cost: accumulated_cost,
+                        });
+                    }
                 }
 
                 if let Some(body_str) = wrapper.get("body").and_then(|b| b.as_str()) {
