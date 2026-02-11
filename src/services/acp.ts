@@ -492,6 +492,14 @@ export async function subscribeToSession(
     ),
   );
   unlisteners.push(
+    await subscribeToEvent<DiffProposalEvent>(
+      "diffProposal",
+      createHandler<{ type: "diffProposal"; data: DiffProposalEvent }>(
+        "diffProposal",
+      ),
+    ),
+  );
+  unlisteners.push(
     await subscribeToEvent<SessionStatusEvent>(
       "sessionStatus",
       createHandler<{ type: "sessionStatus"; data: SessionStatusEvent }>(
@@ -502,9 +510,10 @@ export async function subscribeToSession(
   unlisteners.push(
     await subscribeToEvent<ConfigOptionsUpdateEvent>(
       "configOptionsUpdate",
-      createHandler<{ type: "configOptionsUpdate"; data: ConfigOptionsUpdateEvent }>(
-        "configOptionsUpdate",
-      ),
+      createHandler<{
+        type: "configOptionsUpdate";
+        data: ConfigOptionsUpdateEvent;
+      }>("configOptionsUpdate"),
     ),
   );
   unlisteners.push(
@@ -578,8 +587,9 @@ export async function subscribeToAllEvents(
     ),
   );
   unlisteners.push(
-    await subscribeToEvent<ConfigOptionsUpdateEvent>("configOptionsUpdate", (data) =>
-      callback({ type: "configOptionsUpdate", data }),
+    await subscribeToEvent<ConfigOptionsUpdateEvent>(
+      "configOptionsUpdate",
+      (data) => callback({ type: "configOptionsUpdate", data }),
     ),
   );
   unlisteners.push(
