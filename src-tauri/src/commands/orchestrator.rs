@@ -5,6 +5,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::orchestrator::eval::EvalState;
 use crate::orchestrator::service::OrchestratorState;
+use crate::orchestrator::tool_bridge::ToolResultBridge;
 use crate::orchestrator::types::{ImageAttachment, UserCapabilities};
 use crate::services::database::init_db;
 
@@ -41,6 +42,27 @@ pub async fn cancel_orchestration(
     conversation_id: String,
 ) -> Result<(), String> {
     crate::orchestrator::service::cancel(&state, &conversation_id).await
+}
+
+/// Submit a tool execution result from the frontend back to the waiting ChatModelWorker.
+///
+/// Called by the frontend after executing a non-local tool (gateway, MCP, OpenClaw).
+/// The ChatModelWorker is blocked waiting on the bridge for this result.
+#[tauri::command]
+pub async fn submit_tool_result(
+    bridge: State<'_, ToolResultBridge>,
+    tool_call_id: String,
+    content: String,
+    is_error: bool,
+) -> Result<(), String> {
+    let found = bridge.submit(&tool_call_id, content, is_error).await;
+    if !found {
+        log::warn!(
+            "[submit_tool_result] No pending request for tool_call_id: {}",
+            tool_call_id
+        );
+    }
+    Ok(())
 }
 
 /// Submit an eval satisfaction signal for a message.

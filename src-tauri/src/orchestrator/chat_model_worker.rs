@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::{Emitter, Manager};
 use tokio::sync::{Mutex, mpsc};
 
+use super::tool_bridge::ToolResultBridge;
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
 
@@ -21,6 +23,9 @@ const MAX_TOOL_ROUNDS: usize = 10;
 
 /// Connect timeout for the HTTP client (seconds).
 const CONNECT_TIMEOUT_SECS: u64 = 30;
+
+/// Timeout for waiting on frontend tool execution (5 minutes).
+const TOOL_EXECUTION_TIMEOUT_SECS: u64 = 300;
 
 // =============================================================================
 // Types for SSE Parsing and Tool Execution
@@ -675,7 +680,22 @@ impl ChatModelWorker {
     // Tool Execution
     // =========================================================================
 
-    /// Execute a tool by name with the given arguments.
+    /// Check if a tool name refers to a locally-executable tool.
+    /// Non-local tools (gateway__, mcp__, openclaw__) are routed to the frontend.
+    fn is_local_tool(name: &str) -> bool {
+        matches!(
+            name,
+            "read_file"
+                | "write_file"
+                | "list_directory"
+                | "path_exists"
+                | "create_directory"
+                | "seren_web_fetch"
+                | "execute_command"
+        )
+    }
+
+    /// Execute a local tool by name with the given arguments.
     /// Returns (result_content, is_error).
     async fn execute_tool(name: &str, arguments: &str) -> (String, bool) {
         let args: serde_json::Value = match serde_json::from_str(arguments) {
@@ -785,6 +805,74 @@ impl ChatModelWorker {
                 format!("Tool '{}' is not available in chat mode", name),
                 true,
             ),
+        }
+    }
+
+    /// Route a non-local tool call to the frontend for execution via the tool bridge.
+    ///
+    /// Emits an `orchestrator://tool-request` event, then waits for the frontend to
+    /// call `submit_tool_result` with the result. Times out after 5 minutes.
+    async fn execute_frontend_tool(
+        app: &tauri::AppHandle,
+        tool_call_id: &str,
+        name: &str,
+        arguments: &str,
+    ) -> (String, bool) {
+        log::info!(
+            "[ChatModelWorker] Routing to frontend: {} (id: {})",
+            name,
+            tool_call_id
+        );
+
+        let bridge = app.state::<ToolResultBridge>();
+        let rx = bridge.register(tool_call_id).await;
+
+        // Emit a tool execution request to the frontend
+        let payload = serde_json::json!({
+            "tool_call_id": tool_call_id,
+            "name": name,
+            "arguments": arguments,
+        });
+        if let Err(e) = app.emit("orchestrator://tool-request", &payload) {
+            log::error!(
+                "[ChatModelWorker] Failed to emit tool-request: {}",
+                e
+            );
+            return (format!("Failed to request tool execution: {}", e), true);
+        }
+
+        // Wait for the frontend to submit the result
+        match tokio::time::timeout(Duration::from_secs(TOOL_EXECUTION_TIMEOUT_SECS), rx).await {
+            Ok(Ok(result)) => {
+                log::info!(
+                    "[ChatModelWorker] Frontend tool result for {}: is_error={}, len={}",
+                    name,
+                    result.is_error,
+                    result.content.len()
+                );
+                (result.content, result.is_error)
+            }
+            Ok(Err(_)) => {
+                // Sender was dropped (bridge cleaned up or cancelled)
+                log::warn!(
+                    "[ChatModelWorker] Tool result channel closed for {}",
+                    name
+                );
+                ("Tool execution was cancelled".to_string(), true)
+            }
+            Err(_) => {
+                log::error!(
+                    "[ChatModelWorker] Timeout waiting for frontend to execute {}",
+                    name
+                );
+                (
+                    format!(
+                        "Tool '{}' timed out waiting for execution ({}s)",
+                        name, TOOL_EXECUTION_TIMEOUT_SECS
+                    ),
+                    true,
+                )
+            }
         }
     }
 }
@@ -984,8 +1072,15 @@ impl Worker for ChatModelWorker {
                             tc.name,
                             tc.id
                         );
-                        let (result_content, is_error) =
-                            Self::execute_tool(&tc.name, &tc.arguments).await;
+
+                        let (result_content, is_error) = if Self::is_local_tool(&tc.name) {
+                            Self::execute_tool(&tc.name, &tc.arguments).await
+                        } else {
+                            // Route non-local tools (gateway__, mcp__, openclaw__)
+                            // to the frontend for execution via the tool bridge.
+                            Self::execute_frontend_tool(app, &tc.id, &tc.name, &tc.arguments)
+                                .await
+                        };
 
                         // Emit ToolResult event to frontend
                         let _ = event_tx
