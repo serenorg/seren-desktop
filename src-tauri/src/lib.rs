@@ -439,7 +439,7 @@ pub fn run() {
                     Target::new(TargetKind::Webview),
                 ])
                 .max_file_size(5_000_000) // 5 MB per log file
-                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .level(if cfg!(debug_assertions) {
                     log::LevelFilter::Debug
                 } else {
