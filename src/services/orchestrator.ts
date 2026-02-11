@@ -521,7 +521,9 @@ function buildCapabilities(): UserCapabilities {
   return {
     has_acp_agent: acpStore.availableAgents.length > 0,
     agent_type: acpStore.selectedAgentType ?? null,
-    active_acp_session_id: acpStore.activeSessionId ?? null,
+    active_acp_session_id: acpStore.agentModeEnabled
+      ? (acpStore.activeSessionId ?? null)
+      : null,
     selected_model:
       providerStore.activeModel === AUTO_MODEL_ID
         ? null

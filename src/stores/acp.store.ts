@@ -13,8 +13,9 @@ const sessionReadyPromises = new Map<
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
+  isPromptTooLongError,
   isRateLimitError,
-  performRateLimitFallback,
+  performAgentFallback,
 } from "@/lib/rate-limit-fallback";
 import {
   createAgentConversation,
@@ -111,6 +112,8 @@ export interface ActiveSession {
   title?: string;
   /** Set when the agent hits a rate limit — triggers the fallback-to-chat prompt. */
   rateLimitHit?: boolean;
+  /** Set when the agent's context window is full — triggers the fallback-to-chat prompt. */
+  promptTooLong?: boolean;
 }
 
 interface AcpState {
@@ -1258,17 +1261,42 @@ export const acpStore = {
   },
 
   /**
-   * Dismiss the rate-limit prompt without switching to Chat.
+   * Whether the active session's context window is full (triggers chat fallback prompt).
+   */
+  get promptTooLong(): boolean {
+    const session = this.activeSession;
+    return session?.promptTooLong === true;
+  },
+
+  /**
+   * Whether any agent-level fallback banner should be shown (rate limit OR context full).
+   */
+  get agentFallbackNeeded(): boolean {
+    return this.rateLimitHit || this.promptTooLong;
+  },
+
+  /**
+   * The reason for the current fallback prompt, if any.
+   */
+  get agentFallbackReason(): "rate_limit" | "prompt_too_long" | null {
+    if (this.promptTooLong) return "prompt_too_long";
+    if (this.rateLimitHit) return "rate_limit";
+    return null;
+  },
+
+  /**
+   * Dismiss the fallback prompt without switching to Chat.
    */
   dismissRateLimitPrompt() {
     const sessionId = state.activeSessionId;
     if (sessionId) {
       setState("sessions", sessionId, "rateLimitHit", false);
+      setState("sessions", sessionId, "promptTooLong", false);
     }
   },
 
   /**
-   * Accept the rate-limit prompt: switch agent history to a Chat conversation.
+   * Accept the fallback prompt: switch agent history to a Chat conversation.
    */
   async acceptRateLimitFallback(): Promise<string | null> {
     const session = this.activeSession;
@@ -1278,14 +1306,22 @@ export const acpStore = {
     const messages = [...session.messages];
     const agentModelId = session.currentModelId;
     const title = session.title;
+    const reason = this.agentFallbackReason ?? "rate_limit";
 
-    // Clear the flag first so the banner disappears immediately
+    // Clear the flags first so the banner disappears immediately
     const sessionId = state.activeSessionId;
     if (sessionId) {
       setState("sessions", sessionId, "rateLimitHit", false);
+      setState("sessions", sessionId, "promptTooLong", false);
     }
 
-    return performRateLimitFallback(agentType, messages, agentModelId, title);
+    return performAgentFallback(
+      agentType,
+      messages,
+      agentModelId,
+      title,
+      reason,
+    );
   },
 
   /**
@@ -1413,6 +1449,14 @@ export const acpStore = {
           console.info(
             "[AcpStore] Skipping error message for unresponsive agent — sendPrompt handles recovery",
           );
+        } else if (isPromptTooLongError(String(event.data.error))) {
+          // Context window full — flag the session so the UI shows the
+          // "Continue in Chat" prompt instead of a generic error banner.
+          console.info(
+            "[AcpStore] Prompt too long detected, flagging session for chat fallback",
+          );
+          setState("sessions", sessionId, "promptTooLong", true);
+          this.addErrorMessage(sessionId, event.data.error);
         } else if (isRateLimitError(String(event.data.error))) {
           // Rate limit detected — flag the session so the UI shows the
           // "Continue in Chat" prompt instead of a generic error banner.
@@ -1834,6 +1878,15 @@ export const acpStore = {
       // to avoid false positives when the agent discusses auth topics in normal output.
       if (isLikelyAuthError(session.streamingContent)) {
         setState("sessions", sessionId, "error", session.streamingContent);
+      }
+
+      // If the agent's response is a prompt-too-long error (context window full),
+      // flag the session so the UI shows the "Continue in Chat" fallback banner.
+      if (isPromptTooLongError(session.streamingContent)) {
+        console.info(
+          "[AcpStore] Prompt too long detected in streamed content, flagging session for chat fallback",
+        );
+        setState("sessions", sessionId, "promptTooLong", true);
       }
 
       setState("sessions", sessionId, "streamingContent", "");
