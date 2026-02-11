@@ -650,7 +650,7 @@ async fn execute_multi_task(
                 .map_err(|e| format!("Failed to emit transition: {}", e))?;
 
             // Spawn worker
-            let worker = create_worker(&routing, app, &capabilities);
+            let worker = create_worker(&routing, app, capabilities);
             let subtask_prompt = subtask.prompt.clone();
             let subtask_id = subtask.id.clone();
             let worker_routing = routing.clone();

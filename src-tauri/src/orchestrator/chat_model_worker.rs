@@ -19,6 +19,9 @@ const PUBLISHER_SLUG: &str = "seren-models";
 /// Maximum number of tool execution rounds before forcing completion.
 const MAX_TOOL_ROUNDS: usize = 10;
 
+/// Connect timeout for the HTTP client (seconds).
+const CONNECT_TIMEOUT_SECS: u64 = 30;
+
 // =============================================================================
 // Types for SSE Parsing and Tool Execution
 // =============================================================================
@@ -81,7 +84,7 @@ pub struct ChatModelWorker {
 }
 
 impl ChatModelWorker {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::builder()
@@ -95,11 +98,12 @@ impl ChatModelWorker {
 
     /// Create a worker with tool definitions for function calling.
     pub fn with_tools(tools: Vec<serde_json::Value>) -> Self {
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            client,
             cancelled: Arc::new(Mutex::new(false)),
             tool_definitions: tools,
         }
