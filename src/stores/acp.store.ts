@@ -74,6 +74,16 @@ export interface ActiveSession {
   pendingToolCalls: Map<string, ToolCallEvent>;
   streamingContent: string;
   streamingThinking: string;
+  /** Timestamp for current streaming assistant chunk buffer (ms epoch). */
+  streamingContentTimestamp?: number;
+  /** Timestamp for current streaming thinking chunk buffer (ms epoch). */
+  streamingThinkingTimestamp?: number;
+  /** Buffered replay user text that may arrive as multiple chunks. */
+  pendingUserMessage: string;
+  /** Stable replay user message id for chunk aggregation. */
+  pendingUserMessageId?: string;
+  /** Timestamp for buffered replay user message (ms epoch). */
+  pendingUserMessageTimestamp?: number;
   cwd: string;
   /** Local persisted conversation id (SQLite). */
   conversationId: string;
@@ -562,6 +572,7 @@ export const acpStore = {
         pendingToolCalls: new Map(),
         streamingContent: "",
         streamingThinking: "",
+        pendingUserMessage: "",
         cwd,
         conversationId: info.id,
       };
@@ -888,7 +899,12 @@ export const acpStore = {
       userMessage,
     ]);
     setState("sessions", sessionId, "streamingContent", "");
+    setState("sessions", sessionId, "streamingContentTimestamp", undefined);
     setState("sessions", sessionId, "streamingThinking", "");
+    setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
+    setState("sessions", sessionId, "pendingUserMessage", "");
+    setState("sessions", sessionId, "pendingUserMessageId", undefined);
+    setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
 
     // Derive tab title from the first user prompt
     if (!state.sessions[sessionId]?.title) {
@@ -1245,12 +1261,20 @@ export const acpStore = {
 
   handleSessionEvent(sessionId: string, event: AcpEvent) {
     console.log("[AcpStore] handleSessionEvent:", event.type, sessionId);
+
+    // User replay messages can arrive as multiple chunks; flush buffered user
+    // text when the stream transitions to a non-user event.
+    if (event.type !== "userMessage") {
+      this.flushPendingUserMessage(sessionId);
+    }
+
     switch (event.type) {
       case "messageChunk":
         this.handleMessageChunk(
           sessionId,
           event.data.text,
           event.data.isThought,
+          event.data.timestamp,
         );
         break;
 
@@ -1276,26 +1300,24 @@ export const acpStore = {
         setState("sessions", sessionId, "plan", event.data.entries);
         break;
 
-      case "userMessage": {
-        // User message replayed from history — flush any pending assistant
-        // content first so messages appear in correct chronological order.
-        this.finalizeStreamingContent(sessionId);
-        const userMsg: AgentMessage = {
-          id: crypto.randomUUID(),
-          type: "user",
-          content: event.data.text,
-          timestamp: Date.now(),
-        };
-        setState("sessions", sessionId, "messages", (msgs) => [
-          ...msgs,
-          userMsg,
-        ]);
+      case "userMessage":
+        this.appendReplayUserChunk(
+          sessionId,
+          event.data.text,
+          event.data.messageId,
+          event.data.timestamp,
+        );
         break;
-      }
 
-      case "promptComplete":
+      case "promptComplete": {
+        const isHistoryReplay =
+          event.data.historyReplay === true ||
+          event.data.stopReason === "HistoryReplay";
+        this.flushPendingUserMessage(sessionId);
         this.finalizeStreamingContent(sessionId);
-        this.markPendingToolCallsComplete(sessionId);
+        if (!isHistoryReplay) {
+          this.markPendingToolCallsComplete(sessionId);
+        }
         // Transition status back to "ready" so queued messages can be processed
         setState(
           "sessions",
@@ -1305,6 +1327,7 @@ export const acpStore = {
           "ready" as SessionStatus,
         );
         break;
+      }
 
       case "configOptionsUpdate":
         setState(
@@ -1320,6 +1343,7 @@ export const acpStore = {
 
       case "error":
         // Clean up any in-flight streaming and tool cards
+        this.flushPendingUserMessage(sessionId);
         this.finalizeStreamingContent(sessionId);
         this.markPendingToolCallsComplete(sessionId);
 
@@ -1353,7 +1377,14 @@ export const acpStore = {
         const permEvent =
           event.data as import("@/services/acp").PermissionRequestEvent;
         console.info(
-          `[AcpStore] Permission request received: requestId=${permEvent.requestId}, session=${permEvent.sessionId}, tool=${JSON.stringify((permEvent.toolCall as Record<string, unknown>)?.name ?? "unknown")}`,
+          "[AcpStore] Permission request received: requestId=" +
+            permEvent.requestId +
+            ", session=" +
+            permEvent.sessionId +
+            ", tool=" +
+            JSON.stringify(
+              (permEvent.toolCall as Record<string, unknown>)?.name ?? "unknown",
+            ),
         );
         setState("pendingPermissions", [
           ...state.pendingPermissions,
@@ -1373,14 +1404,83 @@ export const acpStore = {
     }
   },
 
-  handleMessageChunk(sessionId: string, text: string, isThought?: boolean) {
+  flushPendingUserMessage(sessionId: string) {
+    const session = state.sessions[sessionId];
+    if (!session || !session.pendingUserMessage) return;
+
+    const userMsg: AgentMessage = {
+      id: crypto.randomUUID(),
+      type: "user",
+      content: session.pendingUserMessage,
+      timestamp: session.pendingUserMessageTimestamp ?? Date.now(),
+    };
+    setState("sessions", sessionId, "messages", (msgs) => [...msgs, userMsg]);
+    setState("sessions", sessionId, "pendingUserMessage", "");
+    setState("sessions", sessionId, "pendingUserMessageId", undefined);
+    setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
+  },
+
+  appendReplayUserChunk(
+    sessionId: string,
+    text: string,
+    messageId?: string,
+    timestamp?: number,
+  ) {
+    const session = state.sessions[sessionId];
+    if (!session) return;
+
+    // Keep assistant/thought replay chunks and user chunks in strict order.
+    this.finalizeStreamingContent(sessionId);
+
+    const incomingMessageId = messageId?.trim() || undefined;
+    if (
+      session.pendingUserMessage &&
+      incomingMessageId &&
+      session.pendingUserMessageId &&
+      session.pendingUserMessageId !== incomingMessageId
+    ) {
+      this.flushPendingUserMessage(sessionId);
+    }
+
+    setState("sessions", sessionId, "pendingUserMessage", (current) => current + text);
+
+    if (!session.pendingUserMessageId && incomingMessageId) {
+      setState("sessions", sessionId, "pendingUserMessageId", incomingMessageId);
+    }
+    if (session.pendingUserMessageTimestamp === undefined) {
+      setState(
+        "sessions",
+        sessionId,
+        "pendingUserMessageTimestamp",
+        timestamp ?? Date.now(),
+      );
+    }
+  },
+
+  handleMessageChunk(
+    sessionId: string,
+    text: string,
+    isThought?: boolean,
+    timestamp?: number,
+  ) {
     console.log("[AcpStore] handleMessageChunk:", {
       sessionId,
-      text: `${text.slice(0, 50)}...`,
+      text: text.slice(0, 50) + "...",
       isThought,
     });
 
+    const session = state.sessions[sessionId];
+    if (!session) return;
+
     if (isThought) {
+      if (!session.streamingThinking) {
+        setState(
+          "sessions",
+          sessionId,
+          "streamingThinkingTimestamp",
+          timestamp ?? Date.now(),
+        );
+      }
       // Append to streaming thinking content
       setState(
         "sessions",
@@ -1389,6 +1489,14 @@ export const acpStore = {
         (current) => current + text,
       );
     } else {
+      if (!session.streamingContent) {
+        setState(
+          "sessions",
+          sessionId,
+          "streamingContentTimestamp",
+          timestamp ?? Date.now(),
+        );
+      }
       // Append to streaming assistant content
       setState(
         "sessions",
@@ -1410,26 +1518,28 @@ export const acpStore = {
         id: crypto.randomUUID(),
         type: "thought",
         content: session.streamingThinking,
-        timestamp: Date.now(),
+        timestamp: session.streamingThinkingTimestamp ?? Date.now(),
       };
       setState("sessions", sessionId, "messages", (msgs) => [
         ...msgs,
         thinkingMsg,
       ]);
       setState("sessions", sessionId, "streamingThinking", "");
+      setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     }
     if (session.streamingContent) {
       const contentMsg: AgentMessage = {
         id: crypto.randomUUID(),
         type: "assistant",
         content: session.streamingContent,
-        timestamp: Date.now(),
+        timestamp: session.streamingContentTimestamp ?? Date.now(),
       };
       setState("sessions", sessionId, "messages", (msgs) => [
         ...msgs,
         contentMsg,
       ]);
       setState("sessions", sessionId, "streamingContent", "");
+      setState("sessions", sessionId, "streamingContentTimestamp", undefined);
     }
 
     // Skip duplicate if a message with this toolCallId already exists
@@ -1629,13 +1739,14 @@ export const acpStore = {
         id: crypto.randomUUID(),
         type: "thought",
         content: session.streamingThinking,
-        timestamp: Date.now(),
+        timestamp: session.streamingThinkingTimestamp ?? Date.now(),
       };
       setState("sessions", sessionId, "messages", (msgs) => [
         ...msgs,
         thinkingMessage,
       ]);
       setState("sessions", sessionId, "streamingThinking", "");
+      setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     }
 
     // Finalize assistant content if any
@@ -1649,7 +1760,7 @@ export const acpStore = {
         id: crypto.randomUUID(),
         type: "assistant",
         content: session.streamingContent,
-        timestamp: Date.now(),
+        timestamp: session.streamingContentTimestamp ?? Date.now(),
         duration,
       };
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
@@ -1662,6 +1773,7 @@ export const acpStore = {
       }
 
       setState("sessions", sessionId, "streamingContent", "");
+      setState("sessions", sessionId, "streamingContentTimestamp", undefined);
       // Clear the start time
       setState("sessions", sessionId, "promptStartTime", undefined);
     }

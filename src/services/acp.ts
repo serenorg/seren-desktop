@@ -54,6 +54,12 @@ export interface MessageChunkEvent {
   sessionId: string;
   text: string;
   isThought?: boolean;
+  /** Stable message id for replay chunks, when provided by the sidecar. */
+  messageId?: string;
+  /** Source message timestamp (milliseconds since epoch), when available. */
+  timestamp?: number;
+  /** True when this chunk was emitted from session history replay. */
+  replay?: boolean;
 }
 
 export interface ToolCallEvent {
@@ -116,6 +122,8 @@ export interface PlanUpdateEvent {
 export interface PromptCompleteEvent {
   sessionId: string;
   stopReason: string;
+  /** Synthetic completion emitted after load_session history replay. */
+  historyReplay?: boolean;
 }
 
 export interface PermissionOption {
@@ -172,6 +180,12 @@ export interface ConfigOptionsUpdateEvent {
 export interface UserMessageEvent {
   sessionId: string;
   text: string;
+  /** Stable replay message id used to merge chunked user content. */
+  messageId?: string;
+  /** Source message timestamp (milliseconds since epoch), when available. */
+  timestamp?: number;
+  /** True when this user message was emitted from session history replay. */
+  replay?: boolean;
 }
 
 export interface ErrorEvent {

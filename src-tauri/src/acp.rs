@@ -909,6 +909,61 @@ impl Client for ClientDelegate {
     }
 }
 
+fn meta_value<'a>(
+    meta: Option<&'a serde_json::Map<String, serde_json::Value>>,
+    keys: &[&str],
+) -> Option<&'a serde_json::Value> {
+    let meta = meta?;
+    for key in keys {
+        if let Some(value) = meta.get(*key) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn meta_string(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    keys: &[&str],
+) -> Option<String> {
+    meta_value(meta, keys)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+fn meta_bool(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    keys: &[&str],
+) -> Option<bool> {
+    meta_value(meta, keys).and_then(|v| v.as_bool())
+}
+
+fn parse_timestamp_ms(value: &serde_json::Value) -> Option<i64> {
+    if let Some(ms) = value.as_i64() {
+        return Some(ms);
+    }
+    if let Some(ms_u64) = value.as_u64() {
+        if ms_u64 <= i64::MAX as u64 {
+            return Some(ms_u64 as i64);
+        }
+        return None;
+    }
+    let s = value.as_str()?;
+    if let Ok(ms) = s.parse::<i64>() {
+        return Some(ms);
+    }
+    s.parse::<jiff::Timestamp>()
+        .ok()
+        .map(|ts| ts.as_millisecond())
+}
+
+fn meta_timestamp_ms(
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    keys: &[&str],
+) -> Option<i64> {
+    meta_value(meta, keys).and_then(parse_timestamp_ms)
+}
+
 /// Handle a session notification from the agent
 fn handle_session_notification(
     app: &AppHandle,
@@ -923,18 +978,34 @@ fn handle_session_notification(
                 ContentBlock::Text(text_content) => text_content.text.clone(),
                 _ => format!("{:?}", chunk.content),
             };
+            let message_id = meta_string(chunk.meta.as_ref(), &["messageId", "message_id", "id"]);
+            let timestamp = meta_timestamp_ms(
+                chunk.meta.as_ref(),
+                &["timestamp", "createdAt", "created_at"],
+            );
+            let replay = meta_bool(
+                chunk.meta.as_ref(),
+                &["replay", "historyReplay", "history_replay"],
+            );
             log::debug!(
                 "[ACP] Emitting MESSAGE_CHUNK to frontend: sessionId={}, text_len={}",
                 session_id,
                 text.len()
             );
-            let emit_result = app.emit(
-                events::MESSAGE_CHUNK,
-                serde_json::json!({
-                    "sessionId": session_id,
-                    "text": text
-                }),
-            );
+            let mut payload = serde_json::json!({
+                "sessionId": session_id,
+                "text": text
+            });
+            if let Some(message_id) = message_id {
+                payload["messageId"] = serde_json::Value::String(message_id);
+            }
+            if let Some(timestamp) = timestamp {
+                payload["timestamp"] = serde_json::Value::Number(timestamp.into());
+            }
+            if let Some(replay) = replay {
+                payload["replay"] = serde_json::Value::Bool(replay);
+            }
+            let emit_result = app.emit(events::MESSAGE_CHUNK, payload);
             log::debug!("[ACP] MESSAGE_CHUNK emit result: {:?}", emit_result);
         }
         SessionUpdate::ToolCall(tool_call) => {
@@ -1117,19 +1188,35 @@ fn handle_session_notification(
                 ContentBlock::Text(text_content) => text_content.text.clone(),
                 _ => format!("{:?}", chunk.content),
             };
+            let message_id = meta_string(chunk.meta.as_ref(), &["messageId", "message_id", "id"]);
+            let timestamp = meta_timestamp_ms(
+                chunk.meta.as_ref(),
+                &["timestamp", "createdAt", "created_at"],
+            );
+            let replay = meta_bool(
+                chunk.meta.as_ref(),
+                &["replay", "historyReplay", "history_replay"],
+            );
             log::debug!(
                 "[ACP] Emitting THOUGHT_CHUNK to frontend: sessionId={}, text_len={}",
                 session_id,
                 text.len()
             );
-            let emit_result = app.emit(
-                events::MESSAGE_CHUNK,
-                serde_json::json!({
-                    "sessionId": session_id,
-                    "text": text,
-                    "isThought": true
-                }),
-            );
+            let mut payload = serde_json::json!({
+                "sessionId": session_id,
+                "text": text,
+                "isThought": true
+            });
+            if let Some(message_id) = message_id {
+                payload["messageId"] = serde_json::Value::String(message_id);
+            }
+            if let Some(timestamp) = timestamp {
+                payload["timestamp"] = serde_json::Value::Number(timestamp.into());
+            }
+            if let Some(replay) = replay {
+                payload["replay"] = serde_json::Value::Bool(replay);
+            }
+            let emit_result = app.emit(events::MESSAGE_CHUNK, payload);
             log::debug!("[ACP] THOUGHT_CHUNK emit result: {:?}", emit_result);
         }
         SessionUpdate::CurrentModeUpdate(update) => {
@@ -1165,18 +1252,34 @@ fn handle_session_notification(
                 ContentBlock::Text(text_content) => text_content.text.clone(),
                 _ => format!("{:?}", chunk.content),
             };
+            let message_id = meta_string(chunk.meta.as_ref(), &["messageId", "message_id", "id"]);
+            let timestamp = meta_timestamp_ms(
+                chunk.meta.as_ref(),
+                &["timestamp", "createdAt", "created_at"],
+            );
+            let replay = meta_bool(
+                chunk.meta.as_ref(),
+                &["replay", "historyReplay", "history_replay"],
+            );
             log::debug!(
                 "[ACP] Emitting USER_MESSAGE to frontend: sessionId={}, text_len={}",
                 session_id,
                 text.len()
             );
-            let _ = app.emit(
-                events::USER_MESSAGE,
-                serde_json::json!({
-                    "sessionId": session_id,
-                    "text": text
-                }),
-            );
+            let mut payload = serde_json::json!({
+                "sessionId": session_id,
+                "text": text
+            });
+            if let Some(message_id) = message_id {
+                payload["messageId"] = serde_json::Value::String(message_id);
+            }
+            if let Some(timestamp) = timestamp {
+                payload["timestamp"] = serde_json::Value::Number(timestamp.into());
+            }
+            if let Some(replay) = replay {
+                payload["replay"] = serde_json::Value::Bool(replay);
+            }
+            let _ = app.emit(events::USER_MESSAGE, payload);
         }
 
         _ => {
@@ -1831,7 +1934,8 @@ async fn run_session_worker(
             events::PROMPT_COMPLETE,
             serde_json::json!({
                 "sessionId": session_id,
-                "stopReason": "HistoryReplay"
+                "stopReason": "HistoryReplay",
+                "historyReplay": true
             }),
         );
     }
