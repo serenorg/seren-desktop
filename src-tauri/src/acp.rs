@@ -5,7 +5,7 @@ use agent_client_protocol::{Agent, Client, ClientSideConnection, Result as AcpRe
 use agent_client_protocol::{
     AuthMethod, AuthenticateRequest, CancelNotification, ClientCapabilities, ContentBlock,
     CreateTerminalRequest, CreateTerminalResponse, EnvVariable, ExtNotification, ExtRequest,
-    ExtResponse, Implementation, InitializeRequest, KillTerminalCommandRequest,
+    ExtResponse, ImageContent, Implementation, InitializeRequest, KillTerminalCommandRequest,
     KillTerminalCommandResponse, ListSessionsRequest, LoadSessionRequest, McpServer,
     McpServerStdio, ModelId, NewSessionRequest, PromptRequest, ProtocolVersion,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
@@ -2016,7 +2016,17 @@ async fn run_session_worker(
 
                 if let Some(ctx) = context {
                     for item in ctx {
-                        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        if item_type == "image" {
+                            if let (Some(data), Some(mime_type)) = (
+                                item.get("data").and_then(|v| v.as_str()),
+                                item.get("mimeType").and_then(|v| v.as_str()),
+                            ) {
+                                content_blocks.push(ContentBlock::Image(
+                                    ImageContent::new(data, mime_type),
+                                ));
+                            }
+                        } else if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
                             content_blocks.push(ContentBlock::Text(TextContent::new(text)));
                         }
                     }
