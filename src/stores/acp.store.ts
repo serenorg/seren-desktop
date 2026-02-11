@@ -184,7 +184,10 @@ function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
   return Object.entries(state.sessions)
     .filter(([, session]) => {
       if (session.info.agentType !== "claude-code") return false;
-      if (excludeConversationId && session.conversationId === excludeConversationId) {
+      if (
+        excludeConversationId &&
+        session.conversationId === excludeConversationId
+      ) {
         return false;
       }
       // Keep actively prompting sessions alive; only reclaim idle/errored ones.
@@ -677,10 +680,7 @@ export const acpStore = {
           initRetryAttempt < MAX_CLAUDE_INIT_RETRIES &&
           isRetryableClaudeInitError(initFailure)
         ) {
-          console.warn(
-            "[AcpStore] Claude init failed, retrying:",
-            initFailure,
-          );
+          console.warn("[AcpStore] Claude init failed, retrying:", initFailure);
           await this.terminateSession(info.id);
           sessionReadyPromises.delete(info.id);
           pendingSessionEvents.delete(info.id);

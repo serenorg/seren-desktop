@@ -215,10 +215,7 @@ export const threadStore = {
 
     // Keep the project context aligned with the selected thread.
     const thread = this.threads.find((t) => t.id === id);
-    if (
-      thread?.projectRoot &&
-      thread.projectRoot !== fileTreeState.rootPath
-    ) {
+    if (thread?.projectRoot && thread.projectRoot !== fileTreeState.rootPath) {
       setRootPath(thread.projectRoot);
     }
 

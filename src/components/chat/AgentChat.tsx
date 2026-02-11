@@ -442,8 +442,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <div
               class={`px-3 py-2 border rounded-md text-sm ${
                 isAuthError(message.content)
-                  ? "bg-[rgba(210,153,34,0.1)] border-[rgba(210,153,34,0.4)] text-[#d2992a]"
-                  : "bg-[rgba(248,81,73,0.1)] border-[rgba(248,81,73,0.4)] text-destructive"
+                  ? "bg-warning/10 border-warning/40 text-warning"
+                  : "bg-destructive/10 border-destructive/40 text-destructive"
               }`}
             >
               <Show
@@ -456,7 +456,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   </span>
                   <button
                     type="button"
-                    class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d] flex-shrink-0"
+                    class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110 flex-shrink-0"
                     onClick={async () => {
                       const agentType =
                         acpStore.activeSession?.info.agentType ?? "claude-code";
@@ -492,7 +492,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       {/* Messages Area */}
       <div
         ref={messagesRef}
-        class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded"
+        class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-surface-3 [&::-webkit-scrollbar-thumb]:rounded"
         onClick={(e) => {
           const target = e.target as HTMLElement;
           const link = target.closest(".external-link") as HTMLAnchorElement;
@@ -524,7 +524,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <div class="flex-1 flex flex-col items-center justify-center p-10 text-muted-foreground">
               <div class="max-w-[320px] text-center">
                 <svg
-                  class="w-12 h-12 mx-auto mb-4 text-[#30363d]"
+                  class="w-12 h-12 mx-auto mb-4 text-surface-3"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -548,7 +548,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <div class="flex flex-col items-center gap-3 w-full max-w-md">
                   <AgentSelector />
                   <Show when={acpStore.selectedAgentType === "claude-code"}>
-                    <div class="w-full px-3 py-2 bg-[#1f6feb]/10 border border-[#1f6feb]/30 rounded-md text-xs text-primary">
+                    <div class="w-full px-3 py-2 bg-primary/10 border border-primary/30 rounded-md text-xs text-primary">
                       <div class="flex items-start gap-2">
                         <svg
                           class="w-4 h-4 mt-0.5 flex-shrink-0"
@@ -572,7 +572,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     </div>
                   </Show>
                   <Show when={!hasFolderOpen()}>
-                    <div class="w-full px-3 py-2 bg-destructive/10 border border-[#da3633]/30 rounded-md text-xs text-destructive">
+                    <div class="w-full px-3 py-2 bg-destructive/10 border border-destructive/30 rounded-md text-xs text-destructive">
                       Open a folder first to set the agent's working directory.
                     </div>
                   </Show>
@@ -638,7 +638,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
                   innerHTML={renderMarkdown(acpStore.streamingContent)}
                 />
-                <span class="inline-block w-2 h-4 ml-0.5 bg-[#58a6ff] animate-pulse" />
+                <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
               </article>
             </Show>
           </Show>
@@ -702,7 +702,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               ? `The conversation is too long for the agent to continue. You can pick up in Chat mode with ${modelName} via Seren.`
               : `Your conversation history will be preserved. You can continue in Chat mode with ${modelName} via Seren.`;
           return (
-            <div class="mx-4 mb-2 px-3 py-3 border rounded-md text-sm bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.4)] text-[#58a6ff]">
+            <div class="mx-4 mb-2 px-3 py-3 border rounded-md text-sm bg-primary/10 border-primary/40 text-primary">
               <div class="flex items-start gap-3">
                 <svg
                   class="w-5 h-5 mt-0.5 flex-shrink-0"
@@ -718,19 +718,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   />
                 </svg>
                 <div class="flex-1">
-                  <p class="m-0 mb-2 font-medium text-[#e6edf3]">{title}</p>
-                  <p class="m-0 mb-3 text-xs text-[#8b949e]">{description}</p>
+                  <p class="m-0 mb-2 font-medium text-foreground">{title}</p>
+                  <p class="m-0 mb-3 text-xs text-muted-foreground">
+                    {description}
+                  </p>
                   <div class="flex items-center gap-2">
                     <button
                       type="button"
-                      class="px-3 py-1.5 text-xs font-medium bg-[#238636] text-white rounded-md hover:bg-[#2ea043] transition-colors"
+                      class="px-3 py-1.5 text-xs font-medium bg-success text-white rounded-md hover:brightness-110 transition-colors"
                       onClick={() => acpStore.acceptRateLimitFallback()}
                     >
                       Continue in Chat
                     </button>
                     <button
                       type="button"
-                      class="px-3 py-1.5 text-xs font-medium bg-transparent text-[#8b949e] border border-[#30363d] rounded-md hover:text-[#e6edf3] hover:border-[#8b949e] transition-colors"
+                      class="px-3 py-1.5 text-xs font-medium bg-transparent text-muted-foreground border border-surface-3 rounded-md hover:text-foreground hover:border-muted-foreground transition-colors"
                       onClick={() => acpStore.dismissRateLimitPrompt()}
                     >
                       Dismiss
@@ -748,8 +750,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         <div
           class={`mx-4 mb-2 px-3 py-2 border rounded-md text-sm ${
             isAuthError(sessionError())
-              ? "bg-[rgba(210,153,34,0.1)] border-[rgba(210,153,34,0.4)] text-[#d2992a]"
-              : "bg-[rgba(248,81,73,0.1)] border-[rgba(248,81,73,0.4)] text-destructive"
+              ? "bg-warning/10 border-warning/40 text-warning"
+              : "bg-destructive/10 border-destructive/40 text-destructive"
           }`}
         >
           <div class="flex items-center justify-between">
@@ -762,7 +764,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <Show when={isAuthError(sessionError())}>
                 <button
                   type="button"
-                  class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d]"
+                  class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110"
                   onClick={async () => {
                     const agentType =
                       acpStore.activeSession?.info.agentType ?? "claude-code";
@@ -821,7 +823,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       {/* Awaiting Login Banner */}
       <Show when={awaitingLogin()}>
-        <div class="mx-4 mb-2 px-3 py-2 border rounded-md text-sm bg-[rgba(63,185,80,0.1)] border-[rgba(63,185,80,0.4)] text-[#3fb950]">
+        <div class="mx-4 mb-2 px-3 py-2 border rounded-md text-sm bg-success/10 border-success/40 text-success">
           <div class="flex items-center justify-between">
             <span class="flex-1">
               Complete authentication in the opened window, then start a new
@@ -830,7 +832,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <div class="flex items-center gap-2 ml-2">
               <button
                 type="button"
-                class="px-2 py-1 text-xs font-medium bg-[#3fb950] text-[#0d1117] rounded hover:bg-[#56d364]"
+                class="px-2 py-1 text-xs font-medium bg-success text-background rounded hover:brightness-110"
                 onClick={() => {
                   const agentType = awaitingLogin();
                   setAwaitingLogin(null);
@@ -914,7 +916,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     ? "Type to queue message..."
                     : "Tell the agent what to do… (type / for commands)"
                 }
-                class="w-full bg-background border border-border rounded-lg text-foreground p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-muted-foreground disabled:opacity-60 disabled:cursor-not-allowed"
+                class="w-full bg-background border border-border rounded-lg text-foreground p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-primary placeholder:text-muted-foreground disabled:opacity-60 disabled:cursor-not-allowed"
                 minHeight={80}
                 maxHeight={window.innerHeight * 0.5}
                 onInput={(e) => {
@@ -982,7 +984,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 >
                   <button
                     type="button"
-                    class="px-4 py-1.5 bg-destructive text-white rounded-md text-[13px] font-medium hover:bg-[#f85149] transition-colors"
+                    class="px-4 py-1.5 bg-destructive text-white rounded-md text-[13px] font-medium hover:bg-destructive transition-colors"
                     onClick={handleCancel}
                   >
                     Cancel

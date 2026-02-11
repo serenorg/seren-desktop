@@ -117,13 +117,17 @@ export const conversationStore = {
 
   // === Conversation management ===
 
-  async createConversation(title = "New Chat"): Promise<Conversation> {
-    return this.createConversationWithModel(title, DEFAULT_MODEL);
+  async createConversation(
+    title = "New Chat",
+    projectRoot?: string,
+  ): Promise<Conversation> {
+    return this.createConversationWithModel(title, DEFAULT_MODEL, projectRoot);
   },
 
   async createConversationWithModel(
     title: string,
     model: string,
+    projectRoot?: string,
   ): Promise<Conversation> {
     const id = crypto.randomUUID();
 

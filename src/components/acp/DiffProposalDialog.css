@@ -2,10 +2,10 @@
 /* ABOUTME: Inline card shown in agent chat when a file edit needs user approval. */
 
 .diff-proposal-dialog {
-  border: 1px solid var(--border-color, #333);
+  border: 1px solid var(--border);
   border-radius: 8px;
   margin: 8px 0;
-  background: var(--surface-secondary, #1a1a2e);
+  background: var(--surface-1);
   overflow: hidden;
 }
 
@@ -14,7 +14,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border-color, #333);
+  border-bottom: 1px solid var(--border);
 }
 
 .diff-proposal-icon {
@@ -25,14 +25,14 @@
 .diff-proposal-title {
   font-weight: 600;
   font-size: 13px;
-  color: var(--text-primary, #e0e0e0);
+  color: var(--foreground);
 }
 
 .diff-proposal-path {
   margin-left: auto;
   font-family: var(--font-mono, monospace);
   font-size: 12px;
-  color: var(--text-secondary, #aaa);
+  color: var(--muted-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -51,22 +51,22 @@
   display: flex;
   gap: 8px;
   padding: 10px 16px;
-  border-top: 1px solid var(--border-color, #333);
+  border-top: 1px solid var(--border);
   align-items: center;
 }
 
 .diff-proposal-stats {
   font-size: 11px;
-  color: var(--text-secondary, #aaa);
+  color: var(--muted-foreground);
   margin-right: auto;
 }
 
 .diff-proposal-stats-added {
-  color: #3fb950;
+  color: var(--success);
 }
 
 .diff-proposal-stats-removed {
-  color: #f85149;
+  color: var(--destructive);
 }
 
 .diff-proposal-btn {
@@ -84,11 +84,11 @@
 }
 
 .diff-proposal-btn--accept {
-  background: #238636;
+  background: var(--success);
   color: white;
 }
 
 .diff-proposal-btn--reject {
-  background: var(--surface-tertiary, #333);
-  color: var(--text-secondary, #aaa);
+  background: var(--surface-3);
+  color: var(--muted-foreground);
 }
