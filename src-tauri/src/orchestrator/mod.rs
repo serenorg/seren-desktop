@@ -8,6 +8,7 @@ pub mod eval;
 pub mod mcp_publisher_worker;
 pub mod router;
 pub mod service;
+pub mod tool_bridge;
 pub mod trust;
 pub mod types;
 pub mod worker;

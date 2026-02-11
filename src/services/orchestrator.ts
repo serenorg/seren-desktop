@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Attachment, ToolDefinition } from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
+import { executeTool } from "@/lib/tools/executor";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
@@ -84,6 +85,13 @@ interface SkillRef {
   path: string;
 }
 
+/** Tool execution request emitted by the Rust ChatModelWorker for non-local tools. */
+interface ToolExecutionRequest {
+  tool_call_id: string;
+  name: string;
+  arguments: string;
+}
+
 // =============================================================================
 // Internal state for the active orchestration
 // =============================================================================
@@ -134,6 +142,7 @@ export async function orchestrate(
   // 4. Listen for events
   let unlistenTransition: UnlistenFn | null = null;
   let unlistenEvent: UnlistenFn | null = null;
+  let unlistenToolRequest: UnlistenFn | null = null;
 
   try {
     unlistenTransition = await listen<TransitionEvent>(
@@ -144,6 +153,11 @@ export async function orchestrate(
     unlistenEvent = await listen<OrchestratorEvent>(
       "orchestrator://event",
       (event) => handleWorkerEvent(event.payload),
+    );
+
+    unlistenToolRequest = await listen<ToolExecutionRequest>(
+      "orchestrator://tool-request",
+      (event) => handleToolRequest(event.payload),
     );
 
     // 5. Invoke the Rust orchestrator (auth token read from store on Rust side)
@@ -165,6 +179,7 @@ export async function orchestrate(
   } finally {
     unlistenTransition?.();
     unlistenEvent?.();
+    unlistenToolRequest?.();
 
     // Ensure loading state is cleared
     conversationStore.setLoading(false);
@@ -420,6 +435,46 @@ function handleError(message: string): void {
     conversationStore.addMessage(errorMessage);
   } else {
     conversationStore.setError(message);
+  }
+}
+
+/**
+ * Handle a tool execution request from the Rust ChatModelWorker.
+ *
+ * The ChatModelWorker encountered a non-local tool (gateway__, mcp__, openclaw__)
+ * and is waiting for the frontend to execute it and submit the result back.
+ */
+async function handleToolRequest(request: ToolExecutionRequest): Promise<void> {
+  console.log(
+    "[orchestrator] Tool request: %s (id: %s)",
+    request.name,
+    request.tool_call_id,
+  );
+
+  try {
+    const result = await executeTool({
+      id: request.tool_call_id,
+      type: "function",
+      function: {
+        name: request.name,
+        arguments: request.arguments,
+      },
+    });
+
+    await invoke("submit_tool_result", {
+      toolCallId: result.tool_call_id,
+      content: result.content,
+      isError: result.is_error,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[orchestrator] Tool execution failed:", message);
+
+    await invoke("submit_tool_result", {
+      toolCallId: request.tool_call_id,
+      content: `Tool execution error: ${message}`,
+      isError: true,
+    });
   }
 }
 

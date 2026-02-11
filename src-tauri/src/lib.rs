@@ -466,7 +466,8 @@ pub fn run() {
         .manage(mcp::McpState::new())
         .manage(mcp::HttpMcpState::new())
         .manage(orchestrator::service::OrchestratorState::new())
-        .manage(orchestrator::eval::EvalState::new());
+        .manage(orchestrator::eval::EvalState::new())
+        .manage(orchestrator::tool_bridge::ToolResultBridge::new());
 
     #[cfg(feature = "acp")]
     {
@@ -818,6 +819,7 @@ pub fn run() {
             // Orchestrator commands
             commands::orchestrator::orchestrate,
             commands::orchestrator::cancel_orchestration,
+            commands::orchestrator::submit_tool_result,
             commands::orchestrator::submit_eval_signal,
             // Memory commands
             commands::memory::memory_bootstrap,
