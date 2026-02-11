@@ -842,7 +842,7 @@ export const acpStore = {
    * Send a prompt to the active session.
    * Auto-recovers from dead sessions by restarting and retrying.
    */
-  async sendPrompt(prompt: string, context?: Array<{ text?: string }>) {
+  async sendPrompt(prompt: string, context?: Array<Record<string, string>>) {
     const sessionId = state.activeSessionId;
     console.log("[AcpStore] sendPrompt called:", {
       sessionId,

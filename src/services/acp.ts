@@ -250,7 +250,7 @@ export async function spawnAgent(
 export async function sendPrompt(
   sessionId: string,
   prompt: string,
-  context?: Array<{ text?: string }>,
+  context?: Array<Record<string, string>>,
 ): Promise<void> {
   return invoke("acp_prompt", { sessionId, prompt, context });
 }

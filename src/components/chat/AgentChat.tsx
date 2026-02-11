@@ -21,7 +21,7 @@ import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
 import { formatDurationWithVerb } from "@/lib/format-duration";
-import { pickAndReadAttachments, toDataUrl } from "@/lib/images/attachments";
+import { pickAndReadAttachments } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
 import {
   getModelDisplayName,
@@ -256,11 +256,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
 
-    // Build context with images as data URLs
-    const context: Array<{ text?: string }> | undefined =
+    // Build context with images as ACP image content blocks
+    const context: Array<Record<string, string>> | undefined =
       images.length > 0
         ? images.map((img) => ({
-            text: `[Attached image: ${img.name}]\n${toDataUrl(img)}`,
+            type: "image",
+            data: img.base64,
+            mimeType: img.mimeType,
           }))
         : undefined;
 
