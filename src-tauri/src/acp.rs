@@ -112,7 +112,7 @@ fn launch_codex_login() {
 }
 
 /// Agent types supported by the ACP integration
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentType {
     ClaudeCode,
@@ -376,13 +376,35 @@ pub(crate) struct AcpSession {
 /// State for managing ACP sessions
 pub struct AcpState {
     pub(crate) sessions: RwLock<HashMap<String, Arc<Mutex<AcpSession>>>>,
+    /// Serializes sidecar spawning per agent type to prevent concurrent spawns
+    /// that cause SIGKILL collisions (e.g. two codex app-server instances competing).
+    spawn_locks: RwLock<HashMap<AgentType, Arc<Mutex<()>>>>,
 }
 
 impl AcpState {
     pub fn new() -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
+            spawn_locks: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Get or create a per-agent-type spawn lock.
+    async fn spawn_lock(&self, agent_type: AgentType) -> Arc<Mutex<()>> {
+        // Fast path: lock exists
+        {
+            let locks = self.spawn_locks.read().await;
+            if let Some(lock) = locks.get(&agent_type) {
+                return Arc::clone(lock);
+            }
+        }
+        // Slow path: create lock
+        let mut locks = self.spawn_locks.write().await;
+        let lock = locks
+            .entry(agent_type)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        lock
     }
 }
 
@@ -1389,6 +1411,7 @@ pub async fn acp_spawn(
     let session_arc_clone = session_arc.clone();
     let api_key_clone = api_key.clone();
     let resume_agent_session_id_clone = resume_agent_session_id.clone();
+    let spawn_lock = state.spawn_lock(agent_type).await;
 
     let session_arc_for_worker = session_arc_clone.clone();
 
@@ -1415,6 +1438,7 @@ pub async fn acp_spawn(
                 approval_policy,
                 search_enabled,
                 resume_agent_session_id_clone,
+                spawn_lock,
             )
             .await
             {
@@ -1511,8 +1535,13 @@ async fn run_session_worker(
     approval_policy: Option<String>,
     search_enabled: Option<bool>,
     mut resume_agent_session_id: Option<String>,
+    spawn_lock: Arc<Mutex<()>>,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
+    // Acquire spawn lock to prevent concurrent sidecar spawns for the same agent type.
+    // This prevents SIGKILL collisions when multiple sessions try to start simultaneously
+    // (e.g. codex app-server singleton conflicts).
+    let _spawn_guard = spawn_lock.lock().await;
 
     // Build CLI args based on agent type and configuration
     let mut args: Vec<String> = Vec::new();
@@ -1949,6 +1978,10 @@ async fn run_session_worker(
         }),
     );
     log::debug!("[ACP] Emit result: {:?}", emit_result);
+
+    // Release the spawn lock now that the sidecar is initialized and ready.
+    // Other sessions for the same agent type can now start spawning.
+    drop(_spawn_guard);
 
     // Auto-set the user's preferred permission mode if the agent advertises modes.
     // Map Seren sandbox mode names to agent mode IDs by matching name patterns.
@@ -2489,12 +2522,14 @@ pub async fn acp_list_sessions(state: State<'_, AcpState>) -> Result<Vec<AcpSess
 #[tauri::command]
 pub async fn acp_list_remote_sessions(
     app: AppHandle,
+    state: State<'_, AcpState>,
     agent_type: AgentType,
     cwd: String,
     cursor: Option<String>,
 ) -> Result<AcpRemoteSessionsPage, String> {
     let cwd = normalize_cwd(&cwd)?;
     let app_handle = app.clone();
+    let spawn_lock = state.spawn_lock(agent_type).await;
 
     tauri::async_runtime::spawn_blocking(move || {
         // ACP futures aren't Send; run inside a single-threaded runtime + LocalSet.
@@ -2504,7 +2539,7 @@ pub async fn acp_list_remote_sessions(
             .map_err(|e| format!("Failed to create runtime: {e}"))?;
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async move {
-            list_remote_sessions_inner(app_handle, agent_type, cwd, cursor).await
+            list_remote_sessions_inner(app_handle, agent_type, cwd, cursor, spawn_lock).await
         })
     })
     .await
@@ -2516,7 +2551,10 @@ async fn list_remote_sessions_inner(
     agent_type: AgentType,
     cwd: String,
     cursor: Option<String>,
+    spawn_lock: Arc<Mutex<()>>,
 ) -> Result<AcpRemoteSessionsPage, String> {
+    // Acquire spawn lock to serialize with acp_spawn for the same agent type.
+    let _spawn_guard = spawn_lock.lock().await;
     let command = agent_type.command()?;
 
     log::info!(

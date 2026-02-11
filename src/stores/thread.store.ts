@@ -238,8 +238,13 @@ export const threadStore = {
       if (liveSession) {
         acpStore.setActiveSession(liveSession.info.id);
       } else {
-        // No live session — clear active so AgentChat shows the start/resume UI
+        // No live session — clear active and auto-resume the agent conversation.
+        // The spawn lock in the Rust backend prevents SIGKILL collisions.
         acpStore.setActiveSession(null);
+        const cwd = thread?.projectRoot || fileTreeState.rootPath;
+        if (cwd) {
+          void acpStore.resumeAgentConversation(id, cwd);
+        }
       }
     }
   },
