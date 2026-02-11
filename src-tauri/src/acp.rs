@@ -1076,8 +1076,25 @@ fn handle_session_notification(
             );
             log::debug!("[ACP] THOUGHT_CHUNK emit result: {:?}", emit_result);
         }
+        SessionUpdate::CurrentModeUpdate(update) => {
+            log::info!(
+                "[ACP] Mode changed: session={}, currentModeId={}",
+                session_id,
+                &*update.current_mode_id.0
+            );
+            let _ = app.emit(
+                events::SESSION_STATUS,
+                serde_json::json!({
+                    "sessionId": session_id,
+                    "status": "ready",
+                    "modes": {
+                        "currentModeId": &*update.current_mode_id.0
+                    }
+                }),
+            );
+        }
         _ => {
-            // Handle other notification types as needed
+            log::debug!("[ACP] Unhandled session update: {:?}", notification.update);
         }
     }
 }

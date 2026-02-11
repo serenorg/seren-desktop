@@ -675,9 +675,14 @@ export const acpStore = {
 
     try {
       await acpService.setPermissionMode(sessionId, modeId);
+      // Optimistic update — the authoritative update arrives via
+      // CurrentModeUpdate notification handled in handleStatusChange.
       setState("sessions", sessionId, "currentModeId", modeId);
     } catch (error) {
-      console.error("Failed to set permission mode:", error);
+      console.error(
+        `[AcpStore] Failed to set permission mode to "${modeId}":`,
+        error,
+      );
     }
   },
 
@@ -1127,14 +1132,17 @@ export const acpStore = {
       );
     }
 
-    // Extract mode state from session status events (e.g. ready with modes)
+    // Extract mode state from session status events (e.g. ready with modes,
+    // or CurrentModeUpdate notifications which only carry currentModeId)
     if (data?.modes) {
       const modes = data.modes as {
         currentModeId: string;
-        availableModes: AgentModeInfo[];
+        availableModes?: AgentModeInfo[];
       };
       setState("sessions", sessionId, "currentModeId", modes.currentModeId);
-      setState("sessions", sessionId, "availableModes", modes.availableModes);
+      if (modes.availableModes) {
+        setState("sessions", sessionId, "availableModes", modes.availableModes);
+      }
     }
 
     if (status === "ready") {
