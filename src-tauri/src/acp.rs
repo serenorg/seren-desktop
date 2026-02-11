@@ -405,6 +405,7 @@ mod events {
     pub const CONFIG_OPTIONS_UPDATE: &str = "acp://config-options-update";
     pub const ERROR: &str = "acp://error";
     pub const DIFF_PROPOSAL: &str = "acp://diff-proposal";
+    pub const USER_MESSAGE: &str = "acp://user-message";
 }
 
 /// Client delegate that handles requests from the agent
@@ -1158,6 +1159,26 @@ fn handle_session_notification(
             );
             log::debug!("[ACP] CONFIG_OPTIONS_UPDATE emit result: {:?}", emit_result);
         }
+
+        SessionUpdate::UserMessageChunk(chunk) => {
+            let text = match &chunk.content {
+                ContentBlock::Text(text_content) => text_content.text.clone(),
+                _ => format!("{:?}", chunk.content),
+            };
+            log::debug!(
+                "[ACP] Emitting USER_MESSAGE to frontend: sessionId={}, text_len={}",
+                session_id,
+                text.len()
+            );
+            let _ = app.emit(
+                events::USER_MESSAGE,
+                serde_json::json!({
+                    "sessionId": session_id,
+                    "text": text
+                }),
+            );
+        }
+
         _ => {
             log::debug!("[ACP] Unhandled session update: {:?}", notification.update);
         }
@@ -1801,6 +1822,19 @@ async fn run_session_worker(
             }).collect::<Vec<_>>()
         })
     });
+
+    // When resuming a session, load_session replays history as event
+    // notifications. Emit a synthetic PromptComplete so the frontend
+    // finalizes any trailing streaming content into the messages array.
+    if resume_agent_session_id.is_some() {
+        let _ = app.emit(
+            events::PROMPT_COMPLETE,
+            serde_json::json!({
+                "sessionId": session_id,
+                "stopReason": "HistoryReplay"
+            }),
+        );
+    }
 
     // Emit ready status with agent info
     let agent_info = init_response.agent_info.as_ref();

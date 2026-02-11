@@ -169,6 +169,11 @@ export interface ConfigOptionsUpdateEvent {
   configOptions: SessionConfigOption[];
 }
 
+export interface UserMessageEvent {
+  sessionId: string;
+  text: string;
+}
+
 export interface ErrorEvent {
   sessionId: string;
   error: string;
@@ -186,6 +191,7 @@ export type AcpEvent =
   | { type: "diffProposal"; data: DiffProposalEvent }
   | { type: "configOptionsUpdate"; data: ConfigOptionsUpdateEvent }
   | { type: "sessionStatus"; data: SessionStatusEvent }
+  | { type: "userMessage"; data: UserMessageEvent }
   | { type: "error"; data: ErrorEvent };
 
 // ============================================================================
@@ -390,6 +396,7 @@ const EVENT_CHANNELS = {
   diffProposal: "acp://diff-proposal",
   sessionStatus: "acp://session-status",
   configOptionsUpdate: "acp://config-options-update",
+  userMessage: "acp://user-message",
   error: "acp://error",
 } as const;
 
@@ -517,6 +524,14 @@ export async function subscribeToSession(
     ),
   );
   unlisteners.push(
+    await subscribeToEvent<UserMessageEvent>(
+      "userMessage",
+      createHandler<{ type: "userMessage"; data: UserMessageEvent }>(
+        "userMessage",
+      ),
+    ),
+  );
+  unlisteners.push(
     await subscribeToEvent<ErrorEvent>(
       "error",
       createHandler<{ type: "error"; data: ErrorEvent }>("error"),
@@ -590,6 +605,11 @@ export async function subscribeToAllEvents(
     await subscribeToEvent<ConfigOptionsUpdateEvent>(
       "configOptionsUpdate",
       (data) => callback({ type: "configOptionsUpdate", data }),
+    ),
+  );
+  unlisteners.push(
+    await subscribeToEvent<UserMessageEvent>("userMessage", (data) =>
+      callback({ type: "userMessage", data }),
     ),
   );
   unlisteners.push(

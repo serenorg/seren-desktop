@@ -1276,6 +1276,23 @@ export const acpStore = {
         setState("sessions", sessionId, "plan", event.data.entries);
         break;
 
+      case "userMessage": {
+        // User message replayed from history — flush any pending assistant
+        // content first so messages appear in correct chronological order.
+        this.finalizeStreamingContent(sessionId);
+        const userMsg: AgentMessage = {
+          id: crypto.randomUUID(),
+          type: "user",
+          content: event.data.text,
+          timestamp: Date.now(),
+        };
+        setState("sessions", sessionId, "messages", (msgs) => [
+          ...msgs,
+          userMsg,
+        ]);
+        break;
+      }
+
       case "promptComplete":
         this.finalizeStreamingContent(sessionId);
         this.markPendingToolCallsComplete(sessionId);
