@@ -60,10 +60,11 @@ fn select_worker_type(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
 ) -> WorkerType {
-    // Code generation with file system access + ACP agent → AcpAgent
+    // Code generation with file system access + active ACP session → AcpAgent
     if classification.task_type == "code_generation"
         && classification.requires_file_system
         && capabilities.has_acp_agent
+        && capabilities.active_acp_session_id.is_some()
     {
         return WorkerType::AcpAgent;
     }
@@ -370,6 +371,11 @@ mod tests {
             tool_definitions: vec![],
             installed_skills: vec![],
             model_rankings: vec![],
+            active_acp_session_id: if has_agent {
+                Some("test-session-id".to_string())
+            } else {
+                None
+            },
         }
     }
 
@@ -391,6 +397,11 @@ mod tests {
             tool_definitions: vec![],
             installed_skills: skills,
             model_rankings: vec![],
+            active_acp_session_id: if has_agent {
+                Some("test-session-id".to_string())
+            } else {
+                None
+            },
         }
     }
 
@@ -432,6 +443,20 @@ mod tests {
         );
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::AcpAgent);
+    }
+
+    #[test]
+    fn routes_code_generation_without_active_session_to_chat_model() {
+        let classification = make_classification("code_generation", true, true);
+        let mut capabilities = make_capabilities(
+            true,
+            &["anthropic/claude-opus-4-6"],
+            &["firecrawl"],
+        );
+        // Agent is available but no active session — should fall back to ChatModel
+        capabilities.active_acp_session_id = None;
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
 
     #[test]

@@ -731,7 +731,11 @@ pub async fn cancel(state: &OrchestratorState, conversation_id: &str) -> Result<
 // =============================================================================
 
 /// Create the appropriate worker based on the routing decision.
-fn create_worker(routing: &RoutingDecision, _app: &AppHandle, capabilities: &UserCapabilities) -> Arc<dyn Worker> {
+fn create_worker(
+    routing: &RoutingDecision,
+    _app: &AppHandle,
+    capabilities: &UserCapabilities,
+) -> Arc<dyn Worker> {
     match routing.worker_type {
         WorkerType::ChatModel => {
             Arc::new(ChatModelWorker::with_tools(capabilities.tool_definitions.clone()))
@@ -740,7 +744,10 @@ fn create_worker(routing: &RoutingDecision, _app: &AppHandle, capabilities: &Use
             // ACP worker requires feature flag; fall back to chat model if not available
             #[cfg(feature = "acp")]
             {
-                let worker = super::acp_worker::AcpWorker::new(_app.clone());
+                let worker = super::acp_worker::AcpWorker::new(
+                    _app.clone(),
+                    capabilities.active_acp_session_id.clone(),
+                );
                 Arc::new(worker)
             }
             #[cfg(not(feature = "acp"))]
