@@ -91,12 +91,7 @@ async fn get_oauth_redirect_url(url: String, bearer_token: String) -> Result<Str
         }
     }
 
-    let truncated_body = if body_text.len() > 200 {
-        format!("{}...[truncated]", &body_text[..200])
-    } else {
-        body_text.clone()
-    };
-    log::error!("[OAuth] {} response from Gateway: {}", status, truncated_body);
+    log::error!("[OAuth] {} response from Gateway: {}", status, body_text);
     Err(format!(
         "Unexpected response status: {} - {}",
         status, body_text
