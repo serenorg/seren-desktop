@@ -80,9 +80,7 @@ pub async fn create_conversation(
         .unwrap_or_default()
         .as_millis() as i64;
 
-    let normalized_project_root = project_root
-        .as_deref()
-        .and_then(normalize_project_root);
+    let normalized_project_root = project_root.as_deref().and_then(normalize_project_root);
 
     let conversation = Conversation {
         id: id.clone(),
@@ -112,9 +110,7 @@ pub async fn get_conversations(
     app: AppHandle,
     project_root: Option<String>,
 ) -> Result<Vec<Conversation>, String> {
-    let normalized = project_root
-        .as_deref()
-        .and_then(normalize_project_root);
+    let normalized = project_root.as_deref().and_then(normalize_project_root);
 
     run_db(app, move |conn| {
         let rows = if let Some(ref root) = normalized {
@@ -290,7 +286,7 @@ pub async fn create_agent_conversation(
 
     run_db(app, move |conn| {
         conn.execute(
-            "INSERT OR IGNORE INTO conversations (
+            "INSERT INTO conversations (
                 id,
                 title,
                 created_at,
@@ -301,7 +297,14 @@ pub async fn create_agent_conversation(
                 agent_cwd,
                 project_id,
                 project_root
-            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6, ?7, ?8)",
+            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+                is_archived = 0,
+                agent_type = excluded.agent_type,
+                agent_session_id = COALESCE(excluded.agent_session_id, conversations.agent_session_id),
+                agent_cwd = COALESCE(conversations.agent_cwd, excluded.agent_cwd),
+                project_id = COALESCE(conversations.project_id, excluded.project_id),
+                project_root = COALESCE(conversations.project_root, excluded.project_root)",
             params![
                 id,
                 title,

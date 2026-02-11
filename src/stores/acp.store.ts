@@ -167,29 +167,35 @@ const [state, setState] = createStore<AcpState>({
 let globalUnsubscribe: UnlistenFn | null = null;
 const pendingSessionEvents = new Map<string, AcpEvent[]>();
 const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
-const REMOTE_SESSION_SCAN_MAX_PAGES = 20;
 const PENDING_SESSION_EVENT_LIMIT = 500;
+const CLAUDE_INIT_RETRY_DELAY_MS = 350;
+const MAX_CLAUDE_INIT_RETRIES = 3;
 
-async function findRemoteSessionById(
-  cwd: string,
-  agentType: AgentType,
-  sessionId: string,
-): Promise<RemoteSessionInfo | null> {
-  const ensureFn =
-    agentType === "claude-code"
-      ? acpService.ensureClaudeCli
-      : acpService.ensureCodexCli;
-  await ensureFn();
+function isRetryableClaudeInitError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("server shut down unexpectedly") ||
+    lower.includes("signal: 9") ||
+    lower.includes("sigkill")
+  );
+}
 
-  let cursor: string | undefined;
-  for (let pageNum = 0; pageNum < REMOTE_SESSION_SCAN_MAX_PAGES; pageNum += 1) {
-    const page = await acpService.listRemoteSessions(agentType, cwd, cursor);
-    const match = page.sessions.find((s) => s.sessionId === sessionId);
-    if (match) return match;
-    if (!page.nextCursor) return null;
-    cursor = page.nextCursor ?? undefined;
-  }
-  return null;
+function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
+  return Object.entries(state.sessions)
+    .filter(([, session]) => {
+      if (session.info.agentType !== "claude-code") return false;
+      if (excludeConversationId && session.conversationId === excludeConversationId) {
+        return false;
+      }
+      // Keep actively prompting sessions alive; only reclaim idle/errored ones.
+      return (
+        session.info.status === "ready" ||
+        session.info.status === "error" ||
+        session.info.status === "terminated"
+      );
+    })
+    .sort(([, a], [, b]) => a.info.createdAt.localeCompare(b.info.createdAt))
+    .map(([id]) => id);
 }
 
 // ============================================================================
@@ -339,6 +345,9 @@ export const acpStore = {
    * List remote sessions from the selected agent's underlying store.
    */
   async refreshRemoteSessions(cwd: string, agentType?: AgentType) {
+    if (state.remoteSessionsLoading) {
+      return;
+    }
     const resolvedAgentType = agentType ?? state.selectedAgentType;
     setState("remoteSessionsLoading", true);
     setState("remoteSessionsError", null);
@@ -434,11 +443,15 @@ export const acpStore = {
       localSessionId?: string;
       resumeAgentSessionId?: string;
       conversationTitle?: string;
+      initRetryAttempt?: number;
+      reclaimedIdleClaude?: boolean;
     },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
     const localSessionId = opts?.localSessionId;
     const resumeAgentSessionId = opts?.resumeAgentSessionId;
+    const initRetryAttempt = opts?.initRetryAttempt ?? 0;
+    const reclaimedIdleClaude = opts?.reclaimedIdleClaude ?? false;
     const conversationTitle =
       opts?.conversationTitle ??
       (resolvedAgentType === "codex" ? "Codex Agent" : "Claude Agent");
@@ -468,8 +481,10 @@ export const acpStore = {
     // Set up a global listener for session status events BEFORE spawning
     // This ensures we don't miss the "ready" event due to race conditions
     let resolveReady: ((sessionId: string) => void) | null = null;
-    const readyPromise = new Promise<string>((resolve) => {
+    let rejectReady: ((error: Error) => void) | null = null;
+    const readyPromise = new Promise<string>((resolve, reject) => {
       resolveReady = resolve;
+      rejectReady = reject;
     });
 
     // Listen to session status events temporarily so ready-state resolution does
@@ -484,6 +499,11 @@ export const acpStore = {
           }
           if (data.status === "ready" && resolveReady) {
             resolveReady(data.sessionId);
+          } else if (data.status === "error" && rejectReady) {
+            const sessionError =
+              state.sessions[data.sessionId]?.error ??
+              "Agent session failed during initialization.";
+            rejectReady(new Error(sessionError));
           }
         },
       );
@@ -615,6 +635,7 @@ export const acpStore = {
         );
       });
 
+      let initFailure: string | null = null;
       try {
         const readySessionId = await Promise.race([
           readyPromise,
@@ -632,14 +653,155 @@ export const acpStore = {
             "ready" as SessionStatus,
           );
         }
-      } catch (_timeoutError) {
-        console.warn("[AcpStore] Timeout waiting for ready, proceeding anyway");
-        // Resolve the ready promise so sendPrompt doesn't block forever
-        const entry = sessionReadyPromises.get(info.id);
-        if (entry) {
-          entry.resolve();
-          sessionReadyPromises.delete(info.id);
+      } catch (raceError) {
+        const message =
+          raceError instanceof Error ? raceError.message : String(raceError);
+        if (message.includes("timed out")) {
+          console.warn(
+            "[AcpStore] Timeout waiting for ready, proceeding anyway",
+          );
+          // Resolve the ready promise so sendPrompt doesn't block forever
+          const entry = sessionReadyPromises.get(info.id);
+          if (entry) {
+            entry.resolve();
+            sessionReadyPromises.delete(info.id);
+          }
+        } else {
+          initFailure = message;
         }
+      }
+
+      if (initFailure) {
+        if (
+          resolvedAgentType === "claude-code" &&
+          initRetryAttempt < MAX_CLAUDE_INIT_RETRIES &&
+          isRetryableClaudeInitError(initFailure)
+        ) {
+          console.warn(
+            "[AcpStore] Claude init failed, retrying:",
+            initFailure,
+          );
+          await this.terminateSession(info.id);
+          sessionReadyPromises.delete(info.id);
+          pendingSessionEvents.delete(info.id);
+          setState("isLoading", false);
+          tempUnsubscribe();
+          const delayMs =
+            CLAUDE_INIT_RETRY_DELAY_MS * (initRetryAttempt + 1) +
+            Math.floor(Math.random() * 200);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          return this.spawnSession(cwd, resolvedAgentType, {
+            ...opts,
+            initRetryAttempt: initRetryAttempt + 1,
+          });
+        }
+        if (
+          resolvedAgentType === "claude-code" &&
+          !reclaimedIdleClaude &&
+          isRetryableClaudeInitError(initFailure)
+        ) {
+          const idleClaude = getIdleClaudeSessionIds(localSessionId);
+          if (idleClaude.length > 0) {
+            const evictedId = idleClaude[0];
+            console.warn(
+              "[AcpStore] Claude init failed under pressure; reclaiming idle Claude session and retrying:",
+              evictedId,
+            );
+            await this.terminateSession(evictedId);
+            await this.terminateSession(info.id);
+            sessionReadyPromises.delete(info.id);
+            pendingSessionEvents.delete(info.id);
+            setState("isLoading", false);
+            tempUnsubscribe();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            return this.spawnSession(cwd, resolvedAgentType, {
+              ...opts,
+              initRetryAttempt: 0,
+              reclaimedIdleClaude: true,
+            });
+          }
+        }
+
+        setState("error", initFailure);
+        await this.terminateSession(info.id);
+        sessionReadyPromises.delete(info.id);
+        pendingSessionEvents.delete(info.id);
+        setState("isLoading", false);
+        tempUnsubscribe();
+        return null;
+      }
+
+      // Worker can fail fast and remove the session before timeout handling.
+      // Treat that as an initialization failure instead of returning a dead id.
+      if (!state.sessions[info.id]) {
+        const exitedMsg = "Agent session exited during initialization.";
+        if (
+          resolvedAgentType === "claude-code" &&
+          initRetryAttempt < MAX_CLAUDE_INIT_RETRIES
+        ) {
+          console.warn(
+            "[AcpStore] Claude session exited during init, retrying.",
+          );
+          sessionReadyPromises.delete(info.id);
+          pendingSessionEvents.delete(info.id);
+          setState("isLoading", false);
+          tempUnsubscribe();
+          const delayMs =
+            CLAUDE_INIT_RETRY_DELAY_MS * (initRetryAttempt + 1) +
+            Math.floor(Math.random() * 200);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          return this.spawnSession(cwd, resolvedAgentType, {
+            ...opts,
+            initRetryAttempt: initRetryAttempt + 1,
+          });
+        }
+        if (resolvedAgentType === "claude-code" && !reclaimedIdleClaude) {
+          const idleClaude = getIdleClaudeSessionIds(localSessionId);
+          if (idleClaude.length > 0) {
+            const evictedId = idleClaude[0];
+            console.warn(
+              "[AcpStore] Claude init exited early; reclaiming idle Claude session and retrying:",
+              evictedId,
+            );
+            await this.terminateSession(evictedId);
+            sessionReadyPromises.delete(info.id);
+            pendingSessionEvents.delete(info.id);
+            setState("isLoading", false);
+            tempUnsubscribe();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            return this.spawnSession(cwd, resolvedAgentType, {
+              ...opts,
+              initRetryAttempt: 0,
+              reclaimedIdleClaude: true,
+            });
+          }
+        }
+
+        setState("error", exitedMsg);
+        sessionReadyPromises.delete(info.id);
+        pendingSessionEvents.delete(info.id);
+        setState("isLoading", false);
+        tempUnsubscribe();
+        return null;
+      }
+
+      // If the worker reported an initialization error, treat spawn as failed.
+      // This is especially important for resume flows where the sidecar can
+      // accept the command but then fail load_session (e.g. missing Claude id).
+      const spawned = state.sessions[info.id];
+      const initError =
+        spawned?.error ??
+        (spawned?.info.status === "error"
+          ? "Agent session failed during initialization."
+          : null);
+      if (initError) {
+        setState("error", initError);
+        await this.terminateSession(info.id);
+        sessionReadyPromises.delete(info.id);
+        pendingSessionEvents.delete(info.id);
+        setState("isLoading", false);
+        tempUnsubscribe();
+        return null;
       }
 
       setState("isLoading", false);
@@ -664,7 +826,7 @@ export const acpStore = {
    */
   async resumeAgentConversation(
     conversationId: string,
-    cwd: string,
+    cwd?: string,
   ): Promise<string | null> {
     // If already running, just focus it.
     if (state.sessions[conversationId]) {
@@ -691,11 +853,28 @@ export const acpStore = {
 
     const remoteSessionId = convo.agent_session_id?.trim();
     if (!remoteSessionId) {
-      setState(
-        "error",
-        "This agent conversation does not have a resumable session id yet.",
+      console.warn(
+        "[AcpStore] Conversation has no stored remote session id; creating a fresh session.",
+        conversationId,
       );
-      return null;
+      const convoCwd =
+        convo.project_root?.trim() || convo.agent_cwd?.trim() || undefined;
+      const freshCwd = convoCwd || cwd;
+      if (!freshCwd) {
+        setState(
+          "error",
+          "Unable to determine project path for this conversation.",
+        );
+        return null;
+      }
+      const freshSessionId = await this.spawnSession(freshCwd, agentType, {
+        localSessionId: conversationId,
+        conversationTitle: convo.title,
+      });
+      if (freshSessionId) {
+        void this.refreshRecentAgentConversations(200).catch(() => {});
+      }
+      return freshSessionId;
     }
     if (
       agentType === "claude-code" &&
@@ -708,33 +887,44 @@ export const acpStore = {
       return null;
     }
 
-    let remoteMatch: RemoteSessionInfo | null = null;
-    try {
-      remoteMatch = await findRemoteSessionById(
-        cwd,
-        agentType,
-        remoteSessionId,
-      );
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setState("error", `Failed to validate remote session: ${msg}`);
-      return null;
-    }
-    if (!remoteMatch) {
+    const convoCwd =
+      convo.project_root?.trim() || convo.agent_cwd?.trim() || undefined;
+    const resumeCwd = convoCwd || cwd;
+    if (!resumeCwd) {
       setState(
         "error",
-        "This conversation's remote session was not found for the current project folder.",
+        "Unable to determine project path for this conversation.",
       );
       return null;
     }
 
-    const sessionId = await this.spawnSession(cwd, agentType, {
+    const sessionId = await this.spawnSession(resumeCwd, agentType, {
       localSessionId: conversationId,
-      resumeAgentSessionId: remoteMatch.sessionId,
+      resumeAgentSessionId: remoteSessionId,
       conversationTitle: convo.title,
     });
+
+    // Legacy Claude conversations can reference session IDs that no longer
+    // exist on disk. In that case, fall back to a fresh session for the same
+    // persisted conversation instead of failing hard.
+    if (!sessionId && agentType === "claude-code") {
+      console.warn(
+        "[AcpStore] Claude resume failed, starting a fresh session for conversation",
+        conversationId,
+        state.error,
+      );
+      const fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
+        localSessionId: conversationId,
+        conversationTitle: convo.title,
+      });
+      if (fallbackSessionId) {
+        void this.refreshRecentAgentConversations(200).catch(() => {});
+      }
+      return fallbackSessionId;
+    }
+
     if (sessionId) {
-      void this.refreshRecentAgentConversations(50, cwd).catch(() => {});
+      void this.refreshRecentAgentConversations(200).catch(() => {});
     }
     return sessionId;
   },
@@ -769,7 +959,7 @@ export const acpStore = {
       conversationTitle: existing?.title?.trim() || title,
     });
     if (sessionId) {
-      void this.refreshRecentAgentConversations(50, cwd).catch(() => {});
+      void this.refreshRecentAgentConversations(200).catch(() => {});
     }
     return sessionId;
   },

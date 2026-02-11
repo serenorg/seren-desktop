@@ -84,13 +84,11 @@ export const threadStore = {
   },
 
   /**
-   * All threads for the current project, sorted by most recent first.
+   * All threads, sorted by most recent first.
    * Combines chat conversations from conversationStore and agent conversations
    * from acpStore into a single unified list.
    */
   get threads(): Thread[] {
-    const projectRoot = fileTreeState.rootPath;
-
     // Chat conversations → Thread
     const chatThreads: Thread[] = conversationStore.conversations
       .filter((c) => !c.isArchived)
@@ -128,14 +126,7 @@ export const threadStore = {
     // Merge and sort by recency
     const all = [...chatThreads, ...agentThreads];
 
-    // Filter by project if a folder is open
-    const filtered = projectRoot
-      ? all.filter(
-          (t) => t.projectRoot === null || t.projectRoot === projectRoot,
-        )
-      : all;
-
-    return filtered.sort((a, b) => b.timestamp - a.timestamp);
+    return all.sort((a, b) => b.timestamp - a.timestamp);
   },
 
   /**
@@ -222,9 +213,12 @@ export const threadStore = {
   selectThread(id: string, kind: "chat" | "agent") {
     setState({ activeThreadId: id, activeThreadKind: kind });
 
-    // If the thread has a projectRoot and no folder is open, open it
+    // Keep the project context aligned with the selected thread.
     const thread = this.threads.find((t) => t.id === id);
-    if (thread?.projectRoot && !fileTreeState.rootPath) {
+    if (
+      thread?.projectRoot &&
+      thread.projectRoot !== fileTreeState.rootPath
+    ) {
       setRootPath(thread.projectRoot);
     }
 
@@ -300,7 +294,7 @@ export const threadStore = {
    */
   async refresh() {
     await conversationStore.loadHistory();
-    await acpStore.refreshRecentAgentConversations();
+    await acpStore.refreshRecentAgentConversations(200);
   },
 
   /**
