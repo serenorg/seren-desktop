@@ -40,7 +40,9 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             agent_type TEXT,
             agent_session_id TEXT,
             agent_cwd TEXT,
-            agent_model_id TEXT
+            agent_model_id TEXT,
+            project_id TEXT,
+            project_root TEXT
         )",
         [],
     )?;
@@ -110,6 +112,38 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         .ok();
     }
 
+    let has_project_id: bool = conn
+        .prepare("SELECT project_id FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_project_id {
+        conn.execute("ALTER TABLE conversations ADD COLUMN project_id TEXT", [])
+            .ok();
+    }
+
+    let has_project_root: bool = conn
+        .prepare("SELECT project_root FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_project_root {
+        conn.execute("ALTER TABLE conversations ADD COLUMN project_root TEXT", [])
+            .ok();
+    }
+
+    // Backfill project context for existing agent conversations.
+    conn.execute(
+        "UPDATE conversations
+         SET project_root = agent_cwd
+         WHERE kind = 'agent' AND project_root IS NULL AND agent_cwd IS NOT NULL",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "UPDATE conversations
+         SET project_id = project_root
+         WHERE kind = 'agent' AND project_id IS NULL AND project_root IS NOT NULL",
+        [],
+    )
+    .ok();
+
     // Helpful indexes for agent history lookups (safe to run repeatedly).
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_kind_created_at ON conversations(kind, created_at DESC)",
@@ -118,6 +152,11 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     .ok();
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_agent_session_id ON conversations(agent_session_id)",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_kind_project_created_at ON conversations(kind, project_id, created_at DESC)",
         [],
     )
     .ok();

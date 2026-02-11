@@ -676,6 +676,8 @@ export interface AgentConversation {
   agent_session_id: string | null;
   agent_cwd: string | null;
   agent_model_id: string | null;
+  project_id: string | null;
+  project_root: string | null;
   is_archived: boolean;
 }
 
@@ -766,6 +768,7 @@ export async function createAgentConversation(
   title: string,
   agentType: string,
   agentCwd?: string,
+  projectRoot?: string,
   agentSessionId?: string,
 ): Promise<AgentConversation> {
   const invoke = await getInvoke();
@@ -777,6 +780,7 @@ export async function createAgentConversation(
     title,
     agentType,
     agentCwd,
+    projectRoot,
     agentSessionId,
   });
 }
@@ -786,6 +790,7 @@ export async function createAgentConversation(
  */
 export async function getAgentConversations(
   limit = 20,
+  projectRoot?: string,
 ): Promise<AgentConversation[]> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -793,6 +798,7 @@ export async function getAgentConversations(
   }
   return await invoke<AgentConversation[]>("get_agent_conversations", {
     limit,
+    projectRoot,
   });
 }
 

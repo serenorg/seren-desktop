@@ -71,7 +71,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const onPickImages = () => handleAttachImages();
   onMount(() => {
     window.addEventListener("seren:pick-images", onPickImages);
-    void acpStore.refreshRecentAgentConversations();
+    void acpStore.refreshRecentAgentConversations(
+      10,
+      fileTreeState.rootPath ?? undefined,
+    );
   });
   onCleanup(() => {
     window.removeEventListener("seren:pick-images", onPickImages);
@@ -88,6 +91,17 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const hasFolderOpen = () => Boolean(fileTreeState.rootPath);
+
+  // Refresh project-scoped recent agent conversations when folder context changes.
+  createEffect(
+    on(
+      () => fileTreeState.rootPath,
+      (newPath: string | null) => {
+        void acpStore.refreshRecentAgentConversations(10, newPath ?? undefined);
+      },
+      { defer: true },
+    ),
+  );
 
   const scrollToBottom = () => {
     if (messagesRef) {
@@ -582,7 +596,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                         Resume Recent
                       </div>
                       <div class="flex flex-col gap-1 w-full">
-                        <For each={acpStore.recentAgentConversations.slice(0, 5)}>
+                        <For
+                          each={acpStore.recentAgentConversations.slice(0, 5)}
+                        >
                           {(convo) => {
                             const label =
                               convo.agent_type === "codex"
@@ -636,13 +652,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     </div>
                   </Show>
 
-                  <Show
-                    when={acpStore.selectedAgentType === "codex" && hasFolderOpen()}
-                  >
+                  <Show when={hasFolderOpen()}>
                     <div class="w-full mt-2 pt-3 border-t border-[#21262d]">
                       <div class="flex items-center justify-between gap-2 mb-2">
                         <div class="text-[10px] uppercase tracking-wider text-[#8b949e] font-medium">
-                          Browse Codex Sessions
+                          Browse{" "}
+                          {acpStore.selectedAgentType === "codex"
+                            ? "Codex"
+                            : "Claude"}{" "}
+                          Sessions
                         </div>
                         <button
                           type="button"
@@ -651,10 +669,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                           onClick={async () => {
                             const cwd = getCwd();
                             if (!cwd) return;
-                            await acpStore.refreshRemoteSessions(cwd);
+                            await acpStore.refreshRemoteSessions(
+                              cwd,
+                              acpStore.selectedAgentType,
+                            );
                           }}
                         >
-                          {acpStore.remoteSessionsLoading ? "Loading..." : "Refresh"}
+                          {acpStore.remoteSessionsLoading
+                            ? "Loading..."
+                            : "Refresh"}
                         </button>
                       </div>
 
@@ -668,7 +691,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                         when={acpStore.remoteSessions.length > 0}
                         fallback={
                           <div class="text-[11px] text-[#8b949e]">
-                            Click Refresh to list Codex sessions for this folder.
+                            Click Refresh to list{" "}
+                            {acpStore.selectedAgentType === "codex"
+                              ? "Codex"
+                              : "Claude"}{" "}
+                            sessions for this folder.
                           </div>
                         }
                       >
@@ -687,7 +714,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                                   onClick={async () => {
                                     const cwd = getCwd();
                                     if (!cwd) return;
-                                    await acpStore.resumeRemoteSession(s, cwd);
+                                    await acpStore.resumeRemoteSession(
+                                      s,
+                                      cwd,
+                                      acpStore.selectedAgentType,
+                                    );
                                   }}
                                 >
                                   <div class="flex items-center justify-between gap-2">
@@ -696,7 +727,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                                         {title}
                                       </div>
                                       <div class="text-[11px] text-[#8b949e] truncate">
-                                        {s.updatedAt ? s.updatedAt : s.sessionId}
+                                        {s.updatedAt
+                                          ? s.updatedAt
+                                          : s.sessionId}
                                       </div>
                                     </div>
                                     <div class="text-[11px] text-[#58a6ff] shrink-0">
@@ -717,10 +750,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                             onClick={async () => {
                               const cwd = getCwd();
                               if (!cwd) return;
-                              await acpStore.loadMoreRemoteSessions(cwd);
+                              await acpStore.loadMoreRemoteSessions(
+                                cwd,
+                                acpStore.selectedAgentType,
+                              );
                             }}
                           >
-                            {acpStore.remoteSessionsLoading ? "Loading..." : "Load more"}
+                            {acpStore.remoteSessionsLoading
+                              ? "Loading..."
+                              : "Load more"}
                           </button>
                         </Show>
                       </Show>

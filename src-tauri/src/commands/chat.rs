@@ -4,9 +4,27 @@
 use crate::services::database::init_db;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tauri::AppHandle;
 
 const MAX_MESSAGES_PER_CONVERSATION: i32 = 1000;
+
+fn normalize_project_root(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let project_path = PathBuf::from(trimmed);
+    let abs = if project_path.is_absolute() {
+        project_path
+    } else {
+        std::env::current_dir().ok()?.join(project_path)
+    };
+
+    let normalized = abs.canonicalize().unwrap_or(abs);
+    Some(normalized.to_string_lossy().to_string())
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Conversation {
@@ -27,6 +45,8 @@ pub struct AgentConversation {
     pub agent_session_id: Option<String>,
     pub agent_cwd: Option<String>,
     pub agent_model_id: Option<String>,
+    pub project_id: Option<String>,
+    pub project_root: Option<String>,
     pub is_archived: bool,
 }
 
@@ -205,12 +225,19 @@ pub async fn create_agent_conversation(
     title: String,
     agent_type: String,
     agent_cwd: Option<String>,
+    project_root: Option<String>,
     agent_session_id: Option<String>,
 ) -> Result<AgentConversation, String> {
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
+
+    let normalized_project_root = project_root
+        .as_deref()
+        .and_then(normalize_project_root)
+        .or_else(|| agent_cwd.as_deref().and_then(normalize_project_root));
+    let project_id = normalized_project_root.clone();
 
     let convo = AgentConversation {
         id: id.clone(),
@@ -220,6 +247,8 @@ pub async fn create_agent_conversation(
         agent_session_id: agent_session_id.clone(),
         agent_cwd: agent_cwd.clone(),
         agent_model_id: None,
+        project_id: project_id.clone(),
+        project_root: normalized_project_root.clone(),
         is_archived: false,
     };
 
@@ -233,15 +262,19 @@ pub async fn create_agent_conversation(
                 kind,
                 agent_type,
                 agent_session_id,
-                agent_cwd
-            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6)",
+                agent_cwd,
+                project_id,
+                project_root
+            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6, ?7, ?8)",
             params![
                 id,
                 title,
                 created_at,
                 agent_type,
                 agent_session_id,
-                agent_cwd
+                agent_cwd,
+                project_id,
+                normalized_project_root
             ],
         )?;
         Ok(())
@@ -255,18 +288,29 @@ pub async fn create_agent_conversation(
 pub async fn get_agent_conversations(
     app: AppHandle,
     limit: i32,
+    project_root: Option<String>,
 ) -> Result<Vec<AgentConversation>, String> {
+    let normalized_project_root = project_root.as_deref().and_then(normalize_project_root);
+    let raw_project_root = project_root;
+
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, is_archived
+            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, project_id, project_root, is_archived
              FROM conversations
              WHERE kind = 'agent' AND is_archived = 0
+               AND ((?1 IS NULL AND ?2 IS NULL)
+                    OR project_id = ?1
+                    OR project_root = ?1
+                    OR agent_cwd = ?1
+                    OR project_id = ?2
+                    OR project_root = ?2
+                    OR agent_cwd = ?2)
              ORDER BY created_at DESC
-             LIMIT ?1",
+             LIMIT ?3",
         )?;
 
         let rows = stmt
-            .query_map(params![limit], |row| {
+            .query_map(params![normalized_project_root, raw_project_root, limit], |row| {
                 Ok(AgentConversation {
                     id: row.get(0)?,
                     title: row.get(1)?,
@@ -275,7 +319,9 @@ pub async fn get_agent_conversations(
                     agent_session_id: row.get(4)?,
                     agent_cwd: row.get(5)?,
                     agent_model_id: row.get(6)?,
-                    is_archived: row.get::<_, i32>(7)? != 0,
+                    project_id: row.get(7)?,
+                    project_root: row.get(8)?,
+                    is_archived: row.get::<_, i32>(9)? != 0,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -292,7 +338,7 @@ pub async fn get_agent_conversation(
 ) -> Result<Option<AgentConversation>, String> {
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, is_archived
+            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, project_id, project_root, is_archived
              FROM conversations
              WHERE id = ?1 AND kind = 'agent'",
         )?;
@@ -307,7 +353,9 @@ pub async fn get_agent_conversation(
                     agent_session_id: row.get(4)?,
                     agent_cwd: row.get(5)?,
                     agent_model_id: row.get(6)?,
-                    is_archived: row.get::<_, i32>(7)? != 0,
+                    project_id: row.get(7)?,
+                    project_root: row.get(8)?,
+                    is_archived: row.get::<_, i32>(9)? != 0,
                 })
             })
             .optional()?;

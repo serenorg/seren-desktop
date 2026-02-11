@@ -14,15 +14,15 @@ const sessionReadyPromises = new Map<
 import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
   createAgentConversation,
+  type AgentConversation as DbAgentConversation,
   getAgentConversation,
   getAgentConversations,
   getMessages,
   getSerenApiKey,
+  type StoredMessage,
   saveMessage as saveMessageDb,
   setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
-  type AgentConversation as DbAgentConversation,
-  type StoredMessage,
 } from "@/lib/tauri-bridge";
 
 import type {
@@ -285,25 +285,30 @@ export const acpStore = {
   /**
    * Load recent persisted agent conversations for resuming.
    */
-  async refreshRecentAgentConversations(limit = 10) {
+  async refreshRecentAgentConversations(limit = 10, cwd?: string) {
     try {
-      const rows = await getAgentConversations(limit);
+      const rows = await getAgentConversations(limit, cwd);
       setState("recentAgentConversations", rows);
     } catch (error) {
       console.error("Failed to load agent conversation history:", error);
     }
   },
-
   /**
-   * List remote sessions from the agent's underlying store (Codex threads).
+   * List remote sessions from the selected agent's underlying store.
    */
-  async refreshRemoteSessions(cwd: string) {
+  async refreshRemoteSessions(cwd: string, agentType?: AgentType) {
+    const resolvedAgentType = agentType ?? state.selectedAgentType;
     setState("remoteSessionsLoading", true);
     setState("remoteSessionsError", null);
     try {
-      // Ensure Codex CLI is available before we spawn the ACP sidecar.
-      await acpService.ensureCodexCli();
-      const page = await acpService.listRemoteSessions("codex", cwd);
+      // Ensure the underlying CLI is available before listing remote sessions.
+      const ensureFn =
+        resolvedAgentType === "claude-code"
+          ? acpService.ensureClaudeCli
+          : acpService.ensureCodexCli;
+      await ensureFn();
+
+      const page = await acpService.listRemoteSessions(resolvedAgentType, cwd);
       setState("remoteSessions", page.sessions);
       setState("remoteSessionsNextCursor", page.nextCursor ?? null);
     } catch (error) {
@@ -315,13 +320,18 @@ export const acpStore = {
     }
   },
 
-  async loadMoreRemoteSessions(cwd: string) {
+  async loadMoreRemoteSessions(cwd: string, agentType?: AgentType) {
+    const resolvedAgentType = agentType ?? state.selectedAgentType;
     const cursor = state.remoteSessionsNextCursor;
     if (!cursor) return;
     setState("remoteSessionsLoading", true);
     setState("remoteSessionsError", null);
     try {
-      const page = await acpService.listRemoteSessions("codex", cwd, cursor);
+      const page = await acpService.listRemoteSessions(
+        resolvedAgentType,
+        cwd,
+        cursor,
+      );
       setState("remoteSessions", (prev) => [...prev, ...page.sessions]);
       setState("remoteSessionsNextCursor", page.nextCursor ?? null);
     } catch (error) {
@@ -388,18 +398,19 @@ export const acpStore = {
     // Listen to all session status events temporarily.
     // This also captures `agentSessionId` in case the "ready" event arrives
     // before the global event router is installed.
-    const tempUnsubscribe = await acpService.subscribeToEvent<SessionStatusEvent>(
-      "sessionStatus",
-      (data) => {
-      console.log("[AcpStore] Received session status event:", data);
-      if (state.sessions[data.sessionId]) {
-        this.handleStatusChange(data.sessionId, data.status, data);
-      }
-      if (data.status === "ready" && resolveReady) {
-        resolveReady(data.sessionId);
-      }
-      },
-    );
+    const tempUnsubscribe =
+      await acpService.subscribeToEvent<SessionStatusEvent>(
+        "sessionStatus",
+        (data) => {
+          console.log("[AcpStore] Received session status event:", data);
+          if (state.sessions[data.sessionId]) {
+            this.handleStatusChange(data.sessionId, data.status, data);
+          }
+          if (data.status === "ready" && resolveReady) {
+            resolveReady(data.sessionId);
+          }
+        },
+      );
 
     try {
       // Ensure the underlying CLI is installed and up-to-date before spawning
@@ -458,6 +469,7 @@ export const acpStore = {
           info.id,
           conversationTitle,
           resolvedAgentType,
+          cwd,
           cwd,
           resumeAgentSessionId ?? undefined,
         );
@@ -632,9 +644,8 @@ export const acpStore = {
     }
     return sessionId;
   },
-
   /**
-   * Resume a remote Codex session (ACP sessionId / Codex thread id).
+   * Resume a remote agent session (ACP session id from listSessions).
    *
    * If a local persisted conversation already exists for this remote session,
    * we resume that; otherwise we create a new local conversation and resume it.
@@ -642,9 +653,13 @@ export const acpStore = {
   async resumeRemoteSession(
     remoteSession: RemoteSessionInfo,
     cwd: string,
+    agentType?: AgentType,
   ): Promise<string | null> {
+    const resolvedAgentType = agentType ?? state.selectedAgentType;
     const existing = state.recentAgentConversations.find(
-      (c) => c.agent_type === "codex" && c.agent_session_id === remoteSession.sessionId,
+      (c) =>
+        c.agent_type === resolvedAgentType &&
+        c.agent_session_id === remoteSession.sessionId,
     );
     if (existing) {
       return this.resumeAgentConversation(existing.id, cwd);
@@ -652,13 +667,13 @@ export const acpStore = {
 
     const title =
       remoteSession.title?.trim() ||
-      `Codex Session ${remoteSession.sessionId.slice(0, 8)}`;
-    const sessionId = await this.spawnSession(cwd, "codex", {
+      `${resolvedAgentType === "codex" ? "Codex" : "Claude"} Session ${remoteSession.sessionId.slice(0, 8)}`;
+    const sessionId = await this.spawnSession(cwd, resolvedAgentType, {
       resumeAgentSessionId: remoteSession.sessionId,
       conversationTitle: title,
     });
     if (sessionId) {
-      void this.refreshRecentAgentConversations().catch(() => {});
+      void this.refreshRecentAgentConversations(10, cwd).catch(() => {});
     }
     return sessionId;
   },
@@ -961,11 +976,12 @@ export const acpStore = {
       setState("sessions", sessionId, "currentModelId", modelId);
       const session = state.sessions[sessionId];
       if (session) {
-        void setAgentConversationModelIdDb(session.conversationId, modelId).catch(
-          (error) => {
-            console.warn("Failed to persist agent model selection", error);
-          },
-        );
+        void setAgentConversationModelIdDb(
+          session.conversationId,
+          modelId,
+        ).catch((error) => {
+          console.warn("Failed to persist agent model selection", error);
+        });
       }
     } catch (error) {
       console.error("[AcpStore] Failed to set model:", error);
@@ -1099,6 +1115,10 @@ export const acpStore = {
 
   setSelectedAgentType(agentType: AgentType) {
     setState("selectedAgentType", agentType);
+    // Reset remote session listing when switching agents to avoid mixed results.
+    setState("remoteSessions", []);
+    setState("remoteSessionsNextCursor", null);
+    setState("remoteSessionsError", null);
   },
 
   /**
@@ -1185,9 +1205,13 @@ export const acpStore = {
         );
         break;
 
-
       case "configOptionsUpdate":
-        setState("sessions", sessionId, "configOptions", event.data.configOptions);
+        setState(
+          "sessions",
+          sessionId,
+          "configOptions",
+          event.data.configOptions,
+        );
         break;
       case "sessionStatus":
         this.handleStatusChange(sessionId, event.data.status, event.data);
