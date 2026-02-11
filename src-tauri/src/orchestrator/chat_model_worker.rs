@@ -6,6 +6,7 @@ use futures::StreamExt;
 use log;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
@@ -21,10 +22,17 @@ pub struct ChatModelWorker {
     cancelled: Arc<Mutex<bool>>,
 }
 
+/// Connect timeout for the HTTP client (seconds).
+const CONNECT_TIMEOUT_SECS: u64 = 30;
+
 impl ChatModelWorker {
     pub fn new() -> Self {
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            client: reqwest::Client::new(),
+            client,
             cancelled: Arc::new(Mutex::new(false)),
         }
     }
