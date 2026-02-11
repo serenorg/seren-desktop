@@ -68,12 +68,12 @@ type WorkerEvent =
 interface UserCapabilities {
   has_acp_agent: boolean;
   agent_type: string | null;
+  active_acp_session_id: string | null;
   selected_model: string | null;
   available_models: string[];
   available_tools: string[];
   tool_definitions: ToolDefinition[];
   installed_skills: SkillRef[];
-  active_acp_session_id: string | null;
 }
 
 interface SkillRef {
@@ -521,6 +521,7 @@ function buildCapabilities(): UserCapabilities {
   return {
     has_acp_agent: acpStore.availableAgents.length > 0,
     agent_type: acpStore.selectedAgentType ?? null,
+    active_acp_session_id: acpStore.activeSessionId ?? null,
     selected_model: providerStore.activeModel === AUTO_MODEL_ID ? null : providerStore.activeModel,
     available_models: activeModels.map((m) => m.id),
     available_tools: tools.map((t) => t.function.name),
@@ -532,6 +533,5 @@ function buildCapabilities(): UserCapabilities {
       tags: s.tags ?? [],
       path: s.path,
     })),
-    active_acp_session_id: acpStore.activeSessionId ?? null,
   };
 }
