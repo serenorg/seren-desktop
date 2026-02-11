@@ -981,6 +981,147 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             </div>
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Approval Policy
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  When the agent requires human approval before executing
+                  commands
+                </span>
+              </label>
+              <div class="flex gap-3">
+                <For
+                  each={
+                    [
+                      {
+                        value: "untrusted",
+                        label: "Untrusted",
+                        desc: "Approve all untrusted commands",
+                      },
+                      {
+                        value: "on-failure",
+                        label: "On Failure",
+                        desc: "Approve only when commands fail",
+                      },
+                      {
+                        value: "on-request",
+                        label: "On Request",
+                        desc: "Model decides when to ask",
+                      },
+                      {
+                        value: "never",
+                        label: "Never",
+                        desc: "Fully autonomous, no approval",
+                      },
+                    ] as const
+                  }
+                >
+                  {(mode) => (
+                    <button
+                      type="button"
+                      title={
+                        mode.value === "untrusted"
+                          ? "Only run trusted commands (ls, cat, sed) without approval. Escalates for untrusted commands."
+                          : mode.value === "on-failure"
+                            ? "Run all commands without approval. Only asks if a command fails to execute."
+                            : mode.value === "on-request"
+                              ? "The model decides when to ask the user for approval."
+                              : "Never ask for approval. Execution failures are returned directly to the model."
+                      }
+                      class={`flex flex-col items-center gap-2 px-4 py-3 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 ${
+                        settingsState.app.agentApprovalPolicy === mode.value
+                          ? "border-accent bg-[rgba(99,102,241,0.1)]"
+                          : "border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                      }`}
+                      onClick={() =>
+                        handleStringChange("agentApprovalPolicy", mode.value)
+                      }
+                    >
+                      <span
+                        class={`text-[0.85rem] ${settingsState.app.agentApprovalPolicy === mode.value ? "text-foreground" : "text-muted-foreground"}`}
+                      >
+                        {mode.label}
+                      </span>
+                      <span class="text-[0.7rem] text-muted-foreground text-center">
+                        {mode.desc}
+                      </span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Quick Presets
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  Apply common sandbox + approval combinations
+                </span>
+              </label>
+              <div class="flex gap-3">
+                <button
+                  type="button"
+                  title="Convenience preset: workspace-write sandbox + on-request approval"
+                  class={`px-4 py-2 text-[0.85rem] rounded-lg border-2 cursor-pointer transition-all duration-150 ${
+                    settingsState.app.agentSandboxMode === "workspace-write" &&
+                    settingsState.app.agentApprovalPolicy === "on-request"
+                      ? "border-accent bg-[rgba(99,102,241,0.1)] text-foreground"
+                      : "border-[rgba(148,163,184,0.2)] bg-[rgba(30,30,30,0.6)] text-muted-foreground hover:border-[rgba(148,163,184,0.4)]"
+                  }`}
+                  onClick={() => {
+                    handleStringChange("agentSandboxMode", "workspace-write");
+                    handleStringChange("agentApprovalPolicy", "on-request");
+                  }}
+                >
+                  Recommended
+                </button>
+                <button
+                  type="button"
+                  title="DANGEROUS: Removes all sandbox restrictions and approval requirements"
+                  class={`px-4 py-2 text-[0.85rem] rounded-lg border-2 cursor-pointer transition-all duration-150 ${
+                    settingsState.app.agentSandboxMode === "full-access" &&
+                    settingsState.app.agentApprovalPolicy === "never"
+                      ? "border-red-500 bg-[rgba(239,68,68,0.1)] text-red-400"
+                      : "border-red-500/30 bg-[rgba(30,30,30,0.6)] text-red-400/70 hover:border-red-500/60"
+                  }`}
+                  onClick={() => {
+                    handleStringChange("agentSandboxMode", "full-access");
+                    handleStringChange("agentApprovalPolicy", "never");
+                  }}
+                >
+                  Bypass All Safety
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.agentSearchEnabled}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "agentSearchEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="mt-1 w-4 h-4 accent-[var(--color-primary,#6366f1)]"
+                />
+                <div class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable Web Search
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Allow the agent to search the web during sessions
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"

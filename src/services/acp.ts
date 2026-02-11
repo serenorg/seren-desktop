@@ -154,18 +154,24 @@ export type AcpEvent =
  * @param cwd - Working directory for the agent session
  * @param sandboxMode - Optional sandbox mode for restricting agent capabilities
  * @param apiKey - Optional API key to enable Seren MCP tools for the agent
+ * @param approvalPolicy - Optional approval policy for command execution
+ * @param searchEnabled - Optional flag to enable web search
  */
 export async function spawnAgent(
   agentType: AgentType,
   cwd: string,
   sandboxMode?: string,
   apiKey?: string,
+  approvalPolicy?: string,
+  searchEnabled?: boolean,
 ): Promise<AcpSessionInfo> {
   return invoke<AcpSessionInfo>("acp_spawn", {
     agentType,
     cwd,
     sandboxMode: sandboxMode ?? null,
     apiKey: apiKey ?? null,
+    approvalPolicy: approvalPolicy ?? null,
+    searchEnabled: searchEnabled ?? null,
   });
 }
 

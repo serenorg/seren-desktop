@@ -325,6 +325,8 @@ export const acpStore = {
         cwd,
         settingsStore.settings.agentSandboxMode,
         apiKey ?? undefined,
+        settingsStore.settings.agentApprovalPolicy,
+        settingsStore.settings.agentSearchEnabled,
       );
       console.log("[AcpStore] Spawn result:", info);
 
