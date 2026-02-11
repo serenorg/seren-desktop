@@ -123,10 +123,7 @@ async function installAvailableUpdate(): Promise<void> {
           const total = progress.data.contentLength;
           console.log(`[Updater] Download started, size: ${total} bytes`);
           setState({ totalBytes: total });
-        } else if (
-          progress.event === "Progress" &&
-          progress.data.chunkLength
-        ) {
+        } else if (progress.event === "Progress" && progress.data.chunkLength) {
           downloaded += progress.data.chunkLength;
           const percent =
             state.totalBytes > 0

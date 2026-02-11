@@ -87,8 +87,9 @@
 }
 
 .gateway-approval-endpoint {
-  font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
-    "Courier New", monospace;
+  font-family:
+    "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New",
+    monospace;
   font-size: 0.9rem;
   background: var(--surface);
   padding: 8px 12px;
@@ -97,8 +98,9 @@
 }
 
 .gateway-approval-args {
-  font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
-    "Courier New", monospace;
+  font-family:
+    "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New",
+    monospace;
   font-size: 0.85rem;
   color: var(--muted-foreground);
   background: var(--surface);

@@ -1,8 +1,7 @@
 // ABOUTME: Approval dialog for Gateway publisher tool operations.
 // ABOUTME: Shows operation details and requires user confirmation before execution.
 
-import { listen } from "@tauri-apps/api/event";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import {
   type Component,
   createSignal,
@@ -29,7 +28,10 @@ export const GatewayToolApproval: Component = () => {
     const unlisten = await listen<ApprovalRequest>(
       "gateway-tool-approval-request",
       (event) => {
-        console.log("[GatewayToolApproval] Received approval request:", event.payload);
+        console.log(
+          "[GatewayToolApproval] Received approval request:",
+          event.payload,
+        );
         setRequest(event.payload);
         setIsProcessing(false);
       },
@@ -84,11 +86,12 @@ export const GatewayToolApproval: Component = () => {
       .filter(([key]) => !key.startsWith("_")) // Skip internal params
       .slice(0, 3) // Limit to 3 params
       .map(([key, value]) => {
-        const strValue = typeof value === "string"
-          ? value.length > 50
-            ? `${value.slice(0, 50)}...`
-            : value
-          : JSON.stringify(value);
+        const strValue =
+          typeof value === "string"
+            ? value.length > 50
+              ? `${value.slice(0, 50)}...`
+              : value
+            : JSON.stringify(value);
         return `${key}: ${strValue}`;
       });
 
@@ -102,7 +105,9 @@ export const GatewayToolApproval: Component = () => {
           <div class="gateway-approval-dialog">
             <div class="gateway-approval-header">
               <h2 class="gateway-approval-title">
-                {req().isDestructive ? "⚠️ Confirm Destructive Operation" : "🔐 Confirm Operation"}
+                {req().isDestructive
+                  ? "⚠️ Confirm Destructive Operation"
+                  : "🔐 Confirm Operation"}
               </h2>
             </div>
 

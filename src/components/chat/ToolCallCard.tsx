@@ -300,9 +300,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
         </Show>
 
         {/* Summary */}
-        <span class="flex-1 text-sm text-[#e6edf3] truncate">
-          {summary()}
-        </span>
+        <span class="flex-1 text-sm text-[#e6edf3] truncate">{summary()}</span>
 
         {/* Status Badge */}
         <span
@@ -338,16 +336,18 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
             <div class="mb-3">
               <div class="text-[#484f58] font-medium mb-1">Parameters:</div>
               <div class="bg-[#0d1117] border border-[#30363d] rounded p-2 font-mono text-[#e6edf3] max-h-48 overflow-auto">
-                {Object.entries(props.toolCall.parameters!).map(([key, value]) => (
-                  <div class="mb-1 last:mb-0">
-                    <span class="text-[#79c0ff]">{key}:</span>{" "}
-                    <span class="text-[#a5d6ff] break-all">
-                      {typeof value === "string"
-                        ? truncate(value, 500)
-                        : JSON.stringify(value)}
-                    </span>
-                  </div>
-                ))}
+                {Object.entries(props.toolCall.parameters!).map(
+                  ([key, value]) => (
+                    <div class="mb-1 last:mb-0">
+                      <span class="text-[#79c0ff]">{key}:</span>{" "}
+                      <span class="text-[#a5d6ff] break-all">
+                        {typeof value === "string"
+                          ? truncate(value, 500)
+                          : JSON.stringify(value)}
+                      </span>
+                    </div>
+                  ),
+                )}
               </div>
             </div>
           </Show>

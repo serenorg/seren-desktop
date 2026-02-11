@@ -140,17 +140,22 @@ export const EditorPanel: Component = () => {
     const activeTab = tabsState.tabs.find((tab) => tab.id === activeId);
     console.log("[EditorPanel] Sync effect triggered:", {
       activeId,
-      activeTab: activeTab ? {
-        id: activeTab.id,
-        filePath: activeTab.filePath,
-        contentLength: activeTab.content.length
-      } : null
+      activeTab: activeTab
+        ? {
+            id: activeTab.id,
+            filePath: activeTab.filePath,
+            contentLength: activeTab.content.length,
+          }
+        : null,
     });
     if (activeTab) {
       setActiveFilePath(activeTab.filePath);
       setEditorContent(activeTab.content);
       setSelectedPath(activeTab.filePath);
-      console.log("[EditorPanel] Editor content set, first 100 chars:", activeTab.content.substring(0, 100));
+      console.log(
+        "[EditorPanel] Editor content set, first 100 chars:",
+        activeTab.content.substring(0, 100),
+      );
     } else {
       setActiveFilePath(null);
       setEditorContent("");

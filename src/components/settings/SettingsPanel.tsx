@@ -166,7 +166,9 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       <main class="flex-1 px-8 py-6 overflow-y-auto">
         <Show when={activeSection() === "chat"}>
           <section>
-            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Window Settings</h3>
+            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">
+              Window Settings
+            </h3>
             <p class="m-0 mb-6 text-muted-foreground leading-normal">
               Configure AI chat behavior and conversation history.
             </p>

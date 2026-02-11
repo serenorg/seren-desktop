@@ -2,11 +2,11 @@
 // ABOUTME: Displays tabs with close buttons, permission indicators, and a new chat button.
 
 import { type Component, For, Show } from "solid-js";
-import { hasPendingApprovals } from "@/stores/mcp-chat.store";
 import {
   type Conversation,
   conversationStore,
 } from "@/stores/conversation.store";
+import { hasPendingApprovals } from "@/stores/mcp-chat.store";
 
 export const ChatTabBar: Component = () => {
   const handleNewChat = async () => {
@@ -21,7 +21,10 @@ export const ChatTabBar: Component = () => {
   const handleTabClick = (id: string) => {
     // Prevent tab switching during streaming to avoid chat history "loss"
     // The history isn't actually lost - it's just showing a different conversation
-    if (conversationStore.isLoading && id !== conversationStore.activeConversationId) {
+    if (
+      conversationStore.isLoading &&
+      id !== conversationStore.activeConversationId
+    ) {
       console.log("[ChatTabBar] Blocked tab switch during streaming");
       return;
     }

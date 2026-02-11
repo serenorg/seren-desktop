@@ -690,7 +690,11 @@ export const acpStore = {
 
     let remoteMatch: RemoteSessionInfo | null = null;
     try {
-      remoteMatch = await findRemoteSessionById(cwd, agentType, remoteSessionId);
+      remoteMatch = await findRemoteSessionById(
+        cwd,
+        agentType,
+        remoteSessionId,
+      );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setState("error", `Failed to validate remote session: ${msg}`);
