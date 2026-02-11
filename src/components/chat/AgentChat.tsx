@@ -23,6 +23,10 @@ import { openExternalLink } from "@/lib/external-link";
 import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments, toDataUrl } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
+import {
+  getModelDisplayName,
+  mapAgentModelToChat,
+} from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
@@ -797,7 +801,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         {(() => {
           const agentType =
             acpStore.activeSession?.info.agentType ?? "claude-code";
-          const modelName = agentType === "codex" ? "GPT-5" : "Claude Opus 4.5";
+          const agentModelId = acpStore.activeSession?.currentModelId;
+          const chatModelId = mapAgentModelToChat(agentModelId, agentType);
+          const modelName = getModelDisplayName(chatModelId);
           const agentName = agentType === "codex" ? "Codex" : "Claude Code";
           return (
             <div class="mx-4 mb-2 px-3 py-3 border rounded-md text-sm bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.4)] text-[#58a6ff]">

@@ -522,7 +522,10 @@ function buildCapabilities(): UserCapabilities {
     has_acp_agent: acpStore.availableAgents.length > 0,
     agent_type: acpStore.selectedAgentType ?? null,
     active_acp_session_id: acpStore.activeSessionId ?? null,
-    selected_model: providerStore.activeModel === AUTO_MODEL_ID ? null : providerStore.activeModel,
+    selected_model:
+      providerStore.activeModel === AUTO_MODEL_ID
+        ? null
+        : providerStore.activeModel,
     available_models: activeModels.map((m) => m.id),
     available_tools: tools.map((t) => t.function.name),
     tool_definitions: tools,

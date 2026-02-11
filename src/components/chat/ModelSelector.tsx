@@ -180,7 +180,11 @@ export const ModelSelector: Component = () => {
             A
           </span>
         </Show>
-        <span class={providerStore.isAutoModel ? "text-[#7ee787]" : "text-foreground"}>
+        <span
+          class={
+            providerStore.isAutoModel ? "text-[#7ee787]" : "text-foreground"
+          }
+        >
           {currentModel()?.name || "Select model"}
         </span>
         <span class="text-[10px] text-muted-foreground">

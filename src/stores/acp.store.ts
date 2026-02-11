@@ -1276,6 +1276,7 @@ export const acpStore = {
 
     const agentType = session.info.agentType;
     const messages = [...session.messages];
+    const agentModelId = session.currentModelId;
     const title = session.title;
 
     // Clear the flag first so the banner disappears immediately
@@ -1284,7 +1285,7 @@ export const acpStore = {
       setState("sessions", sessionId, "rateLimitHit", false);
     }
 
-    return performRateLimitFallback(agentType, messages, title);
+    return performRateLimitFallback(agentType, messages, agentModelId, title);
   },
 
   /**
