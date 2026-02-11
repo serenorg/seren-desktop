@@ -1,4 +1,4 @@
-import type * as Monaco from "monaco-editor";
+import type * as monaco from "monaco-editor";
 import {
   type Component,
   createEffect,
@@ -9,6 +9,7 @@ import {
 import {
   defaultEditorOptions,
   getLanguageFromPath,
+  getMonaco,
   initMonaco,
   registerAllCodeActions,
 } from "@/lib/editor";
@@ -32,13 +33,13 @@ export interface MonacoEditorProps {
   /** Read-only mode */
   readOnly?: boolean;
   /** Additional editor options */
-  options?: Monaco.editor.IStandaloneEditorConstructionOptions;
+  options?: monaco.editor.IStandaloneEditorConstructionOptions;
 }
 
 export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
   let containerRef: HTMLDivElement | undefined;
-  let editor: Monaco.editor.IStandaloneCodeEditor | undefined;
-  let model: Monaco.editor.ITextModel | undefined;
+  let editor: monaco.editor.IStandaloneCodeEditor | undefined;
+  let model: monaco.editor.ITextModel | undefined;
   let ownsModel = false; // Track if we created the model vs reused existing
 
   const [isDirty, setIsDirty] = createSignal(false);
@@ -142,14 +143,10 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
 
   // Update language when filePath changes
   createEffect(() => {
-    if (!model || !props.filePath) return;
-    const monaco = editor?.getModel()
-      ? (globalThis as unknown as { monaco: typeof Monaco }).monaco
-      : null;
-    if (monaco) {
-      const language = props.language || getLanguageFromPath(props.filePath);
-      monaco.editor.setModelLanguage(model, language);
-    }
+    if (!model || !props.filePath || !isMonacoReady()) return;
+    const m = getMonaco();
+    const language = props.language || getLanguageFromPath(props.filePath);
+    m.editor.setModelLanguage(model, language);
   });
 
   // Update theme when changed
@@ -181,7 +178,7 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
    * Get the editor instance for advanced operations.
    * TODO: Expose via ref pattern when needed by parent components.
    */
-  function _getEditor(): Monaco.editor.IStandaloneCodeEditor | undefined {
+  function _getEditor(): monaco.editor.IStandaloneCodeEditor | undefined {
     return editor;
   }
 
@@ -189,7 +186,7 @@ export const MonacoEditor: Component<MonacoEditorProps> = (props) => {
    * Get the model instance.
    * TODO: Expose via ref pattern when needed by parent components.
    */
-  function _getModel(): Monaco.editor.ITextModel | undefined {
+  function _getModel(): monaco.editor.ITextModel | undefined {
     return model;
   }
 
