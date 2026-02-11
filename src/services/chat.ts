@@ -441,12 +441,7 @@ export async function* streamMessageWithTools(
       tools,
       tools ? "auto" : undefined,
     );
-    console.log(
-      "[streamMessageWithTools] Got response, has content:",
-      !!response.content,
-      "tool_calls:",
-      response.tool_calls?.length ?? 0,
-    );
+    console.log("[streamMessageWithTools] Got response:", response);
 
     // Yield content if present
     if (response.content) {
