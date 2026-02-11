@@ -33,7 +33,8 @@ const SIMPLE_PREFERRED_MODELS: &[&str] = &[
 /// - Code tasks: prefer the most capable model
 /// - Simple Q&A: prefer a fast/cheap model
 ///
-/// Delegation: always InLoop for bootstrap (trust graduation comes in Phase 4).
+/// Delegation: AcpAgent defaults to FullHandoff (agent manages its own loop);
+/// ChatModel and McpPublisher default to InLoop (trust graduation can override).
 pub fn route(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
@@ -45,10 +46,15 @@ pub fn route(
 
     let publisher_slug = extract_publisher_slug(&worker_type, capabilities);
 
+    let delegation = match worker_type {
+        WorkerType::AcpAgent => DelegationType::FullHandoff,
+        _ => DelegationType::InLoop,
+    };
+
     RoutingDecision {
         worker_type,
         model_id,
-        delegation: DelegationType::InLoop,
+        delegation,
         reason,
         selected_skills,
         publisher_slug,
@@ -365,17 +371,17 @@ mod tests {
             } else {
                 None
             },
+            active_acp_session_id: if has_agent {
+                Some("test-session-id".to_string())
+            } else {
+                None
+            },
             selected_model: None,
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: tools.iter().map(|t| t.to_string()).collect(),
             tool_definitions: vec![],
             installed_skills: vec![],
             model_rankings: vec![],
-            active_acp_session_id: if has_agent {
-                Some("test-session-id".to_string())
-            } else {
-                None
-            },
         }
     }
 
@@ -391,17 +397,17 @@ mod tests {
             } else {
                 None
             },
+            active_acp_session_id: if has_agent {
+                Some("test-session-id".to_string())
+            } else {
+                None
+            },
             selected_model: None,
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: vec![],
             tool_definitions: vec![],
             installed_skills: skills,
             model_rankings: vec![],
-            active_acp_session_id: if has_agent {
-                Some("test-session-id".to_string())
-            } else {
-                None
-            },
         }
     }
 
@@ -596,7 +602,7 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn always_uses_in_loop_delegation() {
+    fn acp_agent_uses_full_handoff_delegation() {
         let classification = make_classification("code_generation", true, true);
         let capabilities = make_capabilities(
             true,
@@ -604,6 +610,20 @@ mod tests {
             &[],
         );
         let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::AcpAgent);
+        assert_eq!(decision.delegation, DelegationType::FullHandoff);
+    }
+
+    #[test]
+    fn chat_model_uses_in_loop_delegation() {
+        let classification = make_classification("general_chat", false, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &[],
+        );
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.delegation, DelegationType::InLoop);
     }
 

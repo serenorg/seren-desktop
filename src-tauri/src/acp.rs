@@ -1449,8 +1449,6 @@ async fn run_session_worker(
         log::info!("[ACP] IO task finished");
     });
 
-    // Give the IO task a moment to start
-    tokio::task::yield_now().await;
     log::info!("[ACP] IO task spawned, proceeding with initialization...");
 
     // Initialize the agent (with 30-second timeout to prevent infinite hang)

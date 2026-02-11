@@ -118,6 +118,10 @@ pub struct ImageAttachment {
 pub struct UserCapabilities {
     pub has_acp_agent: bool,
     pub agent_type: Option<String>,
+    /// The active ACP session ID, if one exists. Enables the ACP fast-path
+    /// to skip classification/decomposition when routing to the agent.
+    #[serde(default)]
+    pub active_acp_session_id: Option<String>,
     /// The model the user explicitly selected in the UI.
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -132,10 +136,6 @@ pub struct UserCapabilities {
     /// Empty means no data; router falls back to hardcoded preference lists.
     #[serde(default)]
     pub model_rankings: Vec<(String, f64)>,
-    /// Active ACP session ID, if an agent session is currently running.
-    /// Required for AcpAgent routing — without it, the router falls back to ChatModel.
-    #[serde(default)]
-    pub active_acp_session_id: Option<String>,
 }
 
 /// Transition event emitted when the orchestrator switches models.
@@ -398,9 +398,8 @@ mod tests {
         assert_eq!(caps.available_tools.len(), 2);
         assert_eq!(caps.installed_skills.len(), 1);
         assert_eq!(caps.installed_skills[0].slug, "prose");
-        // model_rankings defaults to empty when not in JSON (frontend compat)
-        assert!(caps.model_rankings.is_empty());
-        // active_acp_session_id defaults to None when not in JSON
+        // Optional fields default when not in JSON (frontend compat)
         assert!(caps.active_acp_session_id.is_none());
+        assert!(caps.model_rankings.is_empty());
     }
 }
