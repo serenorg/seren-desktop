@@ -183,13 +183,6 @@ impl AgentType {
         ))
     }
 
-    /// Get additional arguments for the command
-    fn args(&self) -> Vec<&'static str> {
-        match self {
-            AgentType::ClaudeCode => vec![],
-            AgentType::Codex => vec![],
-        }
-    }
 }
 
 fn auth_error_message(agent_type: AgentType) -> String {
@@ -1132,6 +1125,8 @@ pub async fn acp_spawn(
     cwd: String,
     sandbox_mode: Option<String>,
     api_key: Option<String>,
+    approval_policy: Option<String>,
+    search_enabled: Option<bool>,
 ) -> Result<AcpSessionInfo, String> {
     let cwd = normalize_cwd(&cwd)?;
     let parsed_sandbox_mode = sandbox_mode
@@ -1210,6 +1205,8 @@ pub async fn acp_spawn(
                 pending_diff_proposals,
                 parsed_sandbox_mode,
                 api_key_clone,
+                approval_policy,
+                search_enabled,
             )
             .await
             {
@@ -1297,9 +1294,29 @@ async fn run_session_worker(
     pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     sandbox_mode: crate::sandbox::SandboxMode,
     api_key: Option<String>,
+    approval_policy: Option<String>,
+    search_enabled: Option<bool>,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
-    let args = agent_type.args();
+
+    // Build CLI args based on agent type and configuration
+    let mut args: Vec<String> = Vec::new();
+    if matches!(agent_type, AgentType::Codex) {
+        let sandbox_flag = match sandbox_mode {
+            crate::sandbox::SandboxMode::ReadOnly => "read-only",
+            crate::sandbox::SandboxMode::WorkspaceWrite => "workspace-write",
+            crate::sandbox::SandboxMode::FullAccess => "danger-full-access",
+        };
+        args.extend_from_slice(&["-s".into(), sandbox_flag.into()]);
+
+        if let Some(ref policy) = approval_policy {
+            args.extend_from_slice(&["-a".into(), policy.clone()]);
+        }
+
+        if search_enabled.unwrap_or(false) {
+            args.push("--search".into());
+        }
+    }
 
     log::info!("[ACP] Spawning agent: {:?} {:?} in {}", command, args, cwd);
 
