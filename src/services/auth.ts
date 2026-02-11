@@ -34,16 +34,66 @@ export interface AuthError {
   code?: string;
 }
 
+// Client-side login rate limiting (exponential backoff)
+const loginRateLimit = {
+  attempts: 0,
+  lastAttemptTime: 0,
+  backoffMs: 1_000,
+};
+const MAX_LOGIN_ATTEMPTS = 5;
+const BACKOFF_MULTIPLIER = 2;
+const MAX_BACKOFF_MS = 30_000;
+
+function checkLoginRateLimit(): void {
+  const now = Date.now();
+  const elapsed = now - loginRateLimit.lastAttemptTime;
+
+  if (
+    loginRateLimit.attempts >= MAX_LOGIN_ATTEMPTS &&
+    elapsed < loginRateLimit.backoffMs
+  ) {
+    const waitSeconds = Math.ceil(
+      (loginRateLimit.backoffMs - elapsed) / 1000,
+    );
+    throw new Error(
+      `Too many login attempts. Please wait ${waitSeconds} seconds.`,
+    );
+  }
+
+  // Reset after sufficient cooldown
+  if (elapsed > loginRateLimit.backoffMs * 2) {
+    loginRateLimit.attempts = 0;
+    loginRateLimit.backoffMs = 1_000;
+  }
+}
+
+function recordLoginAttempt(success: boolean): void {
+  loginRateLimit.attempts++;
+  loginRateLimit.lastAttemptTime = Date.now();
+
+  if (success) {
+    loginRateLimit.attempts = 0;
+    loginRateLimit.backoffMs = 1_000;
+  } else {
+    loginRateLimit.backoffMs = Math.min(
+      loginRateLimit.backoffMs * BACKOFF_MULTIPLIER,
+      MAX_BACKOFF_MS,
+    );
+  }
+}
+
 /**
  * Login with email and password.
  * Stores token securely on success.
  * Note: Login endpoint is not in OpenAPI spec, using manual fetch.
- * @throws Error on authentication failure
+ * @throws Error on authentication failure or rate limiting
  */
 export async function login(
   email: string,
   password: string,
 ): Promise<LoginResponse> {
+  checkLoginRateLimit();
+
   const response = await appFetch(`${apiBase}/auth/login`, {
     method: "POST",
     headers: {
@@ -53,6 +103,7 @@ export async function login(
   });
 
   if (!response.ok) {
+    recordLoginAttempt(false);
     if (response.status === 401) {
       throw new Error("Invalid email or password");
     }
@@ -62,6 +113,7 @@ export async function login(
     throw new Error(error.message);
   }
 
+  recordLoginAttempt(true);
   const data: LoginResponse = await response.json();
   await storeToken(data.data.access_token);
   await storeRefreshToken(data.data.refresh_token);

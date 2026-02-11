@@ -91,7 +91,12 @@ async fn get_oauth_redirect_url(url: String, bearer_token: String) -> Result<Str
         }
     }
 
-    log::error!("[OAuth] {} response from Gateway: {}", status, body_text);
+    let truncated_body = if body_text.len() > 200 {
+        format!("{}...[truncated]", &body_text[..200])
+    } else {
+        body_text.clone()
+    };
+    log::error!("[OAuth] {} response from Gateway: {}", status, truncated_body);
     Err(format!(
         "Unexpected response status: {} - {}",
         status, body_text
@@ -410,7 +415,7 @@ pub fn run() {
                     Target::new(TargetKind::Webview),
                 ])
                 .max_file_size(5_000_000) // 5 MB per log file
-                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
                 .level(if cfg!(debug_assertions) {
                     log::LevelFilter::Debug
                 } else {

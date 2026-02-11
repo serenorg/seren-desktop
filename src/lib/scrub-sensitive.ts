@@ -5,8 +5,26 @@ const PATTERNS: Array<{ regex: RegExp; replacement: string }> = [
   // API keys (Stripe-style sk_live_* and sk_test_*)
   { regex: /sk_(live|test)_[a-zA-Z0-9]+/g, replacement: "[REDACTED_API_KEY]" },
 
+  // Seren API keys (seren_xxx_yyy format)
+  {
+    regex: /seren_[a-zA-Z0-9]+_[a-zA-Z0-9]+/g,
+    replacement: "[REDACTED_SEREN_KEY]",
+  },
+
   // Bearer tokens (anything after "Bearer ")
   { regex: /Bearer\s+[^\s]+/g, replacement: "Bearer [REDACTED_TOKEN]" },
+
+  // JWT tokens (eyJ... three dot-separated base64 segments)
+  {
+    regex: /eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g,
+    replacement: "[REDACTED_JWT]",
+  },
+
+  // Database connection strings (postgres://, mysql://, mongodb://)
+  {
+    regex: /(postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"']+/gi,
+    replacement: "$1://[REDACTED_CONNECTION_STRING]",
+  },
 
   // UUIDs
   {
@@ -35,7 +53,8 @@ const PATTERNS: Array<{ regex: RegExp; replacement: string }> = [
 
 /**
  * Removes sensitive data from a string before telemetry.
- * Scrubs: API keys, emails, file paths with usernames, UUIDs, Bearer tokens.
+ * Scrubs: API keys (Stripe + Seren), JWTs, DB connection strings, emails,
+ * file paths with usernames, UUIDs, Bearer tokens.
  */
 export function scrubSensitive(text: string): string {
   let result = text;

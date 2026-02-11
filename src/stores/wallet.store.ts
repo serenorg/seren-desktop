@@ -79,11 +79,7 @@ async function refreshBalance(): Promise<void> {
     return;
   }
 
-  // Add stack trace to identify caller
-  console.log(
-    "[Wallet Store] refreshBalance called from:",
-    new Error().stack?.split("\n")[2]?.trim(),
-  );
+  console.log("[Wallet Store] refreshBalance called");
   console.log("[Wallet Store] Setting isLoading = true");
   setWalletState("isLoading", true);
   setWalletState("error", null);
@@ -91,7 +87,7 @@ async function refreshBalance(): Promise<void> {
   try {
     const data: WalletBalance = await fetchBalance();
     consecutiveFailures = 0;
-    console.log("[Wallet Store] Setting isLoading = false (success)");
+    console.log("[Wallet Store] Balance refresh succeeded");
     setWalletState({
       balance: data.balance_atomic / 1_000_000,
       balance_atomic: data.balance_atomic,
@@ -99,10 +95,6 @@ async function refreshBalance(): Promise<void> {
       lastUpdated: new Date().toISOString(),
       isLoading: false,
     });
-    console.log(
-      "[Wallet Store] State updated, isLoading:",
-      walletState.isLoading,
-    );
   } catch (err) {
     consecutiveFailures++;
     const message =
@@ -141,10 +133,7 @@ function startAutoRefresh(): void {
     return;
   }
 
-  console.log(
-    "[Wallet Store] Starting auto-refresh, called from:",
-    new Error().stack?.split("\n")[2]?.trim(),
-  );
+  console.log("[Wallet Store] Starting auto-refresh");
   setWalletState("autoRefreshActive", true);
   consecutiveFailures = 0;
 
@@ -294,12 +283,7 @@ function resetWalletState(): void {
  */
 function updateBalanceFromError(availableBalanceAtomic: number): void {
   const balanceUsd = `$${(availableBalanceAtomic / 1_000_000).toFixed(2)}`;
-  console.log(
-    "[Wallet Store] Updating balance from 402 error:",
-    availableBalanceAtomic,
-    "->",
-    balanceUsd,
-  );
+  console.log("[Wallet Store] Updating balance from 402 error");
   setWalletState({
     balance: availableBalanceAtomic / 1_000_000,
     balance_atomic: availableBalanceAtomic,
