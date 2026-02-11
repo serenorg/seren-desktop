@@ -93,7 +93,7 @@ export const threadStore = {
         title: c.title,
         kind: "chat" as const,
         status: "idle" as ThreadStatus,
-        projectRoot: (c as { projectRoot?: string | null }).projectRoot ?? null,
+        projectRoot: c.projectRoot,
         timestamp: c.createdAt,
         isLive: false,
       }));
@@ -175,7 +175,11 @@ export const threadStore = {
    * Create a new chat thread.
    */
   async createChatThread(title = "New Chat"): Promise<string> {
-    const conversation = await conversationStore.createConversation(title);
+    const projectRoot = fileTreeState.rootPath || undefined;
+    const conversation = await conversationStore.createConversation(
+      title,
+      projectRoot,
+    );
     this.selectThread(conversation.id, "chat");
     return conversation.id;
   },

@@ -680,6 +680,7 @@ export interface Conversation {
   created_at: number;
   selected_model: string | null;
   selected_provider: string | null;
+  project_root: string | null;
   is_archived: boolean;
 }
 
@@ -723,6 +724,7 @@ export async function createConversation(
   title: string,
   selectedModel?: string,
   selectedProvider?: string,
+  projectRoot?: string,
 ): Promise<Conversation> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -733,18 +735,23 @@ export async function createConversation(
     title,
     selectedModel,
     selectedProvider,
+    projectRoot,
   });
 }
 
 /**
  * Get all non-archived conversations.
  */
-export async function getConversations(): Promise<Conversation[]> {
+export async function getConversations(
+  projectRoot?: string,
+): Promise<Conversation[]> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("Conversation operations require Tauri runtime");
   }
-  return await invoke<Conversation[]>("get_conversations");
+  return await invoke<Conversation[]>("get_conversations", {
+    projectRoot: projectRoot ?? null,
+  });
 }
 
 /**

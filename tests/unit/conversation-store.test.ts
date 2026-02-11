@@ -242,6 +242,7 @@ describe("conversationStore", () => {
           created_at: 1000,
           selected_model: null,
           selected_provider: null,
+          project_root: null,
           is_archived: false,
         },
       ]);
@@ -274,6 +275,7 @@ describe("conversationStore", () => {
           created_at: 1000,
           selected_model: null,
           selected_provider: null,
+          project_root: null,
           is_archived: false,
         },
       ]);

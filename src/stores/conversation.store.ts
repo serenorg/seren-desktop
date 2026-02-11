@@ -26,6 +26,7 @@ export interface Conversation {
   createdAt: number;
   selectedModel: string;
   selectedProvider: ProviderId | null;
+  projectRoot: string | null;
   isArchived: boolean;
 }
 
@@ -56,6 +57,7 @@ function dbToConversation(db: DbConversation): Conversation {
     createdAt: db.created_at,
     selectedModel: db.selected_model ?? DEFAULT_MODEL,
     selectedProvider: (db.selected_provider as ProviderId) ?? null,
+    projectRoot: db.project_root ?? null,
     isArchived: db.is_archived,
   };
 }
@@ -126,7 +128,7 @@ export const conversationStore = {
     const id = crypto.randomUUID();
 
     try {
-      await createConversationDb(id, title, model);
+      await createConversationDb(id, title, model, undefined, projectRoot);
     } catch (error) {
       console.warn("Failed to persist conversation", error);
     }
@@ -137,6 +139,7 @@ export const conversationStore = {
       createdAt: Date.now(),
       selectedModel: model,
       selectedProvider: null,
+      projectRoot: projectRoot ?? null,
       isArchived: false,
     };
 

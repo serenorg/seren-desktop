@@ -44,7 +44,6 @@ import { settingsStore } from "@/stores/settings.store";
 import type { ToolCallEvent } from "@/services/acp";
 import { toUnifiedMessage } from "@/types/conversation";
 import type { ToolCallData } from "@/types/conversation";
-import { ChatTabBar } from "./ChatTabBar";
 import { ToolCallCard } from "./ToolCallCard";
 import { CompactedMessage } from "./CompactedMessage";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
@@ -175,60 +174,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
   };
 
-  // Keyboard shortcuts for tab management
-  const handleKeyDown = (event: KeyboardEvent) => {
-    const isMod = event.metaKey || event.ctrlKey;
-
-    // Ctrl/Cmd+T: New tab (blocked during streaming)
-    if (isMod && event.key === "t") {
-      event.preventDefault();
-      if (conversationStore.isLoading) {
-        console.log("[ChatContent] Blocked new tab during streaming");
-        return;
-      }
-      conversationStore.createConversation();
-      return;
-    }
-
-    // Ctrl/Cmd+W: Close current tab (blocked during streaming)
-    if (isMod && event.key === "w") {
-      event.preventDefault();
-      if (conversationStore.isLoading) {
-        console.log("[ChatContent] Blocked tab close during streaming");
-        return;
-      }
-      const activeId = conversationStore.activeConversationId;
-      if (activeId) {
-        conversationStore.archiveConversation(activeId);
-      }
-      return;
-    }
-
-    // Ctrl+Tab / Ctrl+Shift+Tab: Switch tabs (blocked during streaming)
-    if (event.ctrlKey && event.key === "Tab") {
-      event.preventDefault();
-      if (conversationStore.isLoading) {
-        console.log("[ChatContent] Blocked tab switch during streaming");
-        return;
-      }
-      const conversations = conversationStore.conversations.filter(
-        (c) => !c.isArchived,
-      );
-      if (conversations.length < 2) return;
-
-      const currentIndex = conversations.findIndex(
-        (c) => c.id === conversationStore.activeConversationId,
-      );
-      if (currentIndex === -1) return;
-
-      const nextIndex = event.shiftKey
-        ? (currentIndex - 1 + conversations.length) % conversations.length
-        : (currentIndex + 1) % conversations.length;
-
-      conversationStore.setActiveConversation(conversations[nextIndex].id);
-    }
-  };
-
   onMount(async () => {
     console.log(
       "[ChatContent] Mounting, conversationStore.isLoading:",
@@ -240,8 +185,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       console.log("[ChatContent] Resetting orphaned loading state from HMR");
       conversationStore.setLoading(false);
     }
-
-    document.addEventListener("keydown", handleKeyDown);
 
     // Register copy button handler on document for better reliability
     // Using document-level delegation ensures copy buttons work even if messagesRef timing is off
@@ -284,7 +227,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   });
 
   onCleanup(() => {
-    document.removeEventListener("keydown", handleKeyDown);
     document.removeEventListener("click", handleCopyClick);
     window.removeEventListener(
       "seren:pick-images",
@@ -635,7 +577,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         </div>
       </Show>
       <Show when={!showSignInPrompt()}>
-        <ChatTabBar />
         <header class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[#21262d] bg-[#161b22]">
           <div class="flex items-center gap-3">
             <Show when={chatStore.messages.length > 0}>
