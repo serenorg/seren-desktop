@@ -73,6 +73,7 @@ interface UserCapabilities {
   available_tools: string[];
   tool_definitions: ToolDefinition[];
   installed_skills: SkillRef[];
+  active_acp_session_id: string | null;
 }
 
 interface SkillRef {
@@ -531,5 +532,6 @@ function buildCapabilities(): UserCapabilities {
       tags: s.tags ?? [],
       path: s.path,
     })),
+    active_acp_session_id: acpStore.activeSessionId ?? null,
   };
 }

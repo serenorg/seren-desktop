@@ -22,16 +22,11 @@ pub struct AcpWorker {
 }
 
 impl AcpWorker {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle, session_id: Option<String>) -> Self {
         Self {
             app,
-            session_id: Arc::new(Mutex::new(None)),
+            session_id: Arc::new(Mutex::new(session_id)),
         }
-    }
-
-    /// Set the active session ID for this worker.
-    pub async fn set_session_id(&self, session_id: String) {
-        *self.session_id.lock().await = Some(session_id);
     }
 }
 

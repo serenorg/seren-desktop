@@ -132,6 +132,10 @@ pub struct UserCapabilities {
     /// Empty means no data; router falls back to hardcoded preference lists.
     #[serde(default)]
     pub model_rankings: Vec<(String, f64)>,
+    /// Active ACP session ID, if an agent session is currently running.
+    /// Required for AcpAgent routing — without it, the router falls back to ChatModel.
+    #[serde(default)]
+    pub active_acp_session_id: Option<String>,
 }
 
 /// Transition event emitted when the orchestrator switches models.
@@ -396,5 +400,7 @@ mod tests {
         assert_eq!(caps.installed_skills[0].slug, "prose");
         // model_rankings defaults to empty when not in JSON (frontend compat)
         assert!(caps.model_rankings.is_empty());
+        // active_acp_session_id defaults to None when not in JSON
+        assert!(caps.active_acp_session_id.is_none());
     }
 }
