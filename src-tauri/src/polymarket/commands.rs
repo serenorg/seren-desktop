@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
-use super::signing::{ApiCredentials, build_l2_headers};
 use super::PolymarketError;
+use super::signing::{ApiCredentials, build_l2_headers};
 
 const POLYMARKET_STORE: &str = "polymarket.json";
 const PM_API_KEY: &str = "api_key";
@@ -84,10 +84,7 @@ pub async fn store_polymarket_credentials<R: Runtime>(
     store.set(PM_API_KEY, serde_json::json!(request.api_key));
     store.set(PM_API_SECRET, serde_json::json!(request.api_secret));
     store.set(PM_PASSPHRASE, serde_json::json!(request.passphrase));
-    store.set(
-        PM_WALLET_ADDRESS,
-        serde_json::json!(request.wallet_address),
-    );
+    store.set(PM_WALLET_ADDRESS, serde_json::json!(request.wallet_address));
 
     if let Err(e) = store.save() {
         return PolymarketCommandResult::err(format!("Failed to save store: {}", e));

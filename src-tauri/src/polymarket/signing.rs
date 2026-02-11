@@ -1,8 +1,8 @@
 // ABOUTME: HMAC-SHA256 signing for Polymarket CLOB API L2 authentication.
 // ABOUTME: Generates POLY_SIGNATURE headers for authenticated trading requests.
 
-use base64::engine::general_purpose::URL_SAFE;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -62,9 +62,9 @@ pub fn build_hmac_signature(
     body: &str,
 ) -> Result<String, PolymarketError> {
     // Decode the base64url-encoded secret
-    let decoded_secret = URL_SAFE
-        .decode(secret)
-        .map_err(|e| PolymarketError::SigningFailed(format!("Failed to decode API secret: {}", e)))?;
+    let decoded_secret = URL_SAFE.decode(secret).map_err(|e| {
+        PolymarketError::SigningFailed(format!("Failed to decode API secret: {}", e))
+    })?;
 
     // Build message: timestamp + method + requestPath + body
     let mut message = format!("{}{}{}", timestamp, method, request_path);
@@ -209,7 +209,8 @@ mod tests {
 
     #[test]
     fn test_build_hmac_signature_rejects_invalid_secret() {
-        let result = build_hmac_signature("not-valid-base64!!!", "1704067200", "GET", "/orders", "");
+        let result =
+            build_hmac_signature("not-valid-base64!!!", "1704067200", "GET", "/orders", "");
         assert!(result.is_err());
     }
 
@@ -231,7 +232,10 @@ mod tests {
         assert!(!headers.poly_timestamp.is_empty());
 
         // Timestamp should be a valid number
-        let ts: u64 = headers.poly_timestamp.parse().expect("timestamp should be numeric");
+        let ts: u64 = headers
+            .poly_timestamp
+            .parse()
+            .expect("timestamp should be numeric");
         assert!(ts > 1704067200, "Timestamp should be recent");
     }
 
