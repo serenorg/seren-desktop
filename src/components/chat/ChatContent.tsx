@@ -983,7 +983,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                         event.preventDefault();
                         const selected = matches[commandPopupIndex()];
                         if (selected) {
-                          setInput(`/${selected.name} `);
+                          if (event.key === "Tab" || selected.argHint) {
+                            setInput(`/${selected.name} `);
+                          } else {
+                            executeSlashCommand(`/${selected.name}`);
+                          }
                           setCommandPopupIndex(0);
                         }
                         return;
