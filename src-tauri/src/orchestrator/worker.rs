@@ -8,6 +8,7 @@ use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 
 /// The Worker trait that all worker adapters implement.
 /// Each worker receives a prompt + context and streams events back.
+#[allow(dead_code)]
 #[async_trait]
 pub trait Worker: Send + Sync {
     /// Worker identifier (e.g. "chat_model", "claude-code", "codex")

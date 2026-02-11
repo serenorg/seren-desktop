@@ -244,6 +244,7 @@ fn parse_metadata(json: &Option<String>) -> ParsedMetadata {
 }
 
 /// Validate that a task_type is in the allowlist.
+#[allow(dead_code)]
 pub fn is_valid_task_type(task_type: &str) -> bool {
     VALID_TASK_TYPES.contains(&task_type)
 }

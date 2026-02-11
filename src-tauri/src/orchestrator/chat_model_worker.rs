@@ -634,6 +634,7 @@ impl Worker for ChatModelWorker {
 }
 
 /// Request body for the Gateway chat completions endpoint.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatCompletionRequest {
     model: String,

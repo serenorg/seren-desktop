@@ -163,6 +163,7 @@ impl Worker for AcpWorker {
 /// Map an ACP message chunk event to a WorkerEvent.
 ///
 /// ACP emits: `{ "sessionId": "...", "text": "...", "isThought": false }`
+#[allow(dead_code)]
 pub fn map_message_chunk(payload: &Value) -> Option<WorkerEvent> {
     let text = payload.get("text")?.as_str()?.to_string();
     let is_thought = payload
@@ -184,6 +185,7 @@ pub fn map_message_chunk(payload: &Value) -> Option<WorkerEvent> {
 /// Map an ACP tool call event to a WorkerEvent.
 ///
 /// ACP emits: `{ "sessionId": "...", "toolCallId": "...", "title": "...", "kind": "...", "status": "..." }`
+#[allow(dead_code)]
 pub fn map_tool_call(payload: &Value) -> Option<WorkerEvent> {
     let tool_call_id = payload.get("toolCallId")?.as_str()?.to_string();
     let title = payload
@@ -208,6 +210,7 @@ pub fn map_tool_call(payload: &Value) -> Option<WorkerEvent> {
 /// Map an ACP tool result event to a WorkerEvent.
 ///
 /// ACP emits: `{ "sessionId": "...", "toolCallId": "...", "status": "..." }`
+#[allow(dead_code)]
 pub fn map_tool_result(payload: &Value) -> Option<WorkerEvent> {
     let tool_call_id = payload.get("toolCallId")?.as_str()?.to_string();
     let status = payload
@@ -228,6 +231,7 @@ pub fn map_tool_result(payload: &Value) -> Option<WorkerEvent> {
 /// Map an ACP diff event to a WorkerEvent.
 ///
 /// ACP emits: `{ "sessionId": "...", "toolCallId": "...", "path": "...", "oldText": "...", "newText": "..." }`
+#[allow(dead_code)]
 pub fn map_diff(payload: &Value) -> Option<WorkerEvent> {
     let path = payload.get("path")?.as_str()?.to_string();
     let old_text = payload

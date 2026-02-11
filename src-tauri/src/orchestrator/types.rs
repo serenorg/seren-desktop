@@ -157,6 +157,7 @@ pub struct SubTask {
 }
 
 /// An orchestration plan: the full set of sub-tasks for a prompt.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestrationPlan {
     pub id: String,
@@ -167,6 +168,7 @@ pub struct OrchestrationPlan {
     pub created_at: i64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanStatus {

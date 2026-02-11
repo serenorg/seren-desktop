@@ -16,8 +16,8 @@ use super::mcp_publisher_worker::McpPublisherWorker;
 use super::router;
 use super::trust;
 use super::types::{
-    DelegationType, ImageAttachment, OrchestrationPlan, OrchestratorEvent, PlanStatus,
-    RoutingDecision, SkillRef, SubTask, TransitionEvent, UserCapabilities, WorkerEvent, WorkerType,
+    DelegationType, ImageAttachment, OrchestratorEvent, RoutingDecision, SkillRef, SubTask,
+    TransitionEvent, UserCapabilities, WorkerEvent, WorkerType,
 };
 use super::worker::Worker;
 
