@@ -240,7 +240,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const sendMessage = async () => {
     const trimmed = input().trim();
     const images = attachedImages();
-    if ((!trimmed && images.length === 0) || !hasSession()) return;
+    if (!hasSession()) return;
+
+    // Require text content even when images are attached
+    if (!trimmed) {
+      if (images.length > 0) {
+        setCommandStatus("Please add text to your message. Image-only messages are not supported.");
+        setTimeout(() => setCommandStatus(null), 4000);
+      }
+      return;
+    }
 
     // Check for slash commands first
     if (trimmed.startsWith("/") && images.length === 0) {
@@ -264,6 +273,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             mimeType: img.mimeType,
           }))
         : undefined;
+
+    console.log("[AgentChat] Sending prompt with context:", {
+      hasText: !!trimmed,
+      textLength: trimmed.length,
+      hasContext: !!context,
+      contextLength: context?.length,
+      imageNames: images.map((img) => img.name),
+      contextTypes: context?.map((c) => c.type),
+    });
 
     setInput("");
     setAttachedImages([]);
@@ -973,10 +991,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     <button
                       type="submit"
                       class="px-4 py-1.5 bg-success text-white rounded-md text-[13px] font-medium hover:bg-emerald-700 transition-colors disabled:bg-surface-2 disabled:text-muted-foreground disabled:cursor-not-allowed"
-                      disabled={
-                        !hasSession() ||
-                        (!input().trim() && attachedImages().length === 0)
-                      }
+                      disabled={!hasSession() || !input().trim()}
                     >
                       Send
                     </button>
