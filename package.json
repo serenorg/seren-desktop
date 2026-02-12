@@ -82,7 +82,7 @@
     "seren-acp-codex": {
       "name": "Codex",
       "git": "https://github.com/serenorg/seren-acp-codex",
-      "tag": "v0.2.0",
+      "branch": "main",
       "bin": "seren-acp-codex",
       "dest": "seren-acp-codex"
     },
