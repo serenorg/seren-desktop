@@ -19,8 +19,8 @@ export const SlidePanel: Component<SlidePanelProps> = (props) => {
           onClick={props.onClose}
         />
         <div
-          class="relative w-[var(--slide-panel-width)] max-w-[90vw] h-full bg-surface-1/95 backdrop-blur-xl border-l border-border shadow-[var(--shadow-lg)] overflow-x-hidden overflow-y-auto animate-[slideInRight_200ms_ease]"
-          classList={{ "w-[720px]": props.wide }}
+          class="relative max-w-[90vw] h-full bg-surface-1/95 backdrop-blur-xl border-l border-border shadow-[var(--shadow-lg)] overflow-x-hidden overflow-y-auto animate-[slideInRight_200ms_ease]"
+          style={{ width: props.wide ? "860px" : "var(--slide-panel-width)" }}
         >
           <button
             class="absolute top-3 right-3 w-7 h-7 flex items-center justify-center bg-transparent border-none rounded-md text-muted-foreground cursor-pointer z-[1] transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
