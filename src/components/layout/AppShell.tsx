@@ -119,6 +119,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         <ThreadSidebar
           collapsed={sidebarCollapsed()}
           onToggle={() => setSidebarCollapsed((v) => !v)}
+          activePanel={slidePanel()}
         />
 
         <main class="flex-1 overflow-hidden flex flex-col min-w-0">
