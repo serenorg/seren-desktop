@@ -64,7 +64,8 @@ yarn.lock
 # Claude Code local settings (per-developer)
 .claude/settings.local.json
 
-# Skills directory - ignore user-installed skills but track the symlink
-# The skill-creator skill ships with seren-desktop and should be committed
+# Skills directory - ignore user-installed skills but track default skills
+# Default skills ship with seren-desktop and should be committed
 skills/*
 !skills/skill-creator/
+!skills/polymarket-trader/
