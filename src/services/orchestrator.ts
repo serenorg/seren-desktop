@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Attachment, ToolDefinition } from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
+import { storeAssistantResponse } from "@/services/memory";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
@@ -417,6 +418,12 @@ function handleComplete(
   conversationStore.finalizeStreaming();
   conversationStore.addMessage(assistantMessage);
   conversationStore.persistMessage(assistantMessage);
+
+  // Store conversation to memory if enabled
+  const model = providerStore.activeModel || "unknown";
+  storeAssistantResponse(content, { model }).catch((err) => {
+    console.warn("[orchestrator] Failed to store memory:", err);
+  });
 }
 
 function handleError(message: string): void {

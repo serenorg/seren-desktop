@@ -20,6 +20,7 @@ import type {
 } from "@/lib/providers/types";
 import { executeTools, getAllTools } from "@/lib/tools";
 import { getGatewayTools } from "@/services/mcp-gateway";
+import { storeAssistantResponse } from "@/services/memory";
 import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { projectStore } from "@/stores/project.store";
@@ -483,6 +484,15 @@ export async function* streamMessageWithTools(
         "[streamMessageWithTools] No tool_calls, completing with content length:",
         fullContent.length,
       );
+
+      // Store conversation to memory if enabled
+      storeAssistantResponse(fullContent, {
+        model,
+        userQuery: content,
+      }).catch((err) => {
+        console.warn("[streamMessageWithTools] Failed to store memory:", err);
+      });
+
       yield { type: "complete", finalContent: fullContent };
       return;
     }
@@ -601,6 +611,14 @@ export async function* continueToolIteration(
         });
         continue;
       }
+
+      // Store conversation to memory if enabled
+      storeAssistantResponse(fullContent, {
+        model,
+      }).catch((err) => {
+        console.warn("[continueToolIteration] Failed to store memory:", err);
+      });
+
       yield { type: "complete", finalContent: fullContent };
       return;
     }
