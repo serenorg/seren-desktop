@@ -54,13 +54,13 @@
 }
 
 .titlebar__folder {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-foreground, #94a3b8);
   font-weight: 500;
 }
 
 .titlebar__no-project {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-foreground, #64748b);
   opacity: 0.6;
 }
@@ -71,7 +71,7 @@
   cursor: pointer;
   padding: 2px 10px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-foreground, #64748b);
   transition: all var(--transition-fast, 100ms ease);
 }
@@ -112,7 +112,7 @@
 .titlebar__btn--sign-in {
   width: auto;
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -192,7 +192,7 @@
 .thread-content__browse-btn {
   margin-top: 8px;
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--primary);
   background: var(--primary-muted, rgba(56, 189, 248, 0.1));

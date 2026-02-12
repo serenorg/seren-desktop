@@ -41,7 +41,7 @@
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--muted-foreground, #94a3b8);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -63,7 +63,7 @@
 }
 
 .thread-tab-bar__tab-icon {
-  font-size: 11px;
+  font-size: 13px;
   flex-shrink: 0;
 }
 
@@ -197,7 +197,7 @@
   border: none;
   border-radius: 6px;
   color: var(--foreground);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   transition: background 100ms ease;
 }

@@ -49,7 +49,7 @@ export function getMonaco(): typeof monaco {
  * Register custom editor themes matching Seren Desktop design.
  */
 function registerThemes(): void {
-  // Seren Dark Theme
+  // Seren Dark Theme — matches the deep navy app palette
   monaco.editor.defineTheme("seren-dark", {
     base: "vs-dark",
     inherit: true,
@@ -63,14 +63,22 @@ function registerThemes(): void {
       { token: "variable", foreground: "9CDCFE" },
     ],
     colors: {
-      "editor.background": "#1e1e1e",
-      "editor.foreground": "#d4d4d4",
-      "editor.lineHighlightBackground": "#2d2d2d",
+      "editor.background": "#0f1623",
+      "editor.foreground": "#e2e8f0",
+      "editor.lineHighlightBackground": "#1c2640",
       "editor.selectionBackground": "#264f78",
-      "editorCursor.foreground": "#ffffff",
-      "editorLineNumber.foreground": "#858585",
-      "editorLineNumber.activeForeground": "#c6c6c6",
-      "editor.inactiveSelectionBackground": "#3a3d41",
+      "editorCursor.foreground": "#38bdf8",
+      "editorLineNumber.foreground": "#64748b",
+      "editorLineNumber.activeForeground": "#94a3b8",
+      "editor.inactiveSelectionBackground": "#243049",
+      "editorWidget.background": "#151d2e",
+      "editorWidget.border": "#1e293b",
+      "editorGutter.background": "#0f1623",
+      "editorOverviewRuler.border": "#1e293b",
+      "scrollbarSlider.background": "rgba(148, 163, 184, 0.15)",
+      "scrollbarSlider.hoverBackground": "rgba(148, 163, 184, 0.25)",
+      "scrollbarSlider.activeBackground": "rgba(148, 163, 184, 0.35)",
+      "minimap.background": "#0f1623",
     },
   });
 

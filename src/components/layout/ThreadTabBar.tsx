@@ -1,13 +1,36 @@
 // ABOUTME: Horizontal tab bar for switching between chat and agent threads.
 // ABOUTME: Shows thread tabs with icons, titles, status dots, close buttons, and a "+ New" dropdown.
 
-import { type Component, createSignal, For, Show } from "solid-js";
+import {
+  type Component,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
 import "./ThreadTabBar.css";
 
 export const ThreadTabBar: Component = () => {
   const [showNewMenu, setShowNewMenu] = createSignal(false);
+  let menuRef: HTMLDivElement | undefined;
+
+  // Close dropdown on click-outside
+  const handleClickOutside = (e: MouseEvent) => {
+    if (showNewMenu() && menuRef && !menuRef.contains(e.target as Node)) {
+      setShowNewMenu(false);
+    }
+  };
+
+  onMount(() => {
+    document.addEventListener("mousedown", handleClickOutside);
+  });
+
+  onCleanup(() => {
+    document.removeEventListener("mousedown", handleClickOutside);
+  });
 
   const handleSelect = (thread: Thread) => {
     threadStore.selectThread(thread.id, thread.kind);
@@ -82,7 +105,7 @@ export const ThreadTabBar: Component = () => {
       </div>
 
       {/* New thread button */}
-      <div class="thread-tab-bar__new">
+      <div class="thread-tab-bar__new" ref={menuRef}>
         <button
           type="button"
           class="thread-tab-bar__new-btn"
@@ -121,6 +144,11 @@ export const ThreadTabBar: Component = () => {
               class="thread-tab-bar__new-menu-item"
               onClick={() => handleNewAgent("claude-code")}
               disabled={!fileTreeState.rootPath}
+              title={
+                !fileTreeState.rootPath
+                  ? "Open a folder first to use agents"
+                  : undefined
+              }
             >
               <span class="thread-tab-bar__new-menu-icon">🤖</span>
               Claude Agent
@@ -130,6 +158,11 @@ export const ThreadTabBar: Component = () => {
               class="thread-tab-bar__new-menu-item"
               onClick={() => handleNewAgent("codex")}
               disabled={!fileTreeState.rootPath}
+              title={
+                !fileTreeState.rootPath
+                  ? "Open a folder first to use agents"
+                  : undefined
+              }
             >
               <span class="thread-tab-bar__new-menu-icon">⚡</span>
               Codex Agent

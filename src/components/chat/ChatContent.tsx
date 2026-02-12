@@ -655,10 +655,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   Welcome to Seren
                 </h3>
                 <p class="m-0 text-sm text-center max-w-[320px] leading-relaxed">
-                  Your AI assistant for everyday work. Try typing:
+                  Your AI Agent to create personal skills from your everyday
+                  work. Try typing:
                 </p>
                 <p class="m-0 mt-2 text-sm text-center max-w-[320px] leading-relaxed italic text-foreground">
-                  "Summarize the key points of this article for me"
+                  "Create the skill to identify new business leads and introduce
+                  our company using Seren's Publishers"
                 </p>
               </div>
             }

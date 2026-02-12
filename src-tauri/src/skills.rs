@@ -121,6 +121,66 @@ pub fn remove_skill(skills_dir: String, slug: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Create a new skill folder with scaffold structure.
+/// Generates SKILL.md, template.md, examples/sample.md, and scripts/validate.sh.
+#[tauri::command]
+pub fn create_skill_folder(
+    skills_dir: String,
+    slug: String,
+    name: String,
+) -> Result<String, String> {
+    let dir_path = PathBuf::from(&skills_dir);
+    let skill_dir = dir_path.join(&slug);
+
+    if skill_dir.exists() {
+        return Err(format!("Skill folder '{}' already exists", slug));
+    }
+
+    // Create directory tree
+    fs::create_dir_all(skill_dir.join("examples"))
+        .map_err(|e| format!("Failed to create examples directory: {}", e))?;
+    fs::create_dir_all(skill_dir.join("scripts"))
+        .map_err(|e| format!("Failed to create scripts directory: {}", e))?;
+
+    let skill_md = format!(
+        "---\nname: {slug}\ndescription: TODO — describe what this skill does and when to use it\n---\n\n# {name}\n\n## Overview\n\nDescribe the skill's purpose and capabilities here.\n\n## Workflow\n\n1. Step one\n2. Step two\n3. Step three\n\n## Examples\n\nSee [examples/sample.md](examples/sample.md) for example output.\n\n## Scripts\n\n- [scripts/validate.sh](scripts/validate.sh) — validation script\n",
+        slug = slug,
+        name = name
+    );
+
+    let template_md = format!(
+        "# {name} — Template\n\nUse this template as a starting point. Fill in each section.\n\n## Input\n\nDescribe the input this skill expects.\n\n## Output\n\nDescribe the expected output format.\n",
+        name = name
+    );
+
+    let sample_md = format!(
+        "# {name} — Example Output\n\nThis file shows an example of the expected output format.\n\n## Sample\n\nReplace this with a real example.\n",
+        name = name
+    );
+
+    let validate_sh = "#!/usr/bin/env bash\n# Validation script for this skill.\nset -euo pipefail\necho \"Validation passed.\"\n";
+
+    fs::write(skill_dir.join("SKILL.md"), skill_md)
+        .map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
+    fs::write(skill_dir.join("template.md"), template_md)
+        .map_err(|e| format!("Failed to write template.md: {}", e))?;
+    fs::write(skill_dir.join("examples").join("sample.md"), sample_md)
+        .map_err(|e| format!("Failed to write sample.md: {}", e))?;
+    fs::write(skill_dir.join("scripts").join("validate.sh"), validate_sh)
+        .map_err(|e| format!("Failed to write validate.sh: {}", e))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script_path = skill_dir.join("scripts").join("validate.sh");
+        let perms = fs::Permissions::from_mode(0o755);
+        let _ = fs::set_permissions(&script_path, perms);
+    }
+
+    let skill_file = skill_dir.join("SKILL.md");
+    Ok(skill_file.to_string_lossy().to_string())
+}
+
 /// Read a skill's SKILL.md content.
 #[tauri::command]
 pub fn read_skill_content(skills_dir: String, slug: String) -> Result<Option<String>, String> {

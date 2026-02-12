@@ -23,10 +23,16 @@ interface SkillsExplorerProps {
 
 type SearchTab = "installed" | "available";
 
+const SKILL_CREATOR_SLUG = "skill-creator";
+const SKILL_CREATOR_SOURCE_URL =
+  "https://raw.githubusercontent.com/anthropics/skills/main/skills/skill-creator/SKILL.md";
+
 export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [searchQuery, setSearchQuery] = createSignal("");
   const [searchTab, setSearchTab] = createSignal<SearchTab>("installed");
   const [showFiles, setShowFiles] = createSignal(false);
+  const [showCreateDialog, setShowCreateDialog] = createSignal(false);
+  const [newSkillName, setNewSkillName] = createSignal("");
   const [expandedSkills, setExpandedSkills] = createSignal<Set<string>>(
     new Set(),
   );
@@ -34,9 +40,40 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     Record<string, FileEntry[]>
   >({});
 
-  onMount(() => {
-    skillsStore.refresh();
+  onMount(async () => {
+    await skillsStore.refresh();
+    await ensureSkillCreatorInstalled();
   });
+
+  // ── Default skill-creator install ─────────────
+
+  const ensureSkillCreatorInstalled = async () => {
+    const alreadyInstalled = skillsStore.installed.some(
+      (s) => s.slug === SKILL_CREATOR_SLUG,
+    );
+    if (alreadyInstalled) return;
+
+    try {
+      const response = await fetch(SKILL_CREATOR_SOURCE_URL);
+      if (!response.ok) return;
+      const content = await response.text();
+
+      const skill: Skill = {
+        id: `anthropic:${SKILL_CREATOR_SLUG}`,
+        slug: SKILL_CREATOR_SLUG,
+        name: "Skill Creator",
+        description:
+          "Guide for creating effective skills. Use when users want to create or update a skill that extends capabilities with specialized knowledge, workflows, or tool integrations.",
+        source: "anthropic",
+        sourceUrl: SKILL_CREATOR_SOURCE_URL,
+        tags: ["meta", "creation"],
+        author: "Anthropic",
+      };
+      await skillsStore.install(skill, content, "seren");
+    } catch (err) {
+      console.error("[SkillsExplorer] Failed to install skill-creator:", err);
+    }
+  };
 
   // ── Skill tree expansion ────────────────────────
 
@@ -73,6 +110,29 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   const handleSkillSelect = (skill: InstalledSkill) => {
     skillsStore.setSelected(skill.id);
+  };
+
+  // ── Create Skill ──────────────────────────────
+
+  const handleCreateSkill = async () => {
+    const name = newSkillName().trim();
+    if (!name) return;
+
+    const slug = name.toLowerCase().replace(/\s+/g, "-");
+
+    try {
+      const skillsDir = await invoke<string>("get_seren_skills_dir");
+      await invoke<string>("create_skill_folder", {
+        skillsDir,
+        slug,
+        name,
+      });
+      await skillsStore.refreshInstalled();
+      setNewSkillName("");
+      setShowCreateDialog(false);
+    } catch (err) {
+      console.error("Failed to create skill folder:", err);
+    }
   };
 
   // ── Upload / Download ───────────────────────────
@@ -175,6 +235,28 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           <button
             type="button"
             class="skills-explorer__header-btn"
+            onClick={() => setShowCreateDialog(true)}
+            title="Create skill"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              role="img"
+              aria-label="Create"
+            >
+              <path
+                d="M8 3v10M3 8h10"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="skills-explorer__header-btn"
             onClick={handleUpload}
             title="Upload skill"
           >
@@ -254,6 +336,44 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
         </div>
       </div>
+
+      {/* Create Skill dialog */}
+      <Show when={showCreateDialog()}>
+        <div class="skills-explorer__create-dialog">
+          <input
+            class="skills-explorer__create-input"
+            type="text"
+            placeholder="Skill name (e.g. lead-finder)"
+            value={newSkillName()}
+            onInput={(e) => setNewSkillName(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleCreateSkill();
+              if (e.key === "Escape") setShowCreateDialog(false);
+            }}
+            autofocus
+          />
+          <div class="skills-explorer__create-actions">
+            <button
+              type="button"
+              class="skills-explorer__create-btn skills-explorer__create-btn--primary"
+              onClick={handleCreateSkill}
+              disabled={!newSkillName().trim()}
+            >
+              Create
+            </button>
+            <button
+              type="button"
+              class="skills-explorer__create-btn"
+              onClick={() => {
+                setShowCreateDialog(false);
+                setNewSkillName("");
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Show>
 
       {/* Installed skills with folder trees */}
       <div class="skills-explorer__installed">
