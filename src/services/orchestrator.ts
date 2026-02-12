@@ -234,6 +234,7 @@ function handleTransition(event: TransitionEvent): void {
   };
 
   conversationStore.addMessage(transitionMessage);
+  conversationStore.persistMessage(transitionMessage);
 }
 
 function handleWorkerEvent(event: OrchestratorEvent): void {
@@ -322,6 +323,7 @@ function handleToolCall(event: {
   };
 
   conversationStore.addMessage(toolMessage);
+  conversationStore.persistMessage(toolMessage);
 }
 
 function handleToolResult(event: {
@@ -368,6 +370,7 @@ function handleToolResult(event: {
   };
 
   conversationStore.addMessage(resultMessage);
+  conversationStore.persistMessage(resultMessage);
 }
 
 function handleDiff(event: {
@@ -394,6 +397,7 @@ function handleDiff(event: {
   };
 
   conversationStore.addMessage(diffMessage);
+  conversationStore.persistMessage(diffMessage);
 }
 
 function handleComplete(
@@ -525,6 +529,7 @@ function handleReroute(event: {
   };
 
   conversationStore.addMessage(rerouteMessage);
+  conversationStore.persistMessage(rerouteMessage);
 }
 
 // =============================================================================
@@ -553,6 +558,7 @@ function flushStreamingToMessage(): void {
       workerType: "orchestrator",
     };
     conversationStore.addMessage(flushedMessage);
+    conversationStore.persistMessage(flushedMessage);
     conversationStore.finalizeStreaming();
 
     // Generate a new ID for the next streaming segment
