@@ -16,12 +16,32 @@ pub struct FileEntry {
 /// Read the contents of a file.
 #[tauri::command]
 pub fn read_file(path: String) -> Result<String, String> {
+    let file_path = Path::new(&path);
+
+    // Check if path is a directory before attempting to read
+    if file_path.is_dir() {
+        return Err(format!(
+            "Cannot read directory '{}'. Directories cannot be read as files. Use the list_directory tool instead to see the contents of this directory.",
+            path
+        ));
+    }
+
     fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
 }
 
 /// Read a file and return its contents as base64.
 #[tauri::command]
 pub fn read_file_base64(path: String) -> Result<String, String> {
+    let file_path = Path::new(&path);
+
+    // Check if path is a directory before attempting to read
+    if file_path.is_dir() {
+        return Err(format!(
+            "Cannot read directory '{}'. Directories cannot be read as files. Use the list_directory tool instead.",
+            path
+        ));
+    }
+
     let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
     Ok(STANDARD.encode(&bytes))
 }
