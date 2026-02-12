@@ -101,7 +101,7 @@ export const GatewayToolApproval: Component = () => {
     <Show when={request()}>
       {(req) => (
         <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-[10000] backdrop-blur-[4px]">
-          <div class="bg-background border border-border rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] w-[90%] max-w-[550px] max-h-[80vh] overflow-hidden flex flex-col animate-[slideInDown_200ms_ease-out]">
+          <div class="bg-background border border-border rounded-xl shadow-[var(--shadow-lg)] w-[90%] max-w-[550px] max-h-[80vh] overflow-hidden flex flex-col animate-[slideInDown_200ms_ease-out]">
             <div class="px-6 py-5 border-b border-border">
               <h2 class="m-0 text-xl font-semibold text-foreground">
                 {req().isDestructive
@@ -148,7 +148,7 @@ export const GatewayToolApproval: Component = () => {
               </div>
 
               <Show when={req().isDestructive}>
-                <div class="mt-4 px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-destructive text-[0.9rem]">
+                <div class="mt-4 px-4 py-3 bg-destructive/10 border border-destructive/30 rounded-lg text-destructive text-[0.9rem]">
                   <strong>Warning:</strong> This operation cannot be undone.
                 </div>
               </Show>
@@ -165,7 +165,7 @@ export const GatewayToolApproval: Component = () => {
               </button>
               <button
                 type="button"
-                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-accent text-white hover:bg-[#4f46e5] hover:shadow-[0_2px_8px_rgba(99,102,241,0.3)]"
+                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-accent text-primary-foreground hover:bg-primary/85 hover:shadow-[var(--glow-primary)]"
                 onClick={handleApprove}
                 disabled={isProcessing()}
               >

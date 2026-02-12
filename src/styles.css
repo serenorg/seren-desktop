@@ -13,10 +13,11 @@ html {
 
 body {
   font-family:
-    "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-    Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    "General Sans", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 code {
@@ -73,6 +74,8 @@ code {
   --border-hover: rgba(148, 163, 184, 0.2);
   --input: var(--surface-2);
   --ring: #38bdf8;
+  --input-focus-glow:
+    0 0 0 3px rgba(56, 189, 248, 0.12), 0 0 16px rgba(56, 189, 248, 0.06);
 
   /* Sidebar specific */
   --sidebar: var(--surface-0);
@@ -93,6 +96,10 @@ code {
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+
+  /* Glow effects */
+  --glow-primary: 0 0 20px rgba(56, 189, 248, 0.15);
+  --glow-primary-intense: 0 0 30px rgba(56, 189, 248, 0.25);
 
   /* Transitions */
   --transition-fast: 100ms ease;
@@ -145,6 +152,8 @@ code {
   --color-status-waiting: var(--status-waiting);
   --color-status-error: var(--status-error);
   --color-status-idle: var(--status-idle);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-muted: var(--primary-muted);
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
@@ -189,10 +198,16 @@ code {
   }
 }
 
+/* Refined status bar - subtle gradient instead of solid block */
+footer.status-bar {
+  background: linear-gradient(to right, var(--surface-1), var(--surface-0));
+  border-top: 1px solid var(--border);
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -201,7 +216,7 @@ code {
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 5px;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -400,6 +415,16 @@ code {
   }
   50% {
     opacity: 0.4;
+  }
+}
+
+/* Active thread left-edge indicator */
+@keyframes accentSlide {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
   }
 }
 

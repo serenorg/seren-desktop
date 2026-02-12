@@ -1148,7 +1148,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     ? "Type to queue message..."
                     : "Ask Seren anything… (type / for commands)"
                 }
-                class="w-full bg-background border border-border rounded-xl text-foreground px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-muted)] placeholder:text-muted-foreground"
+                class="w-full bg-background border border-border rounded-xl text-foreground px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all duration-150 focus:outline-none focus:border-primary/60 focus:shadow-[var(--input-focus-glow)] placeholder:text-muted-foreground/60"
                 minHeight={72}
                 maxHeight={window.innerHeight * 0.5}
                 onInput={(event) => {

@@ -1003,7 +1003,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     ? "Type to queue message..."
                     : "Tell the agent what to do… (type / for commands)"
                 }
-                class="w-full bg-background border border-border rounded-lg text-foreground p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-primary placeholder:text-muted-foreground disabled:opacity-60 disabled:cursor-not-allowed"
+                class="w-full bg-background border border-border rounded-xl text-foreground px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all duration-150 focus:outline-none focus:border-primary/60 focus:shadow-[var(--input-focus-glow)] placeholder:text-muted-foreground/60 disabled:opacity-60 disabled:cursor-not-allowed"
                 minHeight={80}
                 maxHeight={window.innerHeight * 0.5}
                 onInput={(e) => {

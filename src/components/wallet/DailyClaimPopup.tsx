@@ -67,7 +67,7 @@ export const DailyClaimPopup: Component = () => {
         onClick={handleBackdropClick}
       >
         <div
-          class="bg-card border border-border rounded-xl p-6 max-w-[400px] w-[90%] shadow-[0_8px_32px_rgba(0,0,0,0.4)] animate-[slideUp_200ms_ease-out]"
+          class="bg-card border border-border rounded-xl p-6 max-w-[400px] w-[90%] shadow-[var(--shadow-lg)] animate-[slideUp_200ms_ease-out]"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
@@ -122,7 +122,7 @@ export const DailyClaimPopup: Component = () => {
             </div>
 
             <Show when={error()}>
-              <div class="text-[0.8rem] text-destructive bg-[rgba(239,68,68,0.1)] p-2 rounded-md mb-3">
+              <div class="text-[0.8rem] text-destructive bg-destructive/10 p-2 rounded-md mb-3">
                 {error()}
               </div>
             </Show>

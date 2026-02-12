@@ -63,12 +63,12 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         class="flex items-center gap-2"
         style={{ "-webkit-app-region": "no-drag" }}
       >
-        <span class="font-semibold text-[13px] text-foreground tracking-[0.02em]">
+        <span class="font-bold text-[14px] text-foreground tracking-[0.06em] uppercase">
           Seren
         </span>
         <button
           type="button"
-          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
+          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
           onClick={props.onToggleSidebar}
           title={props.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
         >
@@ -105,7 +105,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
             </button>
           }
         >
-          <span class="text-[13px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+          <span class="text-[13px] text-muted-foreground/70 overflow-hidden text-ellipsis whitespace-nowrap">
             {folderName()}
           </span>
         </Show>
@@ -180,7 +180,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
 
         <button
           type="button"
-          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
+          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
           onClick={props.onToggleSettings}
           title="Settings"
         >
@@ -210,7 +210,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           fallback={
             <button
               type="button"
-              class="flex items-center justify-center h-7 px-2.5 border-none rounded-md bg-transparent text-muted-foreground text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
+              class="flex items-center justify-center h-7 px-3 border border-primary/30 rounded-md bg-primary/10 text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/20 hover:border-primary/50 active:scale-95"
               onClick={props.onSignInClick}
             >
               Sign In
@@ -219,7 +219,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         >
           <button
             type="button"
-            class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
+            class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
             onClick={props.onLogout}
             title="Sign Out"
           >

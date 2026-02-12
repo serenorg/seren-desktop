@@ -64,9 +64,9 @@ export const ResizableTextarea: Component<ResizableTextareaProps> = (props) => {
   // Determine handle visibility and color based on state
   const handleActive = () => isDragging() || isHovering();
   const handleColor = () => {
-    if (isDragging()) return "#58a6ff";
-    if (isHovering()) return "#8b949e";
-    return "#484f58";
+    if (isDragging()) return "var(--primary)";
+    if (isHovering()) return "var(--muted-foreground)";
+    return "var(--border)";
   };
 
   return (
@@ -82,7 +82,7 @@ export const ResizableTextarea: Component<ResizableTextareaProps> = (props) => {
         {/* Chevron up icon with grip dots */}
         <div
           class="flex flex-col items-center gap-px transition-opacity duration-150"
-          style={{ opacity: handleActive() ? 1 : 0.6 }}
+          style={{ opacity: handleActive() ? 1 : 0.3 }}
         >
           {/* Up/down chevron arrows */}
           <svg

@@ -77,7 +77,7 @@ function EmptyState() {
       <Show when={!fileTreeState.rootPath}>
         <button
           type="button"
-          class="mt-2 px-3.5 py-1.5 text-[13px] font-medium text-primary bg-[rgba(56,189,248,0.1)] border border-transparent rounded-md cursor-pointer transition-all duration-100 hover:bg-[rgba(56,189,248,0.18)] hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          class="mt-2 px-3.5 py-1.5 text-[13px] font-medium text-primary bg-primary/10 border border-transparent rounded-md cursor-pointer transition-all duration-100 hover:bg-primary/[0.18] hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={handleOpenFolder}
         >
           Open Folder

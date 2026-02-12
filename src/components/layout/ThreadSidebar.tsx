@@ -182,7 +182,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       <div class="px-3 py-2 relative shrink-0" ref={menuRef}>
         <button
           type="button"
-          class="flex items-center gap-2 w-full py-2 px-3 bg-[rgba(56,189,248,0.1)] border border-[rgba(56,189,248,0.2)] rounded-lg text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-[rgba(56,189,248,0.15)] hover:border-[rgba(56,189,248,0.3)]"
+          class="flex items-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-lg text-primary text-[13px] font-medium cursor-pointer transition-all duration-150 hover:bg-primary/15 hover:border-primary/25 hover:shadow-[0_0_12px_rgba(56,189,248,0.1)] active:scale-[0.98]"
           onClick={() => setShowNewMenu((v) => !v)}
         >
           <svg
@@ -297,9 +297,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     {(thread) => (
                       <button
                         type="button"
-                        class="flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none rounded-lg cursor-pointer mb-0.5 text-left transition-colors duration-100 hover:bg-surface-2"
+                        class="flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60"
                         classList={{
-                          "!bg-surface-2":
+                          "!bg-surface-2/80 border-l-2 !border-l-primary !pl-2":
                             thread.id === threadStore.activeThreadId,
                         }}
                         onClick={() => handleSelectThread(thread)}
@@ -347,7 +347,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
       {/* Running agents footer */}
       <Show when={threadStore.runningCount > 0}>
-        <div class="px-3 py-2 border-t border-border shrink-0">
+        <div class="px-3 py-2 border-t border-border shrink-0 bg-surface-0/50">
           <span class="text-[11px] text-status-running flex items-center gap-1.5">
             <span class="w-1.5 h-1.5 rounded-full bg-status-running animate-pulse" />
             {threadStore.runningCount} agent
