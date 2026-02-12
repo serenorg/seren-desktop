@@ -377,12 +377,13 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                   class={`flex items-center justify-between px-4 py-4 bg-[rgba(30,30,30,0.6)] border rounded-lg transition-all duration-150 ${cardClasses()}`}
                 >
                   <div class="flex items-center gap-4 flex-1 min-w-0">
-                    {/* Publisher Logo */}
+                    {/* Publisher Logo — prefer local bundled logos, then
+                         publisher store, then API, with initial-letter fallback */}
                     <Show
                       when={
-                        provider.logo_url ||
+                        LOCAL_PROVIDER_LOGOS[provider.slug] ||
                         publisherLogos()?.[provider.id] ||
-                        LOCAL_PROVIDER_LOGOS[provider.slug]
+                        provider.logo_url
                       }
                       fallback={
                         <div class="w-10 h-10 flex items-center justify-center bg-[rgba(148,163,184,0.1)] rounded-lg text-base font-semibold text-muted-foreground">
@@ -395,6 +396,16 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                           src={logoUrl()}
                           alt={provider.name}
                           class="w-10 h-10 rounded-lg object-contain"
+                          onError={(e) => {
+                            const fallback =
+                              LOCAL_PROVIDER_LOGOS[provider.slug];
+                            if (
+                              fallback &&
+                              e.currentTarget.src !== fallback
+                            ) {
+                              e.currentTarget.src = fallback;
+                            }
+                          }}
                         />
                       )}
                     </Show>
