@@ -52,7 +52,7 @@ export const ThinkingBlock: Component<ThinkingBlockProps> = (props) => {
         </Show>
       </button>
       <Show when={isExpanded()}>
-        <div class="px-3 py-2 text-xs text-foreground leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+        <div class="px-3 py-2 text-xs text-foreground/70 leading-relaxed whitespace-pre-wrap max-h-[300px] overflow-y-auto">
           {props.thinking}
           <Show when={props.isStreaming}>
             <span class="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-text-bottom animate-[blink_1s_step-end_infinite]" />
