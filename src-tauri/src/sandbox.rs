@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 pub enum SandboxMode {
     /// Read workspace files only. No writes, no commands, no network.
     ReadOnly,
-    /// Read anywhere, write to workspace + /tmp, execute commands, no network by default.
+    /// Read anywhere, write to workspace + temp dirs, network allowed, secrets blocked.
     WorkspaceWrite,
     /// No restrictions. Sandbox is not applied.
     FullAccess,
@@ -56,6 +56,12 @@ impl SandboxConfig {
                 workspace.to_path_buf(),
                 PathBuf::from("/tmp"),
                 PathBuf::from("/private/tmp"),
+                // macOS per-user temp/cache dirs (DARWIN_USER_TEMP_DIR,
+                // DARWIN_USER_CACHE_DIR) live under /var/folders.  Without
+                // write access here, confstr() fails and git/xcodebuild
+                // produce noisy errors.
+                PathBuf::from("/private/var/folders"),
+                PathBuf::from("/var/folders"),
                 // GPG needs write access for lock files (~/.gnupg/.#lk*)
                 home.join(".gnupg"),
             ],
@@ -72,7 +78,12 @@ impl SandboxConfig {
             home.join("Library/Keychains"),
         ];
 
-        let network_allowed = matches!(mode, SandboxMode::FullAccess);
+        // WorkspaceWrite allows network — blocking it prevents git, npm,
+        // pip, cargo, and other essential developer tools from working.
+        let network_allowed = matches!(
+            mode,
+            SandboxMode::WorkspaceWrite | SandboxMode::FullAccess
+        );
 
         // Allow gpg-agent Unix socket connections for commit signing
         let allowed_socket_paths = vec![home.join(".gnupg")];
@@ -263,7 +274,14 @@ mod tests {
 
         assert!(profile.contains("(allow file-write* (subpath \"/workspace\"))"));
         assert!(profile.contains("(allow file-write* (subpath \"/tmp\"))"));
-        assert!(profile.contains("(deny network*)"));
+        assert!(
+            profile.contains("(allow file-write* (subpath \"/var/folders\"))"),
+            "workspace-write should allow macOS user temp/cache dirs"
+        );
+        assert!(
+            profile.contains("(allow network*)"),
+            "workspace-write should allow network for git/npm/etc."
+        );
     }
 
     #[test]

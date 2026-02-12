@@ -934,17 +934,17 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                       {
                         value: "read-only",
                         label: "Read Only",
-                        desc: "Read workspace files only",
+                        desc: "Read files only, no writes or network",
                       },
                       {
                         value: "workspace-write",
                         label: "Workspace Write",
-                        desc: "Read + write workspace, run commands",
+                        desc: "Write workspace, network, secrets blocked",
                       },
                       {
                         value: "full-access",
                         label: "Full Access",
-                        desc: "No restrictions",
+                        desc: "No restrictions at all",
                       },
                     ] as const
                   }
