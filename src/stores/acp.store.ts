@@ -18,7 +18,6 @@ import {
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
 import {
-  archiveAgentConversation,
   createAgentConversation,
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
@@ -1764,7 +1763,7 @@ export const acpStore = {
   ) {
     console.log("[AcpStore] handleMessageChunk:", {
       sessionId,
-      text: text.slice(0, 50) + "...",
+      text: `${text.slice(0, 50)}...`,
       isThought,
     });
 

@@ -2,13 +2,13 @@
 // ABOUTME: Provides reactive balance updates with automatic refresh.
 
 import { createStore } from "solid-js/store";
+import { refreshAccessToken } from "@/services/auth";
 import {
   claimDailyCredits,
   type DailyClaimEligibility,
   type DailyClaimResponse,
   fetchDailyEligibility,
 } from "@/services/dailyClaim";
-import { refreshAccessToken } from "@/services/auth";
 import { fetchBalance, type WalletBalance } from "@/services/wallet";
 
 /**
@@ -129,10 +129,7 @@ async function refreshBalance(): Promise<void> {
         console.error("[Wallet Store] Token refresh threw:", refreshErr);
       }
       stopAutoRefresh();
-    } else if (
-      isAuthError ||
-      consecutiveFailures >= MAX_CONSECUTIVE_FAILURES
-    ) {
+    } else if (isAuthError || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         console.warn(
           `[Wallet Store] Stopping auto-refresh after ${consecutiveFailures} consecutive failures`,

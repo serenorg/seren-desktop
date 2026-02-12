@@ -143,7 +143,7 @@ export const threadStore = {
     for (const t of threads) {
       const key = t.projectRoot;
       if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(t);
+      groups.get(key)?.push(t);
     }
 
     const result: ThreadGroup[] = [];
@@ -153,7 +153,7 @@ export const threadStore = {
       result.push({
         projectRoot: currentRoot,
         folderName: currentRoot.split("/").pop() || currentRoot,
-        threads: groups.get(currentRoot)!,
+        threads: groups.get(currentRoot) || [],
       });
       groups.delete(currentRoot);
     }

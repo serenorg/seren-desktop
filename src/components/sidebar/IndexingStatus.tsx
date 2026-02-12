@@ -119,19 +119,19 @@ export function IndexingStatus() {
               <div class="indexing-stat">
                 <span class="indexing-stat-label">Chunks</span>
                 <span class="indexing-stat-value">
-                  {formatNumber(indexingStore.stats!.total_chunks)}
+                  {formatNumber(indexingStore.stats?.total_chunks)}
                 </span>
               </div>
               <div class="indexing-stat">
                 <span class="indexing-stat-label">Files</span>
                 <span class="indexing-stat-value">
-                  {formatNumber(indexingStore.stats!.total_files)}
+                  {formatNumber(indexingStore.stats?.total_files)}
                 </span>
               </div>
               <div class="indexing-stat">
                 <span class="indexing-stat-label">Last Updated</span>
                 <span class="indexing-stat-value">
-                  {formatDate(indexingStore.stats!.last_indexed)}
+                  {formatDate(indexingStore.stats?.last_indexed)}
                 </span>
               </div>
             </div>

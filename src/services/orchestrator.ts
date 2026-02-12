@@ -320,12 +320,12 @@ function handleToolResult(event: {
   const toolCallMsg = messages.find(
     (m) => m.toolCallId === event.tool_call_id && m.type === "tool_call",
   );
-  if (toolCallMsg) {
+  if (toolCallMsg?.toolCall) {
     const newStatus = event.is_error ? "error" : "completed";
     conversationStore.updateMessage(toolCallMsg.id, {
       status: "complete",
       toolCall: {
-        ...toolCallMsg.toolCall!,
+        ...toolCallMsg.toolCall,
         status: newStatus,
         result: event.content,
         isError: event.is_error,

@@ -336,7 +336,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
             <div class="mb-3">
               <div class="text-[#484f58] font-medium mb-1">Parameters:</div>
               <div class="bg-[#0d1117] border border-[#30363d] rounded p-2 font-mono text-[#e6edf3] max-h-48 overflow-auto">
-                {Object.entries(props.toolCall.parameters!).map(
+                {Object.entries(props.toolCall.parameters || {}).map(
                   ([key, value]) => (
                     <div class="mb-1 last:mb-0">
                       <span class="text-[#79c0ff]">{key}:</span>{" "}
