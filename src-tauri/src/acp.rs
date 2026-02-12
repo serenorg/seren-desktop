@@ -1510,7 +1510,7 @@ async fn run_session_worker(
     api_key: Option<String>,
     approval_policy: Option<String>,
     search_enabled: Option<bool>,
-    resume_agent_session_id: Option<String>,
+    mut resume_agent_session_id: Option<String>,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
 
@@ -1826,28 +1826,14 @@ async fn run_session_worker(
                             continue;
                         }
 
-                        let exit_status = child.try_wait().ok().flatten();
-                        let stderr_lines = {
-                            let buf = stderr_tail.lock().await;
-                            buf.iter()
-                                .rev()
-                                .take(STDERR_TAIL_ON_ERROR)
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                                .rev()
-                                .collect::<Vec<_>>()
-                        };
-
-                        let mut msg = format!("Failed to load agent session {resume_id}: {:?}", e);
-                        if let Some(status) = exit_status {
-                            msg.push_str(&format!("\nAgent exit status: {status}"));
-                        }
-                        if !stderr_lines.is_empty() {
-                            msg.push_str("\nACP agent stderr (tail):\n");
-                            msg.push_str(&stderr_lines.join("\n"));
-                        }
-                        return Err(msg);
+                        // Session not found or other non-auth error — fall back to
+                        // creating a fresh session instead of crashing the worker.
+                        log::warn!(
+                            "[ACP] Could not resume session {}: {:?}. Falling back to fresh session.",
+                            resume_id, e
+                        );
+                        resume_agent_session_id = None;
+                        continue;
                     }
                 }
             } else {
