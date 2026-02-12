@@ -10,9 +10,15 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import type { Skill } from "@/lib/skills";
+import { skills as skillsService } from "@/services/skills";
 import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
+
+const SKILL_CREATOR_SLUG = "skill-creator";
+const SKILL_CREATOR_SOURCE_URL =
+  "https://raw.githubusercontent.com/anthropics/skills/main/skills/skill-creator/SKILL.md";
 
 export const SkillsSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
@@ -72,6 +78,44 @@ export const SkillsSelector: Component = () => {
     setIsOpen(false);
     window.dispatchEvent(
       new CustomEvent("seren:open-panel", { detail: "skills" }),
+    );
+  };
+
+  const handleCreateNewSkill = async () => {
+    setIsOpen(false);
+
+    // Ensure Skill Creator is installed
+    const alreadyInstalled = skillsStore.installed.some(
+      (s) => s.slug === SKILL_CREATOR_SLUG,
+    );
+
+    if (!alreadyInstalled) {
+      try {
+        const skill: Skill = {
+          id: `anthropic:${SKILL_CREATOR_SLUG}`,
+          slug: SKILL_CREATOR_SLUG,
+          name: "Skill Creator",
+          description:
+            "Guide for creating effective skills. Use when users want to create or update a skill that extends capabilities with specialized knowledge, workflows, or tool integrations.",
+          source: "anthropic",
+          sourceUrl: SKILL_CREATOR_SOURCE_URL,
+          tags: ["meta", "creation"],
+          author: "Anthropic",
+        };
+        const content = await skillsService.fetchContent(skill);
+        if (content) {
+          await skillsStore.install(skill, content, "seren");
+        }
+      } catch (err) {
+        console.error("[SkillsSelector] Failed to install skill-creator:", err);
+      }
+    }
+
+    // Set the chat input to the skill creation prompt
+    window.dispatchEvent(
+      new CustomEvent("seren:set-chat-input", {
+        detail: "What skill do you want to create today?",
+      }),
     );
   };
 
@@ -182,9 +226,13 @@ export const SkillsSelector: Component = () => {
             <Show
               when={allInstalled().length > 0}
               fallback={
-                <div class="px-3 py-4 text-center text-[13px] text-muted-foreground">
-                  No skills installed
-                </div>
+                <button
+                  type="button"
+                  class="w-full px-3 py-4 bg-transparent border-none text-center text-[13px] text-primary cursor-pointer transition-colors hover:bg-border hover:text-primary/80"
+                  onClick={handleCreateNewSkill}
+                >
+                  No skills found. Click to create a new skill
+                </button>
               }
             >
               <For each={allInstalled()}>
