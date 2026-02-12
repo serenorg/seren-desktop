@@ -62,8 +62,9 @@ import "highlight.js/styles/github-dark.css";
 
 /** Map orchestrator ToolCallData to the ToolCallEvent shape ToolCallCard expects. */
 function toToolCallEvent(data: ToolCallData): ToolCallEvent {
-  let params: Record<string, unknown> | undefined;
-  if (data.arguments) {
+  // Use pre-parsed parameters if available, otherwise parse arguments (backward compat)
+  let params: Record<string, unknown> | undefined = data.parameters;
+  if (!params && data.arguments) {
     try {
       params = JSON.parse(data.arguments);
     } catch {
@@ -728,7 +729,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               {(item) => {
                 // Render grouped tool calls
                 if (item.type === "tool_group") {
-                  return <ToolCallGroup toolCalls={item.toolCalls} isComplete={true} />;
+                  return (
+                    <ToolCallGroup
+                      toolCalls={item.toolCalls}
+                      isComplete={true}
+                    />
+                  );
                 }
 
                 // Render single message

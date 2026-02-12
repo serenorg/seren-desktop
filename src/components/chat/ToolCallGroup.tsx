@@ -26,13 +26,22 @@ function categorizeToolCalls(toolCalls: ToolCallEvent[]) {
     const kind = tool.kind.toLowerCase();
     const title = tool.title.toLowerCase();
 
-    if (kind === "read" || kind.includes("file") || kind === "glob" || kind === "grep") {
+    if (
+      kind === "read" ||
+      kind.includes("file") ||
+      kind === "glob" ||
+      kind === "grep"
+    ) {
       categories.filesSearched++;
     } else if (kind === "edit") {
       categories.filesEdited++;
     } else if (kind === "write" || kind === "notebookedit") {
       categories.filesWritten++;
-    } else if (kind.includes("bash") || kind.includes("command") || kind === "execute") {
+    } else if (
+      kind.includes("bash") ||
+      kind.includes("command") ||
+      kind === "execute"
+    ) {
       categories.commandsRun++;
     } else if (title.includes("todo") || kind === "todowrite") {
       categories.tasksCreated++;
@@ -45,26 +54,38 @@ function categorizeToolCalls(toolCalls: ToolCallEvent[]) {
 }
 
 /** Build plain language summary from categories */
-function buildSummary(categories: ReturnType<typeof categorizeToolCalls>): string {
+function buildSummary(
+  categories: ReturnType<typeof categorizeToolCalls>,
+): string {
   const parts: string[] = [];
 
   if (categories.filesSearched > 0) {
-    parts.push(`searched ${categories.filesSearched} file${categories.filesSearched > 1 ? "s" : ""}`);
+    parts.push(
+      `searched ${categories.filesSearched} file${categories.filesSearched > 1 ? "s" : ""}`,
+    );
   }
   if (categories.filesEdited > 0) {
-    parts.push(`edited ${categories.filesEdited} file${categories.filesEdited > 1 ? "s" : ""}`);
+    parts.push(
+      `edited ${categories.filesEdited} file${categories.filesEdited > 1 ? "s" : ""}`,
+    );
   }
   if (categories.filesWritten > 0) {
-    parts.push(`created ${categories.filesWritten} file${categories.filesWritten > 1 ? "s" : ""}`);
+    parts.push(
+      `created ${categories.filesWritten} file${categories.filesWritten > 1 ? "s" : ""}`,
+    );
   }
   if (categories.commandsRun > 0) {
-    parts.push(`ran ${categories.commandsRun} command${categories.commandsRun > 1 ? "s" : ""}`);
+    parts.push(
+      `ran ${categories.commandsRun} command${categories.commandsRun > 1 ? "s" : ""}`,
+    );
   }
   if (categories.tasksCreated > 0) {
     parts.push("updated task list");
   }
   if (categories.other > 0 && parts.length === 0) {
-    parts.push(`${categories.other} operation${categories.other > 1 ? "s" : ""}`);
+    parts.push(
+      `${categories.other} operation${categories.other > 1 ? "s" : ""}`,
+    );
   }
 
   if (parts.length === 0) return "No operations";
@@ -81,7 +102,8 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
 
   const categories = () => categorizeToolCalls(props.toolCalls);
   const summary = () => buildSummary(categories());
-  const hasRunning = () => props.toolCalls.some((t) => t.status.toLowerCase().includes("running"));
+  const hasRunning = () =>
+    props.toolCalls.some((t) => t.status.toLowerCase().includes("running"));
 
   return (
     <div class="my-2 mx-5 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
