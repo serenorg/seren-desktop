@@ -8,6 +8,7 @@ import {
   type DailyClaimResponse,
   fetchDailyEligibility,
 } from "@/services/dailyClaim";
+import { refreshAccessToken } from "@/services/auth";
 import { fetchBalance, type WalletBalance } from "@/services/wallet";
 
 /**
@@ -69,6 +70,9 @@ let topUpInProgress = false;
 const MAX_CONSECUTIVE_FAILURES = 5;
 let consecutiveFailures = 0;
 
+// Guard against infinite auth retry loops
+let authRetryAttempted = false;
+
 /**
  * Refresh the wallet balance from the API.
  */
@@ -100,12 +104,33 @@ async function refreshBalance(): Promise<void> {
     const message =
       err instanceof Error ? err.message : "Failed to fetch balance";
     console.error("[Wallet Store] Error refreshing balance:", message);
-    // Stop auto-refresh on auth errors or persistent failures
-    if (
+
+    const isAuthError =
       message.includes("expired") ||
       message.includes("401") ||
       message.includes("Authentication") ||
-      message.includes("Unauthorized") ||
+      message.includes("Unauthorized");
+
+    // On auth errors, attempt token refresh and retry once before giving up
+    if (isAuthError && !authRetryAttempted) {
+      authRetryAttempted = true;
+      console.log("[Wallet Store] Auth error, attempting token refresh...");
+      try {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          console.log("[Wallet Store] Token refreshed, retrying balance fetch");
+          setWalletState("isLoading", false);
+          authRetryAttempted = false;
+          consecutiveFailures = 0;
+          return refreshBalance();
+        }
+        console.warn("[Wallet Store] Token refresh failed, stopping poller");
+      } catch (refreshErr) {
+        console.error("[Wallet Store] Token refresh threw:", refreshErr);
+      }
+      stopAutoRefresh();
+    } else if (
+      isAuthError ||
       consecutiveFailures >= MAX_CONSECUTIVE_FAILURES
     ) {
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -115,6 +140,8 @@ async function refreshBalance(): Promise<void> {
       }
       stopAutoRefresh();
     }
+
+    authRetryAttempted = false;
     console.log("[Wallet Store] Setting isLoading = false (error)");
     setWalletState({
       isLoading: false,
@@ -274,6 +301,7 @@ function resetWalletState(): void {
   setWalletState(initialState);
   topUpInProgress = false;
   consecutiveFailures = 0;
+  authRetryAttempted = false;
 }
 
 /**
