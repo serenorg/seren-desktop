@@ -34,7 +34,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/serenorg/seren-desktop/releases/latest/download/latest.json"
+        "https://pub-714fe894394345a0a8a102fbac2b208f.r2.dev/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdGQTYwRTZBOEE0Mzg5QTcKUldTbmlVT0thZzZtZjhBS3d6L0dqY2lOVWlHSXRJNkFuRWlwSTVTM2hQSkdhVjBHRnh6UWw5a2gK",
       "dialog": false

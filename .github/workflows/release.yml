@@ -572,7 +572,37 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
-      - name: Generate latest.json for updater
+      - name: Setup AWS CLI for R2
+        run: |
+          pip install awscli
+
+      - name: Upload updater artifacts to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          TAG="${{ github.ref_name }}"
+
+          # Upload all updater artifacts to R2 under version directory
+          for platform_dir in artifacts/update-*; do
+            if [ -d "$platform_dir" ]; then
+              platform=$(basename "$platform_dir" | sed 's/update-//')
+              echo "Uploading $platform artifacts..."
+
+              for file in "$platform_dir"/*; do
+                if [ -f "$file" ]; then
+                  filename=$(basename "$file")
+                  aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+                    --endpoint-url="${AWS_ENDPOINT_URL}"
+                  echo "Uploaded: ${TAG}/${filename}"
+                fi
+              done
+            fi
+          done
+
+      - name: Generate latest.json for updater (R2)
         uses: actions/github-script@v7
         with:
           script: |
@@ -581,8 +611,7 @@ jobs:
 
             const tag = '${{ github.ref_name }}';
             const version = tag.replace(/^v/, '');
-            const repo = `${context.repo.owner}/${context.repo.repo}`;
-            const baseUrl = `https://github.com/${repo}/releases/download/${tag}`;
+            const baseUrl = '${{ secrets.R2_PUBLIC_URL }}/' + tag;
 
             // Platform mapping: artifact dir name -> Tauri updater platform key
             const platforms = [
@@ -627,6 +656,19 @@ jobs:
 
             fs.writeFileSync('artifacts/latest.json', JSON.stringify(manifest, null, 2));
             console.log('Generated latest.json:', JSON.stringify(manifest, null, 2));
+
+      - name: Upload latest.json to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          # Upload latest.json to root of bucket
+          aws s3 cp artifacts/latest.json "s3://${R2_BUCKET}/latest.json" \
+            --endpoint-url="${AWS_ENDPOINT_URL}" \
+            --content-type "application/json"
+          echo "Uploaded latest.json to R2"
 
       - name: Publish release
         uses: actions/github-script@v7
