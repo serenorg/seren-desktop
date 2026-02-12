@@ -2,11 +2,14 @@
 // ABOUTME: Provides credential storage and HMAC-SHA256 L2 signing via Tauri commands.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Runtime};
+use std::sync::Arc;
+use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_store::StoreExt;
+use tokio::sync::Mutex;
 
 use super::PolymarketError;
 use super::signing::{ApiCredentials, build_l2_headers};
+use super::websocket::{Channel, PolymarketWebSocket};
 
 const POLYMARKET_STORE: &str = "polymarket.json";
 const PM_API_KEY: &str = "api_key";
@@ -236,4 +239,90 @@ pub async fn sign_polymarket_request<R: Runtime>(
         poly_api_key: headers.poly_api_key,
         poly_passphrase: headers.poly_passphrase,
     })
+}
+
+// ============================================================================
+// WebSocket Commands
+// ============================================================================
+
+/// Global WebSocket client state
+pub type PolymarketWsState<R = tauri::Wry> = Arc<Mutex<Option<PolymarketWebSocket<R>>>>;
+
+/// Connect to Polymarket WebSocket for real-time updates
+#[tauri::command]
+pub async fn connect_polymarket_websocket<R: Runtime>(
+    app: AppHandle<R>,
+    ws_state: State<'_, PolymarketWsState<R>>,
+) -> Result<String, String> {
+    let mut state = ws_state.lock().await;
+
+    if state.is_some() {
+        return Ok("Already connected".to_string());
+    }
+
+    let ws_client = PolymarketWebSocket::new(app.clone());
+
+    match ws_client.connect().await {
+        Ok(()) => {
+            *state = Some(ws_client);
+            Ok("Connected to Polymarket WebSocket".to_string())
+        }
+        Err(e) => Err(format!("Failed to connect: {}", e)),
+    }
+}
+
+/// Subscribe to market price updates
+#[tauri::command]
+pub async fn subscribe_polymarket_market<R: Runtime>(
+    market_id: String,
+    ws_state: State<'_, PolymarketWsState<R>>,
+) -> Result<String, String> {
+    let state = ws_state.lock().await;
+
+    match &*state {
+        Some(ws) => {
+            let channel = Channel::Market { market_id: market_id.clone() };
+            match ws.subscribe(channel).await {
+                Ok(()) => Ok(format!("Subscribed to market {}", market_id)),
+                Err(e) => Err(format!("Subscription failed: {}", e)),
+            }
+        }
+        None => Err("WebSocket not connected".to_string()),
+    }
+}
+
+/// Subscribe to user order updates (authenticated)
+#[tauri::command]
+pub async fn subscribe_polymarket_user<R: Runtime>(
+    app: AppHandle<R>,
+    ws_state: State<'_, PolymarketWsState<R>>,
+) -> Result<String, String> {
+    // Load API key from store
+    let store = match app.store(POLYMARKET_STORE) {
+        Ok(s) => s,
+        Err(e) => {
+            return Err(format!("Failed to open store: {}", e));
+        }
+    };
+
+    let api_key = match store
+        .get(PM_API_KEY)
+        .and_then(|v| v.as_str().map(String::from))
+    {
+        Some(k) => k,
+        None => return Err("Credentials not configured".to_string()),
+    };
+
+    let state = ws_state.lock().await;
+
+    match &*state {
+        Some(ws) => {
+            let channel = Channel::User { api_key };
+            match ws.subscribe(channel).await {
+                Ok(()) => Ok("Subscribed to user updates".to_string()),
+                Err(e) => Err(format!("Subscription failed: {}", e)),
+            }
+        }
+        None => Err("WebSocket not connected".to_string()),
+    }
 }

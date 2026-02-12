@@ -467,7 +467,8 @@ pub fn run() {
         .manage(mcp::HttpMcpState::new())
         .manage(orchestrator::service::OrchestratorState::new())
         .manage(orchestrator::eval::EvalState::new())
-        .manage(orchestrator::tool_bridge::ToolResultBridge::new());
+        .manage(orchestrator::tool_bridge::ToolResultBridge::new())
+        .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None)) as polymarket::commands::PolymarketWsState);
 
     #[cfg(feature = "acp")]
     {
@@ -727,6 +728,10 @@ pub fn run() {
             polymarket::commands::get_polymarket_address,
             polymarket::commands::clear_polymarket_credentials,
             polymarket::commands::sign_polymarket_request,
+            // Polymarket WebSocket commands
+            polymarket::commands::connect_polymarket_websocket,
+            polymarket::commands::subscribe_polymarket_market,
+            polymarket::commands::subscribe_polymarket_user,
             embedded_runtime::get_embedded_runtime_info,
             store_oauth_credentials,
             get_oauth_credentials,

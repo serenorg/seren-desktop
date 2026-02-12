@@ -7,5 +7,7 @@
 pub mod commands;
 mod signing;
 mod types;
+pub mod websocket;
 
 pub use types::PolymarketError;
+pub use websocket::{Channel, PolymarketWebSocket};

@@ -18,4 +18,10 @@ pub enum PolymarketError {
 
     #[error("Storage error: {0}")]
     StorageError(String),
+
+    #[error("WebSocket error: {0}")]
+    WebSocketError(String),
+
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(String),
 }
