@@ -98,6 +98,7 @@ const mockAgentConversations: Array<{
 
 vi.mock("@/stores/acp.store", () => ({
   acpStore: {
+    selectedAgentType: "claude-code",
     get sessions() {
       return mockSessions;
     },
@@ -105,6 +106,7 @@ vi.mock("@/stores/acp.store", () => ({
       return mockAgentConversations;
     },
     setActiveSession: vi.fn(),
+    setSelectedAgentType: vi.fn(),
     resumeAgentConversation: vi.fn(),
     spawnSession: vi.fn(),
     refreshRecentAgentConversations: vi.fn(),
