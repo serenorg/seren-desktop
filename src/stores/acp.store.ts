@@ -1764,7 +1764,7 @@ export const acpStore = {
   ) {
     console.log("[AcpStore] handleMessageChunk:", {
       sessionId,
-      text: text.slice(0, 50) + "...",
+      text: `${text.slice(0, 50)}...`,
       isThought,
     });
 

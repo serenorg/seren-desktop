@@ -1505,7 +1505,7 @@ const DailyClaimBanner: Component = () => {
 
   const canClaim = () => {
     const claim = walletState.dailyClaim;
-    return claim !== null && claim.can_claim;
+    return claim?.can_claim;
   };
 
   const handleClaim = async () => {

@@ -75,8 +75,8 @@ function formatCodeContext(results: SearchResult[]): string {
     const similarityPercent = Math.round((1 - distance) * 100);
     markdown += ` [${similarityPercent}% relevant]\n\n`;
 
-    markdown += "```" + chunk.language + "\n";
-    markdown += chunk.content + "\n";
+    markdown += `\`\`\`${chunk.language}\n`;
+    markdown += `${chunk.content}\n`;
     markdown += "```\n\n";
   }
 

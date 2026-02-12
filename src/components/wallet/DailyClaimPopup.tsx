@@ -24,10 +24,7 @@ export const DailyClaimPopup: Component = () => {
   const shouldShow = () => {
     const claim = walletState.dailyClaim;
     return (
-      claim !== null &&
-      claim.can_claim &&
-      !walletState.dailyClaimDismissed &&
-      !claimResult()
+      claim?.can_claim && !walletState.dailyClaimDismissed && !claimResult()
     );
   };
 
@@ -80,13 +77,13 @@ export const DailyClaimPopup: Component = () => {
               <div class="daily-claim-success">
                 <span class="daily-claim-success-icon">&#10003;</span>
                 <span class="daily-claim-success-amount">
-                  +{claimResult()!.amount_usd}
+                  +{claimResult()?.amount_usd}
                 </span>
                 <span class="daily-claim-success-balance">
-                  New balance: {claimResult()!.balance_usd}
+                  New balance: {claimResult()?.balance_usd}
                 </span>
                 <span class="daily-claim-remaining">
-                  {claimResult()!.claims_remaining_this_month} claims remaining
+                  {claimResult()?.claims_remaining_this_month} claims remaining
                   this month
                 </span>
                 <button
@@ -113,7 +110,7 @@ export const DailyClaimPopup: Component = () => {
               </p>
               <Show when={walletState.dailyClaim}>
                 <p class="daily-claim-remaining">
-                  {walletState.dailyClaim!.claims_remaining_this_month} claims
+                  {walletState.dailyClaim?.claims_remaining_this_month} claims
                   remaining this month
                 </p>
               </Show>

@@ -399,10 +399,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                           onError={(e) => {
                             const fallback =
                               LOCAL_PROVIDER_LOGOS[provider.slug];
-                            if (
-                              fallback &&
-                              e.currentTarget.src !== fallback
-                            ) {
+                            if (fallback && e.currentTarget.src !== fallback) {
                               e.currentTarget.src = fallback;
                             }
                           }}
