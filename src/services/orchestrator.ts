@@ -288,6 +288,19 @@ function handleToolCall(event: {
   // Flush any pending streaming content into the assistant message
   flushStreamingToMessage();
 
+  // Parse arguments JSON for display in ToolCallCard
+  let parameters: Record<string, unknown> | undefined;
+  try {
+    if (event.arguments) {
+      parameters = JSON.parse(event.arguments);
+    }
+  } catch (error) {
+    console.warn(
+      `[orchestrator] Failed to parse tool arguments for ${event.name}:`,
+      error,
+    );
+  }
+
   const toolMessage: UnifiedMessage = {
     id: crypto.randomUUID(),
     type: "tool_call",
@@ -304,6 +317,7 @@ function handleToolCall(event: {
       status: "running",
       name: event.name,
       arguments: event.arguments,
+      parameters,
     },
   };
 

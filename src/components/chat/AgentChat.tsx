@@ -393,7 +393,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   type GroupedMessage =
     | { type: "single"; message: AgentMessage }
-    | { type: "tool_group"; messages: AgentMessage[]; toolCalls: ToolCallEvent[] };
+    | {
+        type: "tool_group";
+        messages: AgentMessage[];
+        toolCalls: ToolCallEvent[];
+      };
 
   /** Group consecutive tool messages into collapsed groups */
   const groupConsecutiveToolCalls = createMemo(() => {
@@ -680,7 +684,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <For each={groupConsecutiveToolCalls()}>
               {(item) => {
                 if (item.type === "tool_group") {
-                  return <ToolCallGroup toolCalls={item.toolCalls} isComplete={true} />;
+                  return (
+                    <ToolCallGroup
+                      toolCalls={item.toolCalls}
+                      isComplete={true}
+                    />
+                  );
                 }
                 return renderMessage(item.message);
               }}

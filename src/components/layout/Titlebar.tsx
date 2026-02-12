@@ -37,7 +37,7 @@ function formatBytes(bytes: number): string {
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  return `${(bytes / k ** i).toFixed(1)} ${sizes[i]}`;
 }
 
 export const Titlebar: Component<TitlebarProps> = (props) => {
@@ -138,7 +138,9 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         {/* Installing state */}
         <Show when={updaterStore.state.status === "installing"}>
           <div class="flex flex-col gap-0.5 min-w-[140px]">
-            <div class="text-[10px] text-foreground/70">Installing update...</div>
+            <div class="text-[10px] text-foreground/70">
+              Installing update...
+            </div>
             <div class="w-full h-[4px] bg-white/10 rounded-full overflow-hidden">
               <div class="updater-bar-installing w-full h-full rounded-full" />
             </div>

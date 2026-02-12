@@ -66,6 +66,7 @@ export interface ToolCallData {
   status: string;
   name?: string;
   arguments?: string;
+  parameters?: Record<string, unknown>;
   result?: string;
   isError?: boolean;
 }
