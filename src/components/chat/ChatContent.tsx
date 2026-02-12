@@ -661,13 +661,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     try {
       // Save to Seren Notes
       const title = `Chat History - ${new Date().toLocaleDateString()}`;
+      const apiKey = await authStore.getToken();
       const response = await fetch(
         "https://api.serendb.com/publishers/seren-notes/notes",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${await authStore.getToken()}`,
+            Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
             title,
@@ -678,7 +679,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       );
 
       if (response.ok) {
-        alert("Chat history saved to Seren Notes!");
+        const data = await response.json();
+        const noteId = data.data?.id || data.id;
+
+        // Open Seren Notes web UI with API key for auto-login
+        const notesUrl = `https://notes.serendb.com?api_key=${apiKey}${noteId ? `#note-${noteId}` : ""}`;
+        await openExternalLink(notesUrl);
+
+        alert("Chat history saved to Seren Notes! Opening notes page...");
       } else {
         throw new Error(`Failed to save: ${response.statusText}`);
       }
