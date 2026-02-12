@@ -451,8 +451,8 @@ struct ClientDelegate {
     pending_diff_proposals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     /// Maps terminal IDs to tool call IDs for tracking command activity in the UI
     terminal_tool_calls: Arc<Mutex<HashMap<String, String>>>,
-    /// Signalled on every session notification so the prompt timeout resets on activity
-    activity_notify: Arc<tokio::sync::Notify>,
+    /// Sender for activity signals - prevents lost notifications during rapid tool calls
+    activity_tx: tokio::sync::mpsc::UnboundedSender<()>,
 }
 
 impl ClientDelegate {
@@ -919,7 +919,8 @@ impl Client for ClientDelegate {
     }
 
     async fn session_notification(&self, args: SessionNotification) -> AcpResult<()> {
-        self.activity_notify.notify_one();
+        // Signal activity to reset timeout - channel ensures no lost signals
+        let _ = self.activity_tx.send(());
         if self.suppress_session_notifications.load(Ordering::Relaxed) {
             return Ok(());
         }
@@ -1685,7 +1686,7 @@ async fn run_session_worker(
 
     // Create client delegate (keep terminals ref for cleanup on session exit)
     let terminals = Arc::new(Mutex::new(crate::terminal::TerminalManager::new()));
-    let activity_notify = Arc::new(tokio::sync::Notify::new());
+    let (activity_tx, mut activity_rx) = tokio::sync::mpsc::unbounded_channel();
     let suppress_session_notifications = Arc::new(AtomicBool::new(false));
     let delegate = ClientDelegate {
         app: app.clone(),
@@ -1697,7 +1698,7 @@ async fn run_session_worker(
         pending_permissions,
         pending_diff_proposals,
         terminal_tool_calls: Arc::new(Mutex::new(HashMap::new())),
-        activity_notify: Arc::clone(&activity_notify),
+        activity_tx,
     };
 
     // Create ACP connection - use spawn_local since we're in a LocalSet
@@ -2079,6 +2080,7 @@ async fn run_session_worker(
                 // Activity-aware timeout: resets whenever the agent sends a
                 // notification (message chunk, tool call, tool result, etc.).
                 // Only fires when the agent is truly silent for PROMPT_TIMEOUT_SECS.
+                // Use channel (not Notify) to prevent lost signals during rapid tool calls.
                 let mut idle_deadline = tokio::time::Instant::now()
                     + std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS);
 
@@ -2147,8 +2149,9 @@ async fn run_session_worker(
                                     ),
                                 ));
                             }
-                            _ = activity_notify.notified() => {
+                            _ = activity_rx.recv() => {
                                 // Agent sent a notification — reset the idle deadline
+                                // Channel ensures no lost signals during rapid tool execution
                                 idle_deadline = tokio::time::Instant::now()
                                     + std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS);
                             }
@@ -2766,6 +2769,7 @@ async fn list_remote_sessions_inner(
     // Create a mostly-noop client delegate. We suppress session notifications because
     // `list_sessions` is a non-interactive control-plane call.
     let terminals = Arc::new(Mutex::new(crate::terminal::TerminalManager::new()));
+    let (activity_tx, _activity_rx) = tokio::sync::mpsc::unbounded_channel();
     let suppress_session_notifications = Arc::new(AtomicBool::new(true));
     let pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -2777,7 +2781,7 @@ async fn list_remote_sessions_inner(
         cwd: cwd.clone(),
         terminals: Arc::clone(&terminals),
         sandbox_mode: crate::sandbox::SandboxMode::default(),
-        activity_notify: Arc::new(tokio::sync::Notify::new()),
+        activity_tx,
         suppress_session_notifications: Arc::clone(&suppress_session_notifications),
         pending_permissions,
         pending_diff_proposals,
