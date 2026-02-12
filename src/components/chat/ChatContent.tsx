@@ -648,8 +648,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       return;
     }
 
-    // TODO: Implement Seren Notes integration
-    // For now, download as a local markdown file
+    // Format messages as markdown
     let markdown = "# Chat History\n\n";
     for (const msg of messages) {
       if (msg.role === "user") {
@@ -659,15 +658,47 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       }
     }
 
-    const blob = new Blob([markdown], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `chat-history-${new Date().toISOString().split("T")[0]}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+      // Save to Seren Notes
+      const title = `Chat History - ${new Date().toLocaleDateString()}`;
+      const response = await fetch(
+        "https://api.serendb.com/publishers/seren-notes/notes",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${await authStore.getToken()}`,
+          },
+          body: JSON.stringify({
+            title,
+            content: markdown,
+            format: "markdown",
+          }),
+        },
+      );
+
+      if (response.ok) {
+        alert("Chat history saved to Seren Notes!");
+      } else {
+        throw new Error(`Failed to save: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error("Failed to save to Seren Notes:", error);
+      alert(
+        "Failed to save to Seren Notes. Downloading locally instead...",
+      );
+
+      // Fallback: download as local markdown file
+      const blob = new Blob([markdown], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `chat-history-${new Date().toISOString().split("T")[0]}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
   };
 
   return (
