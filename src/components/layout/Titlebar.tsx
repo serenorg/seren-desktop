@@ -16,6 +16,30 @@ interface TitlebarProps {
   sidebarCollapsed: boolean;
 }
 
+const DOWNLOAD_QUIPS = [
+  "Warming up...",
+  "Downloading fresh pixels...",
+  "Fetching improvements...",
+  "Installing awesomeness...",
+  "Polishing bits...",
+  "Almost there...",
+  "Finalizing magic...",
+  "99% done...",
+];
+
+function quipForPercent(percent: number): string {
+  const index = Math.floor((percent / 100) * (DOWNLOAD_QUIPS.length - 1));
+  return DOWNLOAD_QUIPS[Math.min(index, DOWNLOAD_QUIPS.length - 1)];
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+}
+
 export const Titlebar: Component<TitlebarProps> = (props) => {
   const folderName = () => {
     const root = fileTreeState.rootPath;
@@ -77,8 +101,61 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
       </div>
 
       <div class="titlebar__right titlebar--no-drag">
+        {/* Update available button */}
+        <Show when={updaterStore.state.status === "available"}>
+          <button
+            type="button"
+            class="px-3 py-1 rounded-md bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-medium flex items-center gap-1.5 transition-colors animate-pulse"
+            onClick={() => updaterStore.installAvailableUpdate()}
+            title={`Update to ${updaterStore.state.availableVersion}`}
+          >
+            <span>⬆</span>
+            <span>Update {updaterStore.state.availableVersion}</span>
+          </button>
+        </Show>
+
+        {/* Downloading progress */}
         <Show when={updaterStore.state.status === "downloading"}>
-          <span class="titlebar__update-badge">Updating...</span>
+          <div class="flex flex-col gap-0.5 min-w-[140px]">
+            <div class="flex justify-between text-[10px] text-foreground/70">
+              <span>{quipForPercent(updaterStore.state.progressPercent)}</span>
+              <span>{updaterStore.state.progressPercent}%</span>
+            </div>
+            <div
+              class="w-full h-[4px] bg-white/10 rounded-full overflow-hidden"
+              title={`${formatBytes(updaterStore.state.downloadedBytes)} / ${formatBytes(updaterStore.state.totalBytes)}`}
+            >
+              <div
+                class="updater-bar-downloading h-full rounded-full transition-all duration-300"
+                style={{
+                  width: `${updaterStore.state.progressPercent}%`,
+                }}
+              />
+            </div>
+          </div>
+        </Show>
+
+        {/* Installing state */}
+        <Show when={updaterStore.state.status === "installing"}>
+          <div class="flex flex-col gap-0.5 min-w-[140px]">
+            <div class="text-[10px] text-foreground/70">Installing update...</div>
+            <div class="w-full h-[4px] bg-white/10 rounded-full overflow-hidden">
+              <div class="updater-bar-installing w-full h-full rounded-full" />
+            </div>
+          </div>
+        </Show>
+
+        {/* Error state with retry */}
+        <Show when={updaterStore.state.status === "error"}>
+          <button
+            type="button"
+            class="px-3 py-1 rounded-md bg-destructive hover:bg-destructive/90 text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
+            onClick={() => updaterStore.checkForUpdates()}
+            title={updaterStore.state.errorMessage || "Update failed"}
+          >
+            <span>⚠</span>
+            <span>Update failed - Retry</span>
+          </button>
         </Show>
 
         <Show when={authStore.isAuthenticated}>
