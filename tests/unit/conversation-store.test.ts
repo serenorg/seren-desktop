@@ -68,6 +68,27 @@ describe("conversationStore", () => {
       await conversationStore.createConversation("Second");
       expect(conversationStore.conversations[0].title).toBe("Second");
     });
+
+    it("passes projectRoot through to persistence layer", async () => {
+      const { createConversation } = await import("@/lib/tauri-bridge");
+      const convo = await conversationStore.createConversation(
+        "With Project",
+        "/Users/dev/my-project",
+      );
+      expect(convo.projectRoot).toBe("/Users/dev/my-project");
+      expect(createConversation).toHaveBeenCalledWith(
+        convo.id,
+        "With Project",
+        "anthropic/claude-sonnet-4",
+        undefined,
+        "/Users/dev/my-project",
+      );
+    });
+
+    it("defaults projectRoot to null when not provided", async () => {
+      const convo = await conversationStore.createConversation("No Project");
+      expect(convo.projectRoot).toBeNull();
+    });
   });
 
   describe("addMessage", () => {
@@ -242,6 +263,7 @@ describe("conversationStore", () => {
           created_at: 1000,
           selected_model: null,
           selected_provider: null,
+          project_root: null,
           is_archived: false,
         },
       ]);
@@ -274,6 +296,7 @@ describe("conversationStore", () => {
           created_at: 1000,
           selected_model: null,
           selected_provider: null,
+          project_root: null,
           is_archived: false,
         },
       ]);

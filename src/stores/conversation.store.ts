@@ -26,6 +26,7 @@ export interface Conversation {
   createdAt: number;
   selectedModel: string;
   selectedProvider: ProviderId | null;
+  projectRoot: string | null;
   isArchived: boolean;
 }
 
@@ -56,6 +57,7 @@ function dbToConversation(db: DbConversation): Conversation {
     createdAt: db.created_at,
     selectedModel: db.selected_model ?? DEFAULT_MODEL,
     selectedProvider: (db.selected_provider as ProviderId) ?? null,
+    projectRoot: db.project_root ?? null,
     isArchived: db.is_archived,
   };
 }
@@ -115,18 +117,22 @@ export const conversationStore = {
 
   // === Conversation management ===
 
-  async createConversation(title = "New Chat"): Promise<Conversation> {
-    return this.createConversationWithModel(title, DEFAULT_MODEL);
+  async createConversation(
+    title = "New Chat",
+    projectRoot?: string,
+  ): Promise<Conversation> {
+    return this.createConversationWithModel(title, DEFAULT_MODEL, projectRoot);
   },
 
   async createConversationWithModel(
     title: string,
     model: string,
+    projectRoot?: string,
   ): Promise<Conversation> {
     const id = crypto.randomUUID();
 
     try {
-      await createConversationDb(id, title, model);
+      await createConversationDb(id, title, model, undefined, projectRoot);
     } catch (error) {
       console.warn("Failed to persist conversation", error);
     }
@@ -137,6 +143,7 @@ export const conversationStore = {
       createdAt: Date.now(),
       selectedModel: model,
       selectedProvider: null,
+      projectRoot: projectRoot ?? null,
       isArchived: false,
     };
 
@@ -329,9 +336,10 @@ export const conversationStore = {
         }
       }
 
-      if (conversations.length > 0) {
+      // Only set active conversation if none is currently selected
+      if (!state.activeConversationId && conversations.length > 0) {
         setState("activeConversationId", conversations[0].id);
-      } else {
+      } else if (conversations.length === 0) {
         await this.createConversation();
       }
     } catch (error) {

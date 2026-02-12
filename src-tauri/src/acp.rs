@@ -112,7 +112,7 @@ fn launch_codex_login() {
 }
 
 /// Agent types supported by the ACP integration
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentType {
     ClaudeCode,
@@ -353,6 +353,11 @@ pub(crate) enum AcpCommand {
         value_id: String,
         response_tx: oneshot::Sender<Result<(), String>>,
     },
+    ListRemoteSessions {
+        cwd: String,
+        cursor: Option<String>,
+        response_tx: oneshot::Sender<Result<AcpRemoteSessionsPage, String>>,
+    },
     Terminate,
 }
 
@@ -376,13 +381,35 @@ pub(crate) struct AcpSession {
 /// State for managing ACP sessions
 pub struct AcpState {
     pub(crate) sessions: RwLock<HashMap<String, Arc<Mutex<AcpSession>>>>,
+    /// Serializes sidecar spawning per agent type to prevent concurrent spawns
+    /// that cause SIGKILL collisions (e.g. two codex app-server instances competing).
+    spawn_locks: RwLock<HashMap<AgentType, Arc<Mutex<()>>>>,
 }
 
 impl AcpState {
     pub fn new() -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
+            spawn_locks: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Get or create a per-agent-type spawn lock.
+    async fn spawn_lock(&self, agent_type: AgentType) -> Arc<Mutex<()>> {
+        // Fast path: lock exists
+        {
+            let locks = self.spawn_locks.read().await;
+            if let Some(lock) = locks.get(&agent_type) {
+                return Arc::clone(lock);
+            }
+        }
+        // Slow path: create lock
+        let mut locks = self.spawn_locks.write().await;
+        let lock = locks
+            .entry(agent_type)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        lock
     }
 }
 
@@ -1389,6 +1416,7 @@ pub async fn acp_spawn(
     let session_arc_clone = session_arc.clone();
     let api_key_clone = api_key.clone();
     let resume_agent_session_id_clone = resume_agent_session_id.clone();
+    let spawn_lock = state.spawn_lock(agent_type).await;
 
     let session_arc_for_worker = session_arc_clone.clone();
 
@@ -1415,6 +1443,7 @@ pub async fn acp_spawn(
                 approval_policy,
                 search_enabled,
                 resume_agent_session_id_clone,
+                spawn_lock,
             )
             .await
             {
@@ -1511,8 +1540,13 @@ async fn run_session_worker(
     approval_policy: Option<String>,
     search_enabled: Option<bool>,
     mut resume_agent_session_id: Option<String>,
+    spawn_lock: Arc<Mutex<()>>,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
+    // Acquire spawn lock to prevent concurrent sidecar spawns for the same agent type.
+    // This prevents SIGKILL collisions when multiple sessions try to start simultaneously
+    // (e.g. codex app-server singleton conflicts).
+    let _spawn_guard = spawn_lock.lock().await;
 
     // Build CLI args based on agent type and configuration
     let mut args: Vec<String> = Vec::new();
@@ -1950,6 +1984,10 @@ async fn run_session_worker(
     );
     log::debug!("[ACP] Emit result: {:?}", emit_result);
 
+    // Release the spawn lock now that the sidecar is initialized and ready.
+    // Other sessions for the same agent type can now start spawning.
+    drop(_spawn_guard);
+
     // Auto-set the user's preferred permission mode if the agent advertises modes.
     // Map Seren sandbox mode names to agent mode IDs by matching name patterns.
     if let Some(mode_state) = &modes_state {
@@ -2082,6 +2120,9 @@ async fn run_session_worker(
                                     Some(AcpCommand::SetConfigOption { response_tx: tx, .. }) => {
                                         let _ = tx.send(Err("Cannot change config while cancellation is pending".to_string()));
                                     }
+                                    Some(AcpCommand::ListRemoteSessions { response_tx: tx, .. }) => {
+                                        let _ = tx.send(Err("Cannot list sessions while cancellation is pending".to_string()));
+                                    }
                                     None => {
                                         let _ = response_tx.send(Err("Command channel closed".to_string()));
                                         return Ok(());
@@ -2140,6 +2181,9 @@ async fn run_session_worker(
                                         );
                                         queued_config.insert(config_id, value_id);
                                         let _ = tx.send(Ok(()));
+                                    }
+                                    Some(AcpCommand::ListRemoteSessions { response_tx: tx, .. }) => {
+                                        let _ = tx.send(Err("Cannot list sessions while prompt is active".to_string()));
                                     }
                                     Some(other) => {
                                         log::info!("[ACP] Rejecting command while prompt is active");
@@ -2346,6 +2390,37 @@ async fn run_session_worker(
                     }
                 }
             }
+            AcpCommand::ListRemoteSessions {
+                cwd,
+                cursor,
+                response_tx,
+            } => {
+                let mut request = ListSessionsRequest::new().cwd(std::path::PathBuf::from(&cwd));
+                if let Some(c) = cursor {
+                    request = request.cursor(c);
+                }
+                let result = connection
+                    .list_sessions(request)
+                    .await
+                    .map(|resp| {
+                        let sessions = resp
+                            .sessions
+                            .into_iter()
+                            .map(|s| AcpRemoteSessionInfo {
+                                session_id: s.session_id.to_string(),
+                                cwd: s.cwd.display().to_string(),
+                                title: s.title,
+                                updated_at: s.updated_at,
+                            })
+                            .collect::<Vec<_>>();
+                        AcpRemoteSessionsPage {
+                            sessions,
+                            next_cursor: resp.next_cursor,
+                        }
+                    })
+                    .map_err(|e| format!("Failed to list sessions: {:?}", e));
+                let _ = response_tx.send(result);
+            }
             AcpCommand::Terminate => {
                 break;
             }
@@ -2484,17 +2559,85 @@ pub async fn acp_list_sessions(state: State<'_, AcpState>) -> Result<Vec<AcpSess
 
 /// List sessions from an agent's underlying session store (ACP `listSessions`).
 ///
-/// This is a one-shot operation that spawns the agent sidecar, initializes it,
-/// performs ACP authentication if required, calls `listSessions`, and exits.
+/// Prefers routing through a live worker session for the same agent type.
+/// Falls back to a one-shot sidecar operation when no worker is available.
 #[tauri::command]
 pub async fn acp_list_remote_sessions(
     app: AppHandle,
+    state: State<'_, AcpState>,
     agent_type: AgentType,
     cwd: String,
     cursor: Option<String>,
 ) -> Result<AcpRemoteSessionsPage, String> {
     let cwd = normalize_cwd(&cwd)?;
+
+    // Fast path: reuse an already-running worker for this agent type.
+    // This avoids spawning an extra sidecar process (important for Codex app-server stability).
+    let session_arcs = {
+        let sessions = state.sessions.read().await;
+        sessions.values().cloned().collect::<Vec<_>>()
+    };
+    let mut attempted_live_worker = false;
+    let mut live_worker_error: Option<String> = None;
+    for session_arc in session_arcs {
+        let command_tx = {
+            let session = session_arc.lock().await;
+            if session.agent_type != agent_type {
+                None
+            } else {
+                session.command_tx.clone()
+            }
+        };
+        let Some(command_tx) = command_tx else {
+            continue;
+        };
+        attempted_live_worker = true;
+
+        let (response_tx, response_rx) = oneshot::channel();
+        let send_result = command_tx
+            .send(AcpCommand::ListRemoteSessions {
+                cwd: cwd.clone(),
+                cursor: cursor.clone(),
+                response_tx,
+            })
+            .await;
+
+        if send_result.is_err() {
+            log::warn!(
+                "[ACP] Failed to route list remote sessions through live worker; trying another live session if available"
+            );
+            live_worker_error =
+                Some("Failed to route list request through live agent worker".to_string());
+            continue;
+        }
+
+        match response_rx.await {
+            Ok(Ok(page)) => return Ok(page),
+            Ok(Err(err)) => {
+                log::warn!("[ACP] Live-worker list remote sessions failed: {}", err);
+                live_worker_error = Some(err);
+                continue;
+            }
+            Err(_) => {
+                log::warn!(
+                    "[ACP] Live-worker list remote sessions dropped response; trying another live session if available"
+                );
+                live_worker_error =
+                    Some("Live agent worker dropped list-session response".to_string());
+                continue;
+            }
+        }
+    }
+
+    // If at least one live worker existed, avoid spawning another sidecar process.
+    // This prevents process churn while an interactive session is already running.
+    if attempted_live_worker {
+        return Err(live_worker_error
+            .unwrap_or_else(|| "No live agent worker could serve list sessions".to_string()));
+    }
+
     let app_handle = app.clone();
+    let spawn_lock = state.spawn_lock(agent_type).await;
 
     tauri::async_runtime::spawn_blocking(move || {
         // ACP futures aren't Send; run inside a single-threaded runtime + LocalSet.
@@ -2504,7 +2647,7 @@ pub async fn acp_list_remote_sessions(
             .map_err(|e| format!("Failed to create runtime: {e}"))?;
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async move {
-            list_remote_sessions_inner(app_handle, agent_type, cwd, cursor).await
+            list_remote_sessions_inner(app_handle, agent_type, cwd, cursor, spawn_lock).await
         })
     })
     .await
@@ -2516,7 +2659,10 @@ async fn list_remote_sessions_inner(
     agent_type: AgentType,
     cwd: String,
     cursor: Option<String>,
+    spawn_lock: Arc<Mutex<()>>,
 ) -> Result<AcpRemoteSessionsPage, String> {
+    // Acquire spawn lock to serialize with acp_spawn for the same agent type.
+    let _spawn_guard = spawn_lock.lock().await;
     let command = agent_type.command()?;
 
     log::info!(

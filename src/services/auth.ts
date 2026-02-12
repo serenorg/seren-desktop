@@ -52,9 +52,7 @@ function checkLoginRateLimit(): void {
     loginRateLimit.attempts >= MAX_LOGIN_ATTEMPTS &&
     elapsed < loginRateLimit.backoffMs
   ) {
-    const waitSeconds = Math.ceil(
-      (loginRateLimit.backoffMs - elapsed) / 1000,
-    );
+    const waitSeconds = Math.ceil((loginRateLimit.backoffMs - elapsed) / 1000);
     throw new Error(
       `Too many login attempts. Please wait ${waitSeconds} seconds.`,
     );

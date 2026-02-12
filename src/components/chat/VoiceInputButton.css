@@ -10,7 +10,7 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #848d97;
+  color: var(--muted-foreground);
   cursor: pointer;
   transition:
     background-color 0.15s,
@@ -20,22 +20,22 @@
 }
 
 .voice-input-btn:hover {
-  background: #21262d;
-  color: #e6edf3;
+  background: var(--surface-2);
+  color: var(--foreground);
 }
 
 .voice-input-btn[data-state="recording"] {
-  color: #f85149;
-  background: rgba(248, 81, 73, 0.1);
+  color: var(--destructive);
+  background: rgba(248, 113, 113, 0.1);
 }
 
 .voice-input-btn[data-state="transcribing"] {
-  color: #848d97;
+  color: var(--muted-foreground);
   cursor: wait;
 }
 
 .voice-input-btn[data-state="error"] {
-  color: #f85149;
+  color: var(--destructive);
 }
 
 .voice-input-btn:disabled {
@@ -50,7 +50,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #f85149;
+  background: var(--destructive);
   animation: voice-pulse 1s ease-in-out infinite;
 }
 
@@ -69,8 +69,8 @@
 .voice-spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid #30363d;
-  border-top-color: #848d97;
+  border: 2px solid var(--surface-3);
+  border-top-color: var(--muted-foreground);
   border-radius: 50%;
   animation: voice-spin 0.6s linear infinite;
 }
@@ -97,7 +97,7 @@
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: #484f58;
+  color: var(--status-idle);
   cursor: pointer;
   transition:
     background-color 0.15s,
@@ -107,17 +107,17 @@
 }
 
 .voice-auto-submit-toggle:hover {
-  background: #21262d;
-  color: #8b949e;
+  background: var(--surface-2);
+  color: var(--muted-foreground);
 }
 
 .voice-auto-submit-toggle.active {
-  color: #238636;
+  color: var(--success);
 }
 
 .voice-auto-submit-toggle.active:hover {
-  background: rgba(35, 134, 54, 0.1);
-  color: #2ea043;
+  background: rgba(52, 211, 153, 0.1);
+  color: var(--success);
 }
 
 .voice-auto-submit-toggle::after {
@@ -125,12 +125,12 @@
   position: absolute;
   bottom: calc(100% + 6px);
   right: 0;
-  background: #21262d;
-  border: 1px solid #30363d;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 11px;
-  color: #8b949e;
+  color: var(--muted-foreground);
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
@@ -146,12 +146,12 @@
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
-  background: #21262d;
-  border: 1px solid #30363d;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 12px;
-  color: #f85149;
+  color: var(--destructive);
   white-space: nowrap;
   pointer-events: none;
   z-index: 100;

@@ -2,8 +2,8 @@
 .code-block-wrapper {
   position: relative;
   margin: 16px 0;
-  background: #161b22;
-  border: 1px solid #30363d;
+  background: var(--surface-0);
+  border: 1px solid var(--surface-3);
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -14,15 +14,15 @@
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: #0d1117;
-  border-bottom: 1px solid #21262d;
+  background: var(--background);
+  border-bottom: 1px solid var(--surface-2);
 }
 
 .code-block-lang {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  color: #8b949e;
+  color: var(--muted-foreground);
   letter-spacing: 0.5px;
 }
 
@@ -32,9 +32,9 @@
   gap: 4px;
   padding: 4px 8px;
   background: transparent;
-  border: 1px solid #30363d;
+  border: 1px solid var(--surface-3);
   border-radius: 4px;
-  color: #8b949e;
+  color: var(--muted-foreground);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
@@ -42,18 +42,18 @@
 }
 
 .code-copy-btn:hover {
-  background: #21262d;
-  border-color: #484f58;
-  color: #e6edf3;
+  background: var(--surface-2);
+  border-color: var(--status-idle);
+  color: var(--foreground);
 }
 
 .code-copy-btn:active {
-  background: #30363d;
+  background: var(--surface-3);
 }
 
 .code-copy-btn.copied {
-  color: #3fb950;
-  border-color: #3fb950;
+  color: var(--success);
+  border-color: var(--success);
 }
 
 .code-copy-btn svg {
@@ -79,7 +79,7 @@
 
 /* External links in chat messages */
 .external-link {
-  color: #58a6ff;
+  color: var(--primary);
   text-decoration: none;
   cursor: pointer;
 }

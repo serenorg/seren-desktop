@@ -33,6 +33,7 @@ pub struct Conversation {
     pub created_at: i64,
     pub selected_model: Option<String>,
     pub selected_provider: Option<String>,
+    pub project_root: Option<String>,
     pub is_archived: bool,
 }
 
@@ -72,11 +73,14 @@ pub async fn create_conversation(
     title: String,
     selected_model: Option<String>,
     selected_provider: Option<String>,
+    project_root: Option<String>,
 ) -> Result<Conversation, String> {
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
+
+    let normalized_project_root = project_root.as_deref().and_then(normalize_project_root);
 
     let conversation = Conversation {
         id: id.clone(),
@@ -84,14 +88,15 @@ pub async fn create_conversation(
         created_at,
         selected_model: selected_model.clone(),
         selected_provider: selected_provider.clone(),
+        project_root: normalized_project_root.clone(),
         is_archived: false,
     };
 
     run_db(app, move |conn| {
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, selected_model, selected_provider, is_archived, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, 'chat')",
-            params![id, title, created_at, selected_model, selected_provider],
+            "INSERT INTO conversations (id, title, created_at, selected_model, selected_provider, project_root, is_archived, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 'chat')",
+            params![id, title, created_at, selected_model, selected_provider, normalized_project_root],
         )?;
         Ok(())
     })
@@ -101,27 +106,53 @@ pub async fn create_conversation(
 }
 
 #[tauri::command]
-pub async fn get_conversations(app: AppHandle) -> Result<Vec<Conversation>, String> {
-    run_db(app, move |conn| {
-        let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, selected_model, selected_provider, is_archived
-             FROM conversations
-             WHERE kind = 'chat' AND is_archived = 0
-             ORDER BY created_at DESC",
-        )?;
+pub async fn get_conversations(
+    app: AppHandle,
+    project_root: Option<String>,
+) -> Result<Vec<Conversation>, String> {
+    let normalized = project_root.as_deref().and_then(normalize_project_root);
 
-        let rows = stmt
-            .query_map([], |row| {
+    run_db(app, move |conn| {
+        let rows = if let Some(ref root) = normalized {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived
+                 FROM conversations
+                 WHERE kind = 'chat' AND is_archived = 0
+                   AND (project_root = ?1 OR project_root IS NULL)
+                 ORDER BY created_at DESC",
+            )?;
+            stmt.query_map(params![root], |row| {
                 Ok(Conversation {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     created_at: row.get(2)?,
                     selected_model: row.get(3)?,
                     selected_provider: row.get(4)?,
-                    is_archived: row.get::<_, i32>(5)? != 0,
+                    project_root: row.get(5)?,
+                    is_archived: row.get::<_, i32>(6)? != 0,
                 })
             })?
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived
+                 FROM conversations
+                 WHERE kind = 'chat' AND is_archived = 0
+                 ORDER BY created_at DESC",
+            )?;
+            stmt.query_map([], |row| {
+                Ok(Conversation {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    created_at: row.get(2)?,
+                    selected_model: row.get(3)?,
+                    selected_provider: row.get(4)?,
+                    project_root: row.get(5)?,
+                    is_archived: row.get::<_, i32>(6)? != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+        };
 
         Ok(rows)
     })
@@ -132,7 +163,7 @@ pub async fn get_conversations(app: AppHandle) -> Result<Vec<Conversation>, Stri
 pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conversation>, String> {
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, selected_model, selected_provider, is_archived
+            "SELECT id, title, created_at, selected_model, selected_provider, project_root, is_archived
              FROM conversations
              WHERE id = ?1 AND kind = 'chat'",
         )?;
@@ -145,7 +176,8 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
                     created_at: row.get(2)?,
                     selected_model: row.get(3)?,
                     selected_provider: row.get(4)?,
-                    is_archived: row.get::<_, i32>(5)? != 0,
+                    project_root: row.get(5)?,
+                    is_archived: row.get::<_, i32>(6)? != 0,
                 })
             })
             .optional()?;
@@ -254,7 +286,7 @@ pub async fn create_agent_conversation(
 
     run_db(app, move |conn| {
         conn.execute(
-            "INSERT OR IGNORE INTO conversations (
+            "INSERT INTO conversations (
                 id,
                 title,
                 created_at,
@@ -265,7 +297,14 @@ pub async fn create_agent_conversation(
                 agent_cwd,
                 project_id,
                 project_root
-            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6, ?7, ?8)",
+            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+                is_archived = 0,
+                agent_type = excluded.agent_type,
+                agent_session_id = COALESCE(excluded.agent_session_id, conversations.agent_session_id),
+                agent_cwd = COALESCE(conversations.agent_cwd, excluded.agent_cwd),
+                project_id = COALESCE(conversations.project_id, excluded.project_id),
+                project_root = COALESCE(conversations.project_root, excluded.project_root)",
             params![
                 id,
                 title,

@@ -6,8 +6,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  border-left: 2px solid #58a6ff;
-  color: #8b949e;
+  border-left: 2px solid var(--primary);
+  color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.4;
   animation: transition-fade-in 0.3s ease-in;

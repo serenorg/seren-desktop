@@ -36,7 +36,6 @@ import { AgentEffortSelector } from "./AgentEffortSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
 import { AgentModeSelector } from "./AgentModeSelector";
 import { AgentSelector } from "./AgentSelector";
-import { AgentTabBar } from "./AgentTabBar";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
@@ -384,9 +383,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     switch (message.type) {
       case "user":
         return (
-          <article class="px-5 py-4 bg-[#161b22] border-b border-[#21262d]">
+          <article class="px-5 py-4 bg-surface-1 border-b border-surface-2">
             <div
-              class="text-sm leading-relaxed text-[#e6edf3] whitespace-pre-wrap"
+              class="text-sm leading-relaxed text-foreground whitespace-pre-wrap"
               innerHTML={escapeHtmlWithLinks(message.content)}
             />
           </article>
@@ -394,9 +393,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       case "assistant":
         return (
-          <article class="px-5 py-4 border-b border-[#21262d]">
+          <article class="px-5 py-4 border-b border-surface-2">
             <div
-              class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
+              class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
               innerHTML={renderMarkdown(message.content)}
             />
             <Show when={message.duration}>
@@ -406,7 +405,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   message.cost,
                 );
                 return (
-                  <div class="mt-2 text-xs text-[#8b949e]">
+                  <div class="mt-2 text-xs text-muted-foreground">
                     ✻ {verb} for {duration}
                     {costDisplay && ` at ${costDisplay}`}
                   </div>
@@ -418,7 +417,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       case "thought":
         return (
-          <article class="px-5 py-3 border-b border-[#21262d]">
+          <article class="px-5 py-3 border-b border-surface-2">
             <ThinkingBlock thinking={message.content} />
           </article>
         );
@@ -439,12 +438,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       case "error":
         return (
-          <article class="px-5 py-3 border-b border-[#21262d]">
+          <article class="px-5 py-3 border-b border-surface-2">
             <div
               class={`px-3 py-2 border rounded-md text-sm ${
                 isAuthError(message.content)
-                  ? "bg-[rgba(210,153,34,0.1)] border-[rgba(210,153,34,0.4)] text-[#d2992a]"
-                  : "bg-[rgba(248,81,73,0.1)] border-[rgba(248,81,73,0.4)] text-[#f85149]"
+                  ? "bg-warning/10 border-warning/40 text-warning"
+                  : "bg-destructive/10 border-destructive/40 text-destructive"
               }`}
             >
               <Show
@@ -457,7 +456,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   </span>
                   <button
                     type="button"
-                    class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d] flex-shrink-0"
+                    class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110 flex-shrink-0"
                     onClick={async () => {
                       const agentType =
                         acpStore.activeSession?.info.agentType ?? "claude-code";
@@ -487,18 +486,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   return (
     <div class="flex-1 flex flex-col min-h-0">
-      {/* Agent Tab Bar */}
-      <Show when={hasSession()}>
-        <AgentTabBar onNewSession={startSession} />
-      </Show>
-
       {/* Plan Header */}
       <PlanHeader />
 
       {/* Messages Area */}
       <div
         ref={messagesRef}
-        class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded"
+        class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-surface-3 [&::-webkit-scrollbar-thumb]:rounded"
         onClick={(e) => {
           const target = e.target as HTMLElement;
           const link = target.closest(".external-link") as HTMLAnchorElement;
@@ -527,10 +521,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         <Show
           when={hasSession()}
           fallback={
-            <div class="flex-1 flex flex-col items-center justify-center p-10 text-[#8b949e]">
+            <div class="flex-1 flex flex-col items-center justify-center p-10 text-muted-foreground">
               <div class="max-w-[320px] text-center">
                 <svg
-                  class="w-12 h-12 mx-auto mb-4 text-[#30363d]"
+                  class="w-12 h-12 mx-auto mb-4 text-surface-3"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -544,7 +538,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
                   />
                 </svg>
-                <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">
+                <h3 class="m-0 mb-2 text-base font-medium text-foreground">
                   Start an Agent Session
                 </h3>
                 <p class="m-0 mb-4 text-sm">
@@ -554,7 +548,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <div class="flex flex-col items-center gap-3 w-full max-w-md">
                   <AgentSelector />
                   <Show when={acpStore.selectedAgentType === "claude-code"}>
-                    <div class="w-full px-3 py-2 bg-[#1f6feb]/10 border border-[#1f6feb]/30 rounded-md text-xs text-[#58a6ff]">
+                    <div class="w-full px-3 py-2 bg-primary/10 border border-primary/30 rounded-md text-xs text-primary">
                       <div class="flex items-start gap-2">
                         <svg
                           class="w-4 h-4 mt-0.5 flex-shrink-0"
@@ -578,13 +572,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     </div>
                   </Show>
                   <Show when={!hasFolderOpen()}>
-                    <div class="w-full px-3 py-2 bg-[#da3633]/10 border border-[#da3633]/30 rounded-md text-xs text-[#f85149]">
+                    <div class="w-full px-3 py-2 bg-destructive/10 border border-destructive/30 rounded-md text-xs text-destructive">
                       Open a folder first to set the agent's working directory.
                     </div>
                   </Show>
                   <button
                     type="button"
-                    class="px-4 py-2 bg-[#238636] text-white rounded-md text-sm font-medium hover:bg-[#2ea043] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="px-4 py-2 bg-success text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={() => startSession()}
                     disabled={acpStore.isLoading || !hasFolderOpen()}
                   >
@@ -592,119 +586,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                       ? (acpStore.installStatus ?? "Starting...")
                       : "Start Agent"}
                   </button>
-
-                  <Show when={hasFolderOpen()}>
-                    <div class="w-full mt-2 pt-3 border-t border-[#21262d]">
-                      <div class="flex items-center justify-between gap-2 mb-2">
-                        <div class="text-[10px] uppercase tracking-wider text-[#8b949e] font-medium">
-                          Browse{" "}
-                          {acpStore.selectedAgentType === "codex"
-                            ? "Codex"
-                            : "Claude"}{" "}
-                          Sessions
-                        </div>
-                        <button
-                          type="button"
-                          class="text-[11px] text-[#58a6ff] hover:underline disabled:opacity-50"
-                          disabled={acpStore.remoteSessionsLoading}
-                          onClick={async () => {
-                            const cwd = getCwd();
-                            if (!cwd) return;
-                            await acpStore.refreshRemoteSessions(
-                              cwd,
-                              acpStore.selectedAgentType,
-                            );
-                          }}
-                        >
-                          {acpStore.remoteSessionsLoading
-                            ? "Loading..."
-                            : "Refresh"}
-                        </button>
-                      </div>
-
-                      <Show when={acpStore.remoteSessionsError}>
-                        <div class="w-full px-3 py-2 bg-[#da3633]/10 border border-[#da3633]/30 rounded-md text-xs text-[#f85149]">
-                          {acpStore.remoteSessionsError}
-                        </div>
-                      </Show>
-
-                      <Show
-                        when={acpStore.remoteSessions.length > 0}
-                        fallback={
-                          <div class="text-[11px] text-[#8b949e]">
-                            No{" "}
-                            {acpStore.selectedAgentType === "codex"
-                              ? "Codex"
-                              : "Claude"}{" "}
-                            sessions found for this folder yet.
-                          </div>
-                        }
-                      >
-                        <div class="flex flex-col gap-1 w-full">
-                          <For each={acpStore.remoteSessions.slice(0, 10)}>
-                            {(s) => {
-                              const title =
-                                s.title?.trim() ||
-                                `Session ${s.sessionId.slice(0, 8)}`;
-                              return (
-                                <button
-                                  type="button"
-                                  class="w-full px-3 py-2 bg-[#0d1117] border border-[#30363d] rounded-md text-left hover:bg-[#161b22] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={acpStore.remoteSessionsLoading}
-                                  title="Resume this remote session"
-                                  onClick={async () => {
-                                    const cwd = getCwd();
-                                    if (!cwd) return;
-                                    await acpStore.resumeRemoteSession(
-                                      s,
-                                      cwd,
-                                      acpStore.selectedAgentType,
-                                    );
-                                  }}
-                                >
-                                  <div class="flex items-center justify-between gap-2">
-                                    <div class="flex flex-col gap-0.5 min-w-0">
-                                      <div class="text-xs text-[#e6edf3] truncate">
-                                        {title}
-                                      </div>
-                                      <div class="text-[11px] text-[#8b949e] truncate">
-                                        {s.updatedAt
-                                          ? s.updatedAt
-                                          : s.sessionId}
-                                      </div>
-                                    </div>
-                                    <div class="text-[11px] text-[#58a6ff] shrink-0">
-                                      Resume
-                                    </div>
-                                  </div>
-                                </button>
-                              );
-                            }}
-                          </For>
-                        </div>
-
-                        <Show when={acpStore.remoteSessionsNextCursor}>
-                          <button
-                            type="button"
-                            class="mt-2 px-3 py-2 bg-[#161b22] border border-[#30363d] rounded-md text-[11px] text-[#c9d1d9] hover:bg-[#1f242d] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={acpStore.remoteSessionsLoading}
-                            onClick={async () => {
-                              const cwd = getCwd();
-                              if (!cwd) return;
-                              await acpStore.loadMoreRemoteSessions(
-                                cwd,
-                                acpStore.selectedAgentType,
-                              );
-                            }}
-                          >
-                            {acpStore.remoteSessionsLoading
-                              ? "Loading..."
-                              : "Load more"}
-                          </button>
-                        </Show>
-                      </Show>
-                    </div>
-                  </Show>
                 </div>
               </div>
             </div>
@@ -714,8 +595,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           <Show
             when={acpStore.messages.length > 0 || acpStore.streamingContent}
             fallback={
-              <div class="flex flex-col items-center justify-center p-10 text-[#8b949e]">
-                <h3 class="m-0 mb-2 text-base font-medium text-[#e6edf3]">
+              <div class="flex flex-col items-center justify-center p-10 text-muted-foreground">
+                <h3 class="m-0 mb-2 text-base font-medium text-foreground">
                   Agent Ready
                 </h3>
                 <p class="m-0 text-sm text-center max-w-[280px]">
@@ -735,14 +616,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 !acpStore.streamingThinking
               }
             >
-              <article class="px-5 py-4 border-b border-[#21262d]">
+              <article class="px-5 py-4 border-b border-surface-2">
                 <ThinkingStatus />
               </article>
             </Show>
 
             {/* Streaming Thinking */}
             <Show when={acpStore.streamingThinking}>
-              <article class="px-5 py-3 border-b border-[#21262d]">
+              <article class="px-5 py-3 border-b border-surface-2">
                 <ThinkingBlock
                   thinking={acpStore.streamingThinking}
                   isStreaming={true}
@@ -752,12 +633,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
             {/* Streaming Content */}
             <Show when={acpStore.streamingContent}>
-              <article class="px-5 py-4 border-b border-[#21262d]">
+              <article class="px-5 py-4 border-b border-surface-2">
                 <div
-                  class="text-sm leading-relaxed text-[#e6edf3] break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-[#21262d] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-[#161b22] [&_pre]:border [&_pre]:border-[#30363d] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-[#30363d] [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-[#8b949e] [&_a]:text-[#58a6ff] [&_a]:no-underline [&_a:hover]:underline"
+                  class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
                   innerHTML={renderMarkdown(acpStore.streamingContent)}
                 />
-                <span class="inline-block w-2 h-4 ml-0.5 bg-[#58a6ff] animate-pulse" />
+                <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
               </article>
             </Show>
           </Show>
@@ -776,7 +657,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           )
         }
       >
-        <div class="border-t border-[#30363d] bg-[#0d1117] max-h-[40vh] overflow-y-auto">
+        <div class="border-t border-border bg-background max-h-[40vh] overflow-y-auto">
           <For
             each={acpStore.pendingDiffProposals.filter(
               (p) => p.sessionId === acpStore.activeSessionId,
@@ -821,7 +702,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               ? `The conversation is too long for the agent to continue. You can pick up in Chat mode with ${modelName} via Seren.`
               : `Your conversation history will be preserved. You can continue in Chat mode with ${modelName} via Seren.`;
           return (
-            <div class="mx-4 mb-2 px-3 py-3 border rounded-md text-sm bg-[rgba(88,166,255,0.1)] border-[rgba(88,166,255,0.4)] text-[#58a6ff]">
+            <div class="mx-4 mb-2 px-3 py-3 border rounded-md text-sm bg-primary/10 border-primary/40 text-primary">
               <div class="flex items-start gap-3">
                 <svg
                   class="w-5 h-5 mt-0.5 flex-shrink-0"
@@ -837,19 +718,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   />
                 </svg>
                 <div class="flex-1">
-                  <p class="m-0 mb-2 font-medium text-[#e6edf3]">{title}</p>
-                  <p class="m-0 mb-3 text-xs text-[#8b949e]">{description}</p>
+                  <p class="m-0 mb-2 font-medium text-foreground">{title}</p>
+                  <p class="m-0 mb-3 text-xs text-muted-foreground">
+                    {description}
+                  </p>
                   <div class="flex items-center gap-2">
                     <button
                       type="button"
-                      class="px-3 py-1.5 text-xs font-medium bg-[#238636] text-white rounded-md hover:bg-[#2ea043] transition-colors"
+                      class="px-3 py-1.5 text-xs font-medium bg-success text-white rounded-md hover:brightness-110 transition-colors"
                       onClick={() => acpStore.acceptRateLimitFallback()}
                     >
                       Continue in Chat
                     </button>
                     <button
                       type="button"
-                      class="px-3 py-1.5 text-xs font-medium bg-transparent text-[#8b949e] border border-[#30363d] rounded-md hover:text-[#e6edf3] hover:border-[#8b949e] transition-colors"
+                      class="px-3 py-1.5 text-xs font-medium bg-transparent text-muted-foreground border border-surface-3 rounded-md hover:text-foreground hover:border-muted-foreground transition-colors"
                       onClick={() => acpStore.dismissRateLimitPrompt()}
                     >
                       Dismiss
@@ -867,8 +750,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         <div
           class={`mx-4 mb-2 px-3 py-2 border rounded-md text-sm ${
             isAuthError(sessionError())
-              ? "bg-[rgba(210,153,34,0.1)] border-[rgba(210,153,34,0.4)] text-[#d2992a]"
-              : "bg-[rgba(248,81,73,0.1)] border-[rgba(248,81,73,0.4)] text-[#f85149]"
+              ? "bg-warning/10 border-warning/40 text-warning"
+              : "bg-destructive/10 border-destructive/40 text-destructive"
           }`}
         >
           <div class="flex items-center justify-between">
@@ -881,7 +764,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <Show when={isAuthError(sessionError())}>
                 <button
                   type="button"
-                  class="px-2 py-1 text-xs font-medium bg-[#d2992a] text-[#0d1117] rounded hover:bg-[#e5ac3d]"
+                  class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110"
                   onClick={async () => {
                     const agentType =
                       acpStore.activeSession?.info.agentType ?? "claude-code";
@@ -940,7 +823,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       {/* Awaiting Login Banner */}
       <Show when={awaitingLogin()}>
-        <div class="mx-4 mb-2 px-3 py-2 border rounded-md text-sm bg-[rgba(63,185,80,0.1)] border-[rgba(63,185,80,0.4)] text-[#3fb950]">
+        <div class="mx-4 mb-2 px-3 py-2 border rounded-md text-sm bg-success/10 border-success/40 text-success">
           <div class="flex items-center justify-between">
             <span class="flex-1">
               Complete authentication in the opened window, then start a new
@@ -949,7 +832,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <div class="flex items-center gap-2 ml-2">
               <button
                 type="button"
-                class="px-2 py-1 text-xs font-medium bg-[#3fb950] text-[#0d1117] rounded hover:bg-[#56d364]"
+                class="px-2 py-1 text-xs font-medium bg-success text-background rounded hover:brightness-110"
                 onClick={() => {
                   const agentType = awaitingLogin();
                   setAwaitingLogin(null);
@@ -972,7 +855,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       {/* Agent CWD Display */}
       <Show when={hasSession() && acpStore.cwd}>
-        <div class="shrink-0 px-4 py-1.5 border-t border-[#21262d] bg-[#0d1117] flex items-center gap-2 text-xs text-[#8b949e]">
+        <div class="shrink-0 px-4 py-1.5 border-t border-surface-2 bg-background flex items-center gap-2 text-xs text-muted-foreground">
           <svg
             class="w-3 h-3 flex-shrink-0"
             fill="none"
@@ -996,7 +879,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       {/* Input Area */}
       <Show when={hasSession()}>
-        <div class="shrink-0 p-4 border-t border-[#21262d] bg-[#161b22]">
+        <div class="shrink-0 p-4 border-t border-surface-2 bg-surface-1">
           <form
             class="flex flex-col gap-2"
             onSubmit={(e) => {
@@ -1033,7 +916,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     ? "Type to queue message..."
                     : "Tell the agent what to do… (type / for commands)"
                 }
-                class="w-full bg-[#0d1117] border border-[#30363d] rounded-lg text-[#e6edf3] p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58] disabled:opacity-60 disabled:cursor-not-allowed"
+                class="w-full bg-background border border-border rounded-lg text-foreground p-3 font-inherit text-sm leading-normal transition-colors focus:outline-none focus:border-primary placeholder:text-muted-foreground disabled:opacity-60 disabled:cursor-not-allowed"
                 minHeight={80}
                 maxHeight={window.innerHeight * 0.5}
                 onInput={(e) => {
@@ -1045,7 +928,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               />
             </div>
             <Show when={commandStatus()}>
-              <div class="px-3 py-2 bg-[#21262d] border border-[#30363d] rounded-lg text-xs text-[#8b949e] whitespace-pre-wrap">
+              <div class="px-3 py-2 bg-surface-2 border border-border rounded-lg text-xs text-muted-foreground whitespace-pre-wrap">
                 {commandStatus()}
               </div>
             </Show>
@@ -1059,12 +942,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   <ThinkingStatus />
                 </Show>
                 <Show when={messageQueue().length > 0}>
-                  <span class="flex items-center gap-2 px-2 py-1 bg-[#21262d] border border-[#30363d] rounded text-xs text-[#8b949e]">
+                  <span class="flex items-center gap-2 px-2 py-1 bg-surface-2 border border-border rounded text-xs text-muted-foreground">
                     {messageQueue().length} message
                     {messageQueue().length > 1 ? "s" : ""} queued
                     <button
                       type="button"
-                      class="text-[#f85149] hover:underline"
+                      class="text-destructive hover:underline"
                       onClick={() => setMessageQueue([])}
                     >
                       Clear
@@ -1089,7 +972,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   fallback={
                     <button
                       type="submit"
-                      class="px-4 py-1.5 bg-[#238636] text-white rounded-md text-[13px] font-medium hover:bg-[#2ea043] transition-colors disabled:bg-[#21262d] disabled:text-[#484f58] disabled:cursor-not-allowed"
+                      class="px-4 py-1.5 bg-success text-white rounded-md text-[13px] font-medium hover:bg-emerald-700 transition-colors disabled:bg-surface-2 disabled:text-muted-foreground disabled:cursor-not-allowed"
                       disabled={
                         !hasSession() ||
                         (!input().trim() && attachedImages().length === 0)
@@ -1101,7 +984,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 >
                   <button
                     type="button"
-                    class="px-4 py-1.5 bg-[#da3633] text-white rounded-md text-[13px] font-medium hover:bg-[#f85149] transition-colors"
+                    class="px-4 py-1.5 bg-destructive text-white rounded-md text-[13px] font-medium hover:bg-destructive transition-colors"
                     onClick={handleCancel}
                   >
                     Cancel

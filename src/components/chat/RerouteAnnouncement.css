@@ -6,8 +6,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  border-left: 2px solid #d29922;
-  color: #d29922;
+  border-left: 2px solid var(--warning);
+  color: var(--warning);
   font-size: 12px;
   line-height: 1.4;
   animation: reroute-fade-in 0.3s ease-in;
@@ -19,7 +19,7 @@
 }
 
 .reroute-announcement__reason {
-  color: #8b949e;
+  color: var(--muted-foreground);
 }
 
 @keyframes reroute-fade-in {
