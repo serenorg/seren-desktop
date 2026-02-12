@@ -1,0 +1,1 @@
+seren_agent>=0.1.0
