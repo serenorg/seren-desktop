@@ -43,6 +43,7 @@ import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ToolCallCard } from "./ToolCallCard";
+import { ToolCallGroup } from "./ToolCallGroup";
 
 interface AgentChatProps {
   onViewDiff?: (diff: DiffEvent) => void;
@@ -390,6 +391,65 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
   };
 
+  type GroupedMessage =
+    | { type: "single"; message: AgentMessage }
+    | { type: "tool_group"; messages: AgentMessage[]; toolCalls: ToolCallEvent[] };
+
+  /** Group consecutive tool messages into collapsed groups */
+  const groupConsecutiveToolCalls = createMemo(() => {
+    const messages = acpStore.messages;
+    const grouped: GroupedMessage[] = [];
+    let currentGroup: AgentMessage[] = [];
+
+    for (const message of messages) {
+      if (message.type === "tool" && message.toolCall) {
+        // Add to current group
+        currentGroup.push(message);
+      } else {
+        // Flush current group if any
+        if (currentGroup.length > 0) {
+          if (currentGroup.length >= 3) {
+            // Group 3+ consecutive tool calls
+            grouped.push({
+              type: "tool_group",
+              messages: currentGroup,
+              toolCalls: currentGroup
+                .filter((m) => m.toolCall)
+                .map((m) => m.toolCall as ToolCallEvent),
+            });
+          } else {
+            // Show individual cards for 1-2 tool calls
+            for (const msg of currentGroup) {
+              grouped.push({ type: "single", message: msg });
+            }
+          }
+          currentGroup = [];
+        }
+        // Add non-tool message
+        grouped.push({ type: "single", message });
+      }
+    }
+
+    // Flush remaining group
+    if (currentGroup.length > 0) {
+      if (currentGroup.length >= 3) {
+        grouped.push({
+          type: "tool_group",
+          messages: currentGroup,
+          toolCalls: currentGroup
+            .filter((m) => m.toolCall)
+            .map((m) => m.toolCall as ToolCallEvent),
+        });
+      } else {
+        for (const msg of currentGroup) {
+          grouped.push({ type: "single", message: msg });
+        }
+      }
+    }
+
+    return grouped;
+  });
+
   const renderMessage = (message: AgentMessage) => {
     switch (message.type) {
       case "user":
@@ -617,7 +677,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               </div>
             }
           >
-            <For each={acpStore.messages}>{renderMessage}</For>
+            <For each={groupConsecutiveToolCalls()}>
+              {(item) => {
+                if (item.type === "tool_group") {
+                  return <ToolCallGroup toolCalls={item.toolCalls} isComplete={true} />;
+                }
+                return renderMessage(item.message);
+              }}
+            </For>
 
             {/* Loading placeholder while waiting for first chunk */}
             <Show
