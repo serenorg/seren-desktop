@@ -1,9 +1,10 @@
-// ABOUTME: Left sidebar with project header and unified thread list.
-// ABOUTME: Displays all chat and agent threads for the active project, sorted by recency.
+// ABOUTME: Left sidebar with skills search and thread list.
+// ABOUTME: Skills section at top (expanded by default), threads below.
 
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
+  createMemo,
   createSignal,
   For,
   onCleanup,
@@ -11,6 +12,7 @@ import {
   Show,
 } from "solid-js";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
+import { skillsStore } from "@/stores/skills.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
 interface ThreadSidebarProps {
@@ -21,6 +23,8 @@ interface ThreadSidebarProps {
 
 export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const [showNewMenu, setShowNewMenu] = createSignal(false);
+  const [skillsExpanded, setSkillsExpanded] = createSignal(true);
+  const [skillSearchQuery, setSkillSearchQuery] = createSignal("");
   const [collapsedGroups, setCollapsedGroups] = createSignal<
     Set<string | null>
   >(new Set());
@@ -31,6 +35,38 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     if (!root) return null;
     return root.split("/").pop() || root;
   };
+
+  // Combined and filtered skills list
+  const filteredSkills = createMemo(() => {
+    const query = skillSearchQuery().toLowerCase().trim();
+    if (!query) {
+      // Show all skills (installed first, then available)
+      const installed = skillsStore.installed.map(s => ({ ...s, isInstalled: true }));
+      const available = skillsStore.available
+        .filter(s => !skillsStore.isInstalled(s.id))
+        .map(s => ({ ...s, isInstalled: false }));
+      return [...installed, ...available];
+    }
+
+    // Search in both installed and available
+    const searchInSkill = (s: any) => {
+      return (
+        s.name?.toLowerCase().includes(query) ||
+        s.slug?.toLowerCase().includes(query) ||
+        s.description?.toLowerCase().includes(query) ||
+        s.tags?.some((tag: string) => tag.toLowerCase().includes(query))
+      );
+    };
+
+    const installed = skillsStore.installed
+      .filter(searchInSkill)
+      .map(s => ({ ...s, isInstalled: true }));
+    const available = skillsStore.available
+      .filter(s => !skillsStore.isInstalled(s.id) && searchInSkill(s))
+      .map(s => ({ ...s, isInstalled: false }));
+
+    return [...installed, ...available];
+  });
 
   const handleClickOutside = (e: MouseEvent) => {
     if (showNewMenu() && menuRef && !menuRef.contains(e.target as Node)) {
@@ -67,6 +103,18 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
   const handleSelectThread = (thread: Thread) => {
     threadStore.selectThread(thread.id, thread.kind);
+  };
+
+  const handleSkillClick = (skill: any) => {
+    skillsStore.setSelected(skill.id);
+    // Open the skill detail panel
+    window.dispatchEvent(new CustomEvent("seren:open-panel", { detail: "skills" }));
+  };
+
+  const handleCreateSkill = async () => {
+    // Create a new chat thread with prompt to create a skill
+    await threadStore.createChatThread();
+    // TODO: Pre-populate with skill creation prompt
   };
 
   const toggleGroup = (projectRoot: string | null) => {
@@ -179,8 +227,142 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </Show>
       </div>
 
-      {/* Navigation items */}
-      <div class="px-3 py-2 space-y-1 shrink-0">
+      {/* Skills section */}
+      <div class="shrink-0 border-b border-border">
+        {/* Skills header */}
+        <button
+          type="button"
+          class="flex items-center gap-2 w-full px-3 py-2 bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
+          onClick={() => setSkillsExpanded((v) => !v)}
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 16 16"
+            fill="none"
+            role="img"
+            aria-label="Toggle"
+            class="shrink-0 transition-transform duration-150"
+            classList={{
+              "rotate-0": skillsExpanded(),
+              "-rotate-90": !skillsExpanded(),
+            }}
+          >
+            <path
+              d="M4 6l4 4 4-4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            role="img"
+            aria-label="Skills"
+          >
+            <path
+              d="M8 2l1.5 3 3.5.5-2.5 2.5.5 3.5L8 10l-3 1.5.5-3.5L3 5.5l3.5-.5L8 2z"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span class="flex-1 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+            Skills
+          </span>
+          <span class="text-[10px] font-medium text-muted-foreground opacity-60">
+            {filteredSkills().length}
+          </span>
+        </button>
+
+        {/* Skills content (search + list) */}
+        <Show when={skillsExpanded()}>
+          <div class="px-3 pb-2">
+            {/* Search box */}
+            <input
+              type="text"
+              placeholder="Search skills..."
+              value={skillSearchQuery()}
+              onInput={(e) => setSkillSearchQuery(e.currentTarget.value)}
+              class="w-full px-3 py-2 text-[13px] bg-surface-2 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+            />
+
+            {/* Skills list */}
+            <div class="mt-2 max-h-[300px] overflow-y-auto">
+              <Show
+                when={filteredSkills().length > 0}
+                fallback={
+                  <button
+                    type="button"
+                    class="w-full px-3 py-4 text-[13px] text-center text-muted-foreground bg-surface-2 border border-dashed border-border rounded-md cursor-pointer transition-all duration-100 hover:border-primary hover:text-primary hover:bg-primary/5"
+                    onClick={handleCreateSkill}
+                  >
+                    No skills found.
+                    <br />
+                    <span class="text-primary">Click to create a new skill</span>
+                  </button>
+                }
+              >
+                <For each={filteredSkills()}>
+                  {(skill) => (
+                    <button
+                      type="button"
+                      class="flex items-start gap-2 w-full px-2.5 py-2 mb-1 bg-transparent border border-transparent rounded-md cursor-pointer text-left transition-all duration-100 hover:bg-surface-2 hover:border-border"
+                      onClick={() => handleSkillClick(skill)}
+                    >
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 16 16"
+                        fill={(skill as any).isInstalled ? "currentColor" : "none"}
+                        role="img"
+                        aria-label="Skill"
+                        class="shrink-0 mt-0.5"
+                      >
+                        <path
+                          d="M8 2l1.5 3 3.5.5-2.5 2.5.5 3.5L8 10l-3 1.5.5-3.5L3 5.5l3.5-.5L8 2z"
+                          stroke="currentColor"
+                          stroke-width="1.2"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                      <div class="flex-1 min-w-0">
+                        <div class="text-[13px] font-medium text-foreground truncate">
+                          {skill.name}
+                        </div>
+                        <Show when={skill.description}>
+                          <div class="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
+                            {skill.description}
+                          </div>
+                        </Show>
+                      </div>
+                      <Show when={(skill as any).isInstalled}>
+                        <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                          Installed
+                        </span>
+                      </Show>
+                    </button>
+                  )}
+                </For>
+              </Show>
+            </div>
+          </div>
+        </Show>
+      </div>
+
+      {/* Thread list grouped by project */}
+      <div class="px-3 py-1 shrink-0">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground px-2.5 py-1.5">
+          Threads
+        </div>
+      </div>
+
+      {/* New Thread button (moved here, below Threads header) */}
+      <div class="px-3 pb-2 shrink-0">
         <button
           type="button"
           class="flex items-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-lg text-primary text-[13px] font-medium cursor-pointer transition-all duration-150 hover:bg-primary/15 hover:border-primary/25 hover:shadow-[0_0_12px_rgba(56,189,248,0.1)] active:scale-[0.98]"
@@ -205,7 +387,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </button>
 
         <Show when={showNewMenu()}>
-          <div class="absolute top-[calc(100%-4px)] left-3 right-3 bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-md animate-[slideDown_150ms_ease]" ref={menuRef}>
+          <div class="absolute left-3 right-3 bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-md animate-[slideDown_150ms_ease] mt-1" ref={menuRef}>
             <button
               type="button"
               class="flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3"
@@ -234,45 +416,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             </button>
           </div>
         </Show>
-
-        <button
-          type="button"
-          class="flex items-center gap-2 w-full py-2 px-3 rounded-lg text-[13px] font-medium cursor-pointer transition-all duration-100"
-          classList={{
-            "bg-primary/10 text-primary border border-primary/20":
-              props.activePanel === "skills",
-            "bg-transparent border-none text-foreground hover:bg-surface-2":
-              props.activePanel !== "skills",
-          }}
-          onClick={() => {
-            window.dispatchEvent(new CustomEvent("seren:open-panel", { detail: "skills" }));
-          }}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill={props.activePanel === "skills" ? "currentColor" : "none"}
-            role="img"
-            aria-label="Skills"
-          >
-            <path
-              d="M8 2l1.5 3 3.5.5-2.5 2.5.5 3.5L8 10l-3 1.5.5-3.5L3 5.5l3.5-.5L8 2z"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linejoin="round"
-            />
-          </svg>
-          Skills
-        </button>
       </div>
 
-      {/* Thread list grouped by project */}
-      <div class="px-3 py-1 shrink-0">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground px-2.5 py-1.5">
-          Threads
-        </div>
-      </div>
+      {/* Thread list */}
       <div class="flex-1 overflow-y-auto px-2 py-1">
         <Show
           when={threadStore.groupedThreads.length > 0}
