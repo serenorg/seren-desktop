@@ -26,7 +26,7 @@ import {
 } from "@/stores/auth.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
-import { fileTreeState } from "@/stores/fileTree";
+import { fileTreeState, initDefaultRootIfNeeded } from "@/stores/fileTree";
 import { openclawStore } from "@/stores/openclaw.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
@@ -70,6 +70,9 @@ function App() {
 
     // Start OpenClaw message agent
     startOpenClawAgent();
+
+    // Set default project root if none is open
+    await initDefaultRootIfNeeded();
 
     // Load skills and threads after auth check completes
     await skillsStore.refresh();

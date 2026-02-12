@@ -142,4 +142,19 @@ export async function refreshDirectory(path: string): Promise<void> {
   }
 }
 
+/**
+ * Set the root path to ~/Documents/Seren if no project is currently open.
+ */
+export async function initDefaultRootIfNeeded(): Promise<void> {
+  if (fileTreeState.rootPath) return;
+  try {
+    const defaultDir = await invoke<string>("get_default_project_dir");
+    if (defaultDir) {
+      setRootPath(defaultDir);
+    }
+  } catch {
+    // Silently ignore — user can still open a folder manually
+  }
+}
+
 export { fileTreeState, expandedPaths };

@@ -68,6 +68,26 @@ pub fn get_seren_skills_dir() -> Result<String, String> {
     Ok(skills_dir.to_string_lossy().to_string())
 }
 
+/// Get the default project directory (~/$DOCUMENTS/Seren).
+/// Creates the directory if it doesn't exist.
+#[tauri::command]
+pub fn get_default_project_dir() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+    let docs = home.join("Documents");
+    let project_dir = if docs.is_dir() {
+        docs.join("Seren")
+    } else {
+        home.join("Seren")
+    };
+
+    if !project_dir.exists() {
+        fs::create_dir_all(&project_dir)
+            .map_err(|e| format!("Failed to create default project directory: {}", e))?;
+    }
+
+    Ok(project_dir.to_string_lossy().to_string())
+}
+
 /// Get the Claude Code skills directory (~/.claude/skills/).
 /// Creates the directory if it doesn't exist.
 #[tauri::command]

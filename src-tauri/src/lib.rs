@@ -810,6 +810,7 @@ pub fn run() {
             #[cfg(feature = "openclaw")]
             openclaw::openclaw_launch_channel_login,
             // Skills commands
+            skills::get_default_project_dir,
             skills::get_seren_skills_dir,
             skills::get_claude_skills_dir,
             skills::get_project_skills_dir,
