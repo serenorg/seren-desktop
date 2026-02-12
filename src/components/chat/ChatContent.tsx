@@ -41,8 +41,11 @@ import { conversationStore } from "@/stores/conversation.store";
 import { editorStore } from "@/stores/editor.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
+import type { ToolCallEvent } from "@/services/acp";
 import { toUnifiedMessage } from "@/types/conversation";
+import type { ToolCallData } from "@/types/conversation";
 import { ChatTabBar } from "./ChatTabBar";
+import { ToolCallCard } from "./ToolCallCard";
 import { CompactedMessage } from "./CompactedMessage";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
@@ -56,6 +59,28 @@ import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolsetSelector } from "./ToolsetSelector";
 import { TransitionAnnouncement } from "./TransitionAnnouncement";
 import "highlight.js/styles/github-dark.css";
+
+/** Map orchestrator ToolCallData to the ToolCallEvent shape ToolCallCard expects. */
+function toToolCallEvent(data: ToolCallData): ToolCallEvent {
+  let params: Record<string, unknown> | undefined;
+  if (data.arguments) {
+    try {
+      params = JSON.parse(data.arguments);
+    } catch {
+      /* non-JSON arguments — skip */
+    }
+  }
+  return {
+    sessionId: "",
+    toolCallId: data.toolCallId,
+    title: data.title || data.name || "Tool",
+    kind: data.kind,
+    status: data.status,
+    parameters: params,
+    result: data.isError ? undefined : data.result,
+    error: data.isError ? data.result : undefined,
+  };
+}
 
 // Keywords that trigger publisher suggestions
 const SUGGESTION_KEYWORDS = [
@@ -698,7 +723,20 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             }
           >
             <For each={conversationStore.messages}>
-              {(message) => (
+              {(message) => {
+                // Tool results are already embedded in the tool_call message
+                if (message.type === "tool_result") return null;
+
+                // Render tool calls as collapsible cards, not raw text
+                if (message.type === "tool_call" && message.toolCall) {
+                  return (
+                    <div class="px-5 py-2">
+                      <ToolCallCard toolCall={toToolCallEvent(message.toolCall)} />
+                    </div>
+                  );
+                }
+
+                return (
                 <Show
                   when={
                     message.type !== "transition" && message.type !== "reroute"
@@ -815,7 +853,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     </Show>
                   </article>
                 </Show>
-              )}
+                );
+              }}
             </For>
           </Show>
 
