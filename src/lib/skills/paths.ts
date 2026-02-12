@@ -47,7 +47,9 @@ export async function getClaudeSkillsDir(): Promise<string> {
 }
 
 /**
- * Get the project-scope skills directory (.claude/skills/).
+ * Get the project-scope skills directory (skills/).
+ * This is the canonical location following the AgentSkills.io standard.
+ * A symlink at .claude/skills → ../skills provides Claude Code compatibility.
  * Returns null if no project is currently open.
  */
 export async function getProjectSkillsDir(): Promise<string | null> {
@@ -77,6 +79,23 @@ export function getSkillPath(skillsDir: string, slug: string): string {
 export function getSkillDir(skillsDir: string, slug: string): string {
   const separator = skillsDir.includes("\\") ? "\\" : "/";
   return `${skillsDir}${separator}${slug}`;
+}
+
+/**
+ * Create symlink from .claude/skills to ../skills for Claude Code compatibility.
+ * This enables both Claude Code and OpenAI Codex to use the same skills directory.
+ */
+export async function createSkillsSymlink(projectRoot: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  try {
+    await invoke("create_skills_symlink", { projectRoot });
+  } catch (error) {
+    console.error("Failed to create skills symlink:", error);
+    throw error;
+  }
 }
 
 /**

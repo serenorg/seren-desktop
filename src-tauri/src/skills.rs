@@ -39,8 +39,8 @@ pub fn get_claude_skills_dir() -> Result<String, String> {
     Ok(skills_dir.to_string_lossy().to_string())
 }
 
-/// Get the project-scope skills directory (.claude/skills/).
-/// Returns the path if a project root is provided, otherwise returns None.
+/// Get the project-scope skills directory (skills/).
+/// Returns the canonical skills/ path for unified skills directory support.
 /// The project root is determined by the frontend based on the open folder.
 #[tauri::command]
 pub fn get_project_skills_dir(project_root: Option<String>) -> Result<Option<String>, String> {
@@ -51,11 +51,83 @@ pub fn get_project_skills_dir(project_root: Option<String>) -> Result<Option<Str
                 return Ok(None);
             }
 
-            let skills_dir = root_path.join(".claude").join("skills");
+            // Use skills/ as the canonical location (AgentSkills.io standard)
+            let skills_dir = root_path.join("skills");
             Ok(Some(skills_dir.to_string_lossy().to_string()))
         }
         None => Ok(None),
     }
+}
+
+/// Create symlink from .claude/skills to ../skills for Claude Code compatibility.
+/// This allows both Claude Code (via symlink) and OpenAI Codex (via direct path) to use the same skills.
+#[tauri::command]
+pub fn create_skills_symlink(project_root: String) -> Result<(), String> {
+    let root_path = PathBuf::from(&project_root);
+    if !root_path.is_dir() {
+        return Err("Project root is not a directory".to_string());
+    }
+
+    let skills_dir = root_path.join("skills");
+    let claude_dir = root_path.join(".claude");
+    let symlink_path = claude_dir.join("skills");
+
+    // Create .claude directory if it doesn't exist
+    if !claude_dir.exists() {
+        fs::create_dir_all(&claude_dir)
+            .map_err(|e| format!("Failed to create .claude directory: {}", e))?;
+    }
+
+    // Create skills directory if it doesn't exist
+    if !skills_dir.exists() {
+        fs::create_dir_all(&skills_dir)
+            .map_err(|e| format!("Failed to create skills directory: {}", e))?;
+    }
+
+    // Remove existing symlink/directory if it exists
+    if symlink_path.exists() {
+        #[cfg(unix)]
+        {
+            let metadata = fs::symlink_metadata(&symlink_path)
+                .map_err(|e| format!("Failed to read symlink metadata: {}", e))?;
+            if metadata.is_symlink() {
+                fs::remove_file(&symlink_path)
+                    .map_err(|e| format!("Failed to remove existing symlink: {}", e))?;
+            } else {
+                return Err(
+                    ".claude/skills exists but is not a symlink. Please remove it manually."
+                        .to_string(),
+                );
+            }
+        }
+        #[cfg(windows)]
+        {
+            if symlink_path.is_dir() {
+                fs::remove_dir_all(&symlink_path)
+                    .map_err(|e| format!("Failed to remove existing directory: {}", e))?;
+            } else {
+                fs::remove_file(&symlink_path)
+                    .map_err(|e| format!("Failed to remove existing file: {}", e))?;
+            }
+        }
+    }
+
+    // Create the symlink
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink("../skills", &symlink_path)
+            .map_err(|e| format!("Failed to create symlink: {}", e))?;
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::symlink_dir;
+        symlink_dir("..\\skills", &symlink_path)
+            .map_err(|e| format!("Failed to create symlink: {}", e))?;
+    }
+
+    Ok(())
 }
 
 /// List all skill directories in a given skills directory.

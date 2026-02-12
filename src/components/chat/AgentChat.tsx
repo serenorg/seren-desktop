@@ -245,7 +245,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // Require text content even when images are attached
     if (!trimmed) {
       if (images.length > 0) {
-        setCommandStatus("Please add text to your message. Image-only messages are not supported.");
+        setCommandStatus(
+          "Please add text to your message. Image-only messages are not supported.",
+        );
         setTimeout(() => setCommandStatus(null), 4000);
       }
       return;
