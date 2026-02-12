@@ -14,6 +14,12 @@ import {
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
+import type { InstalledSkill } from "@/lib/skills/types";
+
+type SkillWithThreadState = InstalledSkill & {
+  isInstalled: boolean;
+  isThreadSkill: boolean;
+};
 
 interface ThreadSidebarProps {
   collapsed: boolean;
@@ -43,7 +49,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     const threadSkills = skillsStore.getThreadSkills(threadId);
     const threadSkillPaths = new Set(threadSkills.map(s => s.path));
 
-    const searchInSkill = (s: any) => {
+    const searchInSkill = (s: InstalledSkill) => {
       if (!query) return true;
       return (
         s.name?.toLowerCase().includes(query) ||
@@ -103,7 +109,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     threadStore.selectThread(thread.id, thread.kind);
   };
 
-  const handleSkillClick = async (skill: any) => {
+  const handleSkillClick = async (skill: SkillWithThreadState) => {
     const threadId = threadStore.activeThread?.id;
     if (!threadId) {
       console.warn("[ThreadSidebar] No active thread to toggle skill");
@@ -331,7 +337,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         width="12"
                         height="12"
                         viewBox="0 0 16 16"
-                        fill={(skill as any).isInstalled ? "currentColor" : "none"}
+                        fill={skill.isInstalled ? "currentColor" : "none"}
                         role="img"
                         aria-label="Skill"
                         class="shrink-0 mt-0.5"
@@ -353,7 +359,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           </div>
                         </Show>
                       </div>
-                      <Show when={(skill as any).isInstalled}>
+                      <Show when={skill.isInstalled}>
                         <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                           Installed
                         </span>
