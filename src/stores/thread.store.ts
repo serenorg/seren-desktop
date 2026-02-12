@@ -111,7 +111,7 @@ export const threadStore = {
         );
         return {
           id: a.id,
-          title: a.title,
+          title: liveSession?.title || a.title,
           kind: "agent" as const,
           agentType: (a.agent_type as AgentType) || "claude-code",
           status: liveSession

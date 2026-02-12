@@ -11,8 +11,8 @@ import {
 import { openFileInTab } from "@/lib/files/service";
 import type { InstalledSkill, Skill, SkillScope } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
-import { skillsStore } from "@/stores/skills.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { skillsStore } from "@/stores/skills.store";
 import { FileExplorer } from "./FileExplorer";
 import "./SkillsExplorer.css";
 
@@ -59,10 +59,6 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     if (alreadyInstalled) return;
 
     try {
-      const response = await fetch(SKILL_CREATOR_SOURCE_URL);
-      if (!response.ok) return;
-      const content = await response.text();
-
       const skill: Skill = {
         id: `anthropic:${SKILL_CREATOR_SLUG}`,
         slug: SKILL_CREATOR_SLUG,
@@ -74,6 +70,8 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         tags: ["meta", "creation"],
         author: "Anthropic",
       };
+      const content = await skillsService.fetchContent(skill);
+      if (!content) return;
       await skillsStore.install(skill, content, "seren");
     } catch (err) {
       console.error("[SkillsExplorer] Failed to install skill-creator:", err);
@@ -237,7 +235,14 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    setCtxMenu({ x: e.clientX, y: e.clientY, path, name, isDirectory, skillId });
+    setCtxMenu({
+      x: e.clientX,
+      y: e.clientY,
+      path,
+      name,
+      isDirectory,
+      skillId,
+    });
   };
 
   const handleRevealInFinder = async (path: string) => {
@@ -349,7 +354,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       icon: "🗑️",
       shortcut: isMac ? "⌘⌫" : "Delete",
       onClick: () =>
-        handleDeleteCtx(target.path, target.name, target.isDirectory, target.skillId),
+        handleDeleteCtx(
+          target.path,
+          target.name,
+          target.isDirectory,
+          target.skillId,
+        ),
     });
 
     return items;

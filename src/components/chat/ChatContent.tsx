@@ -23,6 +23,7 @@ import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
+import type { ToolCallEvent } from "@/services/acp";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
   CHAT_MAX_RETRIES,
@@ -41,10 +42,8 @@ import { conversationStore } from "@/stores/conversation.store";
 import { editorStore } from "@/stores/editor.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
-import type { ToolCallEvent } from "@/services/acp";
-import { toUnifiedMessage } from "@/types/conversation";
 import type { ToolCallData } from "@/types/conversation";
-import { ToolCallCard } from "./ToolCallCard";
+import { toUnifiedMessage } from "@/types/conversation";
 import { CompactedMessage } from "./CompactedMessage";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
@@ -55,6 +54,7 @@ import { SatisfactionSignal } from "./SatisfactionSignal";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
+import { ToolCallCard } from "./ToolCallCard";
 import { ToolsetSelector } from "./ToolsetSelector";
 import { TransitionAnnouncement } from "./TransitionAnnouncement";
 import "highlight.js/styles/github-dark.css";
@@ -588,9 +588,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   <div
                     class={`h-full rounded-full transition-all ${
                       chatStore.contextUsagePercent >= 80
-                        ? "bg-[#f85149]"
+                        ? "bg-destructive"
                         : chatStore.contextUsagePercent >= 50
-                          ? "bg-[#d29922]"
+                          ? "bg-warning"
                           : "bg-success"
                     }`}
                     style={{ width: `${chatStore.contextUsagePercent}%` }}
@@ -632,7 +632,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         </header>
 
         <div
-          class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded"
+          class="flex-1 min-h-0 overflow-y-auto pb-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-surface-2 [&::-webkit-scrollbar-thumb]:rounded"
           ref={messagesRef}
         >
           <Show when={chatStore.compactedSummary}>
@@ -674,128 +674,131 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 if (message.type === "tool_call" && message.toolCall) {
                   return (
                     <div class="px-5 py-2">
-                      <ToolCallCard toolCall={toToolCallEvent(message.toolCall)} />
+                      <ToolCallCard
+                        toolCall={toToolCallEvent(message.toolCall)}
+                      />
                     </div>
                   );
                 }
 
                 return (
-                <Show
-                  when={
-                    message.type !== "transition" && message.type !== "reroute"
-                  }
-                  fallback={
-                    message.type === "reroute" ? (
-                      <RerouteAnnouncement message={message} />
-                    ) : (
-                      <TransitionAnnouncement message={message} />
-                    )
-                  }
-                >
-                  <article
-                    class={`group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
+                  <Show
+                    when={
+                      message.type !== "transition" &&
+                      message.type !== "reroute"
+                    }
+                    fallback={
+                      message.type === "reroute" ? (
+                        <RerouteAnnouncement message={message} />
+                      ) : (
+                        <TransitionAnnouncement message={message} />
+                      )
+                    }
                   >
-                    <Show when={message.images && message.images.length > 0}>
-                      <MessageImages images={message.images ?? []} />
-                    </Show>
-                    <div
-                      class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-[#f0f6fc] [&_h1]:border-b [&_h1]:border-surface-2 [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-[#f0f6fc] [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-[#f0f6fc] [&_code]:bg-[#1c2333] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-[#f0f6fc] [&_strong]:font-semibold"
-                      innerHTML={
-                        message.role === "assistant"
-                          ? renderMarkdown(message.content)
-                          : escapeHtmlWithLinks(message.content)
-                      }
-                    />
-                    <Show
-                      when={
-                        message.role === "assistant" &&
-                        message.status === "complete" &&
-                        message.duration
-                      }
+                    <article
+                      class={`group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
                     >
-                      {(() => {
-                        const dur = message.duration;
-                        if (!dur) return null;
-                        const { verb, duration, costDisplay } =
-                          formatDurationWithVerb(dur, message.cost);
-                        return (
-                          <div class="mt-2 text-xs text-muted-foreground">
-                            ✻ {verb} for {duration}
-                            {costDisplay && ` at ${costDisplay}`}
-                          </div>
-                        );
-                      })()}
-                    </Show>
-                    <Show
-                      when={
-                        message.role === "assistant" &&
-                        message.status === "complete"
-                      }
-                    >
-                      <div class="mt-1.5 flex justify-end">
-                        <SatisfactionSignal messageId={message.id} />
-                      </div>
-                    </Show>
-                    <Show when={message.status === "error"}>
-                      <div class="mt-2 px-2 py-1.5 bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] rounded flex items-center gap-2 text-xs text-destructive">
-                        <Show
-                          when={!isAuthError(message.error)}
-                          fallback={
-                            <>
-                              <span>
-                                Session expired. Please sign in to continue.
-                              </span>
-                              <button
-                                type="button"
-                                class="bg-transparent border border-[rgba(248,81,73,0.4)] text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
-                                onClick={() => setShowSignInPrompt(true)}
-                              >
-                                Sign In
-                              </button>
-                            </>
-                          }
-                        >
-                          <span>{message.error ?? "Message failed"}</span>
+                      <Show when={message.images && message.images.length > 0}>
+                        <MessageImages images={message.images ?? []} />
+                      </Show>
+                      <div
+                        class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-foreground [&_h1]:border-b [&_h1]:border-surface-2 [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-foreground [&_code]:bg-surface-1 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-foreground [&_strong]:font-semibold"
+                        innerHTML={
+                          message.role === "assistant"
+                            ? renderMarkdown(message.content)
+                            : escapeHtmlWithLinks(message.content)
+                        }
+                      />
+                      <Show
+                        when={
+                          message.role === "assistant" &&
+                          message.status === "complete" &&
+                          message.duration
+                        }
+                      >
+                        {(() => {
+                          const dur = message.duration;
+                          if (!dur) return null;
+                          const { verb, duration, costDisplay } =
+                            formatDurationWithVerb(dur, message.cost);
+                          return (
+                            <div class="mt-2 text-xs text-muted-foreground">
+                              ✻ {verb} for {duration}
+                              {costDisplay && ` at ${costDisplay}`}
+                            </div>
+                          );
+                        })()}
+                      </Show>
+                      <Show
+                        when={
+                          message.role === "assistant" &&
+                          message.status === "complete"
+                        }
+                      >
+                        <div class="mt-1.5 flex justify-end">
+                          <SatisfactionSignal messageId={message.id} />
+                        </div>
+                      </Show>
+                      <Show when={message.status === "error"}>
+                        <div class="mt-2 px-2 py-1.5 bg-destructive/10 border border-destructive/40 rounded flex items-center gap-2 text-xs text-destructive">
                           <Show
-                            when={chatStore.retryingMessageId === message.id}
-                          >
-                            <span>
-                              Retrying (
-                              {Math.min(
-                                message.attemptCount ?? 1,
-                                CHAT_MAX_RETRIES,
-                              )}
-                              /{CHAT_MAX_RETRIES})…
-                            </span>
-                          </Show>
-                          <Show when={message.request}>
-                            <button
-                              type="button"
-                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
-                              onClick={() => handleManualRetry(message)}
-                            >
-                              Retry
-                            </button>
-                          </Show>
-                          <Show
-                            when={
-                              !message.request &&
-                              message.workerType === "orchestrator"
+                            when={!isAuthError(message.error)}
+                            fallback={
+                              <>
+                                <span>
+                                  Session expired. Please sign in to continue.
+                                </span>
+                                <button
+                                  type="button"
+                                  class="bg-transparent border border-destructive/40 text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-destructive/15"
+                                  onClick={() => setShowSignInPrompt(true)}
+                                >
+                                  Sign In
+                                </button>
+                              </>
                             }
                           >
-                            <button
-                              type="button"
-                              class="bg-transparent border border-[rgba(248,81,73,0.4)] text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[rgba(248,81,73,0.15)]"
-                              onClick={() => retryOrchestration()}
+                            <span>{message.error ?? "Message failed"}</span>
+                            <Show
+                              when={chatStore.retryingMessageId === message.id}
                             >
-                              Retry
-                            </button>
+                              <span>
+                                Retrying (
+                                {Math.min(
+                                  message.attemptCount ?? 1,
+                                  CHAT_MAX_RETRIES,
+                                )}
+                                /{CHAT_MAX_RETRIES})…
+                              </span>
+                            </Show>
+                            <Show when={message.request}>
+                              <button
+                                type="button"
+                                class="bg-transparent border border-destructive/40 text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-destructive/15"
+                                onClick={() => handleManualRetry(message)}
+                              >
+                                Retry
+                              </button>
+                            </Show>
+                            <Show
+                              when={
+                                !message.request &&
+                                message.workerType === "orchestrator"
+                              }
+                            >
+                              <button
+                                type="button"
+                                class="bg-transparent border border-destructive/40 text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-destructive/15"
+                                onClick={() => retryOrchestration()}
+                              >
+                                Retry
+                              </button>
+                            </Show>
                           </Show>
-                        </Show>
-                      </div>
-                    </Show>
-                  </article>
-                </Show>
+                        </div>
+                      </Show>
+                    </article>
+                  </Show>
                 );
               }}
             </For>
@@ -829,7 +832,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               <div class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words whitespace-pre-wrap">
                 {conversationStore.streamingContent}
                 <Show when={conversationStore.isLoading}>
-                  <span class="inline-block w-[6px] h-[14px] bg-[#58a6ff] ml-0.5 animate-pulse" />
+                  <span class="inline-block w-[6px] h-[14px] bg-primary ml-0.5 animate-pulse" />
                 </Show>
               </div>
             </article>
@@ -888,7 +891,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 </span>
                 <button
                   type="button"
-                  class="ml-auto bg-transparent border border-border text-muted-foreground px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-[#30363d] hover:text-foreground"
+                  class="ml-auto bg-transparent border border-border text-muted-foreground px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-surface-2 hover:text-foreground"
                   onClick={() => setMessageQueue([])}
                 >
                   Clear Queue
@@ -926,7 +929,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     ? "Type to queue message..."
                     : "Ask Seren anything… (type / for commands)"
                 }
-                class="w-full bg-background border border-border rounded-xl text-foreground px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-[#58a6ff] focus:shadow-[0_0_0_3px_rgba(88,166,255,0.15)] placeholder:text-muted-foreground"
+                class="w-full bg-background border border-border rounded-xl text-foreground px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-muted)] placeholder:text-muted-foreground"
                 minHeight={72}
                 maxHeight={window.innerHeight * 0.5}
                 onInput={(event) => {
@@ -1075,7 +1078,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   fallback={
                     <button
                       type="submit"
-                      class="bg-success text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-emerald-700 hover:shadow-[0_2px_8px_rgba(35,134,54,0.3)] disabled:bg-surface-2 disabled:text-muted-foreground disabled:shadow-none"
+                      class="bg-success text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-emerald-700 hover:shadow-[0_2px_8px_var(--success)] disabled:bg-surface-2 disabled:text-muted-foreground disabled:shadow-none"
                       disabled={
                         !input().trim() && attachedImages().length === 0
                       }
@@ -1086,7 +1089,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 >
                   <button
                     type="button"
-                    class="bg-destructive text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-[#f85149] hover:shadow-[0_2px_8px_rgba(218,54,51,0.3)]"
+                    class="bg-destructive text-white border-none px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer transition-all hover:bg-red-500 hover:shadow-[0_2px_8px_var(--destructive)]"
                     onClick={cancelStreaming}
                   >
                     Stop
