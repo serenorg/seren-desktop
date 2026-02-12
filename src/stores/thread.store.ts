@@ -263,6 +263,8 @@ export const threadStore = {
   ): Promise<string | null> {
     const sessionId = await acpStore.spawnSession(cwd, agentType);
     if (sessionId) {
+      // Refresh conversation list so the new thread appears in the tab bar
+      await acpStore.refreshRecentAgentConversations(200);
       const session = acpStore.sessions[sessionId];
       if (session) {
         this.selectThread(session.conversationId, "agent");
