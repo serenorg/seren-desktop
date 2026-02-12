@@ -16,6 +16,7 @@ import { type Thread, threadStore } from "@/stores/thread.store";
 interface ThreadSidebarProps {
   collapsed: boolean;
   onToggle?: () => void;
+  activePanel?: string | null;
 }
 
 export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
@@ -178,8 +179,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </Show>
       </div>
 
-      {/* New thread button */}
-      <div class="px-3 py-2 relative shrink-0" ref={menuRef}>
+      {/* Navigation items */}
+      <div class="px-3 py-2 space-y-1 shrink-0">
         <button
           type="button"
           class="flex items-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-lg text-primary text-[13px] font-medium cursor-pointer transition-all duration-150 hover:bg-primary/15 hover:border-primary/25 hover:shadow-[0_0_12px_rgba(56,189,248,0.1)] active:scale-[0.98]"
@@ -204,7 +205,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </button>
 
         <Show when={showNewMenu()}>
-          <div class="absolute top-[calc(100%-4px)] left-3 right-3 bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-md animate-[slideDown_150ms_ease]">
+          <div class="absolute top-[calc(100%-4px)] left-3 right-3 bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-md animate-[slideDown_150ms_ease]" ref={menuRef}>
             <button
               type="button"
               class="flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3"
@@ -233,9 +234,45 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             </button>
           </div>
         </Show>
+
+        <button
+          type="button"
+          class="flex items-center gap-2 w-full py-2 px-3 rounded-lg text-[13px] font-medium cursor-pointer transition-all duration-100"
+          classList={{
+            "bg-primary/10 text-primary border border-primary/20":
+              props.activePanel === "skills",
+            "bg-transparent border-none text-foreground hover:bg-surface-2":
+              props.activePanel !== "skills",
+          }}
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent("seren:open-panel", { detail: "skills" }));
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill={props.activePanel === "skills" ? "currentColor" : "none"}
+            role="img"
+            aria-label="Skills"
+          >
+            <path
+              d="M8 2l1.5 3 3.5.5-2.5 2.5.5 3.5L8 10l-3 1.5.5-3.5L3 5.5l3.5-.5L8 2z"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linejoin="round"
+            />
+          </svg>
+          Skills
+        </button>
       </div>
 
       {/* Thread list grouped by project */}
+      <div class="px-3 py-1 shrink-0">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground px-2.5 py-1.5">
+          Threads
+        </div>
+      </div>
       <div class="flex-1 overflow-y-auto px-2 py-1">
         <Show
           when={threadStore.groupedThreads.length > 0}
