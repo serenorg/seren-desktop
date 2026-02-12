@@ -28,10 +28,10 @@ function extractSummary(toolCall: ToolCallEvent): string {
 
   // TodoWrite: show count or action description
   if (params.todos && Array.isArray(params.todos)) {
-    const todos = params.todos;
-    const inProgress = todos.filter((t: any) => t.status === "in_progress");
-    const completed = todos.filter((t: any) => t.status === "completed");
-    const pending = todos.filter((t: any) => t.status === "pending");
+    const todos = params.todos as Array<{ status?: string }>;
+    const inProgress = todos.filter((t) => t.status === "in_progress");
+    const completed = todos.filter((t) => t.status === "completed");
+    const pending = todos.filter((t) => t.status === "pending");
 
     if (inProgress.length > 0) {
       return `${todos.length} todos (${completed.length} done, ${inProgress.length} in progress)`;
