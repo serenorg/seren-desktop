@@ -670,6 +670,97 @@ jobs:
             --content-type "application/json"
           echo "Uploaded latest.json to R2"
 
+      - name: Upload installer files to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          TAG="${{ github.ref_name }}"
+
+          # Upload DMG files (macOS installers)
+          find artifacts -name "*.dmg" -type f | while read file; do
+            filename=$(basename "$file")
+            # Upload to versioned path
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-apple-diskimage"
+            # Upload to latest path with versioned filename
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-apple-diskimage"
+
+            # Create version-less symlink for easier linking
+            if echo "$filename" | grep -q "aarch64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_aarch64.dmg" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/x-apple-diskimage"
+            elif echo "$filename" | grep -q "x64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_x64.dmg" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/x-apple-diskimage"
+            fi
+            echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
+          done
+
+          # Upload NSIS exe files (Windows installers)
+          find artifacts -name "*-setup.exe" -type f | while read file; do
+            filename=$(basename "$file")
+            # Upload to versioned path
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-msdownload"
+            # Upload to latest path with versioned filename
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-msdownload"
+
+            # Create version-less symlink for easier linking
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_x64-setup.exe" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-msdownload"
+            echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
+          done
+
+          # Upload AppImage files (Linux installers)
+          find artifacts -name "*.AppImage" -type f | while read file; do
+            filename=$(basename "$file")
+            # Upload to versioned path
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-executable"
+            # Upload to latest path with versioned filename
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-executable"
+
+            # Create version-less symlink for easier linking
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_amd64.AppImage" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/x-executable"
+            echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
+          done
+
+          # Upload DEB files (Linux installers)
+          find artifacts -name "*.deb" -type f | while read file; do
+            filename=$(basename "$file")
+            # Upload to versioned path
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/vnd.debian.binary-package"
+            # Upload to latest path with versioned filename
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/${filename}" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/vnd.debian.binary-package"
+
+            # Create version-less symlink for easier linking
+            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_amd64.deb" \
+              --endpoint-url="${AWS_ENDPOINT_URL}" \
+              --content-type "application/vnd.debian.binary-package"
+            echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
+          done
+
       - name: Publish release
         uses: actions/github-script@v7
         with:
