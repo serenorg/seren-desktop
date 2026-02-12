@@ -55,6 +55,7 @@ import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolCallCard } from "./ToolCallCard";
+import { ToolCallGroup } from "./ToolCallGroup";
 import { ToolsetSelector } from "./ToolsetSelector";
 import { TransitionAnnouncement } from "./TransitionAnnouncement";
 import "highlight.js/styles/github-dark.css";
@@ -79,6 +80,60 @@ function toToolCallEvent(data: ToolCallData): ToolCallEvent {
     result: data.isError ? undefined : data.result,
     error: data.isError ? data.result : undefined,
   };
+}
+
+type GroupedMessage =
+  | { type: "single"; message: Message }
+  | { type: "tool_group"; messages: Message[]; toolCalls: ToolCallEvent[] };
+
+/** Group consecutive tool_call messages into collapsed groups */
+function groupConsecutiveToolCalls(messages: Message[]): GroupedMessage[] {
+  const grouped: GroupedMessage[] = [];
+  let currentGroup: Message[] = [];
+
+  for (const message of messages) {
+    if (message.type === "tool_call" && message.toolCall) {
+      // Add to current group
+      currentGroup.push(message);
+    } else {
+      // Flush current group if any
+      if (currentGroup.length > 0) {
+        if (currentGroup.length >= 3) {
+          // Group 3+ consecutive tool calls
+          grouped.push({
+            type: "tool_group",
+            messages: currentGroup,
+            toolCalls: currentGroup.map((m) => toToolCallEvent(m.toolCall!)),
+          });
+        } else {
+          // Show individual cards for 1-2 tool calls
+          for (const msg of currentGroup) {
+            grouped.push({ type: "single", message: msg });
+          }
+        }
+        currentGroup = [];
+      }
+      // Add non-tool message
+      grouped.push({ type: "single", message });
+    }
+  }
+
+  // Flush remaining group
+  if (currentGroup.length > 0) {
+    if (currentGroup.length >= 3) {
+      grouped.push({
+        type: "tool_group",
+        messages: currentGroup,
+        toolCalls: currentGroup.map((m) => toToolCallEvent(m.toolCall!)),
+      });
+    } else {
+      for (const msg of currentGroup) {
+        grouped.push({ type: "single", message: msg });
+      }
+    }
+  }
+
+  return grouped;
 }
 
 // Keywords that trigger publisher suggestions
@@ -665,12 +720,20 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               </div>
             }
           >
-            <For each={conversationStore.messages}>
-              {(message) => {
+            <For each={groupConsecutiveToolCalls(conversationStore.messages)}>
+              {(item) => {
+                // Render grouped tool calls
+                if (item.type === "tool_group") {
+                  return <ToolCallGroup toolCalls={item.toolCalls} isComplete={true} />;
+                }
+
+                // Render single message
+                const message = item.message;
+
                 // Tool results are already embedded in the tool_call message
                 if (message.type === "tool_result") return null;
 
-                // Render tool calls as collapsible cards, not raw text
+                // Render individual tool call card (for 1-2 tool calls)
                 if (message.type === "tool_call" && message.toolCall) {
                   return (
                     <div class="px-5 py-2">
