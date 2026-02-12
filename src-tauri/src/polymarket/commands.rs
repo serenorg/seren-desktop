@@ -246,18 +246,18 @@ pub async fn sign_polymarket_request<R: Runtime>(
 // ============================================================================
 
 /// Global WebSocket client state
-pub type PolymarketWsState = Arc<Mutex<Option<PolymarketWebSocket>>>;
+pub type PolymarketWsState<R = tauri::Wry> = Arc<Mutex<Option<PolymarketWebSocket<R>>>>;
 
 /// Connect to Polymarket WebSocket for real-time updates
 #[tauri::command]
 pub async fn connect_polymarket_websocket<R: Runtime>(
     app: AppHandle<R>,
-    ws_state: State<'_, PolymarketWsState>,
-) -> PolymarketCommandResult<String> {
+    ws_state: State<'_, PolymarketWsState<R>>,
+) -> Result<String, String> {
     let mut state = ws_state.lock().await;
 
     if state.is_some() {
-        return PolymarketCommandResult::ok("Already connected".to_string());
+        return Ok("Already connected".to_string());
     }
 
     let ws_client = PolymarketWebSocket::new(app.clone());
@@ -265,29 +265,29 @@ pub async fn connect_polymarket_websocket<R: Runtime>(
     match ws_client.connect().await {
         Ok(()) => {
             *state = Some(ws_client);
-            PolymarketCommandResult::ok("Connected to Polymarket WebSocket".to_string())
+            Ok("Connected to Polymarket WebSocket".to_string())
         }
-        Err(e) => PolymarketCommandResult::err(format!("Failed to connect: {}", e)),
+        Err(e) => Err(format!("Failed to connect: {}", e)),
     }
 }
 
 /// Subscribe to market price updates
 #[tauri::command]
-pub async fn subscribe_polymarket_market(
+pub async fn subscribe_polymarket_market<R: Runtime>(
     market_id: String,
-    ws_state: State<'_, PolymarketWsState>,
-) -> PolymarketCommandResult<String> {
+    ws_state: State<'_, PolymarketWsState<R>>,
+) -> Result<String, String> {
     let state = ws_state.lock().await;
 
     match &*state {
         Some(ws) => {
             let channel = Channel::Market { market_id: market_id.clone() };
             match ws.subscribe(channel).await {
-                Ok(()) => PolymarketCommandResult::ok(format!("Subscribed to market {}", market_id)),
-                Err(e) => PolymarketCommandResult::err(format!("Subscription failed: {}", e)),
+                Ok(()) => Ok(format!("Subscribed to market {}", market_id)),
+                Err(e) => Err(format!("Subscription failed: {}", e)),
             }
         }
-        None => PolymarketCommandResult::err("WebSocket not connected"),
+        None => Err("WebSocket not connected".to_string()),
     }
 }
 
@@ -295,13 +295,13 @@ pub async fn subscribe_polymarket_market(
 #[tauri::command]
 pub async fn subscribe_polymarket_user<R: Runtime>(
     app: AppHandle<R>,
-    ws_state: State<'_, PolymarketWsState>,
-) -> PolymarketCommandResult<String> {
+    ws_state: State<'_, PolymarketWsState<R>>,
+) -> Result<String, String> {
     // Load API key from store
     let store = match app.store(POLYMARKET_STORE) {
         Ok(s) => s,
         Err(e) => {
-            return PolymarketCommandResult::err(format!("Failed to open store: {}", e));
+            return Err(format!("Failed to open store: {}", e));
         }
     };
 
@@ -310,7 +310,7 @@ pub async fn subscribe_polymarket_user<R: Runtime>(
         .and_then(|v| v.as_str().map(String::from))
     {
         Some(k) => k,
-        None => return PolymarketCommandResult::err(PolymarketError::NotConfigured),
+        None => return Err("Credentials not configured".to_string()),
     };
 
     let state = ws_state.lock().await;
@@ -319,10 +319,10 @@ pub async fn subscribe_polymarket_user<R: Runtime>(
         Some(ws) => {
             let channel = Channel::User { api_key };
             match ws.subscribe(channel).await {
-                Ok(()) => PolymarketCommandResult::ok("Subscribed to user updates".to_string()),
-                Err(e) => PolymarketCommandResult::err(format!("Subscription failed: {}", e)),
+                Ok(()) => Ok("Subscribed to user updates".to_string()),
+                Err(e) => Err(format!("Subscription failed: {}", e)),
             }
         }
-        None => PolymarketCommandResult::err("WebSocket not connected"),
+        None => Err("WebSocket not connected".to_string()),
     }
 }

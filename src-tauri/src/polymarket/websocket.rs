@@ -5,7 +5,7 @@ use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::RwLock;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -53,14 +53,14 @@ pub enum Channel {
 }
 
 /// WebSocket client state
-pub struct PolymarketWebSocket {
-    app: AppHandle,
+pub struct PolymarketWebSocket<R: Runtime = tauri::Wry> {
+    app: AppHandle<R>,
     subscriptions: Arc<RwLock<Vec<Channel>>>,
 }
 
-impl PolymarketWebSocket {
+impl<R: Runtime> PolymarketWebSocket<R> {
     /// Create a new WebSocket client
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle<R>) -> Self {
         Self {
             app,
             subscriptions: Arc::new(RwLock::new(Vec::new())),
@@ -164,7 +164,7 @@ impl PolymarketWebSocket {
 
     /// Handle incoming WebSocket message
     async fn handle_message(
-        app: &AppHandle,
+        app: &AppHandle<R>,
         text: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         log::debug!("Received WebSocket message: {}", text);

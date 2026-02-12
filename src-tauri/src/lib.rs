@@ -468,7 +468,7 @@ pub fn run() {
         .manage(orchestrator::service::OrchestratorState::new())
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
-        .manage(polymarket::commands::PolymarketWsState::default());
+        .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None)) as polymarket::commands::PolymarketWsState);
 
     #[cfg(feature = "acp")]
     {
