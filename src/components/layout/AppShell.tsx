@@ -1,5 +1,5 @@
-// ABOUTME: Root layout component with titlebar, skills sidebar, main content, and slide panel.
-// ABOUTME: Skills Explorer in left sidebar, horizontal thread tabs in main content area.
+// ABOUTME: Root layout component with titlebar, thread sidebar, main content, and slide panel.
+// ABOUTME: Thread list in left sidebar, content area routes to chat or agent views.
 
 import {
   type Component,
@@ -12,9 +12,9 @@ import {
 import { SignIn } from "@/components/auth/SignIn";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
+import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
-import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { shortcuts } from "@/lib/shortcuts";
 import { SlidePanel } from "./SlidePanel";
 import { ThreadContent } from "./ThreadContent";
@@ -113,7 +113,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
       />
 
       <div class="app-shell__body">
-        <SkillsExplorer collapsed={sidebarCollapsed()} />
+        <ThreadSidebar
+          collapsed={sidebarCollapsed()}
+          onToggle={() => setSidebarCollapsed((v) => !v)}
+        />
 
         <main class="app-shell__main">
           <ThreadContent onSignInClick={handleSignInClick} />

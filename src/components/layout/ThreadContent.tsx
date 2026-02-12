@@ -5,7 +5,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { type Component, Match, Show, Switch } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
-import { ThreadTabBar } from "@/components/layout/ThreadTabBar";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { threadStore } from "@/stores/thread.store";
 
@@ -15,9 +14,8 @@ interface ThreadContentProps {
 
 export const ThreadContent: Component<ThreadContentProps> = (props) => {
   return (
-    <div class="thread-content">
-      <ThreadTabBar />
-      <div class="thread-content__body">
+    <div class="flex flex-col h-full overflow-hidden">
+      <div class="flex-1 flex flex-col overflow-hidden min-h-0">
         <Switch fallback={<EmptyState />}>
           <Match when={threadStore.activeThreadKind === "chat"}>
             <ChatContent onSignInClick={props.onSignInClick} />
@@ -40,15 +38,15 @@ function EmptyState() {
   };
 
   return (
-    <div class="thread-content__empty">
-      <div class="thread-content__empty-icon">
+    <div class="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+      <div class="opacity-40">
         <svg
           width="48"
           height="48"
           viewBox="0 0 48 48"
           fill="none"
           role="img"
-          aria-label="No skill selected"
+          aria-label="No thread selected"
         >
           <rect
             x="4"
@@ -69,16 +67,17 @@ function EmptyState() {
           />
         </svg>
       </div>
-      <h2 class="thread-content__empty-title">No skill selected</h2>
-      <p class="thread-content__empty-desc">
-        Create a new chat or agent skill from the sidebar to get started on
-        building your skills.
+      <h2 class="text-base font-medium text-foreground opacity-70 m-0">
+        No thread selected
+      </h2>
+      <p class="text-[13px] opacity-50 m-0 max-w-[280px] text-center leading-relaxed">
+        Create a new chat or agent thread from the sidebar to get started.
       </p>
 
       <Show when={!fileTreeState.rootPath}>
         <button
           type="button"
-          class="thread-content__browse-btn"
+          class="mt-2 px-3.5 py-1.5 text-[13px] font-medium text-primary bg-[rgba(56,189,248,0.1)] border border-transparent rounded-md cursor-pointer transition-all duration-100 hover:bg-[rgba(56,189,248,0.18)] hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={handleOpenFolder}
         >
           Open Folder
