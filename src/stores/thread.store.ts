@@ -223,6 +223,13 @@ export const threadStore = {
     if (kind === "chat") {
       conversationStore.setActiveConversation(id);
     } else {
+      if (
+        thread?.agentType &&
+        thread.agentType !== acpStore.selectedAgentType
+      ) {
+        acpStore.setSelectedAgentType(thread.agentType);
+      }
+
       // For agent threads, set active session if one exists
       const liveSession = Object.values(acpStore.sessions).find(
         (s) => s.conversationId === id,

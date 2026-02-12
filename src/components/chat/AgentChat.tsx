@@ -32,10 +32,10 @@ import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
+import { threadStore } from "@/stores/thread.store";
 import { AgentEffortSelector } from "./AgentEffortSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
 import { AgentModeSelector } from "./AgentModeSelector";
-import { AgentSelector } from "./AgentSelector";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
@@ -91,6 +91,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const isReady = () => acpStore.activeSession?.info.status === "ready";
   const isPrompting = () => acpStore.activeSession?.info.status === "prompting";
   const sessionError = () => acpStore.error;
+  const activeAgentThread = createMemo(() => {
+    const thread = threadStore.activeThread;
+    if (!thread || thread.kind !== "agent") return null;
+    return thread;
+  });
+  const lockedAgentType = createMemo<AgentType>(() => {
+    const sessionAgent = acpStore.activeSession?.info.agentType;
+    if (sessionAgent === "codex" || sessionAgent === "claude-code") {
+      return sessionAgent;
+    }
+    return activeAgentThread()?.agentType === "codex" ? "codex" : "claude-code";
+  });
+  const lockedAgentName = () =>
+    lockedAgentType() === "codex" ? "Codex" : "Claude Code";
 
   // Get the current working directory from file tree
   const getCwd = () => {
@@ -103,7 +117,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // any live session tied to the selected folder.
   createEffect(
     on(
-      () => [fileTreeState.rootPath, acpStore.selectedAgentType] as const,
+      () => [fileTreeState.rootPath, lockedAgentType()] as const,
       ([newPath, agentType]) => {
         if (newPath) {
           void acpStore.refreshRemoteSessions(newPath, agentType);
@@ -141,7 +155,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (hasSession()) setAwaitingLogin(null);
   });
 
-  const startSession = async (agentType?: AgentType) => {
+  const startSession = async (agentType: AgentType = lockedAgentType()) => {
     const cwd = getCwd();
     if (!cwd) {
       console.warn("[AgentChat] No folder open, cannot start session");
@@ -154,6 +168,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     } catch (error) {
       console.error("[AgentChat] Failed to start session:", error);
     }
+  };
+
+  const retrySessionConnection = () => {
+    const thread = activeAgentThread();
+    if (!thread) return;
+    threadStore.selectThread(thread.id, "agent");
   };
 
   const handleAttachImages = async () => {
@@ -615,15 +635,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   />
                 </svg>
                 <h3 class="m-0 mb-2 text-base font-medium text-foreground">
-                  Start an Agent Session
+                  Reconnecting {lockedAgentName()} Thread
                 </h3>
                 <p class="m-0 mb-4 text-sm">
-                  Spawn an AI coding agent to help with complex tasks like
-                  refactoring, debugging, or implementing features.
+                  This conversation is locked to {lockedAgentName()}. Seren is
+                  reattaching the session for this thread.
                 </p>
                 <div class="flex flex-col items-center gap-3 w-full max-w-md">
-                  <AgentSelector />
-                  <Show when={acpStore.selectedAgentType === "claude-code"}>
+                  <Show when={lockedAgentType() === "claude-code"}>
                     <div class="w-full px-3 py-2 bg-primary/10 border border-primary/30 rounded-md text-xs text-primary">
                       <div class="flex items-start gap-2">
                         <svg
@@ -655,12 +674,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   <button
                     type="button"
                     class="px-4 py-2 bg-success text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => startSession()}
+                    onClick={retrySessionConnection}
                     disabled={acpStore.isLoading || !hasFolderOpen()}
                   >
                     {acpStore.isLoading
-                      ? (acpStore.installStatus ?? "Starting...")
-                      : "Start Agent"}
+                      ? "Reconnecting..."
+                      : "Retry Connection"}
                   </button>
                 </div>
               </div>
@@ -1022,7 +1041,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             </Show>
             <div class="flex justify-between items-center">
               <div class="flex items-center gap-3">
-                <AgentSelector />
+                <span class="px-2 py-1 bg-surface-2 border border-surface-3 rounded-md text-xs text-foreground font-medium">
+                  {lockedAgentName()}
+                </span>
                 <AgentModelSelector />
                 <AgentModeSelector />
                 <AgentEffortSelector />
