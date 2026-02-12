@@ -276,15 +276,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           }))
         : undefined;
 
-    console.log("[AgentChat] Sending prompt with context:", {
-      hasText: !!trimmed,
-      textLength: trimmed.length,
-      hasContext: !!context,
-      contextLength: context?.length,
-      imageNames: images.map((img) => img.name),
-      contextTypes: context?.map((c) => c.type),
-    });
-
     setInput("");
     setAttachedImages([]);
     setHistoryIndex(-1);
