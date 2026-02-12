@@ -447,6 +447,10 @@ impl ChatModelWorker {
 
         // Track finish reason
         if let Some(ref reason) = result.finish_reason {
+            log::info!(
+                "[ChatModelWorker] Stream finish_reason detected: {}",
+                reason
+            );
             *last_finish_reason = Some(reason.clone());
         }
 
@@ -476,6 +480,7 @@ impl ChatModelWorker {
         response: reqwest::Response,
         event_tx: &mpsc::Sender<WorkerEvent>,
     ) -> Result<StreamOutcome, String> {
+        log::debug!("[ChatModelWorker] Starting SSE stream");
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
         let mut accumulated_content = String::new();
@@ -547,6 +552,11 @@ impl ChatModelWorker {
                 };
 
                 if data_str.trim() == "[DONE]" {
+                    log::info!(
+                        "[ChatModelWorker] Stream [DONE] marker received — finish_reason: {:?}, pending_tools: {}",
+                        last_finish_reason,
+                        pending_tool_calls.len()
+                    );
                     return Ok(Self::build_stream_outcome(
                         &last_finish_reason,
                         pending_tool_calls,
@@ -861,13 +871,18 @@ impl ChatModelWorker {
         arguments: &str,
     ) -> (String, bool) {
         log::info!(
-            "[ChatModelWorker] Routing to frontend: {} (id: {})",
+            "[ChatModelWorker] Frontend tool execution starting: {} (id: {}, args: {})",
             name,
-            tool_call_id
+            tool_call_id,
+            &arguments[..arguments.len().min(200)]
         );
 
         let bridge = app.state::<ToolResultBridge>();
         let rx = bridge.register(tool_call_id).await;
+        log::debug!(
+            "[ChatModelWorker] Tool bridge registered for {}",
+            tool_call_id
+        );
 
         // Emit a tool execution request to the frontend
         let payload = serde_json::json!({
@@ -877,17 +892,22 @@ impl ChatModelWorker {
         });
         if let Err(e) = app.emit("orchestrator://tool-request", &payload) {
             log::error!(
-                "[ChatModelWorker] Failed to emit tool-request: {}",
+                "[ChatModelWorker] Failed to emit tool-request for {}: {}",
+                name,
                 e
             );
             return (format!("Failed to request tool execution: {}", e), true);
         }
+        log::debug!(
+            "[ChatModelWorker] Tool request emitted, waiting for frontend result (timeout: {}s)",
+            TOOL_EXECUTION_TIMEOUT_SECS
+        );
 
         // Wait for the frontend to submit the result
         match tokio::time::timeout(Duration::from_secs(TOOL_EXECUTION_TIMEOUT_SECS), rx).await {
             Ok(Ok(result)) => {
                 log::info!(
-                    "[ChatModelWorker] Frontend tool result for {}: is_error={}, len={}",
+                    "[ChatModelWorker] Frontend tool completed: {} (is_error={}, result_len={})",
                     name,
                     result.is_error,
                     result.content.len()
@@ -897,14 +917,16 @@ impl ChatModelWorker {
             Ok(Err(_)) => {
                 // Sender was dropped (bridge cleaned up or cancelled)
                 log::warn!(
-                    "[ChatModelWorker] Tool result channel closed for {}",
+                    "[ChatModelWorker] Tool result channel closed for {} — bridge cleaned up or cancelled",
                     name
                 );
                 ("Tool execution was cancelled".to_string(), true)
             }
             Err(_) => {
                 log::error!(
-                    "[ChatModelWorker] Timeout waiting for frontend to execute {}",
+                    "[ChatModelWorker] TIMEOUT ({}/{}s) waiting for frontend tool execution: {}",
+                    TOOL_EXECUTION_TIMEOUT_SECS,
+                    TOOL_EXECUTION_TIMEOUT_SECS,
                     name
                 );
                 (
@@ -1020,6 +1042,10 @@ impl Worker for ChatModelWorker {
             }
 
             // Stream the response
+            log::info!(
+                "[ChatModelWorker] Tool round {} starting — awaiting stream outcome",
+                round
+            );
             let outcome = self.stream_response(response, &event_tx).await?;
 
             match outcome {
@@ -1034,9 +1060,10 @@ impl Worker for ChatModelWorker {
                     } else {
                         None
                     };
-                    log::debug!(
-                        "[ChatModelWorker] Complete — round={}, cost={:?}",
+                    log::info!(
+                        "[ChatModelWorker] StreamOutcome::Complete received — round={}, content_len={}, cost={:?}",
                         round,
+                        final_content.len(),
                         total
                     );
                     event_tx
@@ -1047,6 +1074,7 @@ impl Worker for ChatModelWorker {
                         })
                         .await
                         .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                    log::info!("[ChatModelWorker] Execution complete, breaking from tool loop");
                     break;
                 }
                 StreamOutcome::ToolCallsPending {
@@ -1055,6 +1083,11 @@ impl Worker for ChatModelWorker {
                     accumulated_thinking: _,
                     accumulated_cost,
                 } => {
+                    log::info!(
+                        "[ChatModelWorker] StreamOutcome::ToolCallsPending received — round={}, {} tool(s) to execute",
+                        round,
+                        tool_calls.len()
+                    );
                     total_cost += accumulated_cost;
 
                     if round == MAX_TOOL_ROUNDS {
@@ -1145,6 +1178,12 @@ impl Worker for ChatModelWorker {
                             "content": context_content
                         }));
                     }
+
+                    log::info!(
+                        "[ChatModelWorker] All tools executed for round {}, continuing to next round with {} messages",
+                        round,
+                        messages.len()
+                    );
                 }
             }
         }
