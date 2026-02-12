@@ -12,14 +12,7 @@ interface ToolCallGroupProps {
 }
 
 /** Categorize tool calls into plain language summary */
-function categorizeTool Calls(toolCalls: ToolCallEvent[]): {
-  filesSearched: number;
-  filesEdited: number;
-  filesWritten: number;
-  commandsRun: number;
-  tasksCreated: number;
-  other: number;
-} {
+function categorizeToolCalls(toolCalls: ToolCallEvent[]) {
   const categories = {
     filesSearched: 0,
     filesEdited: 0,

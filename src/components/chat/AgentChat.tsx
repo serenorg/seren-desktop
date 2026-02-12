@@ -413,7 +413,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             grouped.push({
               type: "tool_group",
               messages: currentGroup,
-              toolCalls: currentGroup.map((m) => m.toolCall!),
+              toolCalls: currentGroup
+                .filter((m) => m.toolCall)
+                .map((m) => m.toolCall as ToolCallEvent),
             });
           } else {
             // Show individual cards for 1-2 tool calls
@@ -434,7 +436,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         grouped.push({
           type: "tool_group",
           messages: currentGroup,
-          toolCalls: currentGroup.map((m) => m.toolCall!),
+          toolCalls: currentGroup
+            .filter((m) => m.toolCall)
+            .map((m) => m.toolCall as ToolCallEvent),
         });
       } else {
         for (const msg of currentGroup) {

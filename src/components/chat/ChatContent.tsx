@@ -103,7 +103,9 @@ function groupConsecutiveToolCalls(messages: Message[]): GroupedMessage[] {
           grouped.push({
             type: "tool_group",
             messages: currentGroup,
-            toolCalls: currentGroup.map((m) => toToolCallEvent(m.toolCall!)),
+            toolCalls: currentGroup
+              .filter((m) => m.toolCall)
+              .map((m) => toToolCallEvent(m.toolCall as ToolCallData)),
           });
         } else {
           // Show individual cards for 1-2 tool calls
@@ -124,7 +126,9 @@ function groupConsecutiveToolCalls(messages: Message[]): GroupedMessage[] {
       grouped.push({
         type: "tool_group",
         messages: currentGroup,
-        toolCalls: currentGroup.map((m) => toToolCallEvent(m.toolCall!)),
+        toolCalls: currentGroup
+          .filter((m) => m.toolCall)
+          .map((m) => toToolCallEvent(m.toolCall as ToolCallData)),
       });
     } else {
       for (const msg of currentGroup) {
