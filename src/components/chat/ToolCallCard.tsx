@@ -17,13 +17,38 @@ function truncate(str: string, maxLen: number): string {
 /** Extract a meaningful one-line description from tool call parameters. */
 function extractSummary(toolCall: ToolCallEvent): string {
   const params = toolCall.parameters;
-  if (!params) return toolCall.title;
+  if (!params) return "No parameters";
 
-  // Bash / terminal commands: show the command
+  // Bash / terminal commands: show the description or command
   if (params.command) {
     const desc = params.description;
     if (typeof desc === "string" && desc) return truncate(desc, 100);
     return truncate(String(params.command), 100);
+  }
+
+  // TodoWrite: show count or action description
+  if (params.todos && Array.isArray(params.todos)) {
+    const todos = params.todos as Array<{ status?: string }>;
+    const inProgress = todos.filter((t) => t.status === "in_progress");
+    const completed = todos.filter((t) => t.status === "completed");
+    const pending = todos.filter((t) => t.status === "pending");
+
+    if (inProgress.length > 0) {
+      return `${todos.length} todos (${completed.length} done, ${inProgress.length} in progress)`;
+    }
+    return `${todos.length} todos (${completed.length} done, ${pending.length} pending)`;
+  }
+
+  // Edit: show what's being changed
+  if (params.old_string && params.new_string) {
+    const oldPreview = truncate(String(params.old_string), 40);
+    const newPreview = truncate(String(params.new_string), 40);
+    return `Replace "${oldPreview}" → "${newPreview}"`;
+  }
+
+  // Write: show file path being created/written
+  if (params.content && params.file_path) {
+    return `Writing to ${truncate(String(params.file_path), 80)}`;
   }
 
   // Task / subagent: show the short description
@@ -32,22 +57,52 @@ function extractSummary(toolCall: ToolCallEvent): string {
   }
 
   // File operations: show the path
-  const filePath = params.file_path ?? params.path;
+  const filePath = params.file_path ?? params.path ?? params.notebook_path;
   if (filePath) {
     return truncate(String(filePath), 100);
   }
 
-  // Search: show the pattern
+  // Search: show the pattern with context
   if (params.pattern) {
-    return truncate(String(params.pattern), 80);
+    const pattern = truncate(String(params.pattern), 60);
+    if (params.glob) {
+      return `${pattern} in ${params.glob}`;
+    }
+    return pattern;
   }
 
   // URL operations
   if (params.url) {
-    return truncate(String(params.url), 100);
+    const url = truncate(String(params.url), 80);
+    if (params.prompt) {
+      return `${url}: ${truncate(String(params.prompt), 40)}`;
+    }
+    return url;
   }
 
-  return toolCall.title;
+  // Query operations (WebSearch, etc.)
+  if (params.query) {
+    return truncate(String(params.query), 100);
+  }
+
+  // Skill invocations
+  if (params.skill) {
+    const skill = String(params.skill);
+    const args = params.args ? ` ${String(params.args)}` : "";
+    return truncate(`/${skill}${args}`, 100);
+  }
+
+  // Fallback: show first meaningful parameter
+  const keys = Object.keys(params);
+  if (keys.length > 0) {
+    const firstKey = keys[0];
+    const firstValue = params[firstKey];
+    if (typeof firstValue === "string" && firstValue) {
+      return truncate(`${firstKey}: ${firstValue}`, 100);
+    }
+  }
+
+  return "No description available";
 }
 
 export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
@@ -277,8 +332,8 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   };
 
   const showToolLabel = () => {
-    const s = summary();
-    return s !== props.toolCall.title;
+    // Always show the tool name label for better scannability
+    return true;
   };
 
   return (
