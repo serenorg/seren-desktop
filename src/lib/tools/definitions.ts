@@ -364,7 +364,11 @@ export const FILE_TOOLS: ToolDefinition[] = [
       name: "seren_web_fetch",
       description:
         "Fetch content from any public URL. Returns page content as markdown. " +
-        "Use this tool proactively when users ask about web content, news, documentation, or current events. " +
+        "IMPORTANT: Before using this tool, check if a specialized publisher tool " +
+        "(e.g. gateway__github__, gateway__jira__, etc.) is available for the target domain. " +
+        "Publisher tools return structured, smaller data and should always be preferred. " +
+        "Use seren_web_fetch only when no publisher tool covers the URL, or for general " +
+        "web searches via DuckDuckGo/Google. " +
         "To SEARCH the web, construct a search engine URL: " +
         "'https://html.duckduckgo.com/html/?q=your+search+terms' or " +
         "'https://www.google.com/search?q=your+search+terms'. " +
