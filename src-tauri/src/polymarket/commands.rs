@@ -273,10 +273,9 @@ pub async fn connect_polymarket_websocket<R: Runtime>(
 
 /// Subscribe to market price updates
 #[tauri::command]
-pub async fn subscribe_polymarket_market<R: Runtime>(
-    _app: AppHandle<R>,
+pub async fn subscribe_polymarket_market(
     market_id: String,
-    ws_state: State<'_, PolymarketWsState<R>>,
+    ws_state: State<'_, PolymarketWsState>,
 ) -> Result<String, String> {
     let state = ws_state.lock().await;
 
