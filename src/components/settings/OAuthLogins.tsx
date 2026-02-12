@@ -401,6 +401,9 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                               LOCAL_PROVIDER_LOGOS[provider.slug];
                             if (fallback && e.currentTarget.src !== fallback) {
                               e.currentTarget.src = fallback;
+                            } else {
+                              // No local fallback — hide broken image
+                              e.currentTarget.style.display = "none";
                             }
                           }}
                         />
