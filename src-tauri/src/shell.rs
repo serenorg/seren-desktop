@@ -41,6 +41,24 @@ pub async fn execute_shell_command(
         c
     };
 
+    // Prepend embedded runtime to PATH so shell commands can find bundled Node/Git
+    // while preserving access to system-installed tools.
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    if !embedded_path.is_empty() {
+        let sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let combined = if system_path.is_empty() {
+            embedded_path.to_string()
+        } else {
+            format!("{}{}{}", embedded_path, sep, system_path)
+        };
+        cmd.env("PATH", &combined);
+    }
+
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
