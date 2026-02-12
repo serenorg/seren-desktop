@@ -74,8 +74,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   );
 
   const onPickImages = () => handleAttachImages();
+  const onSetChatInput = (event: Event) => {
+    const customEvent = event as CustomEvent<string>;
+    if (customEvent.detail) {
+      setInput(customEvent.detail);
+      inputRef?.focus();
+    }
+  };
   onMount(() => {
     window.addEventListener("seren:pick-images", onPickImages);
+    window.addEventListener("seren:set-chat-input", onSetChatInput);
     if (fileTreeState.rootPath) {
       void acpStore.refreshRemoteSessions(
         fileTreeState.rootPath,
@@ -85,6 +93,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
   onCleanup(() => {
     window.removeEventListener("seren:pick-images", onPickImages);
+    window.removeEventListener("seren:set-chat-input", onSetChatInput);
   });
 
   const hasSession = () => acpStore.activeSession !== null;
