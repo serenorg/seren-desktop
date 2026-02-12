@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { createSkillsSymlink } from "@/lib/skills/paths";
 import { type FileNode, setNodes, setRootPath } from "@/stores/fileTree";
 import { openTab, setTabDirty } from "@/stores/tabs";
 
@@ -98,9 +99,19 @@ export async function openFolder(): Promise<string | null> {
 
 /**
  * Load a folder into the file tree.
+ * Also ensures the skills directory and symlink are set up for unified skills support.
  */
 export async function loadFolder(path: string): Promise<void> {
   setRootPath(path);
+
+  // Ensure skills symlink is created for Claude Code compatibility
+  try {
+    await createSkillsSymlink(path);
+  } catch (error) {
+    console.warn("Failed to create skills symlink:", error);
+    // Don't block folder loading if symlink creation fails
+  }
+
   const entries = await listDirectory(path);
   const nodes = entriesToNodes(entries);
   setNodes(nodes);

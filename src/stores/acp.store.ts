@@ -18,7 +18,6 @@ import {
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
 import {
-  archiveAgentConversation,
   createAgentConversation,
   type AgentConversation as DbAgentConversation,
   getAgentConversation,

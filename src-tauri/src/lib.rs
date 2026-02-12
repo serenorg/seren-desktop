@@ -813,6 +813,7 @@ pub fn run() {
             skills::get_seren_skills_dir,
             skills::get_claude_skills_dir,
             skills::get_project_skills_dir,
+            skills::create_skills_symlink,
             skills::list_skill_dirs,
             skills::install_skill,
             skills::remove_skill,
