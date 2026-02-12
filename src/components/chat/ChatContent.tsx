@@ -609,6 +609,67 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     await conversationStore.clearHistory();
   };
 
+  const copyAllChatHistory = async () => {
+    const messages = conversationStore.messages;
+    if (messages.length === 0) {
+      alert("No chat history to copy");
+      return;
+    }
+
+    // Format messages as markdown
+    let markdown = "# Chat History\n\n";
+    for (const msg of messages) {
+      if (msg.role === "user") {
+        markdown += `**You:** ${msg.content}\n\n`;
+      } else if (msg.role === "assistant") {
+        markdown += `**Assistant:** ${msg.content}\n\n`;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(markdown);
+      alert("Chat history copied to clipboard!");
+    } catch (error) {
+      console.error("Failed to copy:", error);
+      alert("Failed to copy chat history");
+    }
+  };
+
+  const downloadChatHistory = async () => {
+    const messages = conversationStore.messages;
+    if (messages.length === 0) {
+      alert("No chat history to download");
+      return;
+    }
+
+    // Check authentication
+    if (!authStore.isAuthenticated) {
+      setShowSignInPrompt(true);
+      return;
+    }
+
+    // TODO: Implement Seren Notes integration
+    // For now, download as a local markdown file
+    let markdown = "# Chat History\n\n";
+    for (const msg of messages) {
+      if (msg.role === "user") {
+        markdown += `**You:** ${msg.content}\n\n`;
+      } else if (msg.role === "assistant") {
+        markdown += `**Assistant:** ${msg.content}\n\n`;
+      }
+    }
+
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chat-history-${new Date().toISOString().split("T")[0]}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section class="flex flex-col h-full bg-background text-foreground border-l border-surface-2">
       <Show when={showSignInPrompt()}>
@@ -679,6 +740,48 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 disabled={chatStore.isCompacting}
               >
                 {chatStore.isCompacting ? "Compacting..." : "Compact"}
+              </button>
+            </Show>
+            <Show when={conversationStore.messages.length > 0}>
+              <button
+                type="button"
+                class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
+                onClick={copyAllChatHistory}
+                title="Copy all chat history"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
+                onClick={downloadChatHistory}
+                title="Download chat history"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                  />
+                </svg>
               </button>
             </Show>
             <button
