@@ -229,8 +229,22 @@ export type ToolStreamEvent =
     };
 
 /**
+ * Check if a MIME type is supported for vision/multimodal content blocks.
+ * Anthropic API only supports: image/jpeg, image/png, image/gif, image/webp
+ * (Note: SVG and PDF are NOT supported and must be handled separately)
+ */
+function isVisionCompatibleMime(mimeType: string): boolean {
+  return [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+  ].includes(mimeType);
+}
+
+/**
  * Build multimodal content blocks from text and optional attachments.
- * Images and PDFs become content blocks; text/code files are inlined into the message.
+ * Vision-compatible images become content blocks; text/code files are inlined; PDFs are noted as unsupported.
  */
 function buildUserContent(
   text: string,
@@ -240,9 +254,10 @@ function buildUserContent(
     return text;
   }
 
-  // Separate text files (inlined) from binary files (content blocks)
-  const mediaFiles: Attachment[] = [];
+  // Separate files by type
+  const visionImages: Attachment[] = [];
   const inlinedParts: string[] = [];
+  const unsupportedFiles: string[] = [];
 
   for (const att of attachments) {
     if (isTextMime(att.mimeType)) {
@@ -250,23 +265,37 @@ function buildUserContent(
       const decoded = atob(att.base64);
       const ext = att.name.split(".").pop() || "";
       inlinedParts.push(`\`\`\`${ext} (${att.name})\n${decoded}\n\`\`\``);
+    } else if (isVisionCompatibleMime(att.mimeType)) {
+      // Vision-compatible image formats
+      visionImages.push(att);
     } else {
-      mediaFiles.push(att);
+      // PDFs and other unsupported formats
+      unsupportedFiles.push(`${att.name} (${att.mimeType})`);
     }
   }
 
-  // Build final text with inlined files prepended
-  const fullText =
-    inlinedParts.length > 0 ? `${inlinedParts.join("\n\n")}\n\n${text}` : text;
+  // Build text parts
+  const textParts: string[] = [];
+  if (inlinedParts.length > 0) {
+    textParts.push(inlinedParts.join("\n\n"));
+  }
+  if (unsupportedFiles.length > 0) {
+    textParts.push(
+      `[Note: The following files cannot be processed as they are not vision-compatible images: ${unsupportedFiles.join(", ")}]`,
+    );
+  }
+  textParts.push(text);
 
-  // If no media files, plain text is sufficient
-  if (mediaFiles.length === 0) {
+  const fullText = textParts.join("\n\n");
+
+  // If no vision images, return plain text
+  if (visionImages.length === 0) {
     return fullText;
   }
 
-  // Build content blocks for images and PDFs
+  // Build content blocks with vision-compatible images only
   const blocks: ContentBlock[] = [];
-  for (const att of mediaFiles) {
+  for (const att of visionImages) {
     blocks.push({
       type: "image_url",
       image_url: { url: toDataUrl(att) },
