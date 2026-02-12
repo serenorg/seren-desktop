@@ -2,6 +2,7 @@
 // ABOUTME: Presents chats and agent sessions as a single sorted thread list filtered by project.
 
 import { createStore } from "solid-js/store";
+import { archiveAgentConversation } from "@/lib/tauri-bridge";
 import type { AgentType, SessionStatus } from "@/services/acp";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -277,8 +278,10 @@ export const threadStore = {
   async archiveThread(id: string, kind: "chat" | "agent") {
     if (kind === "chat") {
       await conversationStore.archiveConversation(id);
+    } else {
+      await archiveAgentConversation(id);
+      await acpStore.refreshRecentAgentConversations(200);
     }
-    // Agent conversations don't have archive yet — could add later
 
     // Clear selection if this was active
     if (state.activeThreadId === id) {

@@ -874,6 +874,17 @@ export async function setAgentConversationModelId(
 }
 
 /**
+ * Archive an agent conversation (hides from tabs but preserves data).
+ */
+export async function archiveAgentConversation(id: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("archive_agent_conversation", { id });
+}
+
+/**
  * Archive a conversation (hides from tabs but preserves data).
  */
 export async function archiveConversation(id: string): Promise<void> {

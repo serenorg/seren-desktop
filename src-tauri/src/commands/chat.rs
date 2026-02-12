@@ -436,6 +436,18 @@ pub async fn set_agent_conversation_model_id(
     .await
 }
 
+#[tauri::command]
+pub async fn archive_agent_conversation(app: AppHandle, id: String) -> Result<(), String> {
+    run_db(app, move |conn| {
+        conn.execute(
+            "UPDATE conversations SET is_archived = 1 WHERE id = ?1 AND kind = 'agent'",
+            params![id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
 // ============================================================================
 // Message Commands
 // ============================================================================
