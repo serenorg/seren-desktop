@@ -5,6 +5,8 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 [![CI](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+> **🐛 Report bugs and request features:** [serenorg/seren-desktop-issues](https://github.com/serenorg/seren-desktop-issues/issues)
+
 ## Features
 
 ### AI Chat
@@ -293,6 +295,10 @@ You can use Seren's gateway (default) or configure direct API access:
 
 We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
+### Bug Reports & Feature Requests
+
+Report bugs and request features in our public issue tracker: **[seren-desktop-issues](https://github.com/serenorg/seren-desktop-issues/issues)**
+
 ### Development Workflow
 
 1. Fork the repository
@@ -308,7 +314,7 @@ We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ### Good First Issues
 
-Look for issues labeled [`good first issue`](https://github.com/serenorg/seren-desktop/labels/good%20first%20issue).
+Look for issues labeled [`good first issue`](https://github.com/serenorg/seren-desktop-issues/labels/good%20first%20issue) in the issues repo.
 
 ## Documentation
 
