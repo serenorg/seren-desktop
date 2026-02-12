@@ -51,6 +51,7 @@ import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { RerouteAnnouncement } from "./RerouteAnnouncement";
 import { SatisfactionSignal } from "./SatisfactionSignal";
+import { SkillsSelector } from "./SkillsSelector";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
@@ -1270,6 +1271,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               <div class="flex items-center gap-3">
                 <ModelSelector />
                 <ToolsetSelector />
+                <SkillsSelector />
                 <Show when={conversationStore.isLoading}>
                   <ThinkingStatus />
                 </Show>

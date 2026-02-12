@@ -39,6 +39,7 @@ import { AgentSelector } from "./AgentSelector";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
+import { SkillsSelector } from "./SkillsSelector";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
@@ -1025,6 +1026,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <AgentModelSelector />
                 <AgentModeSelector />
                 <AgentEffortSelector />
+                <SkillsSelector />
                 <Show when={isPrompting()}>
                   <ThinkingStatus />
                 </Show>

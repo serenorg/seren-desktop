@@ -1,5 +1,5 @@
 // ABOUTME: Skills store for managing skills state in the UI.
-// ABOUTME: Handles available skills, installed skills, and selection state.
+// ABOUTME: Handles available skills, installed skills, per-project overrides, and selection state.
 
 import { createStore } from "solid-js/store";
 import { log } from "@/lib/logger";
@@ -52,6 +52,14 @@ const [state, setState] = createStore<SkillsState>({
  * Track enabled state separately (not part of the skill data).
  */
 const enabledState: Record<string, boolean> = loadEnabledState();
+
+/**
+ * Per-project skill overrides. Key: project root path, Value: array of skill paths.
+ * Missing key = use global defaults. Empty array = no skills for that project.
+ */
+const [projectSkillsState, setProjectSkillsState] = createStore<
+  Record<string, string[]>
+>({});
 
 /**
  * Skills store with reactive state and actions.
@@ -122,15 +130,93 @@ export const skillsStore = {
   isEnabled(skillId: string): boolean {
     const skill = state.installed.find((s) => s.id === skillId);
     if (!skill) return false;
-    return enabledState[skill.path] !== false; // Default to enabled
+    return skill.enabled !== false; // Default to enabled
   },
 
   /**
    * Get enabled skills.
    */
   get enabledSkills(): InstalledSkill[] {
-    return state.installed.filter((s) => enabledState[s.path] !== false);
+    return state.installed.filter((s) => s.enabled !== false);
   },
+
+  // --------------------------------------------------------------------------
+  // Per-project skill overrides
+  // --------------------------------------------------------------------------
+
+  /**
+   * Get the effective skills for a project.
+   * If the project has a custom override, returns those skills.
+   * Otherwise falls back to the global enabled skills.
+   */
+  getProjectSkills(projectRoot: string | null): InstalledSkill[] {
+    if (!projectRoot) {
+      return this.enabledSkills;
+    }
+    const override = projectSkillsState[projectRoot];
+    if (!override) {
+      return this.enabledSkills;
+    }
+    const paths = new Set(override);
+    return state.installed.filter((s) => paths.has(s.path));
+  },
+
+  /**
+   * Check if a project's skills diverge from the global defaults.
+   */
+  hasProjectOverride(projectRoot: string | null): boolean {
+    if (!projectRoot) return false;
+    const override = projectSkillsState[projectRoot];
+    if (!override) return false;
+    const globalPaths = this.enabledSkills.map((s) => s.path);
+    if (override.length !== globalPaths.length) return true;
+    const globalSet = new Set(globalPaths);
+    return override.some((p) => !globalSet.has(p));
+  },
+
+  /**
+   * Toggle a single skill for a specific project.
+   * On first toggle, copies the current global enabled set as the starting point.
+   */
+  toggleProjectSkill(projectRoot: string, skillPath: string): void {
+    if (!projectSkillsState[projectRoot]) {
+      const globalPaths = this.enabledSkills.map((s) => s.path);
+      setProjectSkillsState(projectRoot, globalPaths);
+    }
+
+    const current = projectSkillsState[projectRoot];
+    if (current.includes(skillPath)) {
+      setProjectSkillsState(
+        projectRoot,
+        current.filter((p) => p !== skillPath),
+      );
+    } else {
+      setProjectSkillsState(projectRoot, [...current, skillPath]);
+    }
+  },
+
+  /**
+   * Clear project override, reverting to global defaults.
+   */
+  resetProjectSkills(projectRoot: string): void {
+    setProjectSkillsState((prev) => {
+      const next = { ...prev };
+      delete next[projectRoot];
+      return next;
+    });
+  },
+
+  /**
+   * Get formatted skill content for a project's active skills.
+   */
+  async getProjectSkillsContent(projectRoot: string | null): Promise<string> {
+    const projectSkills = this.getProjectSkills(projectRoot);
+    return skills.getEnabledSkillsContent(projectSkills);
+  },
+
+  // --------------------------------------------------------------------------
+  // Selection and global management
+  // --------------------------------------------------------------------------
 
   /**
    * Set the selected skill.

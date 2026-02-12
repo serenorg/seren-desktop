@@ -9,6 +9,7 @@ import { executeTool } from "@/lib/tools/executor";
 import { storeAssistantResponse } from "@/services/memory";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { skillsStore } from "@/stores/skills.store";
 import type { UnifiedMessage } from "@/types/conversation";
@@ -589,7 +590,7 @@ function serializeHistory(
  * Passes lightweight skill metadata — the Rust side reads actual content from disk.
  */
 function buildCapabilities(): UserCapabilities {
-  const enabledSkills = skillsStore.enabledSkills;
+  const enabledSkills = skillsStore.getProjectSkills(fileTreeState.rootPath);
   const activeModels =
     providerStore.getModels(providerStore.activeProvider) ?? [];
   const tools = getAllTools();

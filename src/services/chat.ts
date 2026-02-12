@@ -382,7 +382,9 @@ export async function* streamMessageWithTools(
 
   // Inject enabled skills content
   try {
-    const skillsContent = await skillsStore.getEnabledContent();
+    const skillsContent = await skillsStore.getProjectSkillsContent(
+      fileTreeState.rootPath,
+    );
     if (skillsContent) {
       systemContent += skillsContent;
     }

@@ -29,6 +29,7 @@ import { chatStore } from "@/stores/chat.store";
 import { openclawStore } from "@/stores/openclaw.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
+import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 import { updaterStore } from "@/stores/updater.store";
 import {
@@ -69,7 +70,8 @@ function App() {
     // Start OpenClaw message agent
     startOpenClawAgent();
 
-    // Load threads after auth check completes
+    // Load skills and threads after auth check completes
+    await skillsStore.refresh();
     await threadStore.refresh();
   });
 

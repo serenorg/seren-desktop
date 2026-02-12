@@ -1,55 +1,76 @@
-// ABOUTME: Skills Explorer sidebar with installed skill folder trees and search.
-// ABOUTME: Replaces the thread sidebar, embedding a collapsible File Explorer at the bottom.
+// ABOUTME: Skills management panel with browse/install catalog and installed skills management.
+// ABOUTME: Renders inside SlidePanel with tabs for Installed and Browse, inline detail accordion.
 
 import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { type Component, createSignal, For, onMount, Show } from "solid-js";
 import {
-  ContextMenu,
-  type ContextMenuItem,
-} from "@/components/common/ContextMenu";
+  type Component,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
+import { appFetch } from "@/lib/fetch";
 import { openFileInTab } from "@/lib/files/service";
 import type { InstalledSkill, Skill, SkillScope } from "@/lib/skills";
+import { parseSkillMd } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
-import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
-import { FileExplorer } from "./FileExplorer";
-
-interface FileEntry {
-  name: string;
-  path: string;
-  is_directory: boolean;
-}
 
 interface SkillsExplorerProps {
-  collapsed: boolean;
+  collapsed?: boolean;
+  panelMode?: boolean;
 }
 
-type SearchTab = "installed" | "available";
+type Tab = "installed" | "browse";
 
 const SKILL_CREATOR_SLUG = "skill-creator";
 const SKILL_CREATOR_SOURCE_URL =
   "https://raw.githubusercontent.com/anthropics/skills/main/skills/skill-creator/SKILL.md";
 
 export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
+  const [activeTab, setActiveTab] = createSignal<Tab>("installed");
   const [searchQuery, setSearchQuery] = createSignal("");
-  const [searchTab, setSearchTab] = createSignal<SearchTab>("installed");
-  const [showFiles, setShowFiles] = createSignal(false);
+  const [expandedSkillId, setExpandedSkillId] = createSignal<string | null>(
+    null,
+  );
+  const [detailContent, setDetailContent] = createSignal<string | null>(null);
+  const [detailLoading, setDetailLoading] = createSignal(false);
   const [showCreateDialog, setShowCreateDialog] = createSignal(false);
   const [newSkillName, setNewSkillName] = createSignal("");
-  const [expandedSkills, setExpandedSkills] = createSignal<Set<string>>(
-    new Set(),
+  const [showUrlDialog, setShowUrlDialog] = createSignal(false);
+  const [installUrl, setInstallUrl] = createSignal("");
+  const [urlInstalling, setUrlInstalling] = createSignal(false);
+  const [actionInProgress, setActionInProgress] = createSignal<string | null>(
+    null,
   );
-  const [skillChildren, setSkillChildren] = createSignal<
-    Record<string, FileEntry[]>
-  >({});
+  const [overflowMenuId, setOverflowMenuId] = createSignal<string | null>(null);
+
+  // ── Derived values ──────────────────────────────
+
+  const filteredInstalled = () => {
+    const q = searchQuery().toLowerCase().trim();
+    if (!q) return skillsStore.installed;
+    return skillsStore.installed.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        (s.description ?? "").toLowerCase().includes(q) ||
+        s.tags.some((t) => t.toLowerCase().includes(q)),
+    );
+  };
+
+  const filteredBrowse = () => {
+    const q = searchQuery().trim();
+    if (!q) return skillsStore.available;
+    return skillsService.search(skillsStore.available, q);
+  };
+
+  // ── Lifecycle ───────────────────────────────────
 
   onMount(async () => {
     await skillsStore.refresh();
     await ensureSkillCreatorInstalled();
   });
-
-  // ── Default skill-creator install ─────────────
 
   const ensureSkillCreatorInstalled = async () => {
     const alreadyInstalled = skillsStore.installed.some(
@@ -77,294 +98,169 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     }
   };
 
-  // ── Skill tree expansion ────────────────────────
+  // ── Click outside to close overflow menu ────────
 
-  const toggleSkill = async (skill: InstalledSkill) => {
-    const expanded = new Set(expandedSkills());
-    const skillDir = skill.path.replace(/\/SKILL\.md$/, "");
+  const handleDocumentClick = () => {
+    if (overflowMenuId()) {
+      setOverflowMenuId(null);
+    }
+  };
 
-    if (expanded.has(skill.id)) {
-      expanded.delete(skill.id);
-    } else {
-      expanded.add(skill.id);
-      // Lazy-load children if not cached
-      if (!skillChildren()[skill.id]) {
-        try {
-          const entries = await invoke<FileEntry[]>("list_directory", {
-            path: skillDir,
-          });
-          setSkillChildren((prev) => ({ ...prev, [skill.id]: entries }));
-        } catch {
-          // Directory may not exist or be empty
-          setSkillChildren((prev) => ({ ...prev, [skill.id]: [] }));
+  onMount(() => {
+    document.addEventListener("click", handleDocumentClick);
+  });
+
+  onCleanup(() => {
+    document.removeEventListener("click", handleDocumentClick);
+  });
+
+  // ── Detail accordion ────────────────────────────
+
+  const toggleDetail = async (skillId: string) => {
+    if (expandedSkillId() === skillId) {
+      setExpandedSkillId(null);
+      setDetailContent(null);
+      return;
+    }
+
+    setExpandedSkillId(skillId);
+    setDetailContent(null);
+    setDetailLoading(true);
+
+    try {
+      const installed = skillsStore.installed.find((s) => s.id === skillId);
+      if (installed) {
+        const content = await skillsService.readContent(installed);
+        setDetailContent(content);
+      } else {
+        const available = skillsStore.available.find((s) => s.id === skillId);
+        if (available) {
+          const content = await skillsService.fetchContent(available);
+          setDetailContent(content);
         }
       }
+    } catch (err) {
+      console.error("[SkillsExplorer] Failed to load skill content:", err);
+      setDetailContent("Failed to load content.");
+    } finally {
+      setDetailLoading(false);
     }
-    setExpandedSkills(expanded);
   };
 
-  const handleFileClick = (path: string) => {
-    openFileInTab(path);
-    window.dispatchEvent(
-      new CustomEvent("seren:open-panel", { detail: "editor" }),
-    );
+  // ── Install / Uninstall ─────────────────────────
+
+  const handleInstall = async (skill: Skill, scope: SkillScope = "seren") => {
+    setActionInProgress(skill.id);
+    try {
+      const content = await skillsService.fetchContent(skill);
+      if (content) {
+        await skillsStore.install(skill, content, scope);
+      }
+    } catch (err) {
+      console.error("[SkillsExplorer] Failed to install:", err);
+    } finally {
+      setActionInProgress(null);
+    }
   };
 
-  const handleSkillSelect = (skill: InstalledSkill) => {
-    skillsStore.setSelected(skill.id);
+  const handleUninstall = async (skill: InstalledSkill) => {
+    setActionInProgress(skill.id);
+    try {
+      await skillsStore.remove(skill);
+      if (expandedSkillId() === skill.id) {
+        setExpandedSkillId(null);
+        setDetailContent(null);
+      }
+    } catch (err) {
+      console.error("[SkillsExplorer] Failed to uninstall:", err);
+    } finally {
+      setActionInProgress(null);
+    }
   };
 
-  // ── Create Skill ──────────────────────────────
+  // ── Create skill ────────────────────────────────
 
   const handleCreateSkill = async () => {
     const name = newSkillName().trim();
     if (!name) return;
 
     const slug = name.toLowerCase().replace(/\s+/g, "-");
-
     try {
       const skillsDir = await invoke<string>("get_seren_skills_dir");
-      await invoke<string>("create_skill_folder", {
-        skillsDir,
-        slug,
-        name,
-      });
+      await invoke<string>("create_skill_folder", { skillsDir, slug, name });
       await skillsStore.refreshInstalled();
       setNewSkillName("");
       setShowCreateDialog(false);
+      setActiveTab("installed");
     } catch (err) {
-      console.error("Failed to create skill folder:", err);
+      console.error("[SkillsExplorer] Failed to create skill:", err);
     }
   };
 
-  // ── Upload / Download ───────────────────────────
+  // ── Install from URL ────────────────────────────
 
-  const handleUpload = async () => {
-    const selected = await open({
-      filters: [{ name: "Skill files", extensions: ["md"] }],
-      multiple: false,
-    });
-    if (selected && typeof selected === "string") {
-      try {
-        const content = await invoke<string>("read_file", { path: selected });
-        // Derive slug from filename
-        const fileName = selected.split("/").pop() || "skill";
-        const slug = fileName
-          .replace(/\.md$/i, "")
-          .toLowerCase()
-          .replace(/\s+/g, "-");
-        const skill: Skill = {
-          id: `local:${slug}`,
-          slug,
-          name: slug,
-          description: "Imported skill",
-          source: "local",
-          tags: [],
-        };
-        await skillsStore.install(skill, content, "seren");
-      } catch (err) {
-        console.error("Failed to upload skill:", err);
-      }
+  const handleInstallFromUrl = async () => {
+    const url = installUrl().trim();
+    if (!url) return;
+
+    try {
+      new URL(url);
+    } catch {
+      return;
     }
-  };
 
-  const handleDownload = async () => {
-    const selected = skillsStore.selected;
-    if (!selected || !("scope" in selected)) return;
+    setUrlInstalling(true);
+    try {
+      const response = await appFetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const content = await response.text();
 
-    const content = await skillsService.readContent(selected as InstalledSkill);
-    if (!content) return;
+      const urlPath = new URL(url).pathname;
+      const segments = urlPath.split("/").filter(Boolean);
+      const fileName = segments.pop() || "skill";
+      const rawSlug = fileName
+        .replace(/\.md$/i, "")
+        .toLowerCase()
+        .replace(/\s+/g, "-");
 
-    const savePath = await save({
-      defaultPath: `${selected.slug}-SKILL.md`,
-      filters: [{ name: "Markdown", extensions: ["md"] }],
-    });
-    if (savePath) {
-      try {
-        await invoke("write_file", { path: savePath, content });
-      } catch (err) {
-        console.error("Failed to save skill:", err);
-      }
-    }
-  };
+      const parsed = parseSkillMd(content);
 
-  // ── Search ──────────────────────────────────────
+      const skill: Skill = {
+        id: `url:${rawSlug}`,
+        slug: parsed.metadata.name
+          ? parsed.metadata.name.toLowerCase().replace(/\s+/g, "-")
+          : rawSlug,
+        name: parsed.metadata.name || rawSlug,
+        description:
+          (parsed.metadata.description as string) || "Installed from URL",
+        source: "local",
+        sourceUrl: url,
+        tags: (parsed.metadata.tags as string[]) || [],
+        author: parsed.metadata.author as string | undefined,
+        version: parsed.metadata.version as string | undefined,
+      };
 
-  const searchResults = () => {
-    const q = searchQuery();
-    if (!q) return [];
-    if (searchTab() === "installed") {
-      return skillsStore.installed.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q.toLowerCase()) ||
-          s.description.toLowerCase().includes(q.toLowerCase()),
-      );
-    }
-    return skillsService.search(skillsStore.available, q);
-  };
-
-  const handleSearchInstall = async (skill: Skill) => {
-    const content = await skillsService.fetchContent(skill);
-    if (content) {
       await skillsStore.install(skill, content, "seren");
-    }
-  };
-
-  // ── Context menu ─────────────────────────────────
-
-  interface ContextMenuTarget {
-    x: number;
-    y: number;
-    path: string;
-    name: string;
-    isDirectory: boolean;
-    skillId?: string;
-  }
-
-  const [ctxMenu, setCtxMenu] = createSignal<ContextMenuTarget | null>(null);
-
-  const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-
-  const handleContextMenu = (
-    e: MouseEvent,
-    path: string,
-    name: string,
-    isDirectory: boolean,
-    skillId?: string,
-  ) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setCtxMenu({
-      x: e.clientX,
-      y: e.clientY,
-      path,
-      name,
-      isDirectory,
-      skillId,
-    });
-  };
-
-  const handleRevealInFinder = async (path: string) => {
-    try {
-      await invoke("reveal_in_file_manager", { path });
+      setInstallUrl("");
+      setShowUrlDialog(false);
+      setActiveTab("installed");
     } catch (err) {
-      console.error("Failed to reveal in finder:", err);
+      console.error("[SkillsExplorer] Failed to install from URL:", err);
+    } finally {
+      setUrlInstalling(false);
     }
   };
 
-  const handleCopyPath = async (path: string) => {
-    try {
-      await navigator.clipboard.writeText(path);
-    } catch (err) {
-      console.error("Failed to copy path:", err);
-    }
-  };
+  // ── Edit in editor ──────────────────────────────
 
-  const handleCopyRelativePath = async (path: string) => {
-    try {
-      const rootPath = fileTreeState.rootPath;
-      let relativePath = path;
-      if (rootPath && path.startsWith(rootPath)) {
-        relativePath = path.slice(rootPath.length);
-        if (relativePath.startsWith("/")) {
-          relativePath = relativePath.slice(1);
-        }
-      }
-      await navigator.clipboard.writeText(relativePath);
-    } catch (err) {
-      console.error("Failed to copy relative path:", err);
-    }
-  };
-
-  const handleRenameCtx = async (path: string, oldName: string) => {
-    const newName = window.prompt("Rename to:", oldName);
-    if (!newName || newName === oldName) return;
-    const dir = path.substring(0, path.lastIndexOf("/"));
-    const newPath = `${dir}/${newName}`;
-    try {
-      await invoke("rename_path", { oldPath: path, newPath });
-      await skillsStore.refreshInstalled();
-    } catch (err) {
-      console.error("Failed to rename:", err);
-    }
-  };
-
-  const handleDeleteCtx = async (
-    path: string,
-    name: string,
-    isDirectory: boolean,
-    skillId?: string,
-  ) => {
-    const confirmDelete = window.confirm(
-      `Delete "${name}"?${isDirectory ? " This will delete all contents." : ""}`,
+  const handleEditInEditor = (path: string) => {
+    openFileInTab(path);
+    window.dispatchEvent(
+      new CustomEvent("seren:open-panel", { detail: "editor" }),
     );
-    if (!confirmDelete) return;
-    try {
-      await invoke("delete_path", { path });
-      if (skillId) {
-        // Removing an entire skill folder — refresh skill list
-        await skillsStore.refreshInstalled();
-      } else {
-        await skillsStore.refreshInstalled();
-      }
-    } catch (err) {
-      console.error("Failed to delete:", err);
-      alert(`Failed to delete: ${err}`);
-    }
   };
 
-  const getCtxMenuItems = (target: ContextMenuTarget): ContextMenuItem[] => {
-    const items: ContextMenuItem[] = [];
-
-    items.push({
-      label: isMac ? "Reveal in Finder" : "Reveal in Explorer",
-      icon: "📂",
-      shortcut: isMac ? "⌥⌘R" : "Shift+Alt+R",
-      onClick: () => handleRevealInFinder(target.path),
-    });
-
-    items.push({ label: "", separator: true, onClick: () => {} });
-
-    items.push({
-      label: "Copy Path",
-      icon: "📎",
-      shortcut: isMac ? "⌥⌘C" : "Shift+Alt+C",
-      onClick: () => handleCopyPath(target.path),
-    });
-
-    items.push({
-      label: "Copy Relative Path",
-      icon: "📎",
-      shortcut: isMac ? "⇧⌥⌘C" : "Ctrl+Shift+Alt+C",
-      onClick: () => handleCopyRelativePath(target.path),
-    });
-
-    items.push({ label: "", separator: true, onClick: () => {} });
-
-    items.push({
-      label: "Rename",
-      icon: "✏️",
-      shortcut: "Enter",
-      onClick: () => handleRenameCtx(target.path, target.name),
-    });
-
-    items.push({
-      label: "Delete",
-      icon: "🗑️",
-      shortcut: isMac ? "⌘⌫" : "Delete",
-      onClick: () =>
-        handleDeleteCtx(
-          target.path,
-          target.name,
-          target.isDirectory,
-          target.skillId,
-        ),
-    });
-
-    return items;
-  };
-
-  // ── Scope label ─────────────────────────────────
+  // ── Scope badge label ───────────────────────────
 
   const scopeLabel = (scope: SkillScope) => {
     switch (scope) {
@@ -374,6 +270,21 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         return "C";
       case "project":
         return "P";
+      default:
+        return "?";
+    }
+  };
+
+  const scopeTitle = (scope: SkillScope) => {
+    switch (scope) {
+      case "seren":
+        return "Seren scope";
+      case "claude":
+        return "Claude scope";
+      case "project":
+        return "Project scope";
+      default:
+        return scope;
     }
   };
 
@@ -381,24 +292,44 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   return (
     <aside
-      class="w-[var(--sidebar-width)] min-w-[var(--sidebar-width)] flex flex-col bg-surface-1 border-r border-border transition-all duration-200 overflow-hidden"
-      classList={{ "w-0 min-w-0 opacity-0 border-r-0": props.collapsed }}
+      class="flex flex-col bg-surface-1 transition-all duration-200 overflow-hidden h-full"
+      classList={{
+        "w-[var(--sidebar-width)] min-w-[var(--sidebar-width)] border-r border-border":
+          !props.panelMode,
+        "w-full min-w-0": !!props.panelMode,
+        "w-0 min-w-0 opacity-0 border-r-0":
+          !props.panelMode && !!props.collapsed,
+      }}
     >
       {/* Header */}
-      <div class="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
-        <span class="text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-          Skills
-        </span>
-        <div class="flex items-center gap-0.5">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+        <div class="flex items-center gap-2">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            role="img"
+            aria-label="Skills"
+          >
+            <path
+              d="M8 2L9.5 6H14L10.5 8.5L12 13L8 10L4 13L5.5 8.5L2 6H6.5L8 2Z"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span class="text-sm font-semibold text-foreground">Skills</span>
+        </div>
+        <div class="flex items-center gap-1">
           <button
             type="button"
-            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
-            onClick={() => setShowCreateDialog(true)}
-            title="Create skill"
+            class="flex items-center gap-1 px-2 py-1 bg-transparent border border-border rounded-md text-[12px] text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
+            onClick={() => setShowCreateDialog((v) => !v)}
           >
             <svg
-              width="14"
-              height="14"
+              width="12"
+              height="12"
               viewBox="0 0 16 16"
               fill="none"
               role="img"
@@ -411,62 +342,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                 stroke-linecap="round"
               />
             </svg>
+            Create
           </button>
           <button
             type="button"
-            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
-            onClick={handleUpload}
-            title="Upload skill"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              role="img"
-              aria-label="Upload"
-            >
-              <path
-                d="M8 2v8M4 6l4-4 4 4M3 12h10"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
-            onClick={handleDownload}
-            disabled={
-              !skillsStore.selected ||
-              !("scope" in (skillsStore.selected || {}))
-            }
-            title="Download skill"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              role="img"
-              aria-label="Download"
-            >
-              <path
-                d="M8 2v8M4 6l4 4 4-4M3 12h10"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+            class="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
             onClick={() => skillsStore.refresh()}
-            disabled={skillsStore.isLoading}
             title="Refresh skills"
           >
             <svg
@@ -478,15 +359,15 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
               aria-label="Refresh"
             >
               <path
-                d="M2.5 8a5.5 5.5 0 019.3-4M13.5 8a5.5 5.5 0 01-9.3 4"
+                d="M2 8a6 6 0 1011.5 2.5"
                 stroke="currentColor"
-                stroke-width="1.2"
+                stroke-width="1.3"
                 stroke-linecap="round"
               />
               <path
-                d="M12 1v3h-3M4 12v3h3"
+                d="M2 3v5h5"
                 stroke="currentColor"
-                stroke-width="1.2"
+                stroke-width="1.3"
                 stroke-linecap="round"
                 stroke-linejoin="round"
               />
@@ -495,12 +376,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         </div>
       </div>
 
-      {/* Create Skill dialog */}
+      {/* Create dialog */}
       <Show when={showCreateDialog()}>
-        <div class="px-2.5 py-2 border-b border-border flex flex-col gap-1.5">
+        <div class="px-4 py-3 border-b border-border bg-surface-2/50">
           <input
-            class="w-full px-2 py-1.5 text-[13px] bg-surface-2 border border-border-hover rounded-[5px] text-foreground outline-none transition-colors duration-150 placeholder:text-muted-foreground focus:border-primary"
             type="text"
+            class="w-full px-3 py-1.5 bg-surface-1 border border-border rounded-md text-[13px] text-foreground placeholder-muted-foreground outline-none focus:border-primary"
             placeholder="Skill name (e.g. lead-finder)"
             value={newSkillName()}
             onInput={(e) => setNewSkillName(e.currentTarget.value)}
@@ -510,10 +391,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
             }}
             autofocus
           />
-          <div class="flex gap-1">
+          <div class="flex items-center gap-2 mt-2">
             <button
               type="button"
-              class="flex-1 px-2 py-1 text-xs font-medium border border-border-hover rounded-[5px] bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border/80 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed bg-primary/[0.12] text-primary border-primary hover:bg-primary/20"
+              class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
               onClick={handleCreateSkill}
               disabled={!newSkillName().trim()}
             >
@@ -521,7 +402,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
             </button>
             <button
               type="button"
-              class="flex-1 px-2 py-1 text-xs font-medium border border-border-hover rounded-[5px] bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border/80 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              class="px-3 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
               onClick={() => {
                 setShowCreateDialog(false);
                 setNewSkillName("");
@@ -533,291 +414,485 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         </div>
       </Show>
 
-      {/* Installed skills with folder trees */}
-      <div class="flex-1 overflow-y-auto py-1 min-h-0">
+      {/* Search */}
+      <div class="px-4 py-2 border-b border-border shrink-0">
+        <div class="relative">
+          <svg
+            class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            width="13"
+            height="13"
+            viewBox="0 0 16 16"
+            fill="none"
+            role="img"
+            aria-label="Search"
+          >
+            <circle
+              cx="7"
+              cy="7"
+              r="4.5"
+              stroke="currentColor"
+              stroke-width="1.3"
+            />
+            <path
+              d="M10.5 10.5L14 14"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linecap="round"
+            />
+          </svg>
+          <input
+            type="text"
+            class="w-full pl-8 pr-3 py-1.5 bg-surface-2 border border-transparent rounded-md text-[13px] text-foreground placeholder-muted-foreground outline-none focus:border-primary/50 transition-colors"
+            placeholder="Search skills..."
+            value={searchQuery()}
+            onInput={(e) => {
+              setSearchQuery(e.currentTarget.value);
+              setExpandedSkillId(null);
+              setDetailContent(null);
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Tab switcher */}
+      <div class="flex px-4 py-2 gap-0 shrink-0">
+        <button
+          type="button"
+          class="flex-1 py-1.5 text-[12px] font-medium rounded-l-md border border-border transition-colors cursor-pointer"
+          classList={{
+            "bg-primary/[0.12] text-foreground border-primary/30":
+              activeTab() === "installed",
+            "bg-transparent text-muted-foreground hover:bg-surface-2":
+              activeTab() !== "installed",
+          }}
+          onClick={() => setActiveTab("installed")}
+        >
+          Installed ({skillsStore.installed.length})
+        </button>
+        <button
+          type="button"
+          class="flex-1 py-1.5 text-[12px] font-medium rounded-r-md border border-l-0 border-border transition-colors cursor-pointer"
+          classList={{
+            "bg-primary/[0.12] text-foreground border-primary/30":
+              activeTab() === "browse",
+            "bg-transparent text-muted-foreground hover:bg-surface-2":
+              activeTab() !== "browse",
+          }}
+          onClick={() => setActiveTab("browse")}
+        >
+          Browse ({skillsStore.available.length})
+        </button>
+      </div>
+
+      {/* Content area */}
+      <div class="flex-1 overflow-y-auto">
+        {/* Loading */}
         <Show when={skillsStore.isLoading}>
-          <div class="p-4 text-center text-xs text-muted-foreground opacity-50">
+          <div class="flex items-center justify-center py-8 text-muted-foreground text-[13px]">
             Loading skills...
           </div>
         </Show>
 
-        <Show
-          when={!skillsStore.isLoading && skillsStore.installed.length === 0}
-        >
-          <div class="px-4 py-6 text-center text-[13px] text-muted-foreground opacity-60 leading-relaxed">
-            No skills installed yet. Upload a SKILL.md or search for available
-            skills below.
-          </div>
-        </Show>
-
-        <Show when={!skillsStore.isLoading && skillsStore.installed.length > 0}>
-          <For each={skillsStore.installed}>
-            {(skill) => (
-              <div class="mb-px">
-                <button
-                  type="button"
-                  class="flex items-center gap-1 w-full px-2 py-1.5 pl-2.5 bg-transparent border-none text-foreground text-[13px] cursor-pointer text-left transition-colors duration-100 hover:bg-border-subtle"
-                  classList={{
-                    "bg-primary/[0.08]": skillsStore.selectedId === skill.id,
-                  }}
-                  onClick={() => {
-                    handleSkillSelect(skill);
-                    toggleSkill(skill);
-                  }}
-                  onContextMenu={(e) => {
-                    const skillDir = skill.path.replace(/\/SKILL\.md$/, "");
-                    handleContextMenu(e, skillDir, skill.name, true, skill.id);
-                  }}
-                >
-                  {/* Chevron */}
-                  <svg
-                    class="w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform duration-150"
-                    classList={{
-                      "rotate-90": expandedSkills().has(skill.id),
-                    }}
-                    width="14"
-                    height="14"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    role="img"
-                    aria-label="Expand"
-                  >
-                    <path
-                      d="M6 4l4 4-4 4"
-                      stroke="currentColor"
-                      stroke-width="1.2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                  {/* Folder icon */}
-                  <svg
-                    class="shrink-0 text-primary opacity-70"
-                    width="14"
-                    height="14"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    role="img"
-                    aria-label="Skill folder"
-                  >
-                    <path
-                      d="M2 4.5A1.5 1.5 0 013.5 3H6l1.5 2h5A1.5 1.5 0 0114 6.5v5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 11.5v-7z"
-                      stroke="currentColor"
-                      stroke-width="1.2"
-                    />
-                  </svg>
-                  <span class="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium">
-                    {skill.name}
-                  </span>
-                  <span class="text-[10px] px-1 py-px rounded-[3px] bg-border text-muted-foreground shrink-0">
-                    {scopeLabel(skill.scope)}
-                  </span>
-                  <span
-                    class="w-1.5 h-1.5 rounded-full shrink-0"
-                    classList={{
-                      "bg-success": skillsStore.isEnabled(skill.id),
-                      "bg-muted-foreground opacity-30": !skillsStore.isEnabled(
-                        skill.id,
-                      ),
-                    }}
-                  />
-                </button>
-
-                {/* Expanded folder tree */}
-                <Show when={expandedSkills().has(skill.id)}>
-                  <div class="pl-[18px]">
-                    <Show
-                      when={skillChildren()[skill.id]?.length}
-                      fallback={
-                        <div class="p-4 text-center text-xs text-muted-foreground opacity-50">
-                          Loading...
-                        </div>
-                      }
+        {/* Installed tab */}
+        <Show when={!skillsStore.isLoading && activeTab() === "installed"}>
+          <Show
+            when={filteredInstalled().length > 0}
+            fallback={
+              <div class="px-4 py-8 text-center text-[13px] text-muted-foreground">
+                {searchQuery() ? "No matching skills" : "No skills installed"}
+              </div>
+            }
+          >
+            <div class="py-1">
+              <For each={filteredInstalled()}>
+                {(skill) => (
+                  <div class="border-b border-border/50 last:border-b-0">
+                    {/* Card */}
+                    <div
+                      class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50"
+                      classList={{
+                        "bg-surface-2/30": expandedSkillId() === skill.id,
+                      }}
+                      onClick={() => toggleDetail(skill.id)}
                     >
-                      <For each={skillChildren()[skill.id]}>
-                        {(entry) => (
-                          <button
-                            type="button"
-                            class="flex items-center gap-1 w-full px-2 py-[3px] pl-1.5 bg-transparent border-none text-muted-foreground text-xs cursor-pointer text-left transition-all duration-100 hover:bg-border-subtle hover:text-foreground"
-                            classList={{
-                              "text-foreground font-medium": entry.is_directory,
-                            }}
-                            onClick={() => {
-                              if (!entry.is_directory) {
-                                handleFileClick(entry.path);
-                              }
-                            }}
-                            onContextMenu={(e) =>
-                              handleContextMenu(
-                                e,
-                                entry.path,
-                                entry.name,
-                                entry.is_directory,
-                              )
-                            }
+                      {/* Toggle */}
+                      <button
+                        type="button"
+                        class="relative w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 mt-0.5"
+                        classList={{
+                          "bg-success": skillsStore.isEnabled(skill.id),
+                          "bg-muted-foreground/30": !skillsStore.isEnabled(
+                            skill.id,
+                          ),
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          skillsStore.toggleEnabled(skill.id);
+                        }}
+                        role="switch"
+                        aria-checked={skillsStore.isEnabled(skill.id)}
+                        aria-label={
+                          skillsStore.isEnabled(skill.id)
+                            ? "Disable skill"
+                            : "Enable skill"
+                        }
+                      >
+                        <span
+                          class="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform duration-200"
+                          classList={{
+                            "left-[16px]": skillsStore.isEnabled(skill.id),
+                            "left-[2px]": !skillsStore.isEnabled(skill.id),
+                          }}
+                        />
+                      </button>
+
+                      {/* Info */}
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                          <span class="text-[13px] font-medium text-foreground truncate">
+                            {skill.name}
+                          </span>
+                          <span
+                            class="shrink-0 px-1 py-0 text-[10px] font-semibold rounded bg-surface-3 text-muted-foreground"
+                            title={scopeTitle(skill.scope)}
                           >
-                            <Show
-                              when={entry.is_directory}
-                              fallback={
-                                <svg
-                                  class="w-3.5 h-3.5 shrink-0 opacity-60"
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 16 16"
-                                  fill="none"
-                                  role="img"
-                                  aria-label="File"
-                                >
-                                  <path
-                                    d="M4 2h5l3 3v9H4V2z"
-                                    stroke="currentColor"
-                                    stroke-width="1.2"
-                                  />
-                                  <path
-                                    d="M9 2v3h3"
-                                    stroke="currentColor"
-                                    stroke-width="1.2"
-                                  />
-                                </svg>
-                              }
+                            {scopeLabel(skill.scope)}
+                          </span>
+                        </div>
+                        <Show when={skill.description}>
+                          <p class="m-0 mt-0.5 text-[12px] text-muted-foreground truncate">
+                            {skill.description}
+                          </p>
+                        </Show>
+                        <Show when={skill.version || skill.author}>
+                          <p class="m-0 mt-0.5 text-[11px] text-muted-foreground/60">
+                            {skill.author}
+                            {skill.author && skill.version ? " · " : ""}
+                            {skill.version ? `v${skill.version}` : ""}
+                          </p>
+                        </Show>
+                      </div>
+
+                      {/* Overflow menu */}
+                      <div class="relative shrink-0">
+                        <button
+                          type="button"
+                          class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-colors hover:bg-surface-3 hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOverflowMenuId(
+                              overflowMenuId() === skill.id ? null : skill.id,
+                            );
+                          }}
+                          aria-label="Skill actions"
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            role="img"
+                            aria-label="More"
+                          >
+                            <circle cx="8" cy="4" r="1" fill="currentColor" />
+                            <circle cx="8" cy="8" r="1" fill="currentColor" />
+                            <circle cx="8" cy="12" r="1" fill="currentColor" />
+                          </svg>
+                        </button>
+                        <Show when={overflowMenuId() === skill.id}>
+                          <div class="absolute right-0 top-7 min-w-[160px] bg-surface-2 border border-border rounded-lg shadow-[var(--shadow-lg)] z-50 py-1 animate-[fadeIn_100ms_ease]">
+                            <button
+                              type="button"
+                              class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOverflowMenuId(null);
+                                toggleDetail(skill.id);
+                              }}
                             >
-                              <svg
-                                class="w-3.5 h-3.5 shrink-0 opacity-60"
-                                width="14"
-                                height="14"
-                                viewBox="0 0 16 16"
-                                fill="none"
-                                role="img"
-                                aria-label="Directory"
-                              >
-                                <path
-                                  d="M2 4.5A1.5 1.5 0 013.5 3H6l1.5 2h5A1.5 1.5 0 0114 6.5v5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 11.5v-7z"
-                                  stroke="currentColor"
-                                  stroke-width="1.2"
-                                />
-                              </svg>
-                            </Show>
-                            <span class="overflow-hidden text-ellipsis whitespace-nowrap">
-                              {entry.name}
-                            </span>
-                          </button>
-                        )}
-                      </For>
+                              View Details
+                            </button>
+                            <button
+                              type="button"
+                              class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOverflowMenuId(null);
+                                handleEditInEditor(skill.path);
+                              }}
+                            >
+                              Edit in Editor
+                            </button>
+                            <button
+                              type="button"
+                              class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-destructive cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOverflowMenuId(null);
+                                handleUninstall(skill);
+                              }}
+                            >
+                              Uninstall
+                            </button>
+                          </div>
+                        </Show>
+                      </div>
+                    </div>
+
+                    {/* Detail accordion */}
+                    <Show when={expandedSkillId() === skill.id}>
+                      <div class="px-4 pb-3 bg-surface-2/20 border-t border-border/30">
+                        <div class="pt-2.5">
+                          {/* Tags */}
+                          <Show when={skill.tags.length > 0}>
+                            <div class="flex flex-wrap gap-1 mb-2">
+                              <For each={skill.tags}>
+                                {(tag) => (
+                                  <span class="px-1.5 py-0.5 bg-surface-3 rounded text-[10px] text-muted-foreground">
+                                    {tag}
+                                  </span>
+                                )}
+                              </For>
+                            </div>
+                          </Show>
+
+                          {/* Content preview */}
+                          <Show when={detailLoading()}>
+                            <div class="py-3 text-[12px] text-muted-foreground">
+                              Loading content...
+                            </div>
+                          </Show>
+                          <Show when={!detailLoading() && detailContent()}>
+                            <pre class="m-0 max-h-[200px] overflow-y-auto p-2.5 bg-surface-1 border border-border rounded-md text-[11px] text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed">
+                              {detailContent()}
+                            </pre>
+                          </Show>
+
+                          {/* Actions */}
+                          <div class="flex items-center gap-2 mt-2.5">
+                            <button
+                              type="button"
+                              class="px-3 py-1 bg-transparent border border-destructive/40 text-destructive rounded-md text-[12px] cursor-pointer transition-colors hover:bg-destructive/10 disabled:opacity-40"
+                              onClick={() => handleUninstall(skill)}
+                              disabled={actionInProgress() === skill.id}
+                            >
+                              {actionInProgress() === skill.id
+                                ? "Removing..."
+                                : "Uninstall"}
+                            </button>
+                            <button
+                              type="button"
+                              class="px-3 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[12px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
+                              onClick={() => handleEditInEditor(skill.path)}
+                            >
+                              Edit in Editor
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </Show>
                   </div>
-                </Show>
+                )}
+              </For>
+            </div>
+          </Show>
+        </Show>
+
+        {/* Browse tab */}
+        <Show when={!skillsStore.isLoading && activeTab() === "browse"}>
+          <Show
+            when={filteredBrowse().length > 0}
+            fallback={
+              <div class="px-4 py-8 text-center text-[13px] text-muted-foreground">
+                {searchQuery() ? "No matching skills" : "No skills available"}
               </div>
-            )}
-          </For>
+            }
+          >
+            <div class="py-1">
+              <For each={filteredBrowse()}>
+                {(skill) => {
+                  const installed = () => skillsStore.isInstalled(skill.id);
+                  const installing = () => actionInProgress() === skill.id;
+
+                  return (
+                    <div class="border-b border-border/50 last:border-b-0">
+                      {/* Card */}
+                      <div
+                        class="flex items-start gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-surface-2/50"
+                        classList={{
+                          "bg-surface-2/30": expandedSkillId() === skill.id,
+                        }}
+                        onClick={() => toggleDetail(skill.id)}
+                      >
+                        {/* Info */}
+                        <div class="flex-1 min-w-0">
+                          <span class="text-[13px] font-medium text-foreground truncate block">
+                            {skill.name}
+                          </span>
+                          <Show when={skill.description}>
+                            <p class="m-0 mt-0.5 text-[12px] text-muted-foreground truncate">
+                              {skill.description}
+                            </p>
+                          </Show>
+                          <div class="flex items-center gap-1.5 mt-0.5">
+                            <Show when={skill.author || skill.source}>
+                              <span class="text-[11px] text-muted-foreground/60">
+                                {skill.author || skill.source}
+                              </span>
+                            </Show>
+                            <Show when={skill.tags.length > 0}>
+                              <span class="text-[11px] text-muted-foreground/40">
+                                {skill.tags.slice(0, 3).join(", ")}
+                              </span>
+                            </Show>
+                          </div>
+                        </div>
+
+                        {/* Install button */}
+                        <div class="shrink-0 mt-0.5">
+                          <Show
+                            when={!installed()}
+                            fallback={
+                              <span class="px-2 py-1 text-[11px] text-muted-foreground bg-surface-3 rounded">
+                                Installed
+                              </span>
+                            }
+                          >
+                            <button
+                              type="button"
+                              class="px-2.5 py-1 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleInstall(skill);
+                              }}
+                              disabled={installing()}
+                            >
+                              {installing() ? "Installing..." : "Install"}
+                            </button>
+                          </Show>
+                        </div>
+                      </div>
+
+                      {/* Detail accordion */}
+                      <Show when={expandedSkillId() === skill.id}>
+                        <div class="px-4 pb-3 bg-surface-2/20 border-t border-border/30">
+                          <div class="pt-2.5">
+                            {/* Tags */}
+                            <Show when={skill.tags.length > 0}>
+                              <div class="flex flex-wrap gap-1 mb-2">
+                                <For each={skill.tags}>
+                                  {(tag) => (
+                                    <span class="px-1.5 py-0.5 bg-surface-3 rounded text-[10px] text-muted-foreground">
+                                      {tag}
+                                    </span>
+                                  )}
+                                </For>
+                              </div>
+                            </Show>
+
+                            {/* Metadata */}
+                            <div class="flex items-center gap-3 mb-2 text-[11px] text-muted-foreground/60">
+                              <Show when={skill.author}>
+                                <span>Author: {skill.author}</span>
+                              </Show>
+                              <Show when={skill.version}>
+                                <span>v{skill.version}</span>
+                              </Show>
+                              <Show when={skill.source}>
+                                <span>Source: {skill.source}</span>
+                              </Show>
+                            </div>
+
+                            {/* Content preview */}
+                            <Show when={detailLoading()}>
+                              <div class="py-3 text-[12px] text-muted-foreground">
+                                Loading content...
+                              </div>
+                            </Show>
+                            <Show when={!detailLoading() && detailContent()}>
+                              <pre class="m-0 max-h-[200px] overflow-y-auto p-2.5 bg-surface-1 border border-border rounded-md text-[11px] text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed">
+                                {detailContent()}
+                              </pre>
+                            </Show>
+
+                            {/* Install action */}
+                            <Show when={!installed()}>
+                              <div class="mt-2.5">
+                                <button
+                                  type="button"
+                                  class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-[12px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40"
+                                  onClick={() => handleInstall(skill)}
+                                  disabled={installing()}
+                                >
+                                  {installing()
+                                    ? "Installing..."
+                                    : "Install to Seren"}
+                                </button>
+                              </div>
+                            </Show>
+                          </div>
+                        </div>
+                      </Show>
+                    </div>
+                  );
+                }}
+              </For>
+            </div>
+          </Show>
         </Show>
       </div>
 
-      {/* Search section */}
-      <div class="shrink-0 border-t border-border px-2.5 py-2">
-        <input
-          class="w-full px-2 py-1.5 text-[13px] bg-surface-2 border border-border-hover rounded-[5px] text-foreground outline-none transition-colors duration-150 placeholder:text-muted-foreground focus:border-primary"
-          type="text"
-          placeholder="Search skills..."
-          value={searchQuery()}
-          onInput={(e) => setSearchQuery(e.currentTarget.value)}
-        />
-
-        <div class="flex gap-0 mt-1.5 rounded-[5px] overflow-hidden border border-border-hover">
-          <button
-            type="button"
-            class="flex-1 py-1 text-xs font-medium text-center border-none cursor-pointer bg-transparent text-muted-foreground transition-all duration-100 hover:bg-border/80"
-            classList={{
-              "bg-primary/[0.12] text-foreground": searchTab() === "installed",
-            }}
-            onClick={() => setSearchTab("installed")}
-          >
-            Installed
-          </button>
-          <button
-            type="button"
-            class="flex-1 py-1 text-xs font-medium text-center border-none cursor-pointer bg-transparent text-muted-foreground transition-all duration-100 hover:bg-border/80"
-            classList={{
-              "bg-primary/[0.12] text-foreground": searchTab() === "available",
-            }}
-            onClick={() => setSearchTab("available")}
-          >
-            Available
-          </button>
-        </div>
-
-        <Show when={searchQuery() && searchResults().length > 0}>
-          <div class="max-h-[160px] overflow-y-auto mt-1.5">
-            <For each={searchResults()}>
-              {(skill) => (
-                <button
-                  type="button"
-                  class="flex flex-col gap-px w-full px-2 py-1.5 bg-transparent border-none rounded text-foreground text-[13px] cursor-pointer text-left transition-colors duration-100 hover:bg-border/80"
-                  onClick={() => {
-                    if (searchTab() === "available") {
-                      handleSearchInstall(skill);
-                    } else {
-                      skillsStore.setSelected(skill.id);
-                    }
-                  }}
-                >
-                  <span class="font-medium overflow-hidden text-ellipsis whitespace-nowrap">
-                    {skill.name}
-                  </span>
-                  <span class="text-[11px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
-                    {skill.description}
-                  </span>
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
-      </div>
-
-      {/* Collapsible File Explorer */}
-      <div class="shrink-0 border-t border-border">
-        <button
-          type="button"
-          class="flex items-center gap-1.5 w-full px-3 py-2 bg-transparent border-none text-muted-foreground text-xs font-semibold uppercase tracking-[0.04em] cursor-pointer transition-colors duration-100 hover:bg-border-subtle"
-          onClick={() => setShowFiles((v) => !v)}
+      {/* Footer: Install from URL */}
+      <div class="px-4 py-2.5 border-t border-border shrink-0">
+        <Show
+          when={showUrlDialog()}
+          fallback={
+            <button
+              type="button"
+              class="w-full text-left text-[12px] text-muted-foreground bg-transparent border-none cursor-pointer transition-colors hover:text-foreground"
+              onClick={() => setShowUrlDialog(true)}
+            >
+              Install from URL...
+            </button>
+          }
         >
-          <svg
-            class="w-3 h-3 transition-transform duration-150"
-            classList={{ "rotate-90": showFiles() }}
-            width="12"
-            height="12"
-            viewBox="0 0 16 16"
-            fill="none"
-            role="img"
-            aria-label="Toggle files"
-          >
-            <path
-              d="M6 4l4 4-4 4"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+          <div class="flex items-center gap-2">
+            <input
+              type="text"
+              class="flex-1 px-2.5 py-1.5 bg-surface-2 border border-border rounded-md text-[12px] text-foreground placeholder-muted-foreground outline-none focus:border-primary/50"
+              placeholder="https://raw.githubusercontent.com/..."
+              value={installUrl()}
+              onInput={(e) => setInstallUrl(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleInstallFromUrl();
+                if (e.key === "Escape") {
+                  setShowUrlDialog(false);
+                  setInstallUrl("");
+                }
+              }}
+              autofocus
             />
-          </svg>
-          Files
-        </button>
-        <Show when={showFiles()}>
-          <div class="max-h-[300px] overflow-y-auto">
-            <FileExplorer />
+            <button
+              type="button"
+              class="px-2.5 py-1.5 bg-primary text-primary-foreground rounded-md text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80 disabled:opacity-40 shrink-0"
+              onClick={handleInstallFromUrl}
+              disabled={!installUrl().trim() || urlInstalling()}
+            >
+              {urlInstalling() ? "..." : "Install"}
+            </button>
+            <button
+              type="button"
+              class="px-2 py-1.5 bg-transparent border-none text-muted-foreground text-[11px] cursor-pointer hover:text-foreground shrink-0"
+              onClick={() => {
+                setShowUrlDialog(false);
+                setInstallUrl("");
+              }}
+            >
+              Cancel
+            </button>
           </div>
         </Show>
       </div>
-
-      {/* Context menu */}
-      <Show when={ctxMenu()}>
-        {(menu) => (
-          <ContextMenu
-            items={getCtxMenuItems(menu())}
-            x={menu().x}
-            y={menu().y}
-            onClose={() => setCtxMenu(null)}
-          />
-        )}
-      </Show>
     </aside>
   );
 };
