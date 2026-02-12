@@ -194,9 +194,10 @@ fn auth_error_message(agent_type: AgentType) -> String {
     }
 }
 
-/// Maximum time to wait for an agent prompt to produce any response (2 minutes).
+/// Maximum time to wait for an agent prompt to produce any response (5 minutes).
 /// If the agent process is hung or the API is unreachable, this prevents infinite waits.
-const PROMPT_TIMEOUT_SECS: u64 = 120;
+/// Increased from 120s to allow complex operations like deep reasoning, refactoring, and multi-step tool execution.
+const PROMPT_TIMEOUT_SECS: u64 = 300;
 
 /// Debounce window: suppress duplicate login launches within this many seconds.
 const LOGIN_DEBOUNCE_SECS: i64 = 15;
