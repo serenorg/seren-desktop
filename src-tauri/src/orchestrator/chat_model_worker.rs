@@ -27,6 +27,15 @@ const CONNECT_TIMEOUT_SECS: u64 = 30;
 /// Timeout for waiting on frontend tool execution (5 minutes).
 const TOOL_EXECUTION_TIMEOUT_SECS: u64 = 300;
 
+/// Maximum size (in bytes) of a single tool result when appended to the LLM
+/// conversation context.  Results larger than this are truncated to prevent the
+/// accumulated messages payload from growing large enough to cause upstream
+/// Gateway / provider timeouts (HTTP 408).
+///
+/// This does NOT affect the user-facing display — full results are still emitted
+/// via `WorkerEvent::ToolResult`.
+const MAX_TOOL_RESULT_CONTEXT_BYTES: usize = 30_000;
+
 // =============================================================================
 // Types for SSE Parsing and Tool Execution
 // =============================================================================
@@ -680,6 +689,38 @@ impl ChatModelWorker {
     // Tool Execution
     // =========================================================================
 
+    /// Truncate a tool result for the LLM conversation context.
+    ///
+    /// Large tool results (e.g. web page fetches) accumulate across tool rounds,
+    /// bloating the messages payload and causing upstream 408 timeouts.  This
+    /// preserves a UTF-8-safe prefix and appends a truncation notice.
+    fn truncate_for_context(content: &str, tool_name: &str) -> String {
+        if content.len() <= MAX_TOOL_RESULT_CONTEXT_BYTES {
+            return content.to_string();
+        }
+
+        // Find a valid UTF-8 boundary near the limit
+        let mut end = MAX_TOOL_RESULT_CONTEXT_BYTES;
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        log::info!(
+            "[ChatModelWorker] Truncating {} result from {} to {} bytes for LLM context",
+            tool_name,
+            content.len(),
+            end,
+        );
+
+        let mut truncated = content[..end].to_string();
+        truncated.push_str(&format!(
+            "\n\n[Content truncated from {} to {} bytes. The full result was shown to the user.]",
+            content.len(),
+            end,
+        ));
+        truncated
+    }
+
     /// Check if a tool name refers to a locally-executable tool.
     /// Non-local tools (gateway__, mcp__, openclaw__) are routed to the frontend.
     fn is_local_tool(name: &str) -> bool {
@@ -1091,11 +1132,16 @@ impl Worker for ChatModelWorker {
                             })
                             .await;
 
+                        // Truncate tool result for LLM context to prevent
+                        // unbounded payload growth that causes upstream 408s.
+                        let context_content =
+                            Self::truncate_for_context(&result_content, &tc.name);
+
                         // Add tool result message for the next API call
                         messages.push(serde_json::json!({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": result_content
+                            "content": context_content
                         }));
                     }
                 }
