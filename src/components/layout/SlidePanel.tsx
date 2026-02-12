@@ -7,6 +7,7 @@ import "./SlidePanel.css";
 interface SlidePanelProps {
   open: boolean;
   onClose: () => void;
+  wide?: boolean;
   children: JSX.Element;
 }
 
@@ -15,7 +16,10 @@ export const SlidePanel: Component<SlidePanelProps> = (props) => {
     <Show when={props.open}>
       <div class="slide-panel">
         <div class="slide-panel__backdrop" onClick={props.onClose} />
-        <div class="slide-panel__content">
+        <div
+          class="slide-panel__content"
+          classList={{ "slide-panel__content--wide": props.wide }}
+        >
           <button
             class="slide-panel__close"
             onClick={props.onClose}

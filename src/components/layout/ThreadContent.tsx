@@ -1,6 +1,7 @@
 // ABOUTME: Routes to the correct content view based on the active thread type.
 // ABOUTME: Shows ChatContent for chat threads, AgentChat for agent threads, or empty state with remote sessions.
 
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
   createSignal,
@@ -11,8 +12,9 @@ import {
 } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
+import { ThreadTabBar } from "@/components/layout/ThreadTabBar";
 import { acpStore } from "@/stores/acp.store";
-import { fileTreeState } from "@/stores/fileTree";
+import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { threadStore } from "@/stores/thread.store";
 
 interface ThreadContentProps {
@@ -22,20 +24,30 @@ interface ThreadContentProps {
 export const ThreadContent: Component<ThreadContentProps> = (props) => {
   return (
     <div class="thread-content">
-      <Switch fallback={<EmptyState />}>
-        <Match when={threadStore.activeThreadKind === "chat"}>
-          <ChatContent onSignInClick={props.onSignInClick} />
-        </Match>
-        <Match when={threadStore.activeThreadKind === "agent"}>
-          <AgentChat />
-        </Match>
-      </Switch>
+      <ThreadTabBar />
+      <div class="thread-content__body">
+        <Switch fallback={<EmptyState />}>
+          <Match when={threadStore.activeThreadKind === "chat"}>
+            <ChatContent onSignInClick={props.onSignInClick} />
+          </Match>
+          <Match when={threadStore.activeThreadKind === "agent"}>
+            <AgentChat />
+          </Match>
+        </Switch>
+      </div>
     </div>
   );
 };
 
 function EmptyState() {
   const [showRemote, setShowRemote] = createSignal(false);
+
+  const handleOpenFolder = async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (selected && typeof selected === "string") {
+      setRootPath(selected);
+    }
+  };
 
   const handleBrowse = async () => {
     setShowRemote(true);
@@ -86,7 +98,7 @@ function EmptyState() {
           viewBox="0 0 48 48"
           fill="none"
           role="img"
-          aria-label="No threads"
+          aria-label="No skill selected"
         >
           <rect
             x="4"
@@ -107,10 +119,21 @@ function EmptyState() {
           />
         </svg>
       </div>
-      <h2 class="thread-content__empty-title">No thread selected</h2>
+      <h2 class="thread-content__empty-title">No skill selected</h2>
       <p class="thread-content__empty-desc">
-        Create a new chat or agent thread from the sidebar to get started.
+        Create a new chat or agent skill from the sidebar to get started on
+        building your skills.
       </p>
+
+      <Show when={!fileTreeState.rootPath}>
+        <button
+          type="button"
+          class="thread-content__browse-btn"
+          onClick={handleOpenFolder}
+        >
+          Open Folder
+        </button>
+      </Show>
 
       {/* Remote session browser */}
       <Show

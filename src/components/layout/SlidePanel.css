@@ -24,8 +24,13 @@
   background: var(--surface-1, var(--card));
   border-left: 1px solid var(--border);
   box-shadow: var(--shadow-lg, -8px 0 24px rgba(0, 0, 0, 0.4));
+  overflow-x: hidden;
   overflow-y: auto;
   animation: slideInRight 200ms ease;
+}
+
+.slide-panel__content--wide {
+  width: 720px;
 }
 
 .slide-panel__close {

@@ -1,5 +1,5 @@
-// ABOUTME: Root layout component with titlebar, thread sidebar, main content, and slide panel.
-// ABOUTME: Replaces the old three-column ResizableLayout with a project-centric thread-based design.
+// ABOUTME: Root layout component with titlebar, skills sidebar, main content, and slide panel.
+// ABOUTME: Skills Explorer in left sidebar, horizontal thread tabs in main content area.
 
 import {
   type Component,
@@ -14,10 +14,10 @@ import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
+import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { shortcuts } from "@/lib/shortcuts";
 import { SlidePanel } from "./SlidePanel";
 import { ThreadContent } from "./ThreadContent";
-import { ThreadSidebar } from "./ThreadSidebar";
 import { Titlebar } from "./Titlebar";
 import "./AppShell.css";
 
@@ -108,13 +108,12 @@ export const AppShell: Component<AppShellProps> = (props) => {
         onSignInClick={handleSignInClick}
         onLogout={props.onLogout}
         onToggleSettings={handleToggleSettings}
+        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+        sidebarCollapsed={sidebarCollapsed()}
       />
 
       <div class="app-shell__body">
-        <ThreadSidebar
-          collapsed={sidebarCollapsed()}
-          onToggle={() => setSidebarCollapsed((v) => !v)}
-        />
+        <SkillsExplorer collapsed={sidebarCollapsed()} />
 
         <main class="app-shell__main">
           <ThreadContent onSignInClick={handleSignInClick} />
@@ -123,6 +122,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
         <SlidePanel
           open={slidePanel() !== null}
           onClose={handleCloseSlidePanel}
+          wide={slidePanel() === "settings"}
         >
           <Switch>
             <Match when={slidePanel() === "settings"}>

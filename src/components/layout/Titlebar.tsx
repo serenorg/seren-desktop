@@ -1,16 +1,19 @@
 // ABOUTME: Compact titlebar with app branding, project folder name, and user actions.
 // ABOUTME: Replaces the old Header component with a cleaner, Codex-inspired design.
 
+import { open } from "@tauri-apps/plugin-dialog";
 import { type Component, Show } from "solid-js";
 import { BalanceDisplay } from "@/components/common/BalanceDisplay";
 import { authStore } from "@/stores/auth.store";
-import { fileTreeState } from "@/stores/fileTree";
+import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { updaterStore } from "@/stores/updater.store";
 
 interface TitlebarProps {
   onSignInClick: () => void;
   onLogout: () => void;
   onToggleSettings: () => void;
+  onToggleSidebar: () => void;
+  sidebarCollapsed: boolean;
 }
 
 export const Titlebar: Component<TitlebarProps> = (props) => {
@@ -20,22 +23,60 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
     return root.split("/").pop() || root;
   };
 
+  const handleOpenFolder = async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (selected && typeof selected === "string") {
+      setRootPath(selected);
+    }
+  };
+
   return (
-    <div class="titlebar" style={{ "-webkit-app-region": "drag" }}>
-      <div class="titlebar__left">
+    <div class="titlebar titlebar--drag">
+      <div class="titlebar__left titlebar--no-drag">
         <span class="titlebar__brand">Seren</span>
+        <button
+          type="button"
+          class="titlebar__btn"
+          onClick={props.onToggleSidebar}
+          title={props.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            role="img"
+            aria-label="Toggle sidebar"
+          >
+            <path
+              d="M3 4h10M3 8h10M3 12h10"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
       </div>
 
       <div class="titlebar__center">
         <Show
           when={folderName()}
-          fallback={<span class="titlebar__no-project">No folder open</span>}
+          fallback={
+            <button
+              type="button"
+              class="titlebar__no-project titlebar__no-project--clickable titlebar--no-drag"
+              onClick={handleOpenFolder}
+              title="Open a project folder"
+            >
+              Open Folder
+            </button>
+          }
         >
           <span class="titlebar__folder">{folderName()}</span>
         </Show>
       </div>
 
-      <div class="titlebar__right" style={{ "-webkit-app-region": "no-drag" }}>
+      <div class="titlebar__right titlebar--no-drag">
         <Show when={updaterStore.state.status === "downloading"}>
           <span class="titlebar__update-badge">Updating...</span>
         </Show>
@@ -45,6 +86,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         </Show>
 
         <button
+          type="button"
           class="titlebar__btn"
           onClick={props.onToggleSettings}
           title="Settings"
@@ -74,6 +116,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           when={authStore.isAuthenticated}
           fallback={
             <button
+              type="button"
               class="titlebar__btn titlebar__btn--sign-in"
               onClick={props.onSignInClick}
             >
@@ -82,6 +125,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           }
         >
           <button
+            type="button"
             class="titlebar__btn"
             onClick={props.onLogout}
             title="Sign Out"
