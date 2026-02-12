@@ -100,9 +100,26 @@ export interface ImageContentBlock {
 }
 
 /**
- * Content block for multimodal messages.
+ * Document content block for PDFs (Anthropic-native format).
+ * Used when sending PDFs through content blocks to Anthropic API.
  */
-export type ContentBlock = TextContentBlock | ImageContentBlock;
+export interface DocumentContentBlock {
+  type: "document";
+  source: {
+    type: "base64";
+    media_type: "application/pdf";
+    data: string; // raw base64 without data URL prefix
+  };
+}
+
+/**
+ * Content block for multimodal messages.
+ * Supports text, images (OpenAI format), and documents (Anthropic format).
+ */
+export type ContentBlock =
+  | TextContentBlock
+  | ImageContentBlock
+  | DocumentContentBlock;
 
 /**
  * File attachment metadata stored with messages.
