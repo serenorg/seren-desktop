@@ -2,11 +2,14 @@
 // ABOUTME: Presents chats and agent sessions as a single sorted thread list filtered by project.
 
 import { createStore } from "solid-js/store";
+import type { InstalledSkill } from "@/lib/skills";
 import { archiveAgentConversation } from "@/lib/tauri-bridge";
 import type { AgentType, SessionStatus } from "@/services/acp";
+import { skills as skillsService } from "@/services/skills";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
+import { skillsStore } from "@/stores/skills.store";
 
 // ============================================================================
 // Types
@@ -35,6 +38,8 @@ export interface ThreadGroup {
 interface ThreadState {
   activeThreadId: string | null;
   activeThreadKind: "chat" | "agent" | null;
+  /** When true, new threads prefer Seren Chat over any available agent. */
+  preferChat: boolean;
 }
 
 // ============================================================================
@@ -44,6 +49,7 @@ interface ThreadState {
 const [state, setState] = createStore<ThreadState>({
   activeThreadId: null,
   activeThreadKind: null,
+  preferChat: false,
 });
 
 // ============================================================================
@@ -67,6 +73,37 @@ function mapSessionStatusToThread(status: SessionStatus): ThreadStatus {
   }
 }
 
+/**
+ * Auto-detect the best available agent.
+ * If preferChat is set, always returns chat.
+ * Otherwise respects `acpStore.selectedAgentType` as the user's preference,
+ * then falls back to availability order: claude-code > codex > chat.
+ */
+function getBestAgent():
+  | { kind: "agent"; agentType: AgentType }
+  | { kind: "chat" } {
+  if (state.preferChat) return { kind: "chat" };
+
+  const agents = acpStore.availableAgents;
+
+  // Prefer the user's selected agent type if available
+  const preferred = agents.find(
+    (a) => a.type === acpStore.selectedAgentType && a.available,
+  );
+  if (preferred) {
+    return { kind: "agent", agentType: preferred.type as AgentType };
+  }
+
+  // Fall back to availability order
+  const claude = agents.find((a) => a.type === "claude-code" && a.available);
+  if (claude) return { kind: "agent", agentType: "claude-code" };
+
+  const codex = agents.find((a) => a.type === "codex" && a.available);
+  if (codex) return { kind: "agent", agentType: "codex" };
+
+  return { kind: "chat" };
+}
+
 // ============================================================================
 // Store
 // ============================================================================
@@ -82,6 +119,14 @@ export const threadStore = {
 
   get activeThreadKind(): "chat" | "agent" | null {
     return state.activeThreadKind;
+  },
+
+  get preferChat(): boolean {
+    return state.preferChat;
+  },
+
+  setPreferChat(prefer: boolean) {
+    setState("preferChat", prefer);
   },
 
   /**
@@ -282,6 +327,35 @@ export const threadStore = {
   },
 
   /**
+   * Create a thread pre-configured with a single skill.
+   * Auto-detects the best agent (claude > codex > chat).
+   * Sets a thread-level skill override so only the chosen skill is active.
+   */
+  async createSkillThread(skill: InstalledSkill): Promise<string | null> {
+    const best = getBestAgent();
+    const cwd = fileTreeState.rootPath;
+    const skillRef = `${skill.scope}:${skill.slug}`;
+
+    if (best.kind === "agent" && cwd) {
+      const threadId = await this.createAgentThread(best.agentType, cwd);
+      if (threadId) {
+        await skillsService.setThreadSkills(cwd, threadId, [skillRef]);
+        await skillsStore.loadThreadSkills(cwd, threadId, true);
+      }
+      return threadId;
+    }
+
+    // Fallback to chat
+    const threadId = await this.createChatThread(skill.name);
+    const projectRoot = cwd || undefined;
+    if (projectRoot) {
+      await skillsService.setThreadSkills(projectRoot, threadId, [skillRef]);
+      await skillsStore.loadThreadSkills(projectRoot, threadId, true);
+    }
+    return threadId;
+  },
+
+  /**
    * Archive a thread.
    */
   async archiveThread(id: string, kind: "chat" | "agent") {
@@ -310,6 +384,10 @@ export const threadStore = {
    * Clear all state (e.g., on logout).
    */
   clear() {
-    setState({ activeThreadId: null, activeThreadKind: null });
+    setState({
+      activeThreadId: null,
+      activeThreadKind: null,
+      preferChat: false,
+    });
   },
 };

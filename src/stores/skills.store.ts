@@ -128,14 +128,6 @@ const [threadSkillsState, setThreadSkillsState] = createStore<
 >({});
 
 /**
- * Per-thread skill overrides. Key: thread ID, Value: array of skill paths.
- * Missing key = use global defaults. Empty array = no skills for that thread.
- */
-const [threadSkillsState, setThreadSkillsState] = createStore<
-  Record<string, string[]>
->({});
-
-/**
  * Skills store with reactive state and actions.
  */
 export const skillsStore = {
@@ -471,80 +463,6 @@ export const skillsStore = {
     return skills.getEnabledSkillsContent(
       this.getThreadSkills(projectRoot, threadId),
     );
-  },
-
-  // --------------------------------------------------------------------------
-  // Per-thread skill overrides
-  // --------------------------------------------------------------------------
-
-  /**
-   * Get the effective skills for a thread.
-   * If the thread has a custom override, returns those skills.
-   * Otherwise falls back to the global enabled skills.
-   */
-  getThreadSkills(threadId: string | null): InstalledSkill[] {
-    if (!threadId) {
-      return this.enabledSkills;
-    }
-    const override = threadSkillsState[threadId];
-    if (!override) {
-      return this.enabledSkills;
-    }
-    const paths = new Set(override);
-    return state.installed.filter((s) => paths.has(s.path));
-  },
-
-  /**
-   * Check if a thread's skills diverge from the global defaults.
-   */
-  hasThreadOverride(threadId: string | null): boolean {
-    if (!threadId) return false;
-    const override = threadSkillsState[threadId];
-    if (!override) return false;
-    const globalPaths = this.enabledSkills.map((s) => s.path);
-    if (override.length !== globalPaths.length) return true;
-    const globalSet = new Set(globalPaths);
-    return override.some((p) => !globalSet.has(p));
-  },
-
-  /**
-   * Toggle a single skill for a specific thread.
-   * On first toggle, copies the current global enabled set as the starting point.
-   */
-  toggleThreadSkill(threadId: string, skillPath: string): void {
-    if (!threadSkillsState[threadId]) {
-      const globalPaths = this.enabledSkills.map((s) => s.path);
-      setThreadSkillsState(threadId, globalPaths);
-    }
-
-    const current = threadSkillsState[threadId];
-    if (current.includes(skillPath)) {
-      setThreadSkillsState(
-        threadId,
-        current.filter((p) => p !== skillPath),
-      );
-    } else {
-      setThreadSkillsState(threadId, [...current, skillPath]);
-    }
-  },
-
-  /**
-   * Clear thread override, reverting to global defaults.
-   */
-  resetThreadSkills(threadId: string): void {
-    setThreadSkillsState((prev) => {
-      const next = { ...prev };
-      delete next[threadId];
-      return next;
-    });
-  },
-
-  /**
-   * Get formatted skill content for a thread's active skills.
-   */
-  async getThreadSkillsContent(threadId: string | null): Promise<string> {
-    const threadSkills = this.getThreadSkills(threadId);
-    return skills.getEnabledSkillsContent(threadSkills);
   },
 
   // --------------------------------------------------------------------------

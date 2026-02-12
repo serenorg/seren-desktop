@@ -1,40 +1,36 @@
-// ABOUTME: Left sidebar with skills search and thread list.
-// ABOUTME: Skills section at top (expanded by default), threads below.
+// ABOUTME: Left sidebar with project header and unified thread list.
+// ABOUTME: Displays all chat and agent threads for the active project, sorted by recency.
 
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
-  createMemo,
   createSignal,
   For,
   onCleanup,
   onMount,
   Show,
 } from "solid-js";
+import type { InstalledSkill } from "@/lib/skills";
+import type { AgentType } from "@/services/acp";
+import { acpStore } from "@/stores/acp.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
-import type { InstalledSkill } from "@/lib/skills/types";
-
-type SkillWithThreadState = InstalledSkill & {
-  isInstalled: boolean;
-  isThreadSkill: boolean;
-};
 
 interface ThreadSidebarProps {
   collapsed: boolean;
   onToggle?: () => void;
-  activePanel?: string | null;
 }
 
 export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
-  const [showNewMenu, setShowNewMenu] = createSignal(false);
-  const [skillsExpanded, setSkillsExpanded] = createSignal(true);
-  const [skillSearchQuery, setSkillSearchQuery] = createSignal("");
+  const [showLauncher, setShowLauncher] = createSignal(false);
+  const [launcherQuery, setLauncherQuery] = createSignal("");
   const [collapsedGroups, setCollapsedGroups] = createSignal<
     Set<string | null>
   >(new Set());
-  let menuRef: HTMLDivElement | undefined;
+  const [spawning, setSpawning] = createSignal(false);
+  let launcherRef: HTMLDivElement | undefined;
+  let searchInputRef: HTMLInputElement | undefined;
 
   const folderName = () => {
     const root = fileTreeState.rootPath;
@@ -42,44 +38,21 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     return root.split("/").pop() || root;
   };
 
-  // Combined and filtered skills list for the active thread
-  const filteredSkills = createMemo(() => {
-    const query = skillSearchQuery().toLowerCase().trim();
-    const threadId = threadStore.activeThread?.id ?? null;
-    const threadSkills = skillsStore.getThreadSkills(threadId);
-    const threadSkillPaths = new Set(threadSkills.map(s => s.path));
-
-    const searchInSkill = (s: InstalledSkill) => {
-      if (!query) return true;
-      return (
-        s.name?.toLowerCase().includes(query) ||
-        s.slug?.toLowerCase().includes(query) ||
-        s.description?.toLowerCase().includes(query) ||
-        s.tags?.some((tag: string) => tag.toLowerCase().includes(query))
-      );
-    };
-
-    // Thread skills (enabled for this thread) - shown as installed
-    const enabledForThread = threadSkills
-      .filter(searchInSkill)
-      .map(s => ({ ...s, isInstalled: true, isThreadSkill: true }));
-
-    // Other installed skills (not enabled for this thread) - shown as available
-    const otherInstalled = skillsStore.installed
-      .filter(s => !threadSkillPaths.has(s.path) && searchInSkill(s))
-      .map(s => ({ ...s, isInstalled: false, isThreadSkill: false }));
-
-    return [...enabledForThread, ...otherInstalled];
-  });
-
   const handleClickOutside = (e: MouseEvent) => {
-    if (showNewMenu() && menuRef && !menuRef.contains(e.target as Node)) {
-      setShowNewMenu(false);
+    if (
+      showLauncher() &&
+      launcherRef &&
+      !launcherRef.contains(e.target as Node)
+    ) {
+      setShowLauncher(false);
+      setLauncherQuery("");
+      setShowAgentPicker(false);
     }
   };
 
   onMount(() => {
     document.addEventListener("mousedown", handleClickOutside);
+    void skillsStore.refreshInstalled();
   });
 
   onCleanup(() => {
@@ -94,46 +67,98 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   };
 
   const handleNewChat = async () => {
-    setShowNewMenu(false);
-    await threadStore.createChatThread();
+    setShowLauncher(false);
+    setLauncherQuery("");
+    setSpawning(true);
+    try {
+      await threadStore.createChatThread();
+    } finally {
+      setSpawning(false);
+    }
   };
 
-  const handleNewAgent = async (agentType: "claude-code" | "codex") => {
-    setShowNewMenu(false);
-    const cwd = fileTreeState.rootPath;
-    if (!cwd) return;
-    await threadStore.createAgentThread(agentType, cwd);
+  const handleSkillThread = async (skill: InstalledSkill) => {
+    setShowLauncher(false);
+    setLauncherQuery("");
+    setSpawning(true);
+    try {
+      await threadStore.createSkillThread(skill);
+    } finally {
+      setSpawning(false);
+    }
+  };
+
+  const openSkillsManager = () => {
+    setShowLauncher(false);
+    setLauncherQuery("");
+    window.dispatchEvent(
+      new CustomEvent("seren:open-panel", { detail: "skills" }),
+    );
+  };
+
+  const toggleLauncher = () => {
+    const opening = !showLauncher();
+    setShowLauncher(opening);
+    setShowAgentPicker(false);
+    if (opening) {
+      setLauncherQuery("");
+      requestAnimationFrame(() => searchInputRef?.focus());
+    }
+  };
+
+  const filteredSkills = () => {
+    const installed = skillsStore.enabledSkills;
+    const q = launcherQuery().toLowerCase().trim();
+    if (!q) return installed;
+    return installed.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        (s.description ?? "").toLowerCase().includes(q) ||
+        s.tags.some((t) => t.toLowerCase().includes(q)),
+    );
+  };
+
+  const showJustChat = () => {
+    const q = launcherQuery().toLowerCase().trim();
+    if (!q) return true;
+    return "just chat".includes(q) || "chat".includes(q);
+  };
+
+  const [showAgentPicker, setShowAgentPicker] = createSignal(false);
+
+  const currentAgentLabel = () => {
+    if (threadStore.preferChat) return "Chat";
+    const agents = acpStore.availableAgents;
+    const selected = agents.find(
+      (a) => a.type === acpStore.selectedAgentType && a.available,
+    );
+    if (selected) return selected.type === "codex" ? "Codex" : "Claude";
+
+    const claude = agents.find((a) => a.type === "claude-code" && a.available);
+    if (claude) return "Claude";
+    const codex = agents.find((a) => a.type === "codex" && a.available);
+    if (codex) return "Codex";
+    return "Chat";
+  };
+
+  const currentAgentIcon = () => {
+    const label = currentAgentLabel();
+    if (label === "Codex") return "\u26A1";
+    if (label === "Claude") return "\u{1F916}";
+    return "\u{1F4AC}";
+  };
+
+  const availableAgentOptions = () =>
+    acpStore.availableAgents.filter((a) => a.available);
+
+  const selectPreferredAgent = (agentType: AgentType) => {
+    threadStore.setPreferChat(false);
+    acpStore.setSelectedAgentType(agentType);
+    setShowAgentPicker(false);
   };
 
   const handleSelectThread = (thread: Thread) => {
     threadStore.selectThread(thread.id, thread.kind);
-  };
-
-  const handleSkillClick = async (skill: SkillWithThreadState) => {
-    const threadId = threadStore.activeThread?.id;
-    if (!threadId) {
-      console.warn("[ThreadSidebar] No active thread to toggle skill");
-      return;
-    }
-
-    // Check if this skill is installed globally
-    const installedSkill = skillsStore.installed.find(s => s.slug === skill.slug);
-
-    if (!installedSkill) {
-      // Skill not installed globally - need to install it first
-      // For now, just log a warning. In the future, we could auto-install or show a modal
-      console.warn("[ThreadSidebar] Skill not installed globally, cannot add to thread:", skill.slug);
-      return;
-    }
-
-    // Toggle the skill for this thread
-    skillsStore.toggleThreadSkill(threadId, installedSkill.path);
-  };
-
-  const handleCreateSkill = async () => {
-    // Create a new chat thread with prompt to create a skill
-    await threadStore.createChatThread();
-    // TODO: Pre-populate with skill creation prompt
   };
 
   const toggleGroup = (projectRoot: string | null) => {
@@ -246,198 +271,328 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </Show>
       </div>
 
-      {/* Skills section */}
-      <div class="shrink-0 border-b border-border">
-        {/* Skills header */}
+      {/* New thread launcher */}
+      <div class="px-3 py-2 relative shrink-0" ref={launcherRef}>
         <button
           type="button"
-          class="flex items-center gap-2 w-full px-3 py-2 bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
-          onClick={() => setSkillsExpanded((v) => !v)}
+          class="flex items-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-lg text-primary text-[13px] font-medium cursor-pointer transition-all duration-150 hover:bg-primary/15 hover:border-primary/25 hover:shadow-[0_0_12px_rgba(56,189,248,0.1)] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait disabled:hover:bg-primary/8"
+          onClick={toggleLauncher}
+          disabled={spawning()}
         >
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 16 16"
-            fill="none"
-            role="img"
-            aria-label="Toggle"
-            class="shrink-0 transition-transform duration-150"
-            classList={{
-              "rotate-0": skillsExpanded(),
-              "-rotate-90": !skillsExpanded(),
-            }}
+          <Show
+            when={!spawning()}
+            fallback={
+              <span class="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+            }
           >
-            <path
-              d="M4 6l4 4 4-4"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="none"
-            role="img"
-            aria-label="Skills"
-          >
-            <path
-              d="M8 2l1.5 3 3.5.5-2.5 2.5.5 3.5L8 10l-3 1.5.5-3.5L3 5.5l3.5-.5L8 2z"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linejoin="round"
-            />
-          </svg>
-          <span class="flex-1 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-            Skills
-          </span>
-          <span class="text-[10px] font-medium text-muted-foreground opacity-60">
-            {filteredSkills().length}
-          </span>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              role="img"
+              aria-label="New thread"
+            >
+              <path
+                d="M8 3v10M3 8h10"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </Show>
+          {spawning() ? "Starting agent..." : "New Thread"}
         </button>
 
-        {/* Skills content (search + list) */}
-        <Show when={skillsExpanded()}>
-          <div class="px-3 pb-2">
-            {/* Search box */}
-            <input
-              type="text"
-              placeholder="Search skills..."
-              value={skillSearchQuery()}
-              onInput={(e) => setSkillSearchQuery(e.currentTarget.value)}
-              class="w-full px-3 py-2 text-[13px] bg-surface-2 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
+        <Show when={showLauncher()}>
+          <div class="absolute top-[calc(100%-4px)] left-3 right-3 bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] overflow-hidden">
+            {/* Search */}
+            <div class="px-2 pt-2 pb-1.5">
+              <div class="relative">
+                <svg
+                  class="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  role="img"
+                  aria-label="Search"
+                >
+                  <circle
+                    cx="7"
+                    cy="7"
+                    r="4.5"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                  />
+                  <path
+                    d="M10.5 10.5L14 14"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  class="w-full pl-7 pr-2.5 py-1.5 bg-surface-1 border border-border/60 rounded-md text-[12px] text-foreground placeholder-muted-foreground outline-none focus:border-primary/50 transition-colors"
+                  placeholder="Search skills..."
+                  value={launcherQuery()}
+                  onInput={(e) => setLauncherQuery(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setShowLauncher(false);
+                      setLauncherQuery("");
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Just Chat option */}
+            <div class="px-1 pb-0.5">
+              <Show when={showJustChat()}>
+                <button
+                  type="button"
+                  class="flex items-center gap-2.5 w-full py-2 px-2.5 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3"
+                  onClick={handleNewChat}
+                >
+                  <span class="w-5 h-5 flex items-center justify-center rounded bg-surface-3/80 shrink-0">
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      role="img"
+                      aria-label="Chat"
+                    >
+                      <path
+                        d="M2 4a2 2 0 012-2h8a2 2 0 012 2v5a2 2 0 01-2 2H7l-3 2.5V11H4a2 2 0 01-2-2V4z"
+                        stroke="currentColor"
+                        stroke-width="1.2"
+                      />
+                    </svg>
+                  </span>
+                  <span class="font-medium">Just Chat</span>
+                </button>
+              </Show>
+            </div>
 
             {/* Skills list */}
-            <div class="mt-2 max-h-[300px] overflow-y-auto">
-              <Show
-                when={filteredSkills().length > 0}
-                fallback={
-                  <button
-                    type="button"
-                    class="w-full px-3 py-4 text-[13px] text-center text-muted-foreground bg-surface-2 border border-dashed border-border rounded-md cursor-pointer transition-all duration-100 hover:border-primary hover:text-primary hover:bg-primary/5"
-                    onClick={handleCreateSkill}
-                  >
-                    No skills found.
-                    <br />
-                    <span class="text-primary">Click to create a new skill</span>
-                  </button>
-                }
-              >
+            <Show when={filteredSkills().length > 0}>
+              <div class="border-t border-border/40 mx-2" />
+              <div class="max-h-[220px] overflow-y-auto px-1 py-0.5">
                 <For each={filteredSkills()}>
                   {(skill) => (
                     <button
                       type="button"
-                      class="flex items-start gap-2 w-full px-2.5 py-2 mb-1 bg-transparent border border-transparent rounded-md cursor-pointer text-left transition-all duration-100 hover:bg-surface-2 hover:border-border"
-                      onClick={() => handleSkillClick(skill)}
+                      class="flex items-center gap-2.5 w-full py-2 px-2.5 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                      onClick={() => handleSkillThread(skill)}
                     >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 16 16"
-                        fill={skill.isInstalled ? "currentColor" : "none"}
-                        role="img"
-                        aria-label="Skill"
-                        class="shrink-0 mt-0.5"
-                      >
-                        <path
-                          d="M8 2l1.5 3 3.5.5-2.5 2.5.5 3.5L8 10l-3 1.5.5-3.5L3 5.5l3.5-.5L8 2z"
-                          stroke="currentColor"
-                          stroke-width="1.2"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
+                      <span class="w-5 h-5 flex items-center justify-center rounded bg-primary/10 text-primary shrink-0">
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          role="img"
+                          aria-label="Skill"
+                        >
+                          <path
+                            d="M8 2L9.5 6H14L10.5 8.5L12 13L8 10L4 13L5.5 8.5L2 6H6.5L8 2Z"
+                            stroke="currentColor"
+                            stroke-width="1.2"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
+                      </span>
                       <div class="flex-1 min-w-0">
-                        <div class="text-[13px] font-medium text-foreground truncate">
+                        <span class="block truncate font-medium">
                           {skill.name}
-                        </div>
+                        </span>
                         <Show when={skill.description}>
-                          <div class="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
+                          <span class="block text-[11px] text-muted-foreground truncate">
                             {skill.description}
-                          </div>
+                          </span>
                         </Show>
                       </div>
-                      <Show when={skill.isInstalled}>
-                        <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                          Installed
-                        </span>
-                      </Show>
                     </button>
                   )}
                 </For>
-              </Show>
+              </div>
+            </Show>
+
+            {/* Empty state when searching */}
+            <Show
+              when={
+                filteredSkills().length === 0 &&
+                !showJustChat() &&
+                launcherQuery()
+              }
+            >
+              <div class="px-3 py-4 text-center text-[12px] text-muted-foreground">
+                No matching skills
+              </div>
+            </Show>
+
+            {/* Footer: agent selector + manage skills */}
+            <div class="border-t border-border/40 mx-0 flex items-center">
+              {/* Agent selector */}
+              <div class="relative">
+                <button
+                  type="button"
+                  class="flex items-center gap-1.5 py-2 px-3 bg-transparent border-none text-[12px] text-muted-foreground cursor-pointer transition-colors duration-100 hover:bg-surface-3 hover:text-foreground"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowAgentPicker((v) => !v);
+                  }}
+                  title="Default agent for new threads"
+                >
+                  <span class="text-[12px]">{currentAgentIcon()}</span>
+                  <span>{currentAgentLabel()}</span>
+                  <svg
+                    width="8"
+                    height="8"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    role="img"
+                    aria-label="Change agent"
+                  >
+                    <path
+                      d="M4 6l4 4 4-4"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                <Show when={showAgentPicker()}>
+                  <div class="absolute left-0 bottom-[calc(100%+4px)] min-w-[140px] bg-surface-1 border border-border rounded-lg shadow-lg z-30 py-1 animate-[fadeIn_100ms_ease]">
+                    <For each={availableAgentOptions()}>
+                      {(agent) => (
+                        <button
+                          type="button"
+                          class="flex items-center gap-2 w-full px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                          classList={{
+                            "!text-primary":
+                              !threadStore.preferChat &&
+                              agent.type === acpStore.selectedAgentType,
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            selectPreferredAgent(agent.type as AgentType);
+                          }}
+                        >
+                          <span class="text-[12px]">
+                            {agent.type === "codex" ? "\u26A1" : "\u{1F916}"}
+                          </span>
+                          <span>{agent.name}</span>
+                          <Show
+                            when={
+                              !threadStore.preferChat &&
+                              agent.type === acpStore.selectedAgentType
+                            }
+                          >
+                            <svg
+                              class="ml-auto"
+                              width="12"
+                              height="12"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              role="img"
+                              aria-label="Selected"
+                            >
+                              <path
+                                d="M3 8l3.5 3.5L13 4"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                              />
+                            </svg>
+                          </Show>
+                        </button>
+                      )}
+                    </For>
+                    {/* Seren Chat option */}
+                    <button
+                      type="button"
+                      class="flex items-center gap-2 w-full px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                      classList={{
+                        "!text-primary": threadStore.preferChat,
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        threadStore.setPreferChat(true);
+                        setShowAgentPicker(false);
+                      }}
+                    >
+                      <span class="text-[12px]">{"\u{1F4AC}"}</span>
+                      <span>Seren</span>
+                      <Show when={threadStore.preferChat}>
+                        <svg
+                          class="ml-auto"
+                          width="12"
+                          height="12"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          role="img"
+                          aria-label="Selected"
+                        >
+                          <path
+                            d="M3 8l3.5 3.5L13 4"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
+                      </Show>
+                    </button>
+                  </div>
+                </Show>
+              </div>
+
+              <div class="w-px h-4 bg-border/40" />
+
+              {/* Manage skills */}
+              <button
+                type="button"
+                class="flex items-center gap-1.5 flex-1 py-2 px-3 bg-transparent border-none text-[12px] text-muted-foreground cursor-pointer transition-colors duration-100 hover:bg-surface-3 hover:text-foreground"
+                onClick={openSkillsManager}
+              >
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  role="img"
+                  aria-label="Manage"
+                >
+                  <circle
+                    cx="8"
+                    cy="8"
+                    r="2.5"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                  />
+                  <path
+                    d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                Skills...
+              </button>
             </div>
           </div>
         </Show>
       </div>
 
       {/* Thread list grouped by project */}
-      <div class="px-3 py-1 shrink-0">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground px-2.5 py-1.5">
-          Threads
-        </div>
-      </div>
-
-      {/* New Thread button (moved here, below Threads header) */}
-      <div class="px-3 pb-2 shrink-0">
-        <button
-          type="button"
-          class="flex items-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-lg text-primary text-[13px] font-medium cursor-pointer transition-all duration-150 hover:bg-primary/15 hover:border-primary/25 hover:shadow-[0_0_12px_rgba(56,189,248,0.1)] active:scale-[0.98]"
-          onClick={() => setShowNewMenu((v) => !v)}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="none"
-            role="img"
-            aria-label="New thread"
-          >
-            <path
-              d="M8 3v10M3 8h10"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-            />
-          </svg>
-          New Thread
-        </button>
-
-        <Show when={showNewMenu()}>
-          <div class="absolute left-3 right-3 bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-md animate-[slideDown_150ms_ease] mt-1" ref={menuRef}>
-            <button
-              type="button"
-              class="flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3"
-              onClick={handleNewChat}
-            >
-              <span class="text-sm w-5 text-center">{"\u{1F4AC}"}</span>
-              Chat
-            </button>
-            <button
-              type="button"
-              class="flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 disabled:opacity-40 disabled:cursor-not-allowed"
-              onClick={() => handleNewAgent("claude-code")}
-              disabled={!fileTreeState.rootPath}
-            >
-              <span class="text-sm w-5 text-center">{"\u{1F916}"}</span>
-              Claude Agent
-            </button>
-            <button
-              type="button"
-              class="flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 disabled:opacity-40 disabled:cursor-not-allowed"
-              onClick={() => handleNewAgent("codex")}
-              disabled={!fileTreeState.rootPath}
-            >
-              <span class="text-sm w-5 text-center">{"\u26A1"}</span>
-              Codex Agent
-            </button>
-          </div>
-        </Show>
-      </div>
-
-      {/* Thread list */}
       <div class="flex-1 overflow-y-auto px-2 py-1">
         <Show
           when={threadStore.groupedThreads.length > 0}
