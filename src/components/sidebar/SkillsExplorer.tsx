@@ -4,10 +4,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { type Component, createSignal, For, onMount, Show } from "solid-js";
+import {
+  ContextMenu,
+  type ContextMenuItem,
+} from "@/components/common/ContextMenu";
 import { openFileInTab } from "@/lib/files/service";
 import type { InstalledSkill, Skill, SkillScope } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
 import { skillsStore } from "@/stores/skills.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { FileExplorer } from "./FileExplorer";
 import "./SkillsExplorer.css";
 
@@ -208,6 +213,148 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     }
   };
 
+  // ── Context menu ─────────────────────────────────
+
+  interface ContextMenuTarget {
+    x: number;
+    y: number;
+    path: string;
+    name: string;
+    isDirectory: boolean;
+    skillId?: string;
+  }
+
+  const [ctxMenu, setCtxMenu] = createSignal<ContextMenuTarget | null>(null);
+
+  const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+
+  const handleContextMenu = (
+    e: MouseEvent,
+    path: string,
+    name: string,
+    isDirectory: boolean,
+    skillId?: string,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, path, name, isDirectory, skillId });
+  };
+
+  const handleRevealInFinder = async (path: string) => {
+    try {
+      await invoke("reveal_in_file_manager", { path });
+    } catch (err) {
+      console.error("Failed to reveal in finder:", err);
+    }
+  };
+
+  const handleCopyPath = async (path: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+    } catch (err) {
+      console.error("Failed to copy path:", err);
+    }
+  };
+
+  const handleCopyRelativePath = async (path: string) => {
+    try {
+      const rootPath = fileTreeState.rootPath;
+      let relativePath = path;
+      if (rootPath && path.startsWith(rootPath)) {
+        relativePath = path.slice(rootPath.length);
+        if (relativePath.startsWith("/")) {
+          relativePath = relativePath.slice(1);
+        }
+      }
+      await navigator.clipboard.writeText(relativePath);
+    } catch (err) {
+      console.error("Failed to copy relative path:", err);
+    }
+  };
+
+  const handleRenameCtx = async (path: string, oldName: string) => {
+    const newName = window.prompt("Rename to:", oldName);
+    if (!newName || newName === oldName) return;
+    const dir = path.substring(0, path.lastIndexOf("/"));
+    const newPath = `${dir}/${newName}`;
+    try {
+      await invoke("rename_path", { oldPath: path, newPath });
+      await skillsStore.refreshInstalled();
+    } catch (err) {
+      console.error("Failed to rename:", err);
+    }
+  };
+
+  const handleDeleteCtx = async (
+    path: string,
+    name: string,
+    isDirectory: boolean,
+    skillId?: string,
+  ) => {
+    const confirmDelete = window.confirm(
+      `Delete "${name}"?${isDirectory ? " This will delete all contents." : ""}`,
+    );
+    if (!confirmDelete) return;
+    try {
+      await invoke("delete_path", { path });
+      if (skillId) {
+        // Removing an entire skill folder — refresh skill list
+        await skillsStore.refreshInstalled();
+      } else {
+        await skillsStore.refreshInstalled();
+      }
+    } catch (err) {
+      console.error("Failed to delete:", err);
+      alert(`Failed to delete: ${err}`);
+    }
+  };
+
+  const getCtxMenuItems = (target: ContextMenuTarget): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+
+    items.push({
+      label: isMac ? "Reveal in Finder" : "Reveal in Explorer",
+      icon: "📂",
+      shortcut: isMac ? "⌥⌘R" : "Shift+Alt+R",
+      onClick: () => handleRevealInFinder(target.path),
+    });
+
+    items.push({ label: "", separator: true, onClick: () => {} });
+
+    items.push({
+      label: "Copy Path",
+      icon: "📎",
+      shortcut: isMac ? "⌥⌘C" : "Shift+Alt+C",
+      onClick: () => handleCopyPath(target.path),
+    });
+
+    items.push({
+      label: "Copy Relative Path",
+      icon: "📎",
+      shortcut: isMac ? "⇧⌥⌘C" : "Ctrl+Shift+Alt+C",
+      onClick: () => handleCopyRelativePath(target.path),
+    });
+
+    items.push({ label: "", separator: true, onClick: () => {} });
+
+    items.push({
+      label: "Rename",
+      icon: "✏️",
+      shortcut: "Enter",
+      onClick: () => handleRenameCtx(target.path, target.name),
+    });
+
+    items.push({
+      label: "Delete",
+      icon: "🗑️",
+      shortcut: isMac ? "⌘⌫" : "Delete",
+      onClick: () =>
+        handleDeleteCtx(target.path, target.name, target.isDirectory, target.skillId),
+    });
+
+    return items;
+  };
+
   // ── Scope label ─────────────────────────────────
 
   const scopeLabel = (scope: SkillScope) => {
@@ -405,6 +552,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                     handleSkillSelect(skill);
                     toggleSkill(skill);
                   }}
+                  onContextMenu={(e) => {
+                    const skillDir = skill.path.replace(/\/SKILL\.md$/, "");
+                    handleContextMenu(e, skillDir, skill.name, true, skill.id);
+                  }}
                 >
                   {/* Chevron */}
                   <svg
@@ -482,6 +633,14 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                                 handleFileClick(entry.path);
                               }
                             }}
+                            onContextMenu={(e) =>
+                              handleContextMenu(
+                                e,
+                                entry.path,
+                                entry.name,
+                                entry.is_directory,
+                              )
+                            }
                           >
                             <Show
                               when={entry.is_directory}
@@ -635,6 +794,18 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </div>
         </Show>
       </div>
+
+      {/* Context menu */}
+      <Show when={ctxMenu()}>
+        {(menu) => (
+          <ContextMenu
+            items={getCtxMenuItems(menu())}
+            x={menu().x}
+            y={menu().y}
+            onClose={() => setCtxMenu(null)}
+          />
+        )}
+      </Show>
     </aside>
   );
 };
