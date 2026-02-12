@@ -47,6 +47,27 @@ impl Default for OrchestratorState {
 }
 
 // =============================================================================
+// Model Fallback Chain
+// =============================================================================
+
+/// Returns the next faster model in the fallback chain for 408 timeout errors.
+/// Opus → Sonnet → Haiku → None
+fn get_fallback_model(current_model: &str) -> Option<&str> {
+    match current_model {
+        // Opus variants fallback to Sonnet
+        "anthropic/claude-opus-4" | "anthropic/claude-opus-4.5" | "anthropic/claude-opus-4.6" => {
+            Some("anthropic/claude-sonnet-4.5")
+        }
+        // Sonnet variants fallback to Haiku
+        "anthropic/claude-sonnet-4" | "anthropic/claude-sonnet-4.5" => {
+            Some("anthropic/claude-haiku-4.5")
+        }
+        // Haiku has no faster fallback
+        _ => None,
+    }
+}
+
+// =============================================================================
 // Main Orchestration Flow
 // =============================================================================
 
@@ -351,9 +372,46 @@ async fn execute_single_task(
 
         let error_msg = reroutable_error.unwrap();
 
-        // When user explicitly selected a model, retry the same model once
-        // instead of rerouting to a different one.
+        // When user explicitly selected a model, try cascading fallback on timeout errors.
+        // For 408 timeouts: Opus → Sonnet → Haiku, then retry same model once before giving up.
         if user_explicitly_selected {
+            // Check if this is a 408 timeout error that's eligible for model fallback
+            let is_timeout_error = error_msg.contains("408") || error_msg.contains("Request Timeout");
+
+            // Try cascading to a faster model on timeout (Opus→Sonnet→Haiku)
+            if is_timeout_error {
+                if let Some(fallback_model) = get_fallback_model(&routing.model_id) {
+                    let failed_model = routing.model_id.clone();
+
+                    log::info!(
+                        "[Orchestrator] 408 timeout on {}, falling back to faster model: {}",
+                        failed_model,
+                        fallback_model
+                    );
+
+                    // Emit reroute event to notify frontend
+                    let reroute_event = OrchestratorEvent {
+                        conversation_id: conversation_id.to_string(),
+                        worker_event: WorkerEvent::Reroute {
+                            from_model: failed_model.clone(),
+                            to_model: fallback_model.to_string(),
+                            reason: "Switched to faster model due to timeout".to_string(),
+                        },
+                        subtask_id: None,
+                    };
+                    let _ = app.emit("orchestrator://event", &reroute_event);
+
+                    // Update routing to use fallback model
+                    routing.model_id = fallback_model.to_string();
+                    tried_models.push(fallback_model.to_string());
+
+                    // Brief backoff before retry with new model
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+
+            // No faster model available, or non-timeout error: retry same model once
             if same_model_retry_count >= MAX_SAME_MODEL_RETRIES {
                 log::warn!(
                     "[Orchestrator] Transient error on explicitly-selected model {} after {} retry, giving up: {}",
