@@ -18,6 +18,7 @@ import {
   stopOpenClawAgent,
 } from "@/services/openclaw-agent";
 import { telemetry } from "@/services/telemetry";
+import { acpStore } from "@/stores/acp.store";
 import {
   authStore,
   checkAuth,
@@ -73,6 +74,9 @@ function App() {
 
     // Set default project root if none is open
     await initDefaultRootIfNeeded();
+
+    // Detect available agents (Claude, Codex)
+    await acpStore.initialize();
 
     // Load skills and threads after auth check completes
     await skillsStore.refresh();
