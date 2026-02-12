@@ -692,9 +692,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       }
     } catch (error) {
       console.error("Failed to save to Seren Notes:", error);
-      alert(
-        "Failed to save to Seren Notes. Downloading locally instead...",
-      );
+      alert("Failed to save to Seren Notes. Downloading locally instead...");
 
       // Fallback: download as local markdown file
       const blob = new Blob([markdown], { type: "text/markdown" });
@@ -793,7 +791,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
+                  role="img"
+                  aria-label="Copy"
                 >
+                  <title>Copy chat history</title>
                   <path
                     stroke-linecap="round"
                     stroke-linejoin="round"
@@ -813,7 +814,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
+                  role="img"
+                  aria-label="Download"
                 >
+                  <title>Download chat history</title>
                   <path
                     stroke-linecap="round"
                     stroke-linejoin="round"
