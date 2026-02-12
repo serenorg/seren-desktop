@@ -380,8 +380,9 @@ async fn execute_single_task(
 
             // Try cascading to a faster model on timeout (Opus→Sonnet→Haiku)
             if is_timeout_error {
-                if let Some(fallback_model) = get_fallback_model(&routing.model_id) {
+                if let Some(fallback_model_str) = get_fallback_model(&routing.model_id) {
                     let failed_model = routing.model_id.clone();
+                    let fallback_model = fallback_model_str.to_string(); // Convert to owned String
 
                     log::info!(
                         "[Orchestrator] 408 timeout on {}, falling back to faster model: {}",
@@ -394,7 +395,7 @@ async fn execute_single_task(
                         conversation_id: conversation_id.to_string(),
                         worker_event: WorkerEvent::Reroute {
                             from_model: failed_model.clone(),
-                            to_model: fallback_model.to_string(),
+                            to_model: fallback_model.clone(),
                             reason: "Switched to faster model due to timeout".to_string(),
                         },
                         subtask_id: None,
@@ -402,8 +403,8 @@ async fn execute_single_task(
                     let _ = app.emit("orchestrator://event", &reroute_event);
 
                     // Update routing to use fallback model
-                    routing.model_id = fallback_model.to_string();
-                    tried_models.push(fallback_model.to_string());
+                    routing.model_id = fallback_model.clone();
+                    tried_models.push(fallback_model);
 
                     // Brief backoff before retry with new model
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
