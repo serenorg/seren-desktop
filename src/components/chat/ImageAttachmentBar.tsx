@@ -29,7 +29,7 @@ export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
       {/* Attach button */}
       <button
         type="button"
-        class={`flex items-center gap-1 px-2 py-1 bg-transparent border border-[#30363d] text-[#8b949e] rounded text-xs cursor-pointer transition-colors hover:bg-[#21262d] hover:text-[#e6edf3] ${props.isLoading ? "opacity-50 cursor-wait" : ""}`}
+        class={`flex items-center gap-1 px-2 py-1 bg-transparent border border-surface-3 text-muted-foreground rounded text-xs cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground ${props.isLoading ? "opacity-50 cursor-wait" : ""}`}
         onClick={() => {
           console.log(
             "[ImageAttachmentBar] Attach button clicked, isLoading:",
@@ -88,7 +88,7 @@ export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
                 <Show
                   when={isImageMime(file.mimeType)}
                   fallback={
-                    <div class="w-10 h-10 flex items-center justify-center rounded border border-[#30363d] bg-[#21262d] text-[#8b949e]">
+                    <div class="w-10 h-10 flex items-center justify-center rounded border border-surface-3 bg-surface-2 text-muted-foreground">
                       <svg
                         width="16"
                         height="16"
@@ -110,12 +110,12 @@ export const ImageAttachmentBar: Component<ImageAttachmentBarProps> = (
                   <img
                     src={toDataUrl(file)}
                     alt={file.name}
-                    class="w-10 h-10 object-cover rounded border border-[#30363d]"
+                    class="w-10 h-10 object-cover rounded border border-surface-3"
                   />
                 </Show>
                 <button
                   type="button"
-                  class="absolute -top-1 -right-1 w-4 h-4 bg-[#f85149] text-white rounded-full text-[10px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer border-none"
+                  class="absolute -top-1 -right-1 w-4 h-4 bg-destructive text-white rounded-full text-[10px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer border-none"
                   onClick={() => props.onRemove(index())}
                   title={`Remove ${file.name}`}
                 >

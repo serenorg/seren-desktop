@@ -68,9 +68,9 @@ export const ThreadTabBar: Component = () => {
             <button
               type="button"
               role="tab"
-              class="group flex items-center gap-1.5 px-3 min-w-0 max-w-[180px] bg-none border-none border-b-2 border-b-transparent text-muted-foreground text-[13px] cursor-pointer whitespace-nowrap transition-all duration-100 relative hover:bg-[rgba(148,163,184,0.06)] hover:text-foreground"
+              class="group flex items-center gap-1.5 px-3 min-w-0 max-w-[180px] bg-none border-none border-b-2 border-b-transparent text-muted-foreground text-[13px] cursor-pointer whitespace-nowrap transition-all duration-100 relative hover:bg-border-subtle hover:text-foreground"
               classList={{
-                "!text-foreground !border-b-primary !bg-[rgba(148,163,184,0.04)]":
+                "!text-foreground !border-b-primary !bg-border-subtle/70":
                   thread.id === threadStore.activeThreadId,
               }}
               aria-selected={thread.id === threadStore.activeThreadId}
@@ -93,7 +93,7 @@ export const ThreadTabBar: Component = () => {
               <span
                 role="button"
                 tabindex={0}
-                class="hidden group-hover:flex items-center justify-center w-4 h-4 bg-none border-none rounded-sm text-muted-foreground cursor-pointer text-sm leading-none p-0 shrink-0 transition-all duration-100 hover:bg-[rgba(148,163,184,0.15)] hover:text-foreground"
+                class="hidden group-hover:flex items-center justify-center w-4 h-4 bg-none border-none rounded-sm text-muted-foreground cursor-pointer text-sm leading-none p-0 shrink-0 transition-all duration-100 hover:bg-border-medium hover:text-foreground"
                 onClick={(e) => handleClose(e, thread)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter")
@@ -112,7 +112,7 @@ export const ThreadTabBar: Component = () => {
       <div class="relative shrink-0" ref={menuRef}>
         <button
           type="button"
-          class="flex items-center justify-center w-8 h-full bg-none border-none border-l border-l-border text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)] hover:text-primary"
+          class="flex items-center justify-center w-8 h-full bg-none border-none border-l border-l-border text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border/80 hover:text-primary"
           onClick={() => setShowNewMenu((v) => !v)}
           title="New thread"
         >
@@ -137,7 +137,7 @@ export const ThreadTabBar: Component = () => {
           <div class="absolute top-full right-0 min-w-[160px] bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
             <button
               type="button"
-              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-[rgba(148,163,184,0.08)] disabled:opacity-40 disabled:cursor-not-allowed"
+              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={handleNewChat}
             >
               <span class="text-[13px] w-[18px] text-center">💬</span>
@@ -145,7 +145,7 @@ export const ThreadTabBar: Component = () => {
             </button>
             <button
               type="button"
-              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-[rgba(148,163,184,0.08)] disabled:opacity-40 disabled:cursor-not-allowed"
+              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={() => handleNewAgent("claude-code")}
               disabled={!fileTreeState.rootPath}
               title={
@@ -159,7 +159,7 @@ export const ThreadTabBar: Component = () => {
             </button>
             <button
               type="button"
-              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-[rgba(148,163,184,0.08)] disabled:opacity-40 disabled:cursor-not-allowed"
+              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={() => handleNewAgent("codex")}
               disabled={!fileTreeState.rootPath}
               title={

@@ -70,7 +70,7 @@ export function McpOAuthDialog(props: McpOAuthDialogProps) {
   return (
     <Show when={props.isOpen}>
       <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000]">
-        <div class="bg-surface-1 border border-border rounded-xl w-[400px] max-w-[90vw] shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+        <div class="bg-surface-1 border border-border rounded-xl w-[400px] max-w-[90vw] shadow-[var(--shadow-lg)]">
           <div class="flex items-center justify-between px-5 py-4 border-b border-border">
             <h2 class="m-0 text-lg font-semibold text-foreground">
               Connect to Seren MCP
@@ -116,7 +116,7 @@ export function McpOAuthDialog(props: McpOAuthDialogProps) {
 
             <Show when={status() === "success"}>
               <div class="text-center">
-                <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 bg-[rgba(34,197,94,0.12)] text-success">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 bg-success/[0.12] text-success">
                   ✓
                 </div>
                 <p class="my-2 text-foreground">Connected to Seren MCP!</p>
@@ -125,7 +125,7 @@ export function McpOAuthDialog(props: McpOAuthDialogProps) {
 
             <Show when={status() === "error"}>
               <div class="text-center">
-                <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 bg-[rgba(239,68,68,0.12)] text-destructive">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 bg-destructive/[0.12] text-destructive">
                   !
                 </div>
                 <p class="my-2 text-foreground">Authorization failed</p>

@@ -62,12 +62,12 @@ export const DiffCard: Component<DiffCardProps> = (props) => {
   });
 
   return (
-    <div class="my-2 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
+    <div class="my-2 bg-surface-0 border border-surface-3 rounded-lg overflow-hidden">
       {/* Header */}
-      <div class="flex items-center justify-between px-3 py-2 bg-[#21262d] border-b border-[#30363d]">
+      <div class="flex items-center justify-between px-3 py-2 bg-surface-2 border-b border-surface-3">
         <div class="flex items-center gap-2">
           <svg
-            class="w-4 h-4 text-[#8b949e]"
+            class="w-4 h-4 text-muted-foreground"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -81,8 +81,8 @@ export const DiffCard: Component<DiffCardProps> = (props) => {
               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
             />
           </svg>
-          <span class="text-sm font-medium text-[#e6edf3]">{fileName()}</span>
-          <span class="text-xs text-[#8b949e]">{props.diff.path}</span>
+          <span class="text-sm font-medium text-foreground">{fileName()}</span>
+          <span class="text-xs text-muted-foreground">{props.diff.path}</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-xs text-green-500">+{stats().added}</span>
@@ -90,7 +90,7 @@ export const DiffCard: Component<DiffCardProps> = (props) => {
           <Show when={props.onViewInEditor}>
             <button
               type="button"
-              class="px-2 py-1 text-xs bg-[#30363d] text-[#e6edf3] rounded hover:bg-[#484f58] transition-colors"
+              class="px-2 py-1 text-xs bg-surface-3 text-foreground rounded hover:bg-surface-3 transition-colors"
               onClick={() => props.onViewInEditor?.(props.diff)}
             >
               View Diff
@@ -98,7 +98,7 @@ export const DiffCard: Component<DiffCardProps> = (props) => {
           </Show>
           <button
             type="button"
-            class="p-1 text-[#8b949e] hover:text-[#e6edf3] transition-colors"
+            class="p-1 text-muted-foreground hover:text-foreground transition-colors"
             onClick={() => setIsExpanded(!isExpanded())}
           >
             <svg
@@ -127,13 +127,13 @@ export const DiffCard: Component<DiffCardProps> = (props) => {
             <div
               class={`px-3 py-0.5 border-l-2 ${
                 line.type === "added"
-                  ? "bg-[rgba(63,185,80,0.15)] border-green-500 text-green-300"
+                  ? "bg-success/15 border-green-500 text-green-300"
                   : line.type === "removed"
-                    ? "bg-[rgba(248,81,73,0.15)] border-red-500 text-red-300"
-                    : "bg-transparent border-transparent text-[#8b949e]"
+                    ? "bg-destructive/15 border-red-500 text-red-300"
+                    : "bg-transparent border-transparent text-muted-foreground"
               }`}
             >
-              <span class="inline-block w-4 text-[#484f58] select-none">
+              <span class="inline-block w-4 text-muted-foreground/70 select-none">
                 {line.type === "added"
                   ? "+"
                   : line.type === "removed"
@@ -148,7 +148,7 @@ export const DiffCard: Component<DiffCardProps> = (props) => {
 
       {/* Collapsed Preview */}
       <Show when={!isExpanded()}>
-        <div class="px-3 py-2 text-xs text-[#8b949e]">
+        <div class="px-3 py-2 text-xs text-muted-foreground">
           {stats().added} addition{stats().added !== 1 ? "s" : ""},{" "}
           {stats().removed} deletion{stats().removed !== 1 ? "s" : ""}
         </div>

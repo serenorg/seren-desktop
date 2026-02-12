@@ -77,9 +77,9 @@ export const AcpPermissionDialog: Component<AcpPermissionDialogProps> = (
         <span
           class="text-[11px] px-1.5 py-0.5 rounded font-medium"
           classList={{
-            "bg-[rgba(74,222,128,0.12)] text-success": risk() === "low",
-            "bg-[rgba(251,191,36,0.12)] text-warning": risk() === "medium",
-            "bg-[rgba(248,113,113,0.12)] text-destructive": risk() === "high",
+            "bg-success/[0.12] text-success": risk() === "low",
+            "bg-warning/[0.12] text-warning": risk() === "medium",
+            "bg-destructive/[0.12] text-destructive": risk() === "high",
           }}
         >
           {risk()}

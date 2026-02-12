@@ -96,9 +96,9 @@ const ApprovalCard: Component<{
   onReject: () => void;
 }> = (props) => {
   return (
-    <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-4 shadow-lg">
+    <div class="bg-popover border border-border-strong rounded-xl p-4 shadow-lg">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-[0.75rem] px-1.5 py-0.5 bg-[rgba(234,179,8,0.2)] text-[#eab308] rounded font-medium">
+        <span class="text-[0.75rem] px-1.5 py-0.5 bg-warning/20 text-warning/85 rounded font-medium">
           Approval Required
         </span>
         <span class="text-[0.75rem] text-muted-foreground">
@@ -113,7 +113,7 @@ const ApprovalCard: Component<{
         </span>
       </p>
 
-      <div class="px-3 py-2 mb-2 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.15)] rounded text-[0.85rem] text-foreground max-h-[60px] overflow-y-auto">
+      <div class="px-3 py-2 mb-2 bg-surface-3/60 border border-border-medium rounded text-[0.85rem] text-foreground max-h-[60px] overflow-y-auto">
         {props.request.message}
       </div>
 
@@ -121,21 +121,21 @@ const ApprovalCard: Component<{
         Draft response:
       </p>
 
-      <div class="px-3 py-2 mb-3 bg-[rgba(99,102,241,0.05)] border border-[rgba(99,102,241,0.2)] rounded text-[0.85rem] text-foreground max-h-[80px] overflow-y-auto">
+      <div class="px-3 py-2 mb-3 bg-primary/5 border border-primary/20 rounded text-[0.85rem] text-foreground max-h-[80px] overflow-y-auto">
         {props.request.draftResponse}
       </div>
 
       <div class="flex justify-end gap-2">
         <button
           type="button"
-          class="px-3 py-1.5 bg-transparent border border-[rgba(239,68,68,0.4)] rounded-md text-[0.8rem] text-[#ef4444] cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)]"
+          class="px-3 py-1.5 bg-transparent border border-destructive/40 rounded-md text-[0.8rem] text-destructive cursor-pointer transition-all duration-150 hover:bg-destructive/10"
           onClick={props.onReject}
         >
           Reject
         </button>
         <button
           type="button"
-          class="px-3 py-1.5 bg-[#22c55e] border-none rounded-md text-[0.8rem] text-white cursor-pointer transition-all duration-150 hover:opacity-80"
+          class="px-3 py-1.5 bg-success border-none rounded-md text-[0.8rem] text-white cursor-pointer transition-all duration-150 hover:opacity-80"
           onClick={props.onApprove}
         >
           Send

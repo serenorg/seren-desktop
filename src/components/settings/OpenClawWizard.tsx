@@ -346,7 +346,7 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
               </button>
               <button
                 type="button"
-                class="px-4 py-3 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
+                class="px-4 py-3 bg-transparent border border-border-strong rounded-md text-muted-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-border"
                 onClick={props.onSkip}
               >
                 Skip for now
@@ -380,8 +380,8 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
                       type="button"
                       class={`flex flex-col items-center gap-2 px-4 py-4 border-2 rounded-lg cursor-pointer transition-all duration-150 ${
                         isSelected()
-                          ? "bg-[rgba(99,102,241,0.1)] border-accent"
-                          : "bg-[rgba(30,30,30,0.6)] border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                          ? "bg-primary/10 border-accent"
+                          : "bg-surface-1/60 border-border-hover hover:border-border-strong"
                       }`}
                       onClick={toggle}
                     >
@@ -399,14 +399,14 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
               </For>
             </div>
             <Show when={error()}>
-              <div class="px-4 py-3 mb-4 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
+              <div class="px-4 py-3 mb-4 bg-destructive/10 border border-destructive/30 rounded-lg text-[0.85rem] text-destructive">
                 {error()}
               </div>
             </Show>
             <div class="flex justify-between">
               <button
                 type="button"
-                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.85rem] cursor-pointer hover:bg-[rgba(148,163,184,0.1)]"
+                class="px-4 py-2 bg-transparent border border-border-strong rounded-md text-muted-foreground text-[0.85rem] cursor-pointer hover:bg-border"
                 onClick={props.onSkip}
               >
                 Skip for now
@@ -441,10 +441,10 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
                     <div
                       class={`w-2.5 h-2.5 rounded-full ${
                         i() < connectingIndex()
-                          ? "bg-[#22c55e]"
+                          ? "bg-success"
                           : i() === connectingIndex()
                             ? "bg-accent"
-                            : "bg-[rgba(148,163,184,0.3)]"
+                            : "bg-border-strong"
                       }`}
                     />
                   )}
@@ -476,7 +476,7 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
                 </button>
                 <button
                   type="button"
-                  class="px-4 py-2.5 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.85rem] cursor-pointer hover:bg-[rgba(148,163,184,0.1)]"
+                  class="px-4 py-2.5 bg-transparent border border-border-strong rounded-md text-muted-foreground text-[0.85rem] cursor-pointer hover:bg-border"
                   onClick={handleSkipChannel}
                 >
                   Skip
@@ -513,7 +513,7 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
                       [channel.platform]: m,
                     }));
                   return (
-                    <div class="flex items-center justify-between px-4 py-3 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg">
+                    <div class="flex items-center justify-between px-4 py-3 bg-surface-1/60 border border-border-hover rounded-lg">
                       <span class="text-[0.9rem] font-medium text-foreground">
                         {channel.displayName}
                       </span>
@@ -523,7 +523,7 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
                           class={`px-3 py-1.5 rounded-md text-[0.8rem] cursor-pointer transition-all duration-150 border ${
                             mode() === "seren"
                               ? "bg-accent border-accent text-white"
-                              : "bg-transparent border-[rgba(148,163,184,0.3)] text-muted-foreground hover:bg-[rgba(148,163,184,0.1)]"
+                              : "bg-transparent border-border-strong text-muted-foreground hover:bg-border"
                           }`}
                           onClick={() => setMode("seren")}
                         >
@@ -534,7 +534,7 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
                           class={`px-3 py-1.5 rounded-md text-[0.8rem] cursor-pointer transition-all duration-150 border ${
                             mode() === "openclaw"
                               ? "bg-accent border-accent text-white"
-                              : "bg-transparent border-[rgba(148,163,184,0.3)] text-muted-foreground hover:bg-[rgba(148,163,184,0.1)]"
+                              : "bg-transparent border-border-strong text-muted-foreground hover:bg-border"
                           }`}
                           onClick={() => setMode("openclaw")}
                         >
@@ -583,7 +583,7 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
                       [channel.platform]: t,
                     }));
                   return (
-                    <div class="px-4 py-3 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg">
+                    <div class="px-4 py-3 bg-surface-1/60 border border-border-hover rounded-lg">
                       <span class="text-[0.9rem] font-medium text-foreground block mb-2">
                         {channel.displayName}
                       </span>
@@ -640,7 +640,7 @@ export const OpenClawWizard: Component<OpenClawWizardProps> = (props) => {
             </p>
 
             <Show when={error()}>
-              <div class="px-4 py-3 mb-4 mx-auto max-w-[400px] bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
+              <div class="px-4 py-3 mb-4 mx-auto max-w-[400px] bg-destructive/10 border border-destructive/30 rounded-lg text-[0.85rem] text-destructive">
                 {error()}
               </div>
             </Show>
@@ -698,7 +698,7 @@ const TrustButton: Component<{
     class={`px-3 py-1.5 rounded-md text-[0.78rem] cursor-pointer transition-all duration-150 border ${
       props.active
         ? "bg-accent border-accent text-white"
-        : "bg-transparent border-[rgba(148,163,184,0.3)] text-muted-foreground hover:bg-[rgba(148,163,184,0.1)]"
+        : "bg-transparent border-border-strong text-muted-foreground hover:bg-border"
     }`}
     onClick={props.onClick}
   >

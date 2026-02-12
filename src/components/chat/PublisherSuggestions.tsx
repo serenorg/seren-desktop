@@ -16,13 +16,13 @@ export const PublisherSuggestions: Component<PublisherSuggestionsProps> = (
 ) => {
   return (
     <Show when={props.suggestions.length > 0 || props.isLoading}>
-      <div class="absolute bottom-full left-0 right-0 mb-2 bg-[#1e1e1e] border border-border rounded-lg shadow-[0_4px_12px_rgba(0,0,0,0.3)] overflow-hidden z-[100]">
+      <div class="absolute bottom-full left-0 right-0 mb-2 bg-surface-2 border border-border rounded-lg shadow-[var(--shadow-md)] overflow-hidden z-[100]">
         <div class="flex items-center justify-between px-3 py-2 border-b border-border bg-popover">
           <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
             {props.isLoading ? "Finding relevant tools..." : "Suggested tools"}
           </span>
           <button
-            class="flex items-center justify-center w-5 h-5 p-0 border-none rounded bg-transparent text-muted-foreground text-base cursor-pointer transition-all hover:bg-[rgba(255,255,255,0.1)] hover:text-foreground"
+            class="flex items-center justify-center w-5 h-5 p-0 border-none rounded bg-transparent text-muted-foreground text-base cursor-pointer transition-all hover:bg-white/10 hover:text-foreground"
             onClick={() => props.onDismiss()}
             title="Dismiss suggestions"
             aria-label="Dismiss suggestions"
@@ -43,7 +43,7 @@ export const PublisherSuggestions: Component<PublisherSuggestionsProps> = (
               {(publisher) => (
                 <li>
                   <button
-                    class="flex items-center gap-3 w-full px-2 py-2 border-none rounded-md bg-transparent text-left cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.05)] focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-[-2px]"
+                    class="flex items-center gap-3 w-full px-2 py-2 border-none rounded-md bg-transparent text-left cursor-pointer transition-colors hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-[-2px]"
                     onClick={() => props.onSelect(publisher)}
                   >
                     <Show

@@ -173,24 +173,24 @@ export const ProviderSettings: Component = () => {
             const config = PROVIDER_CONFIGS[providerId];
             const authType = providerStore.getAuthType(providerId);
             return (
-              <div class="flex items-center justify-between px-4 py-3 bg-[rgba(30,41,59,0.5)] border border-[rgba(148,163,184,0.15)] rounded-lg transition-[border-color] duration-150 hover:border-[rgba(148,163,184,0.25)]">
+              <div class="flex items-center justify-between px-4 py-3 bg-surface-1/50 border border-border-medium rounded-lg transition-[border-color] duration-150 hover:border-border-strong">
                 <div class="flex flex-col gap-1 min-w-0 flex-1">
                   <div class="flex items-center gap-2">
                     <span class="font-medium text-foreground">
                       {config.name}
                     </span>
                     <Show when={providerId === "seren"}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(99,102,241,0.2)] text-[#818cf8]">
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-primary/20 text-primary/70">
                         Default
                       </span>
                     </Show>
                     <Show when={providerId === providerStore.activeProvider}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(34,197,94,0.2)] text-[#4ade80]">
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-success/20 text-success">
                         Active
                       </span>
                     </Show>
                     <Show when={authType === "oauth"}>
-                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(59,130,246,0.2)] text-[#60a5fa]">
+                      <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-primary/20 text-primary">
                         Signed In
                       </span>
                     </Show>
@@ -212,7 +212,7 @@ export const ProviderSettings: Component = () => {
                   <Show when={providerId !== "seren"}>
                     <button
                       type="button"
-                      class="w-7 h-7 flex items-center justify-center bg-transparent border border-[rgba(148,163,184,0.25)] text-muted-foreground rounded text-base cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:border-[rgba(239,68,68,0.5)] hover:text-[#ef4444]"
+                      class="w-7 h-7 flex items-center justify-center bg-transparent border border-border-strong text-muted-foreground rounded text-base cursor-pointer transition-all duration-150 hover:bg-destructive/10 hover:border-destructive/50 hover:text-destructive"
                       onClick={() => handleRemoveProvider(providerId)}
                       title="Remove provider"
                     >
@@ -228,13 +228,13 @@ export const ProviderSettings: Component = () => {
 
       {/* Add New Provider */}
       <Show when={unconfiguredProviders().length > 0}>
-        <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+        <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
           Add Provider
         </h4>
 
         {/* OAuth Error Display */}
         <Show when={oauthError()}>
-          <div class="mt-3 px-3.5 py-2.5 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-md text-[#ef4444] text-[13px]">
+          <div class="mt-3 px-3.5 py-2.5 bg-destructive/10 border border-destructive/30 rounded-md text-destructive text-[13px]">
             {oauthError()}
           </div>
         </Show>
@@ -253,7 +253,7 @@ export const ProviderSettings: Component = () => {
                       ? "bg-[#10a37f] border-[#10a37f] text-white hover:not-disabled:bg-[#0d8a6a] hover:not-disabled:border-[#0d8a6a]"
                       : providerId === "gemini"
                         ? "bg-gradient-to-br from-[#4285f4] via-[#34a853] to-[#fbbc05] border-transparent text-white hover:not-disabled:from-[#3b78e7] hover:not-disabled:via-[#2d9649] hover:not-disabled:to-[#e5ab04]"
-                        : "bg-[rgba(30,41,59,0.5)] border-[rgba(148,163,184,0.25)] text-foreground"
+                        : "bg-surface-1/50 border-border-strong text-foreground"
                   }`}
                   onClick={() => handleOAuthSignIn(providerId)}
                   disabled={isInProgress() || !config.oauth?.clientId}
@@ -270,14 +270,14 @@ export const ProviderSettings: Component = () => {
           </For>
         </div>
 
-        <div class="flex items-center my-5 gap-4 before:content-[''] before:flex-1 before:h-px before:bg-[rgba(148,163,184,0.25)] after:content-[''] after:flex-1 after:h-px after:bg-[rgba(148,163,184,0.25)]">
+        <div class="flex items-center my-5 gap-4 before:content-[''] before:flex-1 before:h-px before:bg-border-strong after:content-[''] after:flex-1 after:h-px after:bg-border-strong">
           <span class="text-muted-foreground text-xs uppercase tracking-[0.5px]">
             or use API key
           </span>
         </div>
 
         <div class="mt-4">
-          <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+          <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
             <label class="flex flex-col gap-0.5 flex-1">
               <span class="text-[0.95rem] font-medium text-foreground">
                 Provider
@@ -295,7 +295,7 @@ export const ProviderSettings: Component = () => {
                 setApiKeyInput("");
                 providerStore.clearValidationError();
               }}
-              class="min-w-[180px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] cursor-pointer focus:outline-none focus:border-accent"
+              class="min-w-[180px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] cursor-pointer focus:outline-none focus:border-accent"
             >
               <option value="">Select provider...</option>
               <For
@@ -315,7 +315,7 @@ export const ProviderSettings: Component = () => {
               const config = () => PROVIDER_CONFIGS[provider()];
               return (
                 <>
-                  <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                  <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                     <label class="flex flex-col gap-0.5 flex-1">
                       <span class="text-[0.95rem] font-medium text-foreground">
                         API Key
@@ -335,7 +335,7 @@ export const ProviderSettings: Component = () => {
                     <div class="flex gap-2">
                       <input
                         type={showKey() ? "text" : "password"}
-                        class="flex-1 min-w-[250px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.25)] rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent placeholder:text-muted-foreground placeholder:font-sans"
+                        class="flex-1 min-w-[250px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded text-foreground text-[13px] font-mono focus:outline-none focus:border-accent placeholder:text-muted-foreground placeholder:font-sans"
                         value={apiKeyInput()}
                         onInput={(e) => {
                           setApiKeyInput(e.currentTarget.value);
@@ -347,7 +347,7 @@ export const ProviderSettings: Component = () => {
                       />
                       <button
                         type="button"
-                        class="px-3 py-2 bg-[rgba(30,41,59,0.5)] border border-[rgba(148,163,184,0.25)] rounded text-muted-foreground text-[13px] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-[rgba(148,163,184,0.15)]"
+                        class="px-3 py-2 bg-surface-1/50 border border-border-strong rounded text-muted-foreground text-[13px] cursor-pointer transition-colors duration-150 whitespace-nowrap hover:bg-border-medium"
                         onClick={() => setShowKey(!showKey())}
                         title={showKey() ? "Hide API key" : "Show API key"}
                       >
@@ -357,14 +357,14 @@ export const ProviderSettings: Component = () => {
                   </div>
 
                   <Show when={providerStore.validationError}>
-                    <div class="mt-2 px-3 py-2 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded text-[#ef4444] text-[13px]">
+                    <div class="mt-2 px-3 py-2 bg-destructive/10 border border-destructive/30 rounded text-destructive text-[13px]">
                       {providerStore.validationError}
                     </div>
                   </Show>
 
                   <button
                     type="button"
-                    class="mt-4 px-5 py-2.5 bg-accent border-none rounded-md text-white text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-[#4f46e5] disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="mt-4 px-5 py-2.5 bg-accent border-none rounded-md text-white text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleAddApiKey}
                     disabled={
                       !apiKeyInput().trim() || providerStore.isValidating
@@ -382,7 +382,7 @@ export const ProviderSettings: Component = () => {
       </Show>
 
       <Show when={unconfiguredProviders().length === 0}>
-        <div class="flex items-center gap-2 px-4 py-3 bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.3)] rounded-lg text-[#4ade80] text-sm mt-4">
+        <div class="flex items-center gap-2 px-4 py-3 bg-success/10 border border-success/30 rounded-lg text-success text-sm mt-4">
           <span class="text-base">&#10003;</span>
           <span>All available providers have been configured.</span>
         </div>

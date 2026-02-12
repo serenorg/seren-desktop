@@ -33,7 +33,7 @@ export const OpenClawStatus: Component = () => {
     <Show when={label()}>
       <button
         type="button"
-        class="flex items-center gap-1.5 px-2 py-1 bg-transparent border-none rounded text-[0.75rem] text-muted-foreground cursor-pointer hover:bg-[rgba(148,163,184,0.1)] transition-all duration-150"
+        class="flex items-center gap-1.5 px-2 py-1 bg-transparent border-none rounded text-[0.75rem] text-muted-foreground cursor-pointer hover:bg-border transition-all duration-150"
         onClick={() =>
           window.dispatchEvent(new CustomEvent("seren:open-settings"))
         }

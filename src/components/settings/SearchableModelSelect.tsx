@@ -111,24 +111,24 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
     <div class="relative w-full" ref={containerRef}>
       <button
         type="button"
-        class={`w-full flex justify-between items-center px-3 py-2 bg-[#0d1117] border border-[#30363d] text-[#e6edf3] text-sm cursor-pointer transition-[border-color] duration-150 ${
+        class={`w-full flex justify-between items-center px-3 py-2 bg-background border border-surface-3 text-foreground text-sm cursor-pointer transition-[border-color] duration-150 ${
           isOpen()
-            ? "border-[#58a6ff] rounded-t-md rounded-b-none"
-            : "rounded-md hover:border-[#484f58]"
+            ? "border-primary rounded-t-md rounded-b-none"
+            : "rounded-md hover:border-muted-foreground/50"
         }`}
         onClick={() => setIsOpen(!isOpen())}
       >
         <span class="overflow-hidden text-ellipsis whitespace-nowrap">
           {selectedModelName()}
         </span>
-        <span class="text-[10px] text-[#8b949e] ml-2">
+        <span class="text-[10px] text-muted-foreground ml-2">
           {isOpen() ? "▲" : "▼"}
         </span>
       </button>
 
       <Show when={isOpen()}>
-        <div class="absolute top-full left-0 right-0 bg-[#161b22] border border-[#58a6ff] border-t-0 rounded-b-md z-[1000] max-h-[300px] flex flex-col">
-          <div class="p-2 border-b border-[#21262d] flex gap-2 items-center">
+        <div class="absolute top-full left-0 right-0 bg-surface-0 border border-primary border-t-0 rounded-b-md z-[1000] max-h-[300px] flex flex-col">
+          <div class="p-2 border-b border-surface-2 flex gap-2 items-center">
             <input
               ref={inputRef}
               type="text"
@@ -136,10 +136,10 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
               value={search()}
               onInput={(e) => setSearch(e.currentTarget.value)}
               onKeyDown={handleKeyDown}
-              class="flex-1 px-3 py-2 bg-[#0d1117] border border-[#30363d] rounded text-[#e6edf3] text-[13px] focus:outline-none focus:border-[#58a6ff] placeholder:text-[#484f58]"
+              class="flex-1 px-3 py-2 bg-background border border-surface-3 rounded text-foreground text-[13px] focus:outline-none focus:border-primary placeholder:text-muted-foreground/70"
             />
             <Show when={!isLoading() && models().length > 0}>
-              <span class="text-[11px] text-[#8b949e] whitespace-nowrap">
+              <span class="text-[11px] text-muted-foreground whitespace-nowrap">
                 {filteredModels().length} of {models().length}
               </span>
             </Show>
@@ -147,18 +147,18 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
 
           <div class="overflow-y-auto max-h-60">
             <Show when={isLoading()}>
-              <div class="p-4 text-center text-[#8b949e] text-[13px]">
+              <div class="p-4 text-center text-muted-foreground text-[13px]">
                 Loading models from OpenRouter...
               </div>
             </Show>
 
             <Show when={!isLoading() && loadError()}>
-              <div class="p-4 text-center text-[#f85149] text-[13px] flex flex-col gap-2 items-center">
+              <div class="p-4 text-center text-destructive text-[13px] flex flex-col gap-2 items-center">
                 {loadError()}
                 <button
                   type="button"
                   onClick={loadModels}
-                  class="px-3 py-1 bg-transparent border border-[#30363d] rounded text-[#8b949e] text-xs cursor-pointer transition-all duration-150 hover:bg-[#21262d] hover:text-[#e6edf3]"
+                  class="px-3 py-1 bg-transparent border border-surface-3 rounded text-muted-foreground text-xs cursor-pointer transition-all duration-150 hover:bg-surface-2 hover:text-foreground"
                 >
                   Retry
                 </button>
@@ -170,7 +170,7 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
                 !isLoading() && !loadError() && filteredModels().length === 0
               }
             >
-              <div class="p-4 text-center text-[#8b949e] text-[13px]">
+              <div class="p-4 text-center text-muted-foreground text-[13px]">
                 No models match "{search()}"
               </div>
             </Show>
@@ -179,17 +179,19 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
               {(model) => (
                 <button
                   type="button"
-                  class={`w-full flex justify-between items-center px-3 py-2.5 bg-transparent border-none text-[#e6edf3] text-sm cursor-pointer text-left transition-colors duration-100 hover:bg-[#21262d] ${
-                    model.id === props.value ? "bg-[#1f6feb20]" : ""
+                  class={`w-full flex justify-between items-center px-3 py-2.5 bg-transparent border-none text-foreground text-sm cursor-pointer text-left transition-colors duration-100 hover:bg-surface-2 ${
+                    model.id === props.value ? "bg-primary/[0.13]" : ""
                   }`}
                   onClick={() => handleSelect(model.id)}
                 >
                   <span
-                    class={`font-medium ${model.id === props.value ? "text-[#58a6ff]" : ""}`}
+                    class={`font-medium ${model.id === props.value ? "text-primary" : ""}`}
                   >
                     {model.name}
                   </span>
-                  <span class="text-xs text-[#8b949e]">{model.provider}</span>
+                  <span class="text-xs text-muted-foreground">
+                    {model.provider}
+                  </span>
                 </button>
               )}
             </For>

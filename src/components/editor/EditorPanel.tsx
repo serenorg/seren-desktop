@@ -264,14 +264,14 @@ export const EditorPanel: Component = () => {
 
   return (
     <div class="flex h-full bg-card text-foreground" onKeyDown={handleKeyDown}>
-      <aside class="w-60 min-w-[180px] max-w-[400px] flex flex-col bg-popover border-r border-[rgba(148,163,184,0.25)]">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-[rgba(148,163,184,0.15)]">
+      <aside class="w-60 min-w-[180px] max-w-[400px] flex flex-col bg-popover border-r border-border-strong">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-border-medium">
           <span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Explorer
           </span>
           <button
             type="button"
-            class="bg-transparent border-none px-2 py-1 cursor-pointer text-sm rounded transition-colors hover:bg-[rgba(148,163,184,0.15)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="bg-transparent border-none px-2 py-1 cursor-pointer text-sm rounded transition-colors hover:bg-border-medium disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleOpenFolder}
             disabled={isLoading()}
             title="Open Folder"
@@ -290,7 +290,7 @@ export const EditorPanel: Component = () => {
       </aside>
 
       <section class="flex-1 flex flex-col min-w-0">
-        <div class="shrink-0 border-b border-[rgba(148,163,184,0.15)]">
+        <div class="shrink-0 border-b border-border-medium">
           <FileTabs
             isMarkdown={isMarkdownFile()}
             showPreview={showPreview()}
@@ -311,7 +311,7 @@ export const EditorPanel: Component = () => {
                   </h2>
                   <p class="m-0 mb-5 text-muted-foreground leading-normal">
                     Open a folder to browse files, or use{" "}
-                    <kbd class="bg-[rgba(148,163,184,0.2)] px-1.5 py-0.5 rounded font-inherit text-[0.9em]">
+                    <kbd class="bg-border-hover px-1.5 py-0.5 rounded font-inherit text-[0.9em]">
                       {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+O
                     </kbd>{" "}
                     to open a file.
@@ -319,7 +319,7 @@ export const EditorPanel: Component = () => {
                   <Show when={!fileTreeState.rootPath}>
                     <button
                       type="button"
-                      class="bg-accent text-white border-none px-6 py-2.5 rounded-md text-[0.95rem] cursor-pointer transition-colors hover:bg-[#4f46e5]"
+                      class="bg-accent text-white border-none px-6 py-2.5 rounded-md text-[0.95rem] cursor-pointer transition-colors hover:bg-primary/85"
                       onClick={handleOpenFolder}
                     >
                       Open Folder

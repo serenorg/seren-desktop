@@ -99,7 +99,7 @@ export function AboutDialog() {
           class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_150ms_ease-out]"
           onClick={handleBackdropClick}
         >
-          <div class="bg-popover border border-border rounded-xl w-[420px] max-w-[90vw] shadow-[0_8px_32px_rgba(0,0,0,0.4)] animate-[slideUp_200ms_ease-out] overflow-hidden">
+          <div class="bg-popover border border-border rounded-xl w-[420px] max-w-[90vw] shadow-[var(--shadow-lg)] animate-[slideUp_200ms_ease-out] overflow-hidden">
             <div class="px-6 pt-6 pb-4 text-center">
               <h2 class="m-0 text-lg font-semibold text-foreground">Seren</h2>
             </div>
@@ -150,7 +150,7 @@ export function AboutDialog() {
               <Show when={updaterStore.state.status === "available"}>
                 <button
                   type="button"
-                  class="px-5 py-2 rounded-md text-[13px] font-medium cursor-pointer border border-[#238636] transition-colors duration-150 bg-[#238636] text-white hover:bg-[#2ea043]"
+                  class="px-5 py-2 rounded-md text-[13px] font-medium cursor-pointer border border-success/70 transition-colors duration-150 bg-success/70 text-white hover:bg-success/85"
                   onClick={installUpdate}
                 >
                   Install Update {updaterStore.state.availableVersion}
@@ -173,7 +173,7 @@ export function AboutDialog() {
           class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_150ms_ease-out]"
           onClick={closeUpToDate}
         >
-          <div class="bg-popover border border-border rounded-xl w-[360px] max-w-[90vw] shadow-[0_8px_32px_rgba(0,0,0,0.4)] animate-[slideUp_200ms_ease-out] overflow-hidden">
+          <div class="bg-popover border border-border rounded-xl w-[360px] max-w-[90vw] shadow-[var(--shadow-lg)] animate-[slideUp_200ms_ease-out] overflow-hidden">
             <div class="px-6 pt-6 pb-4 text-center">
               <h2 class="m-0 text-lg font-semibold text-foreground">
                 All Up to Date!

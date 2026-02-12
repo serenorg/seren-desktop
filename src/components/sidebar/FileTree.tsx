@@ -482,7 +482,7 @@ const FileTreeNode: Component<FileTreeNodeProps> = (props) => {
           <input
             ref={renameInputRef}
             type="text"
-            class="flex-1 bg-[#1c2128] border border-[#58a6ff] rounded text-foreground text-[13px] py-0.5 px-1.5 outline-none min-w-0 focus:border-[#58a6ff] focus:shadow-[0_0_0_2px_rgba(88,166,255,0.3)]"
+            class="flex-1 bg-surface-1 border border-primary rounded text-foreground text-[13px] py-0.5 px-1.5 outline-none min-w-0 focus:border-primary focus:shadow-[0_0_0_2px_rgba(56,189,248,0.3)]"
             value={props.renameState?.name || ""}
             placeholder="Enter new name"
             aria-label="Rename file"

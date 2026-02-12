@@ -163,11 +163,11 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
   };
 
   const btnClass =
-    "bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-base cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)] disabled:opacity-40 disabled:cursor-not-allowed";
+    "bg-transparent border border-border-strong text-foreground w-8 h-8 rounded flex items-center justify-center text-base cursor-pointer transition-all hover:bg-border-medium hover:border-muted-foreground/40 disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
     <div class="flex flex-col h-full bg-card">
-      <div class="flex items-center justify-between px-4 py-2 bg-popover border-b border-[rgba(148,163,184,0.15)] shrink-0 gap-4">
+      <div class="flex items-center justify-between px-4 py-2 bg-popover border-b border-border-medium shrink-0 gap-4">
         <div class="flex-1 min-w-0">
           <span class="font-medium text-foreground overflow-hidden text-ellipsis whitespace-nowrap">
             {fileName()}
@@ -187,7 +187,7 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
           <span class="flex items-center gap-1 text-muted-foreground text-[13px]">
             <input
               type="number"
-              class="w-[50px] px-2 py-1 bg-card border border-[rgba(148,163,184,0.25)] rounded text-foreground text-[13px] text-center focus:outline-none focus:border-accent [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              class="w-[50px] px-2 py-1 bg-card border border-border-strong rounded text-foreground text-[13px] text-center focus:outline-none focus:border-accent [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               value={currentPage()}
               min={1}
               max={totalPages()}
@@ -237,7 +237,7 @@ export const PdfViewer: Component<PdfViewerProps> = (props) => {
         </div>
       </div>
 
-      <div class="flex-1 overflow-auto flex justify-center p-5 bg-[#525659]">
+      <div class="flex-1 overflow-auto flex justify-center p-5 bg-surface-3">
         {isLoading() ? (
           <div class="flex items-center justify-center h-full w-full text-muted-foreground text-sm">
             Loading PDF...

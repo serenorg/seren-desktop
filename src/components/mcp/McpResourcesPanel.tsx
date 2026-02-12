@@ -95,21 +95,21 @@ export const McpResourcesPanel: Component = () => {
 
   return (
     <div class="flex h-full bg-card">
-      <div class="w-80 border-r border-[rgba(148,163,184,0.25)] flex flex-col bg-popover">
-        <div class="p-4 border-b border-[rgba(148,163,184,0.25)] flex justify-between items-center">
+      <div class="w-80 border-r border-border-strong flex flex-col bg-popover">
+        <div class="p-4 border-b border-border-strong flex justify-between items-center">
           <h3 class="m-0 text-sm font-semibold">Resources</h3>
           <span class="px-2 py-0.5 bg-accent text-white rounded-xl text-xs font-medium">
             {resources().length}
           </span>
         </div>
 
-        <div class="p-3 border-b border-[rgba(148,163,184,0.25)]">
+        <div class="p-3 border-b border-border-strong">
           <input
             type="text"
             placeholder="Search resources..."
             value={searchQuery()}
             onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            class="w-full px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md text-[13px] bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
+            class="w-full px-3 py-2 border border-border-strong rounded-md text-[13px] bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
           />
         </div>
 
@@ -139,7 +139,7 @@ export const McpResourcesPanel: Component = () => {
                     class={`w-full px-3 py-2.5 bg-transparent border-none rounded-md text-left cursor-pointer flex items-center gap-2.5 transition-colors duration-150 ${
                       isSelected()
                         ? "bg-accent text-white"
-                        : "hover:bg-[rgba(148,163,184,0.15)]"
+                        : "hover:bg-border-medium"
                     }`}
                     onClick={() => selectResource(serverName, resource)}
                   >
@@ -217,7 +217,7 @@ export const McpResourcesPanel: Component = () => {
                   <h4 class="m-0 text-sm font-semibold">Content</h4>
                   <Show when={resourceContent()?.content}>
                     <button
-                      class="px-3 py-1.5 bg-popover border border-[rgba(148,163,184,0.25)] rounded text-xs cursor-pointer transition-colors duration-150 hover:bg-[rgba(148,163,184,0.15)]"
+                      class="px-3 py-1.5 bg-popover border border-border-strong rounded text-xs cursor-pointer transition-colors duration-150 hover:bg-border-medium"
                       onClick={() => {
                         const content = resourceContent()?.content;
                         if (content) {
@@ -237,13 +237,13 @@ export const McpResourcesPanel: Component = () => {
                 </Show>
 
                 <Show when={resourceContent()?.error}>
-                  <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-[13px]">
+                  <div class="p-3 bg-destructive/10 text-destructive/85 rounded-md text-[13px]">
                     {resourceContent()?.error}
                   </div>
                 </Show>
 
                 <Show when={resourceContent()?.content}>
-                  <div class="flex-1 bg-popover border border-[rgba(148,163,184,0.25)] rounded-lg overflow-auto min-h-[200px]">
+                  <div class="flex-1 bg-popover border border-border-strong rounded-lg overflow-auto min-h-[200px]">
                     <pre class="m-0 p-4 text-[13px] font-mono whitespace-pre-wrap break-words">
                       {formatContent(resourceContent()?.content)}
                     </pre>

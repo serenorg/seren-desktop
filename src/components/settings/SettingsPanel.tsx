@@ -130,7 +130,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
   return (
     <div class="flex h-full bg-surface text-foreground">
-      <aside class="w-[220px] min-w-[180px] flex flex-col bg-popover border-r border-[rgba(148,163,184,0.25)]">
+      <aside class="w-[220px] min-w-[180px] flex flex-col bg-popover border-r border-border-strong">
         <h2 class="px-4 pt-5 pb-3 m-0 text-[1.1rem] font-semibold text-foreground">
           Settings
         </h2>
@@ -142,7 +142,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 class={`flex items-center gap-2.5 px-3 py-2.5 bg-transparent border-none rounded-md cursor-pointer text-[0.9rem] text-left transition-all duration-150 ${
                   activeSection() === section.id
                     ? "bg-accent text-white"
-                    : "text-muted-foreground hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground"
+                    : "text-muted-foreground hover:bg-border hover:text-foreground"
                 }`}
                 onClick={() => setActiveSection(section.id)}
               >
@@ -152,10 +152,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             )}
           </For>
         </nav>
-        <div class="p-3 border-t border-[rgba(148,163,184,0.15)]">
+        <div class="p-3 border-t border-border-medium">
           <button
             type="button"
-            class="w-full py-2 px-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.85rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:border-[rgba(239,68,68,0.5)] hover:text-[#ef4444]"
+            class="w-full py-2 px-2 bg-transparent border border-border-strong rounded-md text-muted-foreground text-[0.85rem] cursor-pointer transition-all duration-150 hover:bg-destructive/10 hover:border-destructive/50 hover:text-destructive"
             onClick={() => setShowResetConfirm(true)}
           >
             Reset All Settings
@@ -173,7 +173,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               Configure AI chat behavior and conversation history.
             </p>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Default Model
@@ -189,7 +189,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               />
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   History Limit
@@ -210,11 +210,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     e.currentTarget.value,
                   )
                 }
-                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Max Tool Iterations
@@ -237,11 +237,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     e.currentTarget.value,
                   )
                 }
-                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -265,7 +265,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
               Auto-Compact
             </h4>
             <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
@@ -273,7 +273,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               limits.
             </p>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -298,7 +298,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             </div>
 
             <Show when={settingsState.app.autoCompactEnabled}>
-              <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                 <label class="flex flex-col gap-0.5 flex-1">
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Compact Threshold
@@ -321,11 +321,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                       e.currentTarget.value,
                     )
                   }
-                  class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                  class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
                 />
               </div>
 
-              <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                 <label class="flex flex-col gap-0.5 flex-1">
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Preserve Messages
@@ -347,7 +347,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                       e.currentTarget.value,
                     )
                   }
-                  class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                  class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
                 />
               </div>
             </Show>
@@ -375,7 +375,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               Customize your code editing experience.
             </p>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Font Size
@@ -392,11 +392,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 onInput={(e) =>
                   handleNumberChange("editorFontSize", e.currentTarget.value)
                 }
-                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Tab Size
@@ -413,11 +413,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 onInput={(e) =>
                   handleNumberChange("editorTabSize", e.currentTarget.value)
                 }
-                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -441,11 +441,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
               Code Completion
             </h4>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -469,7 +469,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Completion Delay
@@ -487,11 +487,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 onInput={(e) =>
                   handleNumberChange("completionDelay", e.currentTarget.value)
                 }
-                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Completion Model
@@ -509,7 +509,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               />
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Max Suggestion Lines
@@ -529,7 +529,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     e.currentTarget.value,
                   )
                 }
-                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
           </section>
@@ -546,7 +546,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
             <DailyClaimBanner />
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -567,7 +567,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Low Balance Warning
@@ -587,18 +587,18 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     e.currentTarget.value,
                   )
                 }
-                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
               Payment Method
             </h4>
             <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
               Choose your preferred payment method for MCP server tools.
             </p>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Preferred Method
@@ -610,10 +610,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               <div class="flex gap-3">
                 <button
                   type="button"
-                  class={`flex flex-col items-center gap-2 px-6 py-4 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 min-w-[120px] ${
+                  class={`flex flex-col items-center gap-2 px-6 py-4 bg-surface-3/60 border-2 rounded-lg cursor-pointer transition-all duration-150 min-w-[120px] ${
                     settingsState.app.preferredPaymentMethod === "serenbucks"
-                      ? "border-accent bg-[rgba(99,102,241,0.1)]"
-                      : "border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                      ? "border-accent bg-primary/10"
+                      : "border-border-hover hover:border-muted-foreground/40"
                   }`}
                   onClick={() =>
                     handleStringChange("preferredPaymentMethod", "serenbucks")
@@ -628,10 +628,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 </button>
                 <button
                   type="button"
-                  class={`flex flex-col items-center gap-2 px-6 py-4 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  class={`flex flex-col items-center gap-2 px-6 py-4 bg-surface-3/60 border-2 rounded-lg cursor-pointer transition-all duration-150 min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed ${
                     settingsState.app.preferredPaymentMethod === "crypto"
-                      ? "border-accent bg-[rgba(99,102,241,0.1)]"
-                      : "border-[rgba(148,163,184,0.2)] hover:not-disabled:border-[rgba(148,163,184,0.4)]"
+                      ? "border-accent bg-primary/10"
+                      : "border-border-hover hover:not-disabled:border-muted-foreground/40"
                   }`}
                   onClick={() =>
                     handleStringChange("preferredPaymentMethod", "crypto")
@@ -653,7 +653,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </div>
             </div>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -677,11 +677,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
               Auto Top-Up
             </h4>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -706,7 +706,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             </div>
 
             <Show when={settingsState.app.autoTopUpEnabled}>
-              <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                 <label class="flex flex-col gap-0.5 flex-1">
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Top-Up Threshold
@@ -726,11 +726,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                       e.currentTarget.value,
                     )
                   }
-                  class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                  class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
                 />
               </div>
 
-              <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+              <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                 <label class="flex flex-col gap-0.5 flex-1">
                   <span class="text-[0.95rem] font-medium text-foreground">
                     Top-Up Amount
@@ -747,12 +747,12 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   onInput={(e) =>
                     handleNumberChange("autoTopUpAmount", e.currentTarget.value)
                   }
-                  class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                  class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
                 />
               </div>
             </Show>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
               Crypto Wallet (USDC Payments)
             </h4>
             <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
@@ -760,7 +760,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               servers.
             </p>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Auto-Approve Limit
@@ -782,14 +782,14 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     e.currentTarget.value,
                   )
                 }
-                class="w-[100px] px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
+                class="w-[100px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-right focus:outline-none focus:border-accent"
               />
             </div>
 
             <Show
               when={cryptoWalletStore.state().isConfigured}
               fallback={
-                <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                   <label class="flex flex-col gap-0.5 flex-1">
                     <span class="text-[0.95rem] font-medium text-foreground">
                       Private Key
@@ -807,16 +807,16 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                         onInput={(e) =>
                           setPrivateKeyInput(e.currentTarget.value)
                         }
-                        class={`flex-1 px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent ${
+                        class={`flex-1 px-3 py-2.5 bg-surface-3/80 border rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent ${
                           privateKeyInput() &&
                           !isValidPrivateKeyFormat(privateKeyInput())
-                            ? "border-[#ef4444]"
-                            : "border-[rgba(148,163,184,0.3)]"
+                            ? "border-destructive"
+                            : "border-border-strong"
                         }`}
                       />
                       <button
                         type="button"
-                        class="px-5 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 whitespace-nowrap hover:not-disabled:bg-[#4f46e5] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="px-5 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 whitespace-nowrap hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
                         disabled={
                           !isValidPrivateKeyFormat(privateKeyInput()) ||
                           cryptoWalletStore.state().isLoading
@@ -834,12 +834,12 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                         !isValidPrivateKeyFormat(privateKeyInput())
                       }
                     >
-                      <span class="text-[0.8rem] text-[#ef4444]">
+                      <span class="text-[0.8rem] text-destructive">
                         Invalid key format. Must be 64 hex characters.
                       </span>
                     </Show>
                     <Show when={cryptoWalletStore.state().error}>
-                      <span class="text-[0.8rem] text-[#ef4444]">
+                      <span class="text-[0.8rem] text-destructive">
                         {cryptoWalletStore.state().error}
                       </span>
                     </Show>
@@ -848,7 +848,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               }
             >
               <div class="mt-2">
-                <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                   <label class="flex flex-col gap-0.5 flex-1">
                     <span class="text-[0.95rem] font-medium text-foreground">
                       Wallet Address
@@ -858,12 +858,12 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     </span>
                   </label>
                   <div class="flex items-center gap-3 flex-wrap">
-                    <code class="flex-1 px-3 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[0.85rem] text-foreground font-mono break-all">
+                    <code class="flex-1 px-3 py-2.5 bg-surface-3/60 border border-border-hover rounded-md text-[0.85rem] text-foreground font-mono break-all">
                       {cryptoWalletStore.state().address}
                     </code>
                     <button
                       type="button"
-                      class="px-4 py-2.5 bg-transparent border border-[rgba(239,68,68,0.5)] rounded-md text-[#ef4444] text-[0.9rem] cursor-pointer transition-all duration-150 whitespace-nowrap hover:bg-[rgba(239,68,68,0.1)] hover:border-[#ef4444]"
+                      class="px-4 py-2.5 bg-transparent border border-destructive/50 rounded-md text-destructive text-[0.9rem] cursor-pointer transition-all duration-150 whitespace-nowrap hover:bg-destructive/10 hover:border-destructive"
                       onClick={() => setShowClearConfirm(true)}
                     >
                       Remove Wallet
@@ -871,7 +871,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   </div>
                 </div>
 
-                <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+                <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                   <label class="flex flex-col gap-0.5 flex-1">
                     <span class="text-[0.95rem] font-medium text-foreground">
                       USDC Balance (Base)
@@ -884,12 +884,12 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     <Show
                       when={!cryptoWalletStore.state().balanceLoading}
                       fallback={
-                        <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[0.9rem] text-muted-foreground min-w-[140px]">
+                        <span class="px-4 py-2.5 bg-surface-3/60 border border-border-hover rounded-md text-[0.9rem] text-muted-foreground min-w-[140px]">
                           Loading balance...
                         </span>
                       }
                     >
-                      <span class="px-4 py-2.5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[1.1rem] font-semibold text-foreground font-mono min-w-[140px]">
+                      <span class="px-4 py-2.5 bg-surface-3/60 border border-border-hover rounded-md text-[1.1rem] font-semibold text-foreground font-mono min-w-[140px]">
                         {cryptoWalletStore.state().usdcBalance !== null
                           ? `${cryptoWalletStore.state().usdcBalance} USDC`
                           : "—"}
@@ -897,7 +897,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     </Show>
                     <button
                       type="button"
-                      class="w-9 h-9 flex items-center justify-center bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-md text-[1.2rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:not-disabled:bg-[rgba(148,163,184,0.1)] hover:not-disabled:border-[rgba(148,163,184,0.4)] hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                      class="w-9 h-9 flex items-center justify-center bg-surface-3/60 border border-border-hover rounded-md text-[1.2rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:not-disabled:bg-border hover:not-disabled:border-muted-foreground/40 hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => cryptoWalletStore.fetchBalance()}
                       disabled={cryptoWalletStore.state().balanceLoading}
                       title="Refresh balance"
@@ -918,7 +918,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               Configure sandbox security and permissions for AI agent sessions.
             </p>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Sandbox Mode
@@ -952,10 +952,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   {(mode) => (
                     <button
                       type="button"
-                      class={`flex flex-col items-center gap-2 px-6 py-4 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 ${
+                      class={`flex flex-col items-center gap-2 px-6 py-4 bg-surface-3/60 border-2 rounded-lg cursor-pointer transition-all duration-150 ${
                         settingsState.app.agentSandboxMode === mode.value
-                          ? "border-accent bg-[rgba(99,102,241,0.1)]"
-                          : "border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                          ? "border-accent bg-primary/10"
+                          : "border-border-hover hover:border-muted-foreground/40"
                       }`}
                       onClick={() =>
                         handleStringChange("agentSandboxMode", mode.value)
@@ -982,7 +982,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </div>
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Approval Policy
@@ -1031,10 +1031,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                               ? "The model decides when to ask the user for approval."
                               : "Never ask for approval. Execution failures are returned directly to the model."
                       }
-                      class={`flex flex-col items-center gap-2 px-4 py-3 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 ${
+                      class={`flex flex-col items-center gap-2 px-4 py-3 bg-surface-3/60 border-2 rounded-lg cursor-pointer transition-all duration-150 ${
                         settingsState.app.agentApprovalPolicy === mode.value
-                          ? "border-accent bg-[rgba(99,102,241,0.1)]"
-                          : "border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                          ? "border-accent bg-primary/10"
+                          : "border-border-hover hover:border-muted-foreground/40"
                       }`}
                       onClick={() =>
                         handleStringChange("agentApprovalPolicy", mode.value)
@@ -1054,7 +1054,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </div>
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Quick Presets
@@ -1070,8 +1070,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   class={`px-4 py-2 text-[0.85rem] rounded-lg border-2 cursor-pointer transition-all duration-150 ${
                     settingsState.app.agentSandboxMode === "workspace-write" &&
                     settingsState.app.agentApprovalPolicy === "on-request"
-                      ? "border-accent bg-[rgba(99,102,241,0.1)] text-foreground"
-                      : "border-[rgba(148,163,184,0.2)] bg-[rgba(30,30,30,0.6)] text-muted-foreground hover:border-[rgba(148,163,184,0.4)]"
+                      ? "border-accent bg-primary/10 text-foreground"
+                      : "border-border-hover bg-surface-3/60 text-muted-foreground hover:border-muted-foreground/40"
                   }`}
                   onClick={() => {
                     handleStringChange("agentSandboxMode", "workspace-write");
@@ -1086,8 +1086,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   class={`px-4 py-2 text-[0.85rem] rounded-lg border-2 cursor-pointer transition-all duration-150 ${
                     settingsState.app.agentSandboxMode === "full-access" &&
                     settingsState.app.agentApprovalPolicy === "never"
-                      ? "border-red-500 bg-[rgba(239,68,68,0.1)] text-red-400"
-                      : "border-red-500/30 bg-[rgba(30,30,30,0.6)] text-red-400/70 hover:border-red-500/60"
+                      ? "border-red-500 bg-destructive/10 text-red-400"
+                      : "border-red-500/30 bg-surface-3/60 text-red-400/70 hover:border-red-500/60"
                   }`}
                   onClick={() => {
                     handleStringChange("agentSandboxMode", "full-access");
@@ -1099,7 +1099,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </div>
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1123,7 +1123,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1156,7 +1156,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               Customize how Seren Desktop looks.
             </p>
 
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
               <label class="flex flex-col gap-0.5 flex-1">
                 <span class="text-[0.95rem] font-medium text-foreground">
                   Theme
@@ -1170,10 +1170,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   {(theme) => (
                     <button
                       type="button"
-                      class={`flex flex-col items-center gap-2 px-6 py-4 bg-[rgba(30,30,30,0.6)] border-2 rounded-lg cursor-pointer transition-all duration-150 ${
+                      class={`flex flex-col items-center gap-2 px-6 py-4 bg-surface-3/60 border-2 rounded-lg cursor-pointer transition-all duration-150 ${
                         settingsState.app.theme === theme
-                          ? "border-accent bg-[rgba(99,102,241,0.1)]"
-                          : "border-[rgba(148,163,184,0.2)] hover:border-[rgba(148,163,184,0.4)]"
+                          ? "border-accent bg-primary/10"
+                          : "border-border-hover hover:border-muted-foreground/40"
                       }`}
                       onClick={() => handleThemeChange(theme)}
                     >
@@ -1207,7 +1207,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               SerenEmbed.
             </p>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1233,7 +1233,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </label>
             </div>
 
-            <div class="mt-6 p-4 bg-[rgba(99,102,241,0.1)] border border-[rgba(99,102,241,0.3)] rounded">
+            <div class="mt-6 p-4 bg-primary/10 border border-primary/30 rounded">
               <h4 class="m-0 mb-2 text-sm font-semibold text-foreground">
                 How It Works
               </h4>
@@ -1252,7 +1252,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </ul>
             </div>
 
-            <div class="mt-6 p-4 bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded">
+            <div class="mt-6 p-4 bg-warning/10 border border-warning/30 rounded">
               <h4 class="m-0 mb-2 text-sm font-semibold text-foreground">
                 Cost Estimate
               </h4>
@@ -1264,7 +1264,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </p>
             </div>
 
-            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-[rgba(148,163,184,0.15)] pt-5">
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
               Persistent Memory
             </h4>
             <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
@@ -1272,7 +1272,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               account.
             </p>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1309,7 +1309,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               Configure application behavior and privacy options.
             </p>
 
-            <div class="flex items-start justify-start gap-4 py-3 border-b border-[rgba(148,163,184,0.1)]">
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1360,7 +1360,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 <For each={mcpSettings().servers}>
                   {(server) => (
                     <div
-                      class={`flex items-center justify-between px-4 py-3 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg ${
+                      class={`flex items-center justify-between px-4 py-3 bg-surface-3/60 border border-border-hover rounded-lg ${
                         !server.enabled ? "opacity-60" : ""
                       }`}
                     >
@@ -1374,7 +1374,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                               server.autoConnect && server.name !== "Seren MCP"
                             }
                           >
-                            <span class="px-1.5 py-0.5 bg-[rgba(99,102,241,0.2)] rounded text-[0.7rem] text-accent">
+                            <span class="px-1.5 py-0.5 bg-primary/20 rounded text-[0.7rem] text-accent">
                               Auto-connect
                             </span>
                           </Show>
@@ -1394,8 +1394,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                           type="button"
                           class={`px-3 py-1 border-none rounded text-[0.8rem] cursor-pointer transition-all duration-150 hover:opacity-80 ${
                             server.enabled
-                              ? "bg-[rgba(34,197,94,0.2)] text-[#22c55e]"
-                              : "bg-[rgba(148,163,184,0.2)] text-muted-foreground"
+                              ? "bg-success/20 text-success"
+                              : "bg-border-hover text-muted-foreground"
                           }`}
                           onClick={() => handleToggleMcpServer(server.name)}
                           title={server.enabled ? "Disable" : "Enable"}
@@ -1404,7 +1404,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                         </button>
                         <button
                           type="button"
-                          class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[1.2rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-[rgba(239,68,68,0.1)] hover:text-[#ef4444]"
+                          class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[1.2rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-destructive/10 hover:text-destructive"
                           onClick={() => handleRemoveMcpServer(server.name)}
                           title="Remove server"
                         >
@@ -1430,7 +1430,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
           onClick={() => setShowResetConfirm(false)}
         >
           <div
-            class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-6 max-w-[400px] w-[90%]"
+            class="bg-popover border border-border-strong rounded-xl p-6 max-w-[400px] w-[90%]"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 class="m-0 mb-3 text-[1.1rem]">Reset All Settings?</h3>
@@ -1441,14 +1441,14 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             <div class="flex justify-end gap-2">
               <button
                 type="button"
-                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
+                class="px-4 py-2 bg-transparent border border-border-strong rounded-md text-muted-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-border"
                 onClick={() => setShowResetConfirm(false)}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                class="px-4 py-2 bg-[#ef4444] border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[#dc2626]"
+                class="px-4 py-2 bg-destructive border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-destructive/85"
                 onClick={handleResetAll}
               >
                 Reset All
@@ -1464,7 +1464,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
           onClick={() => setShowClearConfirm(false)}
         >
           <div
-            class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl p-6 max-w-[400px] w-[90%]"
+            class="bg-popover border border-border-strong rounded-xl p-6 max-w-[400px] w-[90%]"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 class="m-0 mb-3 text-[1.1rem]">Remove Crypto Wallet?</h3>
@@ -1475,14 +1475,14 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             <div class="flex justify-end gap-2">
               <button
                 type="button"
-                class="px-4 py-2 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-muted-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
+                class="px-4 py-2 bg-transparent border border-border-strong rounded-md text-muted-foreground text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-border"
                 onClick={() => setShowClearConfirm(false)}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                class="px-4 py-2 bg-[#ef4444] border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-[#dc2626]"
+                class="px-4 py-2 bg-destructive border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-destructive/85"
                 onClick={handleClearCryptoWallet}
               >
                 Remove Wallet
@@ -1525,7 +1525,7 @@ const DailyClaimBanner: Component = () => {
 
   return (
     <Show when={canClaim() && !claimedAmount()}>
-      <div class="flex items-center justify-between gap-4 py-3 px-4 mb-4 rounded-lg border border-[rgba(99,102,241,0.3)] bg-[rgba(99,102,241,0.08)]">
+      <div class="flex items-center justify-between gap-4 py-3 px-4 mb-4 rounded-lg border border-primary/30 bg-primary/[0.08]">
         <div class="flex flex-col gap-0.5">
           <span class="text-[0.95rem] font-medium text-foreground">
             {walletState.dailyClaim?.claim_amount_usd
@@ -1538,11 +1538,11 @@ const DailyClaimBanner: Component = () => {
               : "Claim your free daily credits"}
           </span>
           <Show when={error()}>
-            <span class="text-[0.75rem] text-[#ef4444]">{error()}</span>
+            <span class="text-[0.75rem] text-destructive">{error()}</span>
           </Show>
         </div>
         <button
-          class="py-1.5 px-4 text-[0.8125rem] font-medium rounded-md cursor-pointer bg-[#6366f1] text-white border-none hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-150"
+          class="py-1.5 px-4 text-[0.8125rem] font-medium rounded-md cursor-pointer bg-primary text-white border-none hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-150"
           onClick={handleClaim}
           disabled={claiming()}
         >

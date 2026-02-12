@@ -46,7 +46,7 @@ export const ToolsetSelector: Component = () => {
   return (
     <div class="relative" ref={containerRef}>
       <button
-        class="flex items-center gap-2 px-3 py-1.5 bg-popover border border-muted rounded-md text-sm text-foreground cursor-pointer transition-colors hover:border-[rgba(148,163,184,0.4)]"
+        class="flex items-center gap-2 px-3 py-1.5 bg-popover border border-muted rounded-md text-sm text-foreground cursor-pointer transition-colors hover:border-muted-foreground/40"
         onClick={() => setIsOpen(!isOpen())}
         title={
           activeToolset()?.description ||
@@ -63,18 +63,18 @@ export const ToolsetSelector: Component = () => {
       </button>
 
       <Show when={isOpen()}>
-        <div class="absolute bottom-[calc(100%+8px)] left-0 min-w-[220px] bg-[#1e1e1e] border border-[#3c3c3c] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-[1000] overflow-hidden">
+        <div class="absolute bottom-[calc(100%+8px)] left-0 min-w-[220px] bg-surface-2 border border-surface-3 rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-[1000] overflow-hidden">
           {/* Header */}
-          <div class="px-3 py-2 bg-[#252525] border-b border-[#3c3c3c]">
+          <div class="px-3 py-2 bg-surface-3 border-b border-surface-3">
             <span class="text-xs text-muted-foreground">Active Toolset</span>
           </div>
 
           {/* Options */}
-          <div class="max-h-[250px] overflow-y-auto py-1 bg-[#1e1e1e]">
+          <div class="max-h-[250px] overflow-y-auto py-1 bg-surface-2">
             {/* All Publishers option */}
             <button
               type="button"
-              class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-[rgba(148,163,184,0.1)] ${!activeToolset() ? "bg-[rgba(99,102,241,0.12)]" : ""}`}
+              class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border ${!activeToolset() ? "bg-primary/[0.12]" : ""}`}
               onClick={() => handleSelect(null)}
             >
               <div class="flex flex-col gap-0.5 min-w-0 flex-1">
@@ -93,7 +93,7 @@ export const ToolsetSelector: Component = () => {
               {(toolset) => (
                 <button
                   type="button"
-                  class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-[rgba(148,163,184,0.1)] ${activeToolset()?.id === toolset.id ? "bg-[rgba(99,102,241,0.12)]" : ""}`}
+                  class={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border ${activeToolset()?.id === toolset.id ? "bg-primary/[0.12]" : ""}`}
                   onClick={() => handleSelect(toolset.id)}
                 >
                   <div class="flex flex-col gap-0.5 min-w-0 flex-1">

@@ -42,10 +42,10 @@ export const SatisfactionSignal: Component<SatisfactionSignalProps> = (
       <Show when={signal() === null || signal() === 1}>
         <button
           type="button"
-          class={`bg-transparent border border-[#30363d] cursor-pointer px-2 py-1 rounded-md transition-all ${
+          class={`bg-transparent border border-surface-3 cursor-pointer px-2 py-1 rounded-md transition-all ${
             signal() === 1
-              ? "text-[#3fb950] border-[#238636] bg-[rgba(35,134,54,0.1)]"
-              : "text-[#8b949e] hover:text-[#3fb950] hover:border-[#238636] hover:bg-[rgba(35,134,54,0.05)]"
+              ? "text-success border-success/70 bg-success/10"
+              : "text-muted-foreground hover:text-success hover:border-success/70 hover:bg-success/5"
           }`}
           onClick={() => submit(1)}
           title="This response was helpful — your feedback helps Seren route to the best models for you"
@@ -64,10 +64,10 @@ export const SatisfactionSignal: Component<SatisfactionSignalProps> = (
       <Show when={signal() === null || signal() === 0}>
         <button
           type="button"
-          class={`bg-transparent border border-[#30363d] cursor-pointer px-2 py-1 rounded-md transition-all ${
+          class={`bg-transparent border border-surface-3 cursor-pointer px-2 py-1 rounded-md transition-all ${
             signal() === 0
-              ? "text-[#f85149] border-[#da3633] bg-[rgba(218,54,51,0.1)]"
-              : "text-[#8b949e] hover:text-[#f85149] hover:border-[#da3633] hover:bg-[rgba(218,54,51,0.05)]"
+              ? "text-destructive border-destructive/80 bg-destructive/10"
+              : "text-muted-foreground hover:text-destructive hover:border-destructive/80 hover:bg-destructive/5"
           }`}
           onClick={() => submit(0)}
           title="This response was not helpful — your feedback helps Seren avoid poor models"

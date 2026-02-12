@@ -204,14 +204,14 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
     const base =
       "mt-1 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full w-fit before:content-[''] before:w-1.5 before:h-1.5 before:rounded-full";
     if (level === "low")
-      return `${base} bg-[rgba(34,197,94,0.15)] text-[#15803d] before:bg-[#22c55e]`;
+      return `${base} bg-success/15 text-success/70 before:bg-success`;
     if (level === "medium")
-      return `${base} bg-[rgba(251,191,36,0.2)] text-[#b45309] before:bg-[#f59e0b]`;
-    return `${base} bg-[rgba(248,113,113,0.2)] text-[#b91c1c] before:bg-[#ef4444]`;
+      return `${base} bg-warning/20 text-warning/80 before:bg-warning/85`;
+    return `${base} bg-destructive/20 text-destructive/70 before:bg-destructive`;
   };
 
   return (
-    <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-lg px-4 py-3 my-2">
+    <div class="bg-popover border border-border-strong rounded-lg px-4 py-3 my-2">
       <div class="flex items-center gap-2.5 mb-3">
         <span class="text-xl">🔧</span>
         <div class="flex-1 flex flex-col gap-0.5">
@@ -223,7 +223,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
           </span>
           <div class={getRiskBadgeClasses()}>{getRiskLabel(riskLevel())}</div>
         </div>
-        <span class="px-2.5 py-1 bg-[#dbeafe] text-accent rounded-md text-[11px] font-medium">
+        <span class="px-2.5 py-1 bg-primary/15 text-accent rounded-md text-[11px] font-medium">
           {props.request.serverName}
         </span>
       </div>
@@ -233,10 +233,10 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
           <span class="block text-[11px] uppercase tracking-[0.5px] text-muted-foreground mb-1.5">
             Arguments:
           </span>
-          <div class="bg-card border border-[rgba(148,163,184,0.25)] rounded-md px-3 py-2">
+          <div class="bg-card border border-border-strong rounded-md px-3 py-2">
             <For each={argEntries()}>
               {([key, value]) => (
-                <div class="flex gap-2 py-1 text-[13px] font-mono border-b border-[rgba(148,163,184,0.25)] last:border-b-0">
+                <div class="flex gap-2 py-1 text-[13px] font-mono border-b border-border-strong last:border-b-0">
                   <span class="text-accent font-medium">{key}:</span>
                   <span class="text-foreground break-all">
                     {formatArgValue(value)}
@@ -258,7 +258,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
             value={confirmationInput()}
             onInput={(e) => setConfirmationInput(e.currentTarget.value)}
             placeholder={props.request.call.name}
-            class="p-2 border border-[rgba(148,163,184,0.25)] rounded-md font-mono bg-card text-foreground"
+            class="p-2 border border-border-strong rounded-md font-mono bg-card text-foreground"
           />
         </div>
       </Show>
@@ -274,7 +274,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
 
       <div class="flex items-center gap-2 mt-3">
         <button
-          class="flex-1 px-4 py-2 bg-[#22c55e] text-white border-none rounded-md text-[13px] font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-[#16a34a] disabled:opacity-60 disabled:cursor-not-allowed"
+          class="flex-1 px-4 py-2 bg-success text-white border-none rounded-md text-[13px] font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-success/85 disabled:opacity-60 disabled:cursor-not-allowed"
           onClick={handleApprove}
           disabled={
             isExecuting() ||
@@ -287,14 +287,14 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
         </button>
         <Show when={isExecuting()}>
           <button
-            class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md bg-popover text-muted-foreground text-xs font-medium cursor-pointer hover:bg-[#fee2e2] hover:border-[#f87171] hover:text-[#b91c1c]"
+            class="px-3 py-2 border border-border-strong rounded-md bg-popover text-muted-foreground text-xs font-medium cursor-pointer hover:bg-destructive/15 hover:border-destructive hover:text-destructive/70"
             onClick={handleCancel}
           >
             Cancel
           </button>
         </Show>
         <button
-          class="px-4 py-2 bg-popover text-foreground border border-[rgba(148,163,184,0.25)] rounded-md text-[13px] font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-[rgba(239,68,68,0.1)] hover:not-disabled:border-[#dc2626] hover:not-disabled:text-[#dc2626] disabled:opacity-60 disabled:cursor-not-allowed"
+          class="px-4 py-2 bg-popover text-foreground border border-border-strong rounded-md text-[13px] font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-destructive/10 hover:not-disabled:border-destructive/85 hover:not-disabled:text-destructive/85 disabled:opacity-60 disabled:cursor-not-allowed"
           onClick={handleDeny}
           disabled={isExecuting()}
         >
@@ -303,9 +303,9 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
       </div>
 
       <Show when={error()}>
-        <div class="flex items-start gap-2 px-3 py-2.5 bg-[rgba(239,68,68,0.1)] rounded-md mt-3">
+        <div class="flex items-start gap-2 px-3 py-2.5 bg-destructive/10 rounded-md mt-3">
           <span class="shrink-0">❌</span>
-          <span class="text-[13px] text-[#dc2626]">{error()}</span>
+          <span class="text-[13px] text-destructive/85">{error()}</span>
         </div>
         <div class="mt-2 flex items-center gap-3">
           <Show when={wasCancelled()}>
@@ -329,7 +329,7 @@ export const McpToolCallApproval: Component<McpToolCallApprovalProps> = (
         {(toolResult) => (
           <div
             class={`flex items-start gap-2 px-3 py-2.5 rounded-md mt-3 ${
-              toolResult().isError ? "bg-[#fef9c3]" : "bg-[#dcfce7]"
+              toolResult().isError ? "bg-warning/15" : "bg-success/15"
             }`}
           >
             <span class="shrink-0">{toolResult().isError ? "⚠️" : "✅"}</span>

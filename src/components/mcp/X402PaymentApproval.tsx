@@ -152,7 +152,7 @@ export const X402PaymentApproval: Component = () => {
 
         return (
           <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-[2000] backdrop-blur-[4px]">
-            <div class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-2xl p-6 max-w-[420px] w-[90%] shadow-[0_16px_48px_rgba(0,0,0,0.4)]">
+            <div class="bg-popover border border-border-strong rounded-2xl p-6 max-w-[420px] w-[90%] shadow-[0_16px_48px_rgba(0,0,0,0.4)]">
               <div class="flex items-center gap-3 mb-4">
                 <span class="text-2xl">💳</span>
                 <h3 class="m-0 text-[1.2rem] font-semibold text-foreground">
@@ -168,17 +168,17 @@ export const X402PaymentApproval: Component = () => {
                   requires payment to proceed.
                 </p>
 
-                <div class="bg-black/20 border border-[rgba(148,163,184,0.15)] rounded-xl p-4 mb-4">
-                  <div class="flex justify-between items-center py-2 border-b border-[rgba(148,163,184,0.1)]">
+                <div class="bg-black/20 border border-border-medium rounded-xl p-4 mb-4">
+                  <div class="flex justify-between items-center py-2 border-b border-border">
                     <span class="text-[0.9rem] text-muted-foreground">
                       Amount
                     </span>
-                    <span class="text-[1.1rem] text-[#22c55e] font-semibold">
+                    <span class="text-[1.1rem] text-success font-semibold">
                       {p().amountFormatted}
                     </span>
                   </div>
                   <Show when={selectedMethod() === "crypto"}>
-                    <div class="flex justify-between items-center py-2 border-b border-[rgba(148,163,184,0.1)]">
+                    <div class="flex justify-between items-center py-2 border-b border-border">
                       <span class="text-[0.9rem] text-muted-foreground">
                         Network
                       </span>
@@ -212,8 +212,8 @@ export const X402PaymentApproval: Component = () => {
                             type="button"
                             class={`relative flex-1 flex items-center gap-3 px-4 py-3.5 bg-black/20 border-2 rounded-[10px] cursor-pointer transition-all duration-150 text-left ${
                               selectedMethod() === method.id
-                                ? "border-accent bg-[rgba(99,102,241,0.1)]"
-                                : "border-[rgba(148,163,184,0.2)] hover:not-disabled:border-[rgba(148,163,184,0.4)]"
+                                ? "border-accent bg-primary/10"
+                                : "border-border-hover hover:not-disabled:border-muted-foreground/40"
                             } ${!method.available ? "opacity-50 cursor-not-allowed" : ""}`}
                             onClick={() =>
                               method.available && setSelectedMethod(method.id)
@@ -231,7 +231,7 @@ export const X402PaymentApproval: Component = () => {
                               </span>
                             </div>
                             <Show when={!method.available}>
-                              <span class="absolute bottom-1 right-2 text-[0.75rem] text-[#ef4444]">
+                              <span class="absolute bottom-1 right-2 text-[0.75rem] text-destructive">
                                 {method.reason}
                               </span>
                             </Show>
@@ -243,14 +243,14 @@ export const X402PaymentApproval: Component = () => {
                 </Show>
 
                 <Show when={selectedMethod() === "crypto"}>
-                  <p class="m-0 p-3 bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded-lg text-[0.85rem] text-[#eab308] leading-relaxed">
+                  <p class="m-0 p-3 bg-warning/10 border border-warning/30 rounded-lg text-[0.85rem] text-warning/85 leading-relaxed">
                     This payment will be signed with your crypto wallet and
                     submitted to {p().chainName}.
                   </p>
                 </Show>
 
                 <Show when={selectedMethod() === "serenbucks"}>
-                  <p class="m-0 p-3 bg-[rgba(99,102,241,0.1)] border border-[rgba(99,102,241,0.3)] rounded-lg text-[0.85rem] text-accent leading-relaxed">
+                  <p class="m-0 p-3 bg-primary/10 border border-primary/30 rounded-lg text-[0.85rem] text-accent leading-relaxed">
                     This will be charged to your SerenBucks balance.
                   </p>
                 </Show>
@@ -259,7 +259,7 @@ export const X402PaymentApproval: Component = () => {
               <div class="flex gap-3 justify-end">
                 <button
                   type="button"
-                  class="px-5 py-2.5 rounded-lg text-[0.95rem] font-medium cursor-pointer transition-all duration-150 bg-transparent border border-[rgba(148,163,184,0.3)] text-muted-foreground hover:not-disabled:bg-[rgba(148,163,184,0.1)] hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="px-5 py-2.5 rounded-lg text-[0.95rem] font-medium cursor-pointer transition-all duration-150 bg-transparent border border-border-strong text-muted-foreground hover:not-disabled:bg-border hover:not-disabled:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleDecline}
                   disabled={isProcessing()}
                 >
@@ -267,7 +267,7 @@ export const X402PaymentApproval: Component = () => {
                 </button>
                 <button
                   type="button"
-                  class="px-5 py-2.5 rounded-lg text-[0.95rem] font-medium cursor-pointer transition-all duration-150 bg-[#22c55e] border-none text-white hover:not-disabled:bg-[#16a34a] disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="px-5 py-2.5 rounded-lg text-[0.95rem] font-medium cursor-pointer transition-all duration-150 bg-success border-none text-white hover:not-disabled:bg-success/85 disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleApprove}
                   disabled={
                     isProcessing() ||

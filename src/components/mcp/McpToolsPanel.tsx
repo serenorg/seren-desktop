@@ -128,8 +128,8 @@ export const McpToolsPanel: Component = () => {
 
   return (
     <div class="flex h-full bg-card">
-      <div class="w-[280px] border-r border-[rgba(148,163,184,0.25)] flex flex-col bg-popover">
-        <div class="p-4 border-b border-[rgba(148,163,184,0.25)] flex justify-between items-center">
+      <div class="w-[280px] border-r border-border-strong flex flex-col bg-popover">
+        <div class="p-4 border-b border-border-strong flex justify-between items-center">
           <h3 class="m-0 text-sm font-semibold">Available Tools</h3>
           <span class="px-2 py-0.5 bg-accent text-white rounded-xl text-xs font-medium">
             {tools().length}
@@ -160,7 +160,7 @@ export const McpToolsPanel: Component = () => {
                     class={`w-full px-3 py-2.5 bg-transparent border-none rounded-md text-left cursor-pointer flex flex-col gap-0.5 transition-colors duration-150 ${
                       isSelected()
                         ? "bg-accent text-white"
-                        : "hover:bg-[rgba(148,163,184,0.15)]"
+                        : "hover:bg-border-medium"
                     }`}
                     onClick={() => selectTool(serverName, tool)}
                   >
@@ -216,7 +216,7 @@ export const McpToolsPanel: Component = () => {
                         <label class="block text-[13px] font-medium mb-1">
                           {arg.name}
                           {arg.required && (
-                            <span class="text-[#dc2626] ml-0.5">*</span>
+                            <span class="text-destructive/85 ml-0.5">*</span>
                           )}
                         </label>
                         <Show when={arg.schema.description}>
@@ -235,7 +235,7 @@ export const McpToolsPanel: Component = () => {
                           onInput={(e) =>
                             updateArg(arg.name, e.currentTarget.value)
                           }
-                          class="w-full px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md text-sm font-mono bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
+                          class="w-full px-3 py-2 border border-border-strong rounded-md text-sm font-mono bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
                         />
                       </div>
                     )}
@@ -245,7 +245,7 @@ export const McpToolsPanel: Component = () => {
 
               <div class="mb-6">
                 <button
-                  class="px-5 py-2.5 bg-accent text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-[#2563eb] disabled:opacity-60 disabled:cursor-not-allowed"
+                  class="px-5 py-2.5 bg-accent text-white border-none rounded-md text-sm font-medium cursor-pointer transition-colors duration-150 hover:not-disabled:bg-primary/85 disabled:opacity-60 disabled:cursor-not-allowed"
                   onClick={executeTool}
                   disabled={execution()?.isRunning}
                 >
@@ -255,7 +255,7 @@ export const McpToolsPanel: Component = () => {
 
               <Show when={execution()}>
                 {(exec) => (
-                  <div class="border-t border-[rgba(148,163,184,0.25)] pt-6">
+                  <div class="border-t border-border-strong pt-6">
                     <h4 class="m-0 mb-3 text-sm font-semibold">Result</h4>
                     <Show when={exec().isRunning}>
                       <div class="text-muted-foreground text-[13px]">
@@ -263,7 +263,7 @@ export const McpToolsPanel: Component = () => {
                       </div>
                     </Show>
                     <Show when={exec().error}>
-                      <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-[13px]">
+                      <div class="p-3 bg-destructive/10 text-destructive/85 rounded-md text-[13px]">
                         {exec().error}
                       </div>
                     </Show>
@@ -272,7 +272,7 @@ export const McpToolsPanel: Component = () => {
                         <div
                           class={`p-4 rounded-lg overflow-x-auto ${
                             toolResult().isError
-                              ? "bg-[rgba(239,68,68,0.1)]"
+                              ? "bg-destructive/10"
                               : "bg-popover"
                           }`}
                         >

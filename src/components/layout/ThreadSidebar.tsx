@@ -131,7 +131,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
           fallback={
             <button
               type="button"
-              class="flex items-center gap-1.5 flex-1 bg-transparent border border-dashed border-border text-muted-foreground text-xs cursor-pointer py-1.5 px-2.5 rounded-md transition-all duration-100 hover:border-primary hover:text-primary hover:bg-[rgba(56,189,248,0.08)]"
+              class="flex items-center gap-1.5 flex-1 bg-transparent border border-dashed border-border text-muted-foreground text-xs cursor-pointer py-1.5 px-2.5 rounded-md transition-all duration-100 hover:border-primary hover:text-primary hover:bg-primary/[0.08]"
               onClick={handleOpenFolder}
             >
               <FolderIcon />

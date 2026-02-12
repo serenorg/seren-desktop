@@ -72,6 +72,9 @@ code {
   /* Border and input */
   --border: rgba(148, 163, 184, 0.1);
   --border-hover: rgba(148, 163, 184, 0.2);
+  --border-subtle: rgba(148, 163, 184, 0.06);
+  --border-medium: rgba(148, 163, 184, 0.15);
+  --border-strong: rgba(148, 163, 184, 0.25);
   --input: var(--surface-2);
   --ring: #38bdf8;
   --input-focus-glow:
@@ -137,6 +140,10 @@ code {
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-hover: var(--border-hover);
+  --color-border-medium: var(--border-medium);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);

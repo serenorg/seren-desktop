@@ -75,15 +75,15 @@ export const FileExplorer: Component = () => {
   };
 
   return (
-    <aside class="flex flex-col h-full bg-[#161b22] border-r border-[#21262d]">
-      <div class="flex justify-between items-center px-3 py-2.5 border-b border-[#21262d] text-[11px] font-semibold uppercase tracking-wide text-[#8b949e]">
+    <aside class="flex flex-col h-full bg-surface-0 border-r border-surface-2">
+      <div class="flex justify-between items-center px-3 py-2.5 border-b border-surface-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         <span>Explorer</span>
         <button
           type="button"
           onClick={handleOpenFolder}
           disabled={isLoading()}
           title="Open Folder"
-          class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1 py-0.5 text-sm leading-none transition-colors hover:text-[#e6edf3] disabled:opacity-50 disabled:cursor-not-allowed"
+          class="bg-transparent border-none text-muted-foreground cursor-pointer px-1 py-0.5 text-sm leading-none transition-colors hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLoading() ? "..." : "+"}
         </button>

@@ -192,7 +192,7 @@ export const ToolsetsSettings: Component = () => {
         </h3>
         <button
           type="button"
-          class="px-3 py-1.5 text-sm font-medium text-white bg-accent border-none rounded cursor-pointer transition-colors duration-100 hover:bg-[#4f46e5]"
+          class="px-3 py-1.5 text-sm font-medium text-white bg-accent border-none rounded cursor-pointer transition-colors duration-100 hover:bg-primary/85"
           onClick={openCreateModal}
         >
           + New Toolset
@@ -205,14 +205,14 @@ export const ToolsetsSettings: Component = () => {
 
       {/* Error Display */}
       <Show when={error()}>
-        <div class="mb-4 px-3.5 py-2.5 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-md text-[#ef4444] text-[13px]">
+        <div class="mb-4 px-3.5 py-2.5 bg-destructive/10 border border-destructive/30 rounded-md text-destructive text-[13px]">
           {error()}
         </div>
       </Show>
 
       {/* Empty State */}
       <Show when={toolsets().length === 0}>
-        <div class="text-center py-10 px-6 text-muted-foreground border border-dashed border-[rgba(148,163,184,0.2)] rounded-lg">
+        <div class="text-center py-10 px-6 text-muted-foreground border border-dashed border-border-hover rounded-lg">
           <span class="text-[2.5rem] block mb-3 opacity-60">📦</span>
           <p class="m-0 mb-2">No toolsets yet</p>
           <p class="m-0 text-[0.85rem]">
@@ -226,14 +226,14 @@ export const ToolsetsSettings: Component = () => {
         <div class="flex flex-col gap-3">
           <For each={toolsets()}>
             {(toolset) => (
-              <div class="px-4 py-4 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg">
+              <div class="px-4 py-4 bg-surface-3/60 border border-border-hover rounded-lg">
                 <div class="flex items-start justify-between gap-4">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 mb-1">
                       <h4 class="m-0 text-base font-medium text-foreground">
                         {toolset.name}
                       </h4>
-                      <span class="px-2 py-0.5 text-xs bg-[rgba(148,163,184,0.1)] text-muted-foreground rounded">
+                      <span class="px-2 py-0.5 text-xs bg-border text-muted-foreground rounded">
                         {toolset.publisherSlugs.length} publisher
                         {toolset.publisherSlugs.length !== 1 ? "s" : ""}
                       </span>
@@ -252,10 +252,10 @@ export const ToolsetsSettings: Component = () => {
                           const status = getConnectionStatus(slug);
                           const statusColor =
                             status === "connected"
-                              ? "bg-[rgba(34,197,94,0.2)] border-[rgba(34,197,94,0.3)]"
+                              ? "bg-success/20 border-success/30"
                               : status === "expired"
-                                ? "bg-[rgba(245,158,11,0.2)] border-[rgba(245,158,11,0.3)]"
-                                : "bg-[rgba(148,163,184,0.1)] border-[rgba(148,163,184,0.2)]";
+                                ? "bg-warning/20 border-warning/30"
+                                : "bg-border border-border-hover";
                           return (
                             <span
                               class={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded border ${statusColor}`}
@@ -270,7 +270,7 @@ export const ToolsetsSettings: Component = () => {
                               {pub?.name || slug}
                               <button
                                 type="button"
-                                class="ml-0.5 text-muted-foreground hover:text-[#ef4444] transition-colors"
+                                class="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
                                 onClick={() =>
                                   handleInlineRemove(toolset.id, slug)
                                 }
@@ -287,7 +287,7 @@ export const ToolsetsSettings: Component = () => {
                       <div class="relative">
                         <button
                           type="button"
-                          class="px-2 py-1 text-xs text-muted-foreground bg-transparent border border-dashed border-[rgba(148,163,184,0.3)] rounded cursor-pointer transition-colors hover:border-accent hover:text-accent"
+                          class="px-2 py-1 text-xs text-muted-foreground bg-transparent border border-dashed border-border-strong rounded cursor-pointer transition-colors hover:border-accent hover:text-accent"
                           onClick={() => {
                             setAddingToToolset(
                               addingToToolset() === toolset.id
@@ -303,7 +303,7 @@ export const ToolsetsSettings: Component = () => {
 
                         {/* Inline Add Popup */}
                         <Show when={addingToToolset() === toolset.id}>
-                          <div class="absolute left-0 top-full mt-1 z-50 w-64 bg-[#1e1e1e] border border-[rgba(148,163,184,0.3)] rounded-lg shadow-lg overflow-hidden">
+                          <div class="absolute left-0 top-full mt-1 z-50 w-64 bg-surface-2 border border-border-strong rounded-lg shadow-lg overflow-hidden">
                             <input
                               type="text"
                               value={inlineSearch()}
@@ -311,7 +311,7 @@ export const ToolsetsSettings: Component = () => {
                                 setInlineSearch(e.currentTarget.value)
                               }
                               placeholder="Search publishers..."
-                              class="w-full px-3 py-2 bg-transparent border-b border-[rgba(148,163,184,0.2)] text-sm text-foreground focus:outline-none"
+                              class="w-full px-3 py-2 bg-transparent border-b border-border-hover text-sm text-foreground focus:outline-none"
                               autofocus
                             />
                             <div class="max-h-40 overflow-y-auto">
@@ -335,7 +335,7 @@ export const ToolsetsSettings: Component = () => {
                                 {(pub) => (
                                   <button
                                     type="button"
-                                    class="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-[rgba(148,163,184,0.1)] transition-colors"
+                                    class="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-border transition-colors"
                                     onClick={() =>
                                       handleInlineAdd(toolset.id, pub.slug)
                                     }
@@ -355,7 +355,7 @@ export const ToolsetsSettings: Component = () => {
                   <div class="flex gap-2">
                     <button
                       type="button"
-                      class="px-2.5 py-1 text-xs text-[#ef4444] bg-transparent border border-[rgba(239,68,68,0.3)] rounded cursor-pointer transition-colors hover:bg-[rgba(239,68,68,0.1)]"
+                      class="px-2.5 py-1 text-xs text-destructive bg-transparent border border-destructive/30 rounded cursor-pointer transition-colors hover:bg-destructive/10"
                       onClick={() => handleDelete(toolset)}
                     >
                       Delete
@@ -376,8 +376,8 @@ export const ToolsetsSettings: Component = () => {
             if (e.target === e.currentTarget) closeModal();
           }}
         >
-          <div class="bg-[#1e1e1e] border border-[rgba(148,163,184,0.2)] rounded-lg w-full max-w-lg mx-4 max-h-[80vh] overflow-hidden flex flex-col">
-            <div class="px-5 py-4 border-b border-[rgba(148,163,184,0.1)]">
+          <div class="bg-surface-2 border border-border-hover rounded-lg w-full max-w-lg mx-4 max-h-[80vh] overflow-hidden flex flex-col">
+            <div class="px-5 py-4 border-b border-border">
               <h3 class="m-0 text-lg font-semibold text-foreground">
                 {editingToolset() ? "Edit Toolset" : "Create Toolset"}
               </h3>
@@ -394,7 +394,7 @@ export const ToolsetsSettings: Component = () => {
                   value={formName()}
                   onInput={(e) => setFormName(e.currentTarget.value)}
                   placeholder="e.g., Sales Research"
-                  class="w-full px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-sm focus:outline-none focus:border-accent"
+                  class="w-full px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-sm focus:outline-none focus:border-accent"
                 />
               </div>
 
@@ -408,7 +408,7 @@ export const ToolsetsSettings: Component = () => {
                   onInput={(e) => setFormDescription(e.currentTarget.value)}
                   placeholder="What is this toolset for?"
                   rows={2}
-                  class="w-full px-3 py-2 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-sm resize-none focus:outline-none focus:border-accent"
+                  class="w-full px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-sm resize-none focus:outline-none focus:border-accent"
                 />
               </div>
 
@@ -432,7 +432,7 @@ export const ToolsetsSettings: Component = () => {
                     value={publisherSearch()}
                     onInput={(e) => setPublisherSearch(e.currentTarget.value)}
                     placeholder="Search publishers..."
-                    class="w-full px-3 py-2 pl-8 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-sm focus:outline-none focus:border-accent"
+                    class="w-full px-3 py-2 pl-8 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-sm focus:outline-none focus:border-accent"
                   />
                   <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
                     🔍
@@ -452,12 +452,12 @@ export const ToolsetsSettings: Component = () => {
                   when={!publishers.loading && (publishers()?.length ?? 0) > 0}
                 >
                   <Show when={filteredPublishers().length === 0}>
-                    <div class="text-sm text-muted-foreground py-4 text-center border border-[rgba(148,163,184,0.2)] rounded-md">
+                    <div class="text-sm text-muted-foreground py-4 text-center border border-border-hover rounded-md">
                       No publishers match "{publisherSearch()}"
                     </div>
                   </Show>
                   <Show when={filteredPublishers().length > 0}>
-                    <div class="max-h-[200px] overflow-y-auto border border-[rgba(148,163,184,0.2)] rounded-md">
+                    <div class="max-h-[200px] overflow-y-auto border border-border-hover rounded-md">
                       <For each={filteredPublishers()}>
                         {(pub) => {
                           const isSelected = () =>
@@ -465,10 +465,10 @@ export const ToolsetsSettings: Component = () => {
                           const status = getConnectionStatus(pub.slug);
                           return (
                             <label
-                              class={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-[rgba(148,163,184,0.1)] last:border-b-0 transition-colors ${
+                              class={`flex items-center gap-3 px-3 py-2.5 cursor-pointer border-b border-border last:border-b-0 transition-colors ${
                                 isSelected()
-                                  ? "bg-[rgba(99,102,241,0.1)]"
-                                  : "hover:bg-[rgba(148,163,184,0.05)]"
+                                  ? "bg-primary/10"
+                                  : "hover:bg-border-subtle"
                               }`}
                             >
                               <input
@@ -483,12 +483,12 @@ export const ToolsetsSettings: Component = () => {
                                     {pub.name}
                                   </span>
                                   <Show when={status === "connected"}>
-                                    <span class="text-[10px] px-1.5 py-0.5 bg-[rgba(34,197,94,0.2)] text-[#22c55e] rounded">
+                                    <span class="text-[10px] px-1.5 py-0.5 bg-success/20 text-success rounded">
                                       Connected
                                     </span>
                                   </Show>
                                   <Show when={status === "expired"}>
-                                    <span class="text-[10px] px-1.5 py-0.5 bg-[rgba(245,158,11,0.2)] text-[#f59e0b] rounded">
+                                    <span class="text-[10px] px-1.5 py-0.5 bg-warning/20 text-warning/85 rounded">
                                       Expired
                                     </span>
                                   </Show>
@@ -510,17 +510,17 @@ export const ToolsetsSettings: Component = () => {
             </div>
 
             {/* Modal Footer */}
-            <div class="px-5 py-3 border-t border-[rgba(148,163,184,0.1)] flex justify-end gap-2">
+            <div class="px-5 py-3 border-t border-border flex justify-end gap-2">
               <button
                 type="button"
-                class="px-4 py-2 text-sm text-muted-foreground bg-transparent border border-[rgba(148,163,184,0.3)] rounded cursor-pointer transition-colors hover:bg-[rgba(148,163,184,0.1)]"
+                class="px-4 py-2 text-sm text-muted-foreground bg-transparent border border-border-strong rounded cursor-pointer transition-colors hover:bg-border"
                 onClick={closeModal}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                class="px-4 py-2 text-sm font-medium text-white bg-accent border-none rounded cursor-pointer transition-colors hover:bg-[#4f46e5] disabled:opacity-50 disabled:cursor-not-allowed"
+                class="px-4 py-2 text-sm font-medium text-white bg-accent border-none rounded cursor-pointer transition-colors hover:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={handleSave}
                 disabled={!formName().trim()}
               >

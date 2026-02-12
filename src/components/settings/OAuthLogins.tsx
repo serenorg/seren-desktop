@@ -305,7 +305,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
 
       {/* Error Display */}
       <Show when={error()}>
-        <div class="mb-4 px-3.5 py-2.5 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-md text-[#ef4444] text-[13px]">
+        <div class="mb-4 px-3.5 py-2.5 bg-destructive/10 border border-destructive/30 rounded-md text-destructive text-[13px]">
           {error()}
         </div>
       </Show>
@@ -364,17 +364,17 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
               // Determine card border/background based on state
               const cardClasses = () => {
                 if (expired()) {
-                  return "border-[rgba(245,158,11,0.5)] bg-[rgba(245,158,11,0.08)]";
+                  return "border-warning/50 bg-warning/[0.08]";
                 }
                 if (connection()) {
-                  return "border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.05)]";
+                  return "border-success/30 bg-success/5";
                 }
-                return "border-[rgba(148,163,184,0.2)]";
+                return "border-border-hover";
               };
 
               return (
                 <div
-                  class={`flex items-center justify-between px-4 py-4 bg-[rgba(30,30,30,0.6)] border rounded-lg transition-all duration-150 ${cardClasses()}`}
+                  class={`flex items-center justify-between px-4 py-4 bg-surface-3/60 border rounded-lg transition-all duration-150 ${cardClasses()}`}
                 >
                   <div class="flex items-center gap-4 flex-1 min-w-0">
                     {/* Publisher Logo — prefer local bundled logos, then
@@ -386,7 +386,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                         provider.logo_url
                       }
                       fallback={
-                        <div class="w-10 h-10 flex items-center justify-center bg-[rgba(148,163,184,0.1)] rounded-lg text-base font-semibold text-muted-foreground">
+                        <div class="w-10 h-10 flex items-center justify-center bg-border rounded-lg text-base font-semibold text-muted-foreground">
                           {provider.name?.charAt(0).toUpperCase() ?? "?"}
                         </div>
                       }
@@ -416,12 +416,12 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                           {provider.name}
                         </span>
                         <Show when={expired()}>
-                          <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(245,158,11,0.2)] text-[#f59e0b]">
+                          <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-warning/20 text-warning/85">
                             Expired
                           </span>
                         </Show>
                         <Show when={connection() && !expired()}>
-                          <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-[rgba(34,197,94,0.2)] text-[#4ade80]">
+                          <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-success/20 text-success">
                             Connected
                           </span>
                         </Show>
@@ -432,7 +432,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                         </span>
                       </Show>
                       <Show when={expired()}>
-                        <span class="text-[0.75rem] text-[#f59e0b]">
+                        <span class="text-[0.75rem] text-warning/85">
                           Token expired - please reconnect to continue using
                           this service
                         </span>
@@ -454,7 +454,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                     <Show when={expired()}>
                       <button
                         type="button"
-                        class="px-4 py-2 bg-[#f59e0b] border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-[#d97706] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="px-4 py-2 bg-warning/85 border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-warning/70 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => handleConnect(provider)}
                         disabled={isConnecting()}
                       >
@@ -465,7 +465,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                     <Show when={connection() && !expired()}>
                       <button
                         type="button"
-                        class="px-4 py-2 bg-transparent border border-[rgba(239,68,68,0.5)] rounded-md text-[#ef4444] text-[0.9rem] cursor-pointer transition-all duration-150 hover:not-disabled:bg-[rgba(239,68,68,0.1)] hover:not-disabled:border-[#ef4444] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="px-4 py-2 bg-transparent border border-destructive/50 rounded-md text-destructive text-[0.9rem] cursor-pointer transition-all duration-150 hover:not-disabled:bg-destructive/10 hover:not-disabled:border-destructive disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => handleDisconnect(provider.slug)}
                         disabled={isDisconnecting()}
                       >
@@ -476,7 +476,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                     <Show when={!connection() && !expired()}>
                       <button
                         type="button"
-                        class="px-4 py-2 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-[#4f46e5] disabled:opacity-50 disabled:cursor-not-allowed"
+                        class="px-4 py-2 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => handleConnect(provider)}
                         disabled={isConnecting()}
                       >
@@ -492,7 +492,7 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
       </Show>
 
       {/* Info Box */}
-      <div class="mt-6 p-4 bg-[rgba(99,102,241,0.1)] border border-[rgba(99,102,241,0.3)] rounded">
+      <div class="mt-6 p-4 bg-primary/10 border border-primary/30 rounded">
         <h4 class="m-0 mb-2 text-sm font-semibold text-foreground">
           Why Connect Accounts?
         </h4>

@@ -107,7 +107,7 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
 
   return (
     <div class="flex flex-col h-full bg-card">
-      <div class="flex items-center justify-between px-4 py-2 bg-popover border-b border-[rgba(148,163,184,0.15)] shrink-0">
+      <div class="flex items-center justify-between px-4 py-2 bg-popover border-b border-border-medium shrink-0">
         <div class="flex items-center gap-4">
           <span class="font-medium text-foreground">{fileName()}</span>
           {dimensions() && (
@@ -119,7 +119,7 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)]"
+            class="bg-transparent border border-border-strong text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-border-medium hover:border-muted-foreground/40"
             onClick={handleZoomOut}
             title="Zoom Out"
           >
@@ -130,7 +130,7 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
           </span>
           <button
             type="button"
-            class="bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)]"
+            class="bg-transparent border border-border-strong text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-border-medium hover:border-muted-foreground/40"
             onClick={handleZoomIn}
             title="Zoom In"
           >
@@ -138,7 +138,7 @@ export const ImageViewer: Component<ImageViewerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="bg-transparent border border-[rgba(148,163,184,0.25)] text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.15)] hover:border-[rgba(148,163,184,0.4)]"
+            class="bg-transparent border border-border-strong text-foreground w-8 h-8 rounded flex items-center justify-center text-lg cursor-pointer transition-all hover:bg-border-medium hover:border-muted-foreground/40"
             onClick={handleZoomReset}
             title="Reset Zoom"
           >

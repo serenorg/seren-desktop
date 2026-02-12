@@ -56,13 +56,13 @@ export const PlanHeader: Component = () => {
       case "pending":
         return (
           <span class="w-4 h-4 flex items-center justify-center">
-            <span class="w-2 h-2 rounded-full bg-[#8b949e]" />
+            <span class="w-2 h-2 rounded-full bg-muted-foreground" />
           </span>
         );
       default:
         return (
           <span class="w-4 h-4 flex items-center justify-center">
-            <span class="w-2 h-2 rounded-full bg-[#30363d]" />
+            <span class="w-2 h-2 rounded-full bg-surface-3" />
           </span>
         );
     }
@@ -74,16 +74,16 @@ export const PlanHeader: Component = () => {
 
   return (
     <Show when={hasPlan()}>
-      <div class="bg-[#161b22] border-b border-[#21262d]">
+      <div class="bg-surface-0 border-b border-surface-2">
         {/* Header */}
         <button
           type="button"
-          class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[#21262d] transition-colors"
+          class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-surface-2 transition-colors"
           onClick={() => setIsExpanded(!isExpanded())}
         >
           <div class="flex items-center gap-2">
             <svg
-              class={`w-4 h-4 text-[#8b949e] transition-transform ${isExpanded() ? "rotate-90" : ""}`}
+              class={`w-4 h-4 text-muted-foreground transition-transform ${isExpanded() ? "rotate-90" : ""}`}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -97,9 +97,9 @@ export const PlanHeader: Component = () => {
                 d="M9 5l7 7-7 7"
               />
             </svg>
-            <span class="text-sm font-medium text-[#e6edf3]">Plan</span>
+            <span class="text-sm font-medium text-foreground">Plan</span>
           </div>
-          <span class="text-xs text-[#8b949e]">
+          <span class="text-xs text-muted-foreground">
             {completedCount()}/{totalCount()} completed
           </span>
         </button>
@@ -117,13 +117,15 @@ export const PlanHeader: Component = () => {
                     <span
                       class={`${
                         entry.status.toLowerCase() === "completed"
-                          ? "text-[#8b949e] line-through"
+                          ? "text-muted-foreground line-through"
                           : entry.status.toLowerCase().includes("progress")
-                            ? "text-[#e6edf3] font-medium"
-                            : "text-[#8b949e]"
+                            ? "text-foreground font-medium"
+                            : "text-muted-foreground"
                       }`}
                     >
-                      <span class="text-[#484f58] mr-1.5">{index() + 1}.</span>
+                      <span class="text-muted-foreground/70 mr-1.5">
+                        {index() + 1}.
+                      </span>
                       {entry.content}
                     </span>
                   </li>

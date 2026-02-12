@@ -241,16 +241,16 @@ export const OpenClawChannelConnect: Component<OpenClawChannelConnectProps> = (
   return (
     <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000]">
       <div
-        class="bg-popover border border-[rgba(148,163,184,0.25)] rounded-xl max-w-[560px] w-[90%] max-h-[80vh] overflow-hidden flex flex-col"
+        class="bg-popover border border-border-strong rounded-xl max-w-[560px] w-[90%] max-h-[80vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div class="flex items-center justify-between px-6 py-4 border-b border-[rgba(148,163,184,0.15)]">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-border-medium">
           <div class="flex items-center gap-3">
             <Show when={selectedPlatform() && !props.platformId}>
               <button
                 type="button"
-                class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-muted-foreground cursor-pointer hover:bg-[rgba(148,163,184,0.1)]"
+                class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-muted-foreground cursor-pointer hover:bg-border"
                 onClick={handleBack}
               >
                 ←
@@ -264,7 +264,7 @@ export const OpenClawChannelConnect: Component<OpenClawChannelConnectProps> = (
           </div>
           <button
             type="button"
-            class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[1.2rem] text-muted-foreground cursor-pointer hover:bg-[rgba(148,163,184,0.1)]"
+            class="w-7 h-7 flex items-center justify-center bg-transparent border-none rounded text-[1.2rem] text-muted-foreground cursor-pointer hover:bg-border"
             onClick={props.onClose}
           >
             ×
@@ -333,7 +333,7 @@ const PlatformPicker: Component<{
         {(platform) => (
           <button
             type="button"
-            class="flex flex-col items-center gap-2 px-4 py-5 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)] hover:border-[rgba(148,163,184,0.4)]"
+            class="flex flex-col items-center gap-2 px-4 py-5 bg-surface-1/60 border border-border-hover rounded-lg cursor-pointer transition-all duration-150 hover:bg-border hover:border-border-strong"
             onClick={() => props.onSelect(platform)}
           >
             <span class="flex items-center justify-center w-[2rem] h-[2rem]">
@@ -408,13 +408,13 @@ const QrCodeFlow: Component<{
       </p>
 
       <Show when={error()}>
-        <div class="px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444] w-full">
+        <div class="px-4 py-3 bg-destructive/10 border border-destructive/30 rounded-lg text-[0.85rem] text-destructive w-full">
           {error()}
         </div>
       </Show>
 
       <Show when={launched()}>
-        <div class="px-4 py-3 bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.3)] rounded-lg text-[0.85rem] text-[#4ade80] w-full text-center">
+        <div class="px-4 py-3 bg-success/10 border border-success/30 rounded-lg text-[0.85rem] text-success w-full text-center">
           Terminal opened — scan the QR code there, then this window will update
           automatically.
         </div>
@@ -476,7 +476,7 @@ const TokenFlow: Component<{
     <div class="flex flex-col gap-4">
       <Show when={success()}>
         <div class="flex flex-col items-center gap-3 py-6">
-          <div class="w-12 h-12 rounded-full bg-[rgba(34,197,94,0.15)] flex items-center justify-center text-[1.5rem]">
+          <div class="w-12 h-12 rounded-full bg-success/15 flex items-center justify-center text-[1.5rem]">
             ✓
           </div>
           <p class="m-0 text-[1rem] font-medium text-foreground">
@@ -493,7 +493,7 @@ const TokenFlow: Component<{
         </p>
 
         <Show when={error()}>
-          <div class="px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
+          <div class="px-4 py-3 bg-destructive/10 border border-destructive/30 rounded-lg text-[0.85rem] text-destructive">
             {error()}
           </div>
         </Show>
@@ -509,7 +509,7 @@ const TokenFlow: Component<{
             }
             value={token()}
             onInput={(e) => setToken(e.currentTarget.value)}
-            class="px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent"
+            class="px-3 py-2.5 bg-surface-1/80 border border-border-strong rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent"
           />
         </label>
 
@@ -563,7 +563,7 @@ const OAuthFlow: Component<{
       </p>
 
       <Show when={error()}>
-        <div class="px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
+        <div class="px-4 py-3 bg-destructive/10 border border-destructive/30 rounded-lg text-[0.85rem] text-destructive">
           {error()}
         </div>
       </Show>
@@ -636,7 +636,7 @@ const PhoneFlow: Component<{
   return (
     <div class="flex flex-col gap-4">
       <Show when={error()}>
-        <div class="px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
+        <div class="px-4 py-3 bg-destructive/10 border border-destructive/30 rounded-lg text-[0.85rem] text-destructive">
           {error()}
         </div>
       </Show>
@@ -656,7 +656,7 @@ const PhoneFlow: Component<{
             placeholder="+1 (555) 123-4567"
             value={phone()}
             onInput={(e) => setPhone(e.currentTarget.value)}
-            class="px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] focus:outline-none focus:border-accent"
+            class="px-3 py-2.5 bg-surface-1/80 border border-border-strong rounded-md text-foreground text-[0.9rem] focus:outline-none focus:border-accent"
           />
         </label>
 
@@ -684,7 +684,7 @@ const PhoneFlow: Component<{
             placeholder="123456"
             value={verificationCode()}
             onInput={(e) => setVerificationCode(e.currentTarget.value)}
-            class="px-3 py-2.5 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.3)] rounded-md text-foreground text-[0.9rem] text-center tracking-[0.3em] font-mono focus:outline-none focus:border-accent"
+            class="px-3 py-2.5 bg-surface-1/80 border border-border-strong rounded-md text-foreground text-[0.9rem] text-center tracking-[0.3em] font-mono focus:outline-none focus:border-accent"
           />
         </label>
 
@@ -715,7 +715,7 @@ const InstructionsFlow: Component<{
         {props.platform.instructions}
       </p>
 
-      <div class="px-4 py-3 bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded-lg text-[0.85rem] text-[#eab308]">
+      <div class="px-4 py-3 bg-warning/10 border border-warning/30 rounded-lg text-[0.85rem] text-warning">
         After configuring the external bridge, restart OpenClaw and the channel
         will appear automatically.
       </div>

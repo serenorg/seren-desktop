@@ -63,8 +63,7 @@ export function VoiceInputButton(props: VoiceInputButtonProps) {
         type="button"
         class="flex items-center justify-center w-8 h-8 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-150 relative shrink-0 hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         classList={{
-          "text-destructive bg-[rgba(248,113,113,0.1)]":
-            voiceState() === "recording",
+          "text-destructive bg-destructive/10": voiceState() === "recording",
           "text-muted-foreground cursor-wait": voiceState() === "transcribing",
           "text-destructive": voiceState() === "error",
         }}
@@ -88,7 +87,7 @@ export function VoiceInputButton(props: VoiceInputButtonProps) {
         type="button"
         class="voice-auto-submit-toggle flex items-center justify-center w-5 h-5 border-none rounded bg-transparent text-status-idle cursor-pointer transition-all duration-150 p-0 shrink-0 hover:bg-surface-2 hover:text-muted-foreground"
         classList={{
-          "active text-success hover:bg-[rgba(52,211,153,0.1)] hover:text-success":
+          "active text-success hover:bg-success/10 hover:text-success":
             autoSubmit(),
         }}
         onClick={toggleAutoSubmit}

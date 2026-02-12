@@ -107,7 +107,7 @@ export const OpenClawSettings: Component = () => {
         </p>
 
         {/* Status Bar */}
-        <div class="flex items-center justify-between px-4 py-3 mb-4 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg">
+        <div class="flex items-center justify-between px-4 py-3 mb-4 bg-surface-3/60 border border-border-hover rounded-lg">
           <div class="flex items-center gap-3">
             <span
               class="w-2.5 h-2.5 rounded-full"
@@ -127,7 +127,7 @@ export const OpenClawSettings: Component = () => {
             <Show when={openclawStore.isRunning}>
               <button
                 type="button"
-                class="px-3 py-1.5 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-[0.8rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
+                class="px-3 py-1.5 bg-transparent border border-border-strong rounded-md text-[0.8rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-border"
                 onClick={handleRestart}
                 disabled={isToggling()}
               >
@@ -137,7 +137,7 @@ export const OpenClawSettings: Component = () => {
             <button
               type="button"
               class={`px-3 py-1.5 border-none rounded-md text-[0.8rem] text-white cursor-pointer transition-all duration-150 hover:opacity-80 ${
-                openclawStore.isRunning ? "bg-[#ef4444]" : "bg-[#22c55e]"
+                openclawStore.isRunning ? "bg-destructive" : "bg-success"
               }`}
               onClick={handleToggleProcess}
               disabled={isToggling()}
@@ -153,7 +153,7 @@ export const OpenClawSettings: Component = () => {
 
         {/* Error Display */}
         <Show when={error()}>
-          <div class="px-4 py-3 mb-4 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-[0.85rem] text-[#ef4444]">
+          <div class="px-4 py-3 mb-4 bg-destructive/10 border border-destructive/30 rounded-lg text-[0.85rem] text-destructive">
             {error()}
           </div>
         </Show>
@@ -206,7 +206,7 @@ export const OpenClawSettings: Component = () => {
             </button>
             <button
               type="button"
-              class="px-3 py-1.5 bg-transparent border border-[rgba(148,163,184,0.3)] rounded-md text-[0.8rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-[rgba(148,163,184,0.1)]"
+              class="px-3 py-1.5 bg-transparent border border-border-strong rounded-md text-[0.8rem] text-muted-foreground cursor-pointer transition-all duration-150 hover:bg-border"
               onClick={handleRefreshChannels}
             >
               Refresh Channels
@@ -216,7 +216,7 @@ export const OpenClawSettings: Component = () => {
 
         {/* OpenClaw Dashboard */}
         <Show when={openclawStore.isRunning && openclawStore.port}>
-          <div class="mt-6 pt-6 border-t border-[rgba(148,163,184,0.15)]">
+          <div class="mt-6 pt-6 border-t border-border-medium">
             <h4 class="m-0 mb-2 text-[1rem] font-semibold text-foreground">
               OpenClaw Dashboard
             </h4>
@@ -224,7 +224,7 @@ export const OpenClawSettings: Component = () => {
               Configure channel security policies, allowlists, and DM/group
               settings.
             </p>
-            <div class="rounded-lg border border-[rgba(148,163,184,0.2)] overflow-hidden">
+            <div class="rounded-lg border border-border-hover overflow-hidden">
               <iframe
                 src={`http://127.0.0.1:${openclawStore.port}/`}
                 style="width: 100%; height: 600px; border: none; background: #1a1a2e;"
@@ -287,7 +287,7 @@ const ChannelRow: Component<{
   };
 
   return (
-    <div class="flex items-center justify-between px-4 py-3 bg-[rgba(30,30,30,0.6)] border border-[rgba(148,163,184,0.2)] rounded-lg">
+    <div class="flex items-center justify-between px-4 py-3 bg-surface-3/60 border border-border-hover rounded-lg">
       <div class="flex items-center gap-3">
         <span
           class="w-2 h-2 rounded-full"
@@ -307,7 +307,7 @@ const ChannelRow: Component<{
         {/* Agent Mode */}
         <select
           title="Agent mode"
-          class="px-2 py-1 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.2)] rounded text-[0.8rem] text-foreground cursor-pointer"
+          class="px-2 py-1 bg-surface-3/80 border border-border-hover rounded text-[0.8rem] text-foreground cursor-pointer"
           value={props.channel.agentMode}
           onChange={(e) =>
             props.onConfigChange({
@@ -322,7 +322,7 @@ const ChannelRow: Component<{
         {/* Trust Level */}
         <select
           title="Trust level"
-          class="px-2 py-1 bg-[rgba(30,30,30,0.8)] border border-[rgba(148,163,184,0.2)] rounded text-[0.8rem] text-foreground cursor-pointer"
+          class="px-2 py-1 bg-surface-3/80 border border-border-hover rounded text-[0.8rem] text-foreground cursor-pointer"
           value={props.channel.trustLevel}
           onChange={(e) =>
             props.onConfigChange({

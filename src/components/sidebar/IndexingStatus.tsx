@@ -176,7 +176,7 @@ export function IndexingStatus() {
       </Show>
 
       <Show when={indexingStore.error}>
-        <div class="flex items-start gap-2 p-2 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded mt-2">
+        <div class="flex items-start gap-2 p-2 bg-destructive/10 border border-destructive/30 rounded mt-2">
           <span class="text-destructive text-sm shrink-0">⚠</span>
           <span class="text-[11px] text-destructive leading-normal">
             {indexingStore.error}

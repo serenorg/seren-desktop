@@ -34,11 +34,11 @@ export function ThinkingStatus() {
   onCleanup(() => clearInterval(timer));
 
   return (
-    <span class="inline-flex items-center gap-2 text-sm text-[#e6edf3]">
+    <span class="inline-flex items-center gap-2 text-sm text-foreground">
       <span class="inline-flex items-center gap-[3px]">
-        <span class="inline-block w-[6px] h-[6px] rounded-full bg-[#58a6ff] thinking-dot thinking-dot-1" />
-        <span class="inline-block w-[6px] h-[6px] rounded-full bg-[#58a6ff] thinking-dot thinking-dot-2" />
-        <span class="inline-block w-[6px] h-[6px] rounded-full bg-[#58a6ff] thinking-dot thinking-dot-3" />
+        <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-1" />
+        <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-2" />
+        <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-3" />
       </span>
       <span>{THINKING_WORDS[index()]}…</span>
     </span>

@@ -106,11 +106,11 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
     props.toolCalls.some((t) => t.status.toLowerCase().includes("running"));
 
   return (
-    <div class="my-2 mx-5 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
+    <div class="my-2 mx-5 bg-surface-0 border border-surface-3 rounded-lg overflow-hidden">
       {/* Collapsible Header */}
       <button
         type="button"
-        class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-[#21262d] transition-colors"
+        class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-2 transition-colors"
         onClick={() => setIsExpanded(!isExpanded())}
       >
         {/* Status Icon */}
@@ -156,20 +156,20 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
         </Show>
 
         {/* Summary Text */}
-        <span class="flex-1 text-sm text-[#e6edf3]">
+        <span class="flex-1 text-sm text-foreground">
           <Show when={hasRunning()} fallback={`Done (${summary()})`}>
             Working on your request... ({summary()})
           </Show>
         </span>
 
         {/* Tool Count Badge */}
-        <span class="shrink-0 px-2 py-0.5 rounded text-xs bg-[#30363d] text-[#8b949e]">
+        <span class="shrink-0 px-2 py-0.5 rounded text-xs bg-surface-3 text-muted-foreground">
           {props.toolCalls.length} tool{props.toolCalls.length > 1 ? "s" : ""}
         </span>
 
         {/* Expand Icon */}
         <svg
-          class={`w-4 h-4 shrink-0 text-[#8b949e] transition-transform ${isExpanded() ? "rotate-180" : ""}`}
+          class={`w-4 h-4 shrink-0 text-muted-foreground transition-transform ${isExpanded() ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -187,7 +187,7 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
 
       {/* Expanded Tool Call Cards */}
       <Show when={isExpanded()}>
-        <div class="border-t border-[#21262d] px-3 py-2 space-y-2">
+        <div class="border-t border-surface-2 px-3 py-2 space-y-2">
           <For each={props.toolCalls}>
             {(toolCall) => <ToolCallCard toolCall={toolCall} />}
           </For>

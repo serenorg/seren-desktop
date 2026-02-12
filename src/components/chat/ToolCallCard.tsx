@@ -187,8 +187,8 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
       };
     }
     return {
-      color: "text-[#8b949e]",
-      bg: "bg-[#30363d]",
+      color: "text-muted-foreground",
+      bg: "bg-surface-3",
       icon: (
         <span class="w-4 h-4 flex items-center justify-center">
           <span class="w-2 h-2 rounded-full bg-current" />
@@ -337,25 +337,25 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   };
 
   return (
-    <div class="my-2 bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
+    <div class="my-2 bg-surface-0 border border-surface-3 rounded-lg overflow-hidden">
       {/* Header */}
       <button
         type="button"
-        class="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-[#21262d] transition-colors"
+        class="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-surface-2 transition-colors"
         onClick={() => setIsExpanded(!isExpanded())}
       >
         {/* Tool Icon */}
-        <span class="text-[#8b949e] shrink-0">{toolIcon()}</span>
+        <span class="text-muted-foreground shrink-0">{toolIcon()}</span>
 
         {/* Tool name label (when summary differs from title) */}
         <Show when={showToolLabel()}>
-          <span class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#30363d] text-[#8b949e]">
+          <span class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-surface-3 text-muted-foreground">
             {props.toolCall.title}
           </span>
         </Show>
 
         {/* Summary */}
-        <span class="flex-1 text-sm text-[#e6edf3] truncate">{summary()}</span>
+        <span class="flex-1 text-sm text-foreground truncate">{summary()}</span>
 
         {/* Status Badge */}
         <span
@@ -367,7 +367,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
 
         {/* Expand Icon */}
         <svg
-          class={`w-4 h-4 shrink-0 text-[#8b949e] transition-transform ${isExpanded() ? "rotate-180" : ""}`}
+          class={`w-4 h-4 shrink-0 text-muted-foreground transition-transform ${isExpanded() ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -385,17 +385,19 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
 
       {/* Details */}
       <Show when={isExpanded()}>
-        <div class="px-3 py-2 border-t border-[#21262d] text-xs">
+        <div class="px-3 py-2 border-t border-surface-2 text-xs">
           {/* Parameters */}
           <Show when={props.toolCall.parameters}>
             <div class="mb-3">
-              <div class="text-[#484f58] font-medium mb-1">Parameters:</div>
-              <div class="bg-[#0d1117] border border-[#30363d] rounded p-2 font-mono text-[#e6edf3] max-h-48 overflow-auto">
+              <div class="text-muted-foreground/70 font-medium mb-1">
+                Parameters:
+              </div>
+              <div class="bg-background border border-surface-3 rounded p-2 font-mono text-foreground max-h-48 overflow-auto">
                 {Object.entries(props.toolCall.parameters || {}).map(
                   ([key, value]) => (
                     <div class="mb-1 last:mb-0">
-                      <span class="text-[#79c0ff]">{key}:</span>{" "}
-                      <span class="text-[#a5d6ff] break-all">
+                      <span class="text-primary/80">{key}:</span>{" "}
+                      <span class="text-primary/60 break-all">
                         {typeof value === "string"
                           ? truncate(value, 500)
                           : JSON.stringify(value)}
@@ -410,8 +412,10 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
           {/* Result */}
           <Show when={props.toolCall.result}>
             <div class="mb-3">
-              <div class="text-[#484f58] font-medium mb-1">Result:</div>
-              <div class="bg-[#0d1117] border border-[#238636] rounded p-2 text-[#3fb950] max-h-48 overflow-auto">
+              <div class="text-muted-foreground/70 font-medium mb-1">
+                Result:
+              </div>
+              <div class="bg-background border border-success/70 rounded p-2 text-success max-h-48 overflow-auto">
                 {props.toolCall.result}
               </div>
             </div>
@@ -420,17 +424,19 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
           {/* Error */}
           <Show when={props.toolCall.error}>
             <div class="mb-3">
-              <div class="text-[#484f58] font-medium mb-1">Error:</div>
-              <div class="bg-[#0d1117] border border-[#f85149] rounded p-2 text-[#f85149]">
+              <div class="text-muted-foreground/70 font-medium mb-1">
+                Error:
+              </div>
+              <div class="bg-background border border-destructive rounded p-2 text-destructive">
                 {props.toolCall.error}
               </div>
             </div>
           </Show>
 
           {/* Metadata */}
-          <div class="text-[#8b949e]">
-            <span class="text-[#484f58]">Tool:</span>{" "}
-            <span class="text-[#e6edf3]">{props.toolCall.title}</span>
+          <div class="text-muted-foreground">
+            <span class="text-muted-foreground/70">Tool:</span>{" "}
+            <span class="text-foreground">{props.toolCall.title}</span>
           </div>
         </div>
       </Show>

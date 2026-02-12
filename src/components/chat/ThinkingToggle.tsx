@@ -16,8 +16,8 @@ export const ThinkingToggle: Component = () => {
       type="button"
       class={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all border ${
         isEnabled()
-          ? "bg-[#58a6ff]/10 border-[#58a6ff]/30 text-[#58a6ff]"
-          : "bg-transparent border-[#30363d] text-[#8b949e] hover:border-[#484f58] hover:text-[#e6edf3]"
+          ? "bg-primary/10 border-primary/30 text-primary"
+          : "bg-transparent border-surface-3 text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground"
       }`}
       onClick={toggle}
       title={isEnabled() ? "Hide AI thinking" : "Show AI thinking"}

@@ -392,7 +392,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         <div class="flex items-center gap-0.5">
           <button
             type="button"
-            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={() => setShowCreateDialog(true)}
             title="Create skill"
           >
@@ -414,7 +414,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handleUpload}
             title="Upload skill"
           >
@@ -437,7 +437,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handleDownload}
             disabled={
               !skillsStore.selected ||
@@ -464,7 +464,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={() => skillsStore.refresh()}
             disabled={skillsStore.isLoading}
             title="Refresh skills"
@@ -499,7 +499,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       <Show when={showCreateDialog()}>
         <div class="px-2.5 py-2 border-b border-border flex flex-col gap-1.5">
           <input
-            class="w-full px-2 py-1.5 text-[13px] bg-surface-2 border border-[rgba(148,163,184,0.2)] rounded-[5px] text-foreground outline-none transition-colors duration-150 placeholder:text-muted-foreground focus:border-primary"
+            class="w-full px-2 py-1.5 text-[13px] bg-surface-2 border border-border-hover rounded-[5px] text-foreground outline-none transition-colors duration-150 placeholder:text-muted-foreground focus:border-primary"
             type="text"
             placeholder="Skill name (e.g. lead-finder)"
             value={newSkillName()}
@@ -513,7 +513,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           <div class="flex gap-1">
             <button
               type="button"
-              class="flex-1 px-2 py-1 text-xs font-medium border border-[rgba(148,163,184,0.2)] rounded-[5px] bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed bg-[rgba(56,189,248,0.12)] text-primary border-primary hover:bg-[rgba(56,189,248,0.2)]"
+              class="flex-1 px-2 py-1 text-xs font-medium border border-border-hover rounded-[5px] bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border/80 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed bg-primary/[0.12] text-primary border-primary hover:bg-primary/20"
               onClick={handleCreateSkill}
               disabled={!newSkillName().trim()}
             >
@@ -521,7 +521,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
             </button>
             <button
               type="button"
-              class="flex-1 px-2 py-1 text-xs font-medium border border-[rgba(148,163,184,0.2)] rounded-[5px] bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              class="flex-1 px-2 py-1 text-xs font-medium border border-border-hover rounded-[5px] bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-border/80 hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={() => {
                 setShowCreateDialog(false);
                 setNewSkillName("");
@@ -556,10 +556,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
               <div class="mb-px">
                 <button
                   type="button"
-                  class="flex items-center gap-1 w-full px-2 py-1.5 pl-2.5 bg-transparent border-none text-foreground text-[13px] cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(148,163,184,0.06)]"
+                  class="flex items-center gap-1 w-full px-2 py-1.5 pl-2.5 bg-transparent border-none text-foreground text-[13px] cursor-pointer text-left transition-colors duration-100 hover:bg-border-subtle"
                   classList={{
-                    "bg-[rgba(56,189,248,0.08)]":
-                      skillsStore.selectedId === skill.id,
+                    "bg-primary/[0.08]": skillsStore.selectedId === skill.id,
                   }}
                   onClick={() => {
                     handleSkillSelect(skill);
@@ -610,7 +609,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                   <span class="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium">
                     {skill.name}
                   </span>
-                  <span class="text-[10px] px-1 py-px rounded-[3px] bg-[rgba(148,163,184,0.1)] text-muted-foreground shrink-0">
+                  <span class="text-[10px] px-1 py-px rounded-[3px] bg-border text-muted-foreground shrink-0">
                     {scopeLabel(skill.scope)}
                   </span>
                   <span
@@ -639,7 +638,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                         {(entry) => (
                           <button
                             type="button"
-                            class="flex items-center gap-1 w-full px-2 py-[3px] pl-1.5 bg-transparent border-none text-muted-foreground text-xs cursor-pointer text-left transition-all duration-100 hover:bg-[rgba(148,163,184,0.06)] hover:text-foreground"
+                            class="flex items-center gap-1 w-full px-2 py-[3px] pl-1.5 bg-transparent border-none text-muted-foreground text-xs cursor-pointer text-left transition-all duration-100 hover:bg-border-subtle hover:text-foreground"
                             classList={{
                               "text-foreground font-medium": entry.is_directory,
                             }}
@@ -716,20 +715,19 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       {/* Search section */}
       <div class="shrink-0 border-t border-border px-2.5 py-2">
         <input
-          class="w-full px-2 py-1.5 text-[13px] bg-surface-2 border border-[rgba(148,163,184,0.2)] rounded-[5px] text-foreground outline-none transition-colors duration-150 placeholder:text-muted-foreground focus:border-primary"
+          class="w-full px-2 py-1.5 text-[13px] bg-surface-2 border border-border-hover rounded-[5px] text-foreground outline-none transition-colors duration-150 placeholder:text-muted-foreground focus:border-primary"
           type="text"
           placeholder="Search skills..."
           value={searchQuery()}
           onInput={(e) => setSearchQuery(e.currentTarget.value)}
         />
 
-        <div class="flex gap-0 mt-1.5 rounded-[5px] overflow-hidden border border-[rgba(148,163,184,0.2)]">
+        <div class="flex gap-0 mt-1.5 rounded-[5px] overflow-hidden border border-border-hover">
           <button
             type="button"
-            class="flex-1 py-1 text-xs font-medium text-center border-none cursor-pointer bg-transparent text-muted-foreground transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)]"
+            class="flex-1 py-1 text-xs font-medium text-center border-none cursor-pointer bg-transparent text-muted-foreground transition-all duration-100 hover:bg-border/80"
             classList={{
-              "bg-[rgba(56,189,248,0.12)] text-foreground":
-                searchTab() === "installed",
+              "bg-primary/[0.12] text-foreground": searchTab() === "installed",
             }}
             onClick={() => setSearchTab("installed")}
           >
@@ -737,10 +735,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="flex-1 py-1 text-xs font-medium text-center border-none cursor-pointer bg-transparent text-muted-foreground transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)]"
+            class="flex-1 py-1 text-xs font-medium text-center border-none cursor-pointer bg-transparent text-muted-foreground transition-all duration-100 hover:bg-border/80"
             classList={{
-              "bg-[rgba(56,189,248,0.12)] text-foreground":
-                searchTab() === "available",
+              "bg-primary/[0.12] text-foreground": searchTab() === "available",
             }}
             onClick={() => setSearchTab("available")}
           >
@@ -754,7 +751,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
               {(skill) => (
                 <button
                   type="button"
-                  class="flex flex-col gap-px w-full px-2 py-1.5 bg-transparent border-none rounded text-foreground text-[13px] cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(148,163,184,0.08)]"
+                  class="flex flex-col gap-px w-full px-2 py-1.5 bg-transparent border-none rounded text-foreground text-[13px] cursor-pointer text-left transition-colors duration-100 hover:bg-border/80"
                   onClick={() => {
                     if (searchTab() === "available") {
                       handleSearchInstall(skill);
@@ -780,7 +777,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       <div class="shrink-0 border-t border-border">
         <button
           type="button"
-          class="flex items-center gap-1.5 w-full px-3 py-2 bg-transparent border-none text-muted-foreground text-xs font-semibold uppercase tracking-[0.04em] cursor-pointer transition-colors duration-100 hover:bg-[rgba(148,163,184,0.06)]"
+          class="flex items-center gap-1.5 w-full px-3 py-2 bg-transparent border-none text-muted-foreground text-xs font-semibold uppercase tracking-[0.04em] cursor-pointer transition-colors duration-100 hover:bg-border-subtle"
           onClick={() => setShowFiles((v) => !v)}
         >
           <svg

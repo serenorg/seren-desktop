@@ -137,7 +137,7 @@ export const McpServersPanel: Component = () => {
       <div class="flex justify-between items-center">
         <h3 class="m-0 text-lg font-semibold">MCP Servers</h3>
         <button
-          class="px-4 py-2 bg-accent text-white border-none rounded-md cursor-pointer text-sm hover:bg-[#2563eb]"
+          class="px-4 py-2 bg-accent text-white border-none rounded-md cursor-pointer text-sm hover:bg-primary/85"
           onClick={() => setShowAddForm(!showAddForm())}
         >
           {showAddForm() ? "Cancel" : "Add Server"}
@@ -145,7 +145,7 @@ export const McpServersPanel: Component = () => {
       </div>
 
       <Show when={error()}>
-        <div class="p-3 bg-[rgba(239,68,68,0.1)] text-[#dc2626] rounded-md text-sm">
+        <div class="p-3 bg-destructive/10 text-destructive/85 rounded-md text-sm">
           {error()}
         </div>
       </Show>
@@ -165,7 +165,7 @@ export const McpServersPanel: Component = () => {
               placeholder="e.g., filesystem"
               value={newServerName()}
               onInput={(e) => setNewServerName(e.currentTarget.value)}
-              class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
+              class="px-3 py-2 border border-border-strong rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
             />
           </div>
 
@@ -182,7 +182,7 @@ export const McpServersPanel: Component = () => {
               placeholder="e.g., npx"
               value={newServerCommand()}
               onInput={(e) => setNewServerCommand(e.currentTarget.value)}
-              class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
+              class="px-3 py-2 border border-border-strong rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
             />
           </div>
 
@@ -199,7 +199,7 @@ export const McpServersPanel: Component = () => {
               placeholder="e.g., -y, @modelcontextprotocol/server-filesystem, /path"
               value={newServerArgs()}
               onInput={(e) => setNewServerArgs(e.currentTarget.value)}
-              class="px-3 py-2 border border-[rgba(148,163,184,0.25)] rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
+              class="px-3 py-2 border border-border-strong rounded-md text-sm bg-card text-foreground focus:outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)]"
             />
           </div>
 
@@ -221,13 +221,13 @@ export const McpServersPanel: Component = () => {
 
           <div class="flex gap-2 mt-2">
             <button
-              class="px-4 py-2 bg-accent text-white border-none rounded-md cursor-pointer text-sm hover:bg-[#2563eb]"
+              class="px-4 py-2 bg-accent text-white border-none rounded-md cursor-pointer text-sm hover:bg-primary/85"
               onClick={handleAddServer}
             >
               Add Server
             </button>
             <button
-              class="px-4 py-2 bg-popover text-foreground border border-[rgba(148,163,184,0.25)] rounded-md cursor-pointer text-sm hover:bg-[rgba(148,163,184,0.15)]"
+              class="px-4 py-2 bg-popover text-foreground border border-border-strong rounded-md cursor-pointer text-sm hover:bg-border-medium"
               onClick={resetForm}
             >
               Cancel
@@ -258,11 +258,11 @@ export const McpServersPanel: Component = () => {
                     !server.enabled
                       ? "opacity-60"
                       : status() === "connected"
-                        ? "border-[#22c55e]"
+                        ? "border-success"
                         : status() === "error"
-                          ? "border-[#dc2626]"
-                          : "border-[rgba(148,163,184,0.25)]"
-                  } ${isBuiltin() ? "bg-[#f0f9ff] border-accent" : ""}`}
+                          ? "border-destructive/85"
+                          : "border-border-strong"
+                  } ${isBuiltin() ? "bg-primary/10 border-accent" : ""}`}
                 >
                   <div class="flex-1 flex flex-col gap-1">
                     <div class="flex items-center gap-2">
@@ -277,10 +277,10 @@ export const McpServersPanel: Component = () => {
                           status() === "disconnected"
                             ? "bg-popover text-muted-foreground"
                             : status() === "connecting"
-                              ? "bg-[#fef9c3] text-[#ca8a04]"
+                              ? "bg-warning/15 text-warning/70"
                               : status() === "connected"
-                                ? "bg-[#dcfce7] text-[#16a34a]"
-                                : "bg-[rgba(239,68,68,0.1)] text-[#dc2626]"
+                                ? "bg-success/15 text-success/85"
+                                : "bg-destructive/10 text-destructive/85"
                         }`}
                       >
                         {isBuiltin() && status() === "connected"
@@ -323,7 +323,7 @@ export const McpServersPanel: Component = () => {
                         when={status() === "connected"}
                         fallback={
                           <button
-                            class="px-3 py-1.5 rounded text-xs cursor-pointer bg-[#22c55e] text-white border-none hover:not-disabled:bg-[#16a34a] disabled:opacity-50 disabled:cursor-not-allowed"
+                            class="px-3 py-1.5 rounded text-xs cursor-pointer bg-success text-white border-none hover:not-disabled:bg-success/85 disabled:opacity-50 disabled:cursor-not-allowed"
                             onClick={() => handleConnect(server)}
                             disabled={!server.enabled || isConnecting()}
                           >
@@ -332,7 +332,7 @@ export const McpServersPanel: Component = () => {
                         }
                       >
                         <button
-                          class="px-3 py-1.5 rounded text-xs cursor-pointer bg-[#f59e0b] text-white border-none hover:bg-[#d97706]"
+                          class="px-3 py-1.5 rounded text-xs cursor-pointer bg-warning/85 text-white border-none hover:bg-warning/70"
                           onClick={() => handleDisconnect(server.name)}
                         >
                           Disconnect
@@ -340,14 +340,14 @@ export const McpServersPanel: Component = () => {
                       </Show>
 
                       <button
-                        class="px-3 py-1.5 rounded text-xs cursor-pointer bg-popover text-foreground border border-[rgba(148,163,184,0.25)] hover:bg-[rgba(148,163,184,0.15)]"
+                        class="px-3 py-1.5 rounded text-xs cursor-pointer bg-popover text-foreground border border-border-strong hover:bg-border-medium"
                         onClick={() => handleToggle(server.name)}
                       >
                         {server.enabled ? "Disable" : "Enable"}
                       </button>
 
                       <button
-                        class="px-3 py-1.5 rounded text-xs cursor-pointer bg-[#ef4444] text-white border-none hover:bg-[#dc2626]"
+                        class="px-3 py-1.5 rounded text-xs cursor-pointer bg-destructive text-white border-none hover:bg-destructive/85"
                         onClick={() => handleRemove(server.name)}
                       >
                         Remove

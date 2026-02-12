@@ -210,11 +210,11 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
       onKeyDown={handleKeyDown}
     >
       <Show when={props.onClose}>
-        <div class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-[rgba(148,163,184,0.15)] bg-[#161b22]">
-          <span class="text-xs font-medium text-[#8b949e]">Editor</span>
+        <div class="shrink-0 flex justify-between items-center px-3 py-2 border-b border-border-medium bg-surface-0">
+          <span class="text-xs font-medium text-muted-foreground">Editor</span>
           <button
             type="button"
-            class="bg-transparent border-none text-[#8b949e] cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-[#e6edf3]"
+            class="bg-transparent border-none text-muted-foreground cursor-pointer px-1.5 py-0.5 text-sm leading-none hover:text-foreground"
             onClick={props.onClose}
             title="Close Editor"
           >
@@ -222,7 +222,7 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
           </button>
         </div>
       </Show>
-      <div class="shrink-0 border-b border-[rgba(148,163,184,0.15)]">
+      <div class="shrink-0 border-b border-border-medium">
         <FileTabs
           isMarkdown={isMarkdownFile()}
           showPreview={showPreview()}
@@ -243,7 +243,7 @@ export const EditorContent: Component<EditorContentProps> = (props) => {
                 </h2>
                 <p class="m-0 mb-5 text-muted-foreground leading-normal">
                   Select a file from the explorer, or use{" "}
-                  <kbd class="bg-[rgba(148,163,184,0.2)] px-1.5 py-0.5 rounded font-inherit text-[0.9em]">
+                  <kbd class="bg-border-hover px-1.5 py-0.5 rounded font-inherit text-[0.9em]">
                     {navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+O
                   </kbd>{" "}
                   to open a file.

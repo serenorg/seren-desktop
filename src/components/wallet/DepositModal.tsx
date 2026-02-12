@@ -147,12 +147,12 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
       onClick={handleBackdropClick}
     >
       <div
-        class="bg-[#1e293b] border border-[rgba(148,163,184,0.15)] rounded-xl w-[90%] max-w-[420px] shadow-[0_8px_32px_rgba(0,0,0,0.4)] animate-[slideUp_0.2s_ease-out]"
+        class="bg-surface-2 border border-border-medium rounded-xl w-[90%] max-w-[420px] shadow-[var(--shadow-lg)] animate-[slideUp_0.2s_ease-out]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="deposit-modal-title"
       >
-        <header class="flex items-center justify-between px-6 py-5 border-b border-[rgba(148,163,184,0.15)]">
+        <header class="flex items-center justify-between px-6 py-5 border-b border-border-medium">
           <h2
             id="deposit-modal-title"
             class="text-[18px] font-semibold text-white m-0"
@@ -160,7 +160,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
             Add SerenBucks
           </h2>
           <button
-            class="flex items-center justify-center w-8 h-8 p-0 bg-transparent border-none rounded-md text-[24px] text-[#94a3b8] cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.1)] hover:text-white"
+            class="flex items-center justify-center w-8 h-8 p-0 bg-transparent border-none rounded-md text-[24px] text-muted-foreground cursor-pointer transition-all hover:bg-border hover:text-white"
             onClick={props.onClose}
             aria-label="Close"
           >
@@ -169,8 +169,8 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
         </header>
 
         <div class="p-6 flex flex-col gap-5">
-          <div class="flex flex-col items-center gap-1 p-4 bg-[rgba(15,23,42,0.5)] rounded-lg">
-            <span class="text-[12px] text-[#64748b] uppercase tracking-wider">
+          <div class="flex flex-col items-center gap-1 p-4 bg-background/50 rounded-lg">
+            <span class="text-[12px] text-muted-foreground uppercase tracking-wider">
               Current Balance
             </span>
             <span class="text-[28px] font-bold text-white tabular-nums">
@@ -188,8 +188,8 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   type="button"
                   class={`flex flex-col items-center gap-1 px-3 py-4 rounded-[10px] cursor-pointer transition-all border-2 ${
                     paymentMethod() === "stripe"
-                      ? "border-[#6366f1] bg-[rgba(99,102,241,0.1)]"
-                      : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                      ? "border-primary bg-primary/10"
+                      : "bg-background/50 border-border-medium hover:bg-surface-1/50 hover:border-border-strong"
                   }`}
                   onClick={() => setPaymentMethod("stripe")}
                 >
@@ -202,8 +202,8 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   type="button"
                   class={`flex flex-col items-center gap-1 px-3 py-4 rounded-[10px] cursor-pointer transition-all border-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                     paymentMethod() === "crypto"
-                      ? "border-[#6366f1] bg-[rgba(99,102,241,0.1)]"
-                      : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                      ? "border-primary bg-primary/10"
+                      : "bg-background/50 border-border-medium hover:bg-surface-1/50 hover:border-border-strong"
                   }`}
                   onClick={() => setPaymentMethod("crypto")}
                   disabled={!cryptoWalletStore.state().isConfigured}
@@ -231,8 +231,8 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                     <button
                       class={`py-3 px-2 rounded-lg text-[14px] font-medium cursor-pointer transition-all border ${
                         !isCustom() && selectedAmount() === amount
-                          ? "bg-[#6366f1] border-[#6366f1] text-white"
-                          : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-white hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                          ? "bg-primary border-primary text-white"
+                          : "bg-background/50 border-border-medium text-white hover:bg-surface-1/50 hover:border-border-strong"
                       }`}
                       onClick={() => handlePresetClick(amount)}
                     >
@@ -243,8 +243,8 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                 <button
                   class={`py-3 px-2 rounded-lg text-[14px] font-medium cursor-pointer transition-all border ${
                     isCustom()
-                      ? "bg-[#6366f1] border-[#6366f1] text-white"
-                      : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-white hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                      ? "bg-primary border-primary text-white"
+                      : "bg-background/50 border-border-medium text-white hover:bg-surface-1/50 hover:border-border-strong"
                   }`}
                   onClick={handleCustomClick}
                 >
@@ -254,7 +254,9 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
 
               <Show when={isCustom()}>
                 <div class="flex items-center gap-2 mt-2">
-                  <span class="text-[18px] font-medium text-[#94a3b8]">$</span>
+                  <span class="text-[18px] font-medium text-muted-foreground">
+                    $
+                  </span>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -263,19 +265,19 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                     onInput={(e) => handleCustomInput(e.currentTarget.value)}
                     aria-label="Custom amount in dollars"
                     autofocus
-                    class="flex-1 px-4 py-3 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-lg text-[18px] text-white outline-none transition-colors focus:border-[#6366f1] placeholder:text-[#64748b]"
+                    class="flex-1 px-4 py-3 bg-background/50 border border-border-medium rounded-lg text-[18px] text-white outline-none transition-colors focus:border-primary placeholder:text-muted-foreground"
                   />
                 </div>
-                <p class="text-[12px] text-[#64748b] mt-1 m-0">
+                <p class="text-[12px] text-muted-foreground mt-1 m-0">
                   Minimum $5, maximum $500
                 </p>
               </Show>
             </div>
 
             <Show when={effectiveAmount() > 0}>
-              <div class="flex justify-between items-center px-4 py-3 bg-[rgba(15,23,42,0.5)] rounded-lg text-[14px] text-[#94a3b8]">
+              <div class="flex justify-between items-center px-4 py-3 bg-background/50 rounded-lg text-[14px] text-muted-foreground">
                 <span>New balance after deposit:</span>
-                <span class="font-semibold text-[#22c55e]">
+                <span class="font-semibold text-success">
                   ${((walletState.balance ?? 0) + effectiveAmount()).toFixed(2)}
                 </span>
               </div>
@@ -285,7 +287,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
           <Show when={cryptoDepositInfo()}>
             {(info) => (
               <div class="flex flex-col gap-4">
-                <div class="flex items-center gap-3 pb-3 border-b border-[rgba(148,163,184,0.15)]">
+                <div class="flex items-center gap-3 pb-3 border-b border-border-medium">
                   <span class="text-[28px]">🔐</span>
                   <h3 class="m-0 text-[16px] font-semibold text-white">
                     Send USDC to Complete Deposit
@@ -294,7 +296,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
 
                 <div class="flex flex-col gap-3">
                   <div class="flex flex-col gap-1">
-                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">
+                    <span class="text-[12px] font-medium text-muted-foreground uppercase tracking-wider">
                       Amount
                     </span>
                     <span class="text-[15px] font-medium text-white">
@@ -302,7 +304,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                     </span>
                   </div>
                   <div class="flex flex-col gap-1">
-                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">
+                    <span class="text-[12px] font-medium text-muted-foreground uppercase tracking-wider">
                       Network
                     </span>
                     <span class="text-[15px] font-medium text-white">
@@ -310,16 +312,16 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                     </span>
                   </div>
                   <div class="flex flex-col gap-1">
-                    <span class="text-[12px] font-medium text-[#64748b] uppercase tracking-wider">
+                    <span class="text-[12px] font-medium text-muted-foreground uppercase tracking-wider">
                       Deposit Address
                     </span>
                     <div class="flex items-center gap-2">
-                      <code class="flex-1 px-3 py-2.5 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-md text-[12px] font-mono text-white break-all">
+                      <code class="flex-1 px-3 py-2.5 bg-background/50 border border-border-medium rounded-md text-[12px] font-mono text-white break-all">
                         {info().depositAddress}
                       </code>
                       <button
                         type="button"
-                        class="px-3 py-2 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-md text-[16px] cursor-pointer transition-all hover:bg-[rgba(30,41,59,0.5)] hover:border-[rgba(148,163,184,0.25)]"
+                        class="px-3 py-2 bg-background/50 border border-border-medium rounded-md text-[16px] cursor-pointer transition-all hover:bg-surface-1/50 hover:border-border-strong"
                         onClick={handleCopyAddress}
                         title="Copy address"
                       >
@@ -329,20 +331,20 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
                   </div>
                 </div>
 
-                <div class="p-3 bg-[rgba(255,193,7,0.1)] border border-[rgba(255,193,7,0.3)] rounded-lg">
+                <div class="p-3 bg-warning/10 border border-warning/30 rounded-lg">
                   <p class="m-0 text-[13px] text-white">
                     Send exactly <strong>{info().amount} USDC</strong> to the
                     address above.
                   </p>
-                  <p class="mt-2 text-[12px] text-[#94a3b8] m-0">
+                  <p class="mt-2 text-[12px] text-muted-foreground m-0">
                     Only send USDC on <strong>{info().network}</strong>. Sending
                     other tokens or using the wrong network will result in
                     permanent loss.
                   </p>
                 </div>
 
-                <div class="flex items-center gap-2 p-3 bg-[rgba(15,23,42,0.5)] rounded-lg text-[13px] text-[#94a3b8]">
-                  <span class="w-2 h-2 bg-[#6366f1] rounded-full animate-pulse" />
+                <div class="flex items-center gap-2 p-3 bg-background/50 rounded-lg text-[13px] text-muted-foreground">
+                  <span class="w-2 h-2 bg-primary rounded-full animate-pulse" />
                   <span>Waiting for payment...</span>
                 </div>
               </div>
@@ -351,7 +353,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
 
           <Show when={error()}>
             <div
-              class="px-4 py-3 bg-[rgba(220,53,69,0.1)] border border-[#dc3545] rounded-lg text-[13px] text-[#dc3545]"
+              class="px-4 py-3 bg-destructive/10 border border-destructive rounded-lg text-[13px] text-destructive"
               role="alert"
             >
               {error()}
@@ -359,13 +361,13 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
           </Show>
         </div>
 
-        <footer class="flex justify-end gap-3 px-6 py-4 border-t border-[rgba(148,163,184,0.15)]">
+        <footer class="flex justify-end gap-3 px-6 py-4 border-t border-border-medium">
           <Show
             when={!cryptoDepositInfo()}
             fallback={
               <button
                 type="button"
-                class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-[#6366f1] text-white border-none hover:bg-[#4f46e5]"
+                class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-primary text-white border-none hover:bg-primary/85"
                 onClick={props.onClose}
               >
                 Done
@@ -374,7 +376,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
           >
             <button
               type="button"
-              class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-transparent text-[#94a3b8] border border-[rgba(148,163,184,0.15)] hover:bg-[rgba(148,163,184,0.1)] hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+              class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-transparent text-muted-foreground border border-border-medium hover:bg-border hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={props.onClose}
               disabled={isLoading()}
             >
@@ -382,7 +384,7 @@ export const DepositModal: Component<DepositModalProps> = (props) => {
             </button>
             <button
               type="button"
-              class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-[#6366f1] text-white border-none hover:bg-[#4f46e5] disabled:opacity-60 disabled:cursor-not-allowed"
+              class="px-5 py-2.5 text-[14px] font-medium rounded-lg cursor-pointer transition-all bg-primary text-white border-none hover:bg-primary/85 disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={handleDeposit}
               disabled={isLoading() || !isValidAmount()}
             >

@@ -22,7 +22,7 @@ export const MessageImages: Component<MessageImagesProps> = (props) => {
               when={isImageMime(file.mimeType)}
               fallback={
                 <div
-                  class="flex items-center gap-2 px-3 py-2 border border-[#30363d] rounded-lg bg-[#161b22] text-[#8b949e] text-xs"
+                  class="flex items-center gap-2 px-3 py-2 border border-surface-3 rounded-lg bg-surface-0 text-muted-foreground text-xs"
                   title={file.name}
                 >
                   <svg
@@ -46,7 +46,7 @@ export const MessageImages: Component<MessageImagesProps> = (props) => {
             >
               <button
                 type="button"
-                class="border border-[#30363d] rounded-lg overflow-hidden cursor-pointer bg-transparent p-0 hover:border-[#58a6ff] transition-colors"
+                class="border border-surface-3 rounded-lg overflow-hidden cursor-pointer bg-transparent p-0 hover:border-primary transition-colors"
                 onClick={() => setExpandedIndex(index())}
                 title={file.name}
               >

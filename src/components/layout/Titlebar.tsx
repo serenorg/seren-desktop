@@ -119,7 +119,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         <Show when={updaterStore.state.status === "available"}>
           <button
             type="button"
-            class="px-3 py-1 rounded-md bg-[#238636] hover:bg-[#2ea043] text-white text-xs font-medium flex items-center gap-1.5 transition-colors animate-pulse"
+            class="px-3 py-1 rounded-md bg-success/70 hover:bg-success/85 text-white text-xs font-medium flex items-center gap-1.5 transition-colors animate-pulse"
             onClick={() => updaterStore.installAvailableUpdate()}
             title={`Update to ${updaterStore.state.availableVersion}`}
           >

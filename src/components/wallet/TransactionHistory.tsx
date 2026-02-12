@@ -141,13 +141,13 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
 
   return (
     <div class="flex flex-col h-full max-h-[500px]">
-      <header class="flex items-center justify-between px-5 py-4 border-b border-[rgba(148,163,184,0.15)]">
+      <header class="flex items-center justify-between px-5 py-4 border-b border-border-medium">
         <h3 class="text-[16px] font-semibold text-white m-0">
           Transaction History
         </h3>
         <Show when={props.onClose}>
           <button
-            class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-none rounded text-[20px] text-[#94a3b8] cursor-pointer transition-all hover:bg-[rgba(148,163,184,0.1)] hover:text-white"
+            class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-none rounded text-[20px] text-muted-foreground cursor-pointer transition-all hover:bg-border hover:text-white"
             onClick={props.onClose}
             aria-label="Close"
           >
@@ -156,12 +156,12 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
         </Show>
       </header>
 
-      <div class="flex gap-2 px-5 py-3 border-b border-[rgba(148,163,184,0.15)]">
+      <div class="flex gap-2 px-5 py-3 border-b border-border-medium">
         <button
           class={`px-3 py-1.5 rounded-full text-[12px] font-medium cursor-pointer transition-all border ${
             filter() === "all"
-              ? "bg-[#6366f1] border-[#6366f1] text-white"
-              : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-[#94a3b8] hover:bg-[rgba(30,41,59,0.5)] hover:text-white"
+              ? "bg-primary border-primary text-white"
+              : "bg-background/50 border-border-medium text-muted-foreground hover:bg-surface-1/50 hover:text-white"
           }`}
           onClick={() => setFilter("all")}
         >
@@ -170,8 +170,8 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
         <button
           class={`px-3 py-1.5 rounded-full text-[12px] font-medium cursor-pointer transition-all border ${
             filter() === "deposit"
-              ? "bg-[#6366f1] border-[#6366f1] text-white"
-              : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-[#94a3b8] hover:bg-[rgba(30,41,59,0.5)] hover:text-white"
+              ? "bg-primary border-primary text-white"
+              : "bg-background/50 border-border-medium text-muted-foreground hover:bg-surface-1/50 hover:text-white"
           }`}
           onClick={() => setFilter("deposit")}
         >
@@ -180,8 +180,8 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
         <button
           class={`px-3 py-1.5 rounded-full text-[12px] font-medium cursor-pointer transition-all border ${
             filter() === "charge"
-              ? "bg-[#6366f1] border-[#6366f1] text-white"
-              : "bg-[rgba(15,23,42,0.5)] border-[rgba(148,163,184,0.15)] text-[#94a3b8] hover:bg-[rgba(30,41,59,0.5)] hover:text-white"
+              ? "bg-primary border-primary text-white"
+              : "bg-background/50 border-border-medium text-muted-foreground hover:bg-surface-1/50 hover:text-white"
           }`}
           onClick={() => setFilter("charge")}
         >
@@ -191,18 +191,18 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
 
       <div class="flex-1 overflow-y-auto py-2">
         <Show when={data.loading}>
-          <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-[#64748b] text-[14px]">
-            <div class="w-6 h-6 border-2 border-[rgba(148,163,184,0.15)] border-t-[#6366f1] rounded-full animate-spin" />
+          <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-muted-foreground text-[14px]">
+            <div class="w-6 h-6 border-2 border-border-medium border-t-primary rounded-full animate-spin" />
             <span>Loading transactions...</span>
           </div>
         </Show>
 
         <Show when={data.error}>
-          <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-[#64748b] text-[14px]">
+          <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-muted-foreground text-[14px]">
             <span>Failed to load transactions</span>
             <button
               onClick={() => refetch()}
-              class="px-3 py-1.5 bg-[#6366f1] border-none rounded text-[13px] text-white cursor-pointer"
+              class="px-3 py-1.5 bg-primary border-none rounded text-[13px] text-white cursor-pointer"
             >
               Retry
             </button>
@@ -213,7 +213,7 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
           <Show
             when={filteredTransactions().length > 0}
             fallback={
-              <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-[#64748b] text-[14px]">
+              <div class="flex flex-col items-center justify-center gap-3 px-5 py-10 text-muted-foreground text-[14px]">
                 <span>No transactions found</span>
               </div>
             }
@@ -224,7 +224,7 @@ export const TransactionHistory: Component<TransactionHistoryProps> = (
 
             <Show when={hasMore()}>
               <button
-                class="block w-[calc(100%-40px)] mx-5 my-3 py-2.5 bg-[rgba(15,23,42,0.5)] border border-[rgba(148,163,184,0.15)] rounded-md text-[13px] font-medium text-[#94a3b8] cursor-pointer transition-all hover:bg-[rgba(30,41,59,0.5)] hover:text-white"
+                class="block w-[calc(100%-40px)] mx-5 my-3 py-2.5 bg-background/50 border border-border-medium rounded-md text-[13px] font-medium text-muted-foreground cursor-pointer transition-all hover:bg-surface-1/50 hover:text-white"
                 onClick={handleLoadMore}
               >
                 Load More
@@ -247,13 +247,13 @@ const TransactionItem: Component<{ transaction: Transaction }> = (props) => {
   const getIconClasses = () => {
     const cat = category();
     if (cat === "deposit" || cat === "refund") {
-      return "bg-[rgba(40,167,69,0.1)] text-[#28a745]";
+      return "bg-success/10 text-success";
     }
-    return "bg-[rgba(108,117,125,0.1)] text-[#94a3b8]";
+    return "bg-border text-muted-foreground";
   };
 
   return (
-    <div class="flex items-center gap-3 px-5 py-3 border-b border-[rgba(148,163,184,0.15)] transition-colors hover:bg-[rgba(148,163,184,0.05)] last:border-b-0">
+    <div class="flex items-center gap-3 px-5 py-3 border-b border-border-medium transition-colors hover:bg-border-subtle last:border-b-0">
       <div
         class={`flex items-center justify-center w-9 h-9 rounded-full text-[16px] shrink-0 ${getIconClasses()}`}
       >
@@ -263,22 +263,22 @@ const TransactionItem: Component<{ transaction: Transaction }> = (props) => {
         <span class="text-[14px] font-medium text-white">
           {getTransactionLabel(props.transaction.source)}
         </span>
-        <span class="text-[12px] text-[#94a3b8] overflow-hidden text-ellipsis whitespace-nowrap">
+        <span class="text-[12px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
           {props.transaction.description || props.transaction.source}
         </span>
-        <span class="text-[11px] text-[#64748b]">
+        <span class="text-[11px] text-muted-foreground">
           {formatDate(props.transaction.created_at)} at{" "}
           {formatTime(props.transaction.created_at)}
         </span>
       </div>
       <div class="flex flex-col items-end gap-0.5 shrink-0">
         <span
-          class={`text-[14px] font-semibold tabular-nums ${isPositive() ? "text-[#28a745]" : "text-[#94a3b8]"}`}
+          class={`text-[14px] font-semibold tabular-nums ${isPositive() ? "text-success" : "text-muted-foreground"}`}
         >
           {isPositive() ? "+" : "-"}
           {props.transaction.amount_usd}
         </span>
-        <span class="text-[11px] text-[#64748b] tabular-nums">
+        <span class="text-[11px] text-muted-foreground tabular-nums">
           Balance: {props.transaction.remaining_usd}
         </span>
       </div>

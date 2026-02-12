@@ -43,12 +43,12 @@ export const AgentModeSelector: Component = () => {
       <div class="relative" ref={dropdownRef}>
         <button
           type="button"
-          class="flex items-center gap-1.5 px-2 py-1 bg-[#21262d] border border-[#30363d] rounded-md text-xs text-[#e6edf3] cursor-pointer hover:bg-[#30363d] transition-colors"
+          class="flex items-center gap-1.5 px-2 py-1 bg-surface-2 border border-surface-3 rounded-md text-xs text-foreground cursor-pointer hover:bg-surface-3 transition-colors"
           onClick={() => setIsOpen(!isOpen())}
           title="Change permission mode"
         >
           <svg
-            class="w-3 h-3 text-[#8b949e]"
+            class="w-3 h-3 text-muted-foreground"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -66,7 +66,7 @@ export const AgentModeSelector: Component = () => {
             {currentModeName() ?? "Mode"}
           </span>
           <svg
-            class={`w-3 h-3 text-[#8b949e] transition-transform ${isOpen() ? "rotate-180" : ""}`}
+            class={`w-3 h-3 text-muted-foreground transition-transform ${isOpen() ? "rotate-180" : ""}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -83,24 +83,24 @@ export const AgentModeSelector: Component = () => {
         </button>
 
         <Show when={isOpen()}>
-          <div class="absolute bottom-full left-0 mb-1 w-72 bg-[#161b22] border border-[#30363d] rounded-lg shadow-lg z-50 overflow-hidden">
-            <div class="px-3 py-2 border-b border-[#21262d] text-[10px] uppercase tracking-wider text-[#8b949e] font-medium">
+          <div class="absolute bottom-full left-0 mb-1 w-72 bg-surface-0 border border-surface-3 rounded-lg shadow-lg z-50 overflow-hidden">
+            <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
               Permission Mode
             </div>
             <For each={availableModes()}>
               {(mode) => (
                 <button
                   type="button"
-                  class={`w-full text-left px-3 py-2 border-b border-[#21262d] last:border-b-0 transition-colors cursor-pointer hover:bg-[#21262d] ${
-                    mode.modeId === currentModeId() ? "bg-[#21262d]" : ""
+                  class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
+                    mode.modeId === currentModeId() ? "bg-surface-2" : ""
                   }`}
                   onClick={() => selectMode(mode.modeId)}
                 >
                   <div class="flex items-center justify-between">
                     <div class="flex flex-col gap-0.5">
-                      <span class="text-sm text-[#e6edf3]">{mode.name}</span>
+                      <span class="text-sm text-foreground">{mode.name}</span>
                       <Show when={mode.description}>
-                        <span class="text-[11px] text-[#8b949e]">
+                        <span class="text-[11px] text-muted-foreground">
                           {mode.description}
                         </span>
                       </Show>

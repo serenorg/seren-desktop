@@ -28,7 +28,7 @@ export const AutocompleteStatus: Component<AutocompleteStatusProps> = (
 
   return (
     <button
-      class={`inline-flex items-center gap-1 py-0.5 px-2 border-none rounded bg-transparent text-xs cursor-pointer transition-colors duration-150 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-[#4a9eff] focus-visible:outline-offset-1 ${config().colorClass}`}
+      class={`inline-flex items-center gap-1 py-0.5 px-2 border-none rounded bg-transparent text-xs cursor-pointer transition-colors duration-150 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-1 ${config().colorClass}`}
       onClick={() => props.onToggle?.()}
       title={props.errorMessage || config().label}
       aria-label={config().label}
