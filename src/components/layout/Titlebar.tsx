@@ -111,7 +111,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
       </div>
 
       <div
-        class="flex items-center gap-1"
+        class="flex items-center gap-2"
         style={{ "-webkit-app-region": "no-drag" }}
       >
         {/* Update available button */}
