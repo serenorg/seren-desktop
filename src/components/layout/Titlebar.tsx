@@ -55,12 +55,20 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
   };
 
   return (
-    <div class="titlebar titlebar--drag">
-      <div class="titlebar__left titlebar--no-drag">
-        <span class="titlebar__brand">Seren</span>
+    <div
+      class="flex items-center justify-between h-[var(--titlebar-height,40px)] px-3 pl-[78px] bg-surface-1 border-b border-border shrink-0 select-none"
+      style={{ "-webkit-app-region": "drag" }}
+    >
+      <div
+        class="flex items-center gap-2"
+        style={{ "-webkit-app-region": "no-drag" }}
+      >
+        <span class="font-semibold text-[13px] text-foreground tracking-[0.02em]">
+          Seren
+        </span>
         <button
           type="button"
-          class="titlebar__btn"
+          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
           onClick={props.onToggleSidebar}
           title={props.sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
         >
@@ -82,13 +90,14 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         </button>
       </div>
 
-      <div class="titlebar__center">
+      <div class="flex items-center gap-1.5 flex-1 justify-center">
         <Show
           when={folderName()}
           fallback={
             <button
               type="button"
-              class="titlebar__no-project titlebar__no-project--clickable titlebar--no-drag"
+              class="text-xs text-muted-foreground opacity-60 bg-transparent border-none cursor-pointer transition-colors duration-100 hover:text-foreground"
+              style={{ "-webkit-app-region": "no-drag" }}
               onClick={handleOpenFolder}
               title="Open a project folder"
             >
@@ -96,11 +105,16 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
             </button>
           }
         >
-          <span class="titlebar__folder">{folderName()}</span>
+          <span class="text-[13px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+            {folderName()}
+          </span>
         </Show>
       </div>
 
-      <div class="titlebar__right titlebar--no-drag">
+      <div
+        class="flex items-center gap-1"
+        style={{ "-webkit-app-region": "no-drag" }}
+      >
         {/* Update available button */}
         <Show when={updaterStore.state.status === "available"}>
           <button
@@ -166,7 +180,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
 
         <button
           type="button"
-          class="titlebar__btn"
+          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
           onClick={props.onToggleSettings}
           title="Settings"
         >
@@ -196,7 +210,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           fallback={
             <button
               type="button"
-              class="titlebar__btn titlebar__btn--sign-in"
+              class="flex items-center justify-center h-7 px-2.5 border-none rounded-md bg-transparent text-muted-foreground text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
               onClick={props.onSignInClick}
             >
               Sign In
@@ -205,7 +219,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         >
           <button
             type="button"
-            class="titlebar__btn"
+            class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground"
             onClick={props.onLogout}
             title="Sign Out"
           >

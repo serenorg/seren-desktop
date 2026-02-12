@@ -7,7 +7,6 @@ import { createSignal, onCleanup, onMount } from "solid-js";
 import { getMonaco } from "@/lib/editor";
 import type { DiffProposalEvent } from "@/stores/acp.store";
 import { acpStore } from "@/stores/acp.store";
-import "./DiffProposalDialog.css";
 
 export interface DiffProposalDialogProps {
   proposal: DiffProposalEvent;
@@ -126,31 +125,39 @@ export const DiffProposalDialog: Component<DiffProposalDialogProps> = (
   }
 
   return (
-    <div class="diff-proposal-dialog">
-      <div class="diff-proposal-header">
-        <span class="diff-proposal-icon">{"\u270F"}</span>
-        <span class="diff-proposal-title">Review Edit</span>
-        <span class="diff-proposal-path" title={props.proposal.path}>
+    <div class="border border-border rounded-lg my-2 bg-surface-1 overflow-hidden">
+      <div class="flex items-center gap-2 px-4 py-2.5 border-b border-border">
+        <span class="text-base shrink-0">{"\u270F"}</span>
+        <span class="font-semibold text-[13px] text-foreground">
+          Review Edit
+        </span>
+        <span
+          class="ml-auto font-[var(--font-mono)] text-xs text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap max-w-[50%]"
+          title={props.proposal.path}
+        >
           {fileName()}
         </span>
       </div>
 
-      <div class="diff-proposal-editor" ref={containerRef} />
+      <div
+        class="h-[300px] min-h-[150px] max-h-[60vh] overflow-hidden resize-y"
+        ref={containerRef}
+      />
 
-      <div class="diff-proposal-actions">
-        <span class="diff-proposal-stats">
-          <span class="diff-proposal-stats-added">+{stats().added}</span>
+      <div class="flex gap-2 px-4 py-2.5 border-t border-border items-center">
+        <span class="text-[11px] text-muted-foreground mr-auto">
+          <span class="text-success">+{stats().added}</span>
           {" / "}
-          <span class="diff-proposal-stats-removed">-{stats().removed}</span>
+          <span class="text-destructive">-{stats().removed}</span>
         </span>
         <button
-          class="diff-proposal-btn diff-proposal-btn--reject"
+          class="px-4 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-opacity duration-150 hover:opacity-85 bg-surface-3 text-muted-foreground"
           onClick={handleReject}
         >
           Reject
         </button>
         <button
-          class="diff-proposal-btn diff-proposal-btn--accept"
+          class="px-4 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-opacity duration-150 hover:opacity-85 bg-success text-white"
           onClick={handleAccept}
         >
           Accept

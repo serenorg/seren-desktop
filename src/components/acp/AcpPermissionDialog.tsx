@@ -4,7 +4,6 @@
 import { type Component, For, Show } from "solid-js";
 import type { PermissionRequestEvent } from "@/services/acp";
 import { acpStore } from "@/stores/acp.store";
-import "./AcpPermissionDialog.css";
 
 export interface AcpPermissionDialogProps {
   permission: PermissionRequestEvent;
@@ -63,37 +62,46 @@ export const AcpPermissionDialog: Component<AcpPermissionDialogProps> = (
   }
 
   return (
-    <div class="acp-permission-dialog">
-      <div class="acp-permission-header">
-        <span class="acp-permission-icon">
+    <div class="border border-border rounded-lg px-4 py-3 my-2 bg-surface-1">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-base shrink-0">
           {risk() === "high"
             ? "\u26A0"
             : risk() === "medium"
               ? "\u24D8"
               : "\u2714"}
         </span>
-        <span class="acp-permission-title">Permission Required</span>
-        <span class={`acp-permission-badge acp-permission-badge--${risk()}`}>
+        <span class="font-semibold text-[13px] text-foreground">
+          Permission Required
+        </span>
+        <span
+          class="text-[11px] px-1.5 py-0.5 rounded font-medium"
+          classList={{
+            "bg-[rgba(74,222,128,0.12)] text-success": risk() === "low",
+            "bg-[rgba(251,191,36,0.12)] text-warning": risk() === "medium",
+            "bg-[rgba(248,113,113,0.12)] text-destructive": risk() === "high",
+          }}
+        >
           {risk()}
         </span>
       </div>
 
-      <div class="acp-permission-details">
-        <span class="acp-permission-command">{toolDisplay()}</span>
+      <div class="bg-surface-0 rounded-md px-3 py-2 mb-2.5 font-[var(--font-mono)] text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-[120px] overflow-y-auto">
+        <span class="text-foreground font-medium">{toolDisplay()}</span>
       </div>
 
       <Show
         when={hasOptions()}
         fallback={
-          <div class="acp-permission-actions">
+          <div class="flex gap-2 items-center">
             <button
-              class="acp-permission-btn acp-permission-btn--approve"
+              class="px-3.5 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-opacity duration-150 hover:opacity-85 bg-primary text-white"
               onClick={() => handleApprove()}
             >
               Approve
             </button>
             <button
-              class="acp-permission-btn acp-permission-btn--deny"
+              class="px-3.5 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-opacity duration-150 hover:opacity-85 bg-surface-3 text-muted-foreground"
               onClick={handleDeny}
             >
               Deny
@@ -101,11 +109,11 @@ export const AcpPermissionDialog: Component<AcpPermissionDialogProps> = (
           </div>
         }
       >
-        <div class="acp-permission-options">
+        <div class="flex gap-1.5 flex-wrap">
           <For each={props.permission.options}>
             {(option) => (
               <button
-                class="acp-permission-option-btn"
+                class="px-2.5 py-1 rounded border border-border bg-transparent text-muted-foreground text-[11px] cursor-pointer transition-all duration-150 hover:border-primary hover:text-foreground"
                 onClick={() => handleApprove(option.optionId)}
                 title={option.description}
               >
@@ -114,7 +122,7 @@ export const AcpPermissionDialog: Component<AcpPermissionDialogProps> = (
             )}
           </For>
           <button
-            class="acp-permission-btn acp-permission-btn--deny"
+            class="px-3.5 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-opacity duration-150 hover:opacity-85 bg-surface-3 text-muted-foreground"
             onClick={handleDeny}
           >
             Deny

@@ -345,3 +345,132 @@ code {
   background-size: 200% 100%;
   animation: updater-shimmer 1.5s ease-in-out infinite;
 }
+
+/* Slide-in from right (SlidePanel) */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* Slide-in from top (approval dialogs) */
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Fade-in with slight upward translate */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Voice recording pulse */
+@keyframes voicePulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes tabPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* Voice auto-submit tooltip via ::after */
+.voice-auto-submit-toggle::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+}
+
+.voice-auto-submit-toggle:hover::after {
+  opacity: 1;
+}
+
+/* Markdown code block styles (render-markdown.ts injects these class names) */
+.code-block-wrapper {
+  @apply relative my-4 bg-surface-0 border border-surface-3 rounded-[10px] overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.2)];
+}
+
+.code-block-header {
+  @apply flex justify-between items-center px-3 py-2 bg-background border-b border-surface-2;
+}
+
+.code-block-lang {
+  @apply text-[11px] font-semibold uppercase text-muted-foreground tracking-[0.5px];
+}
+
+.code-copy-btn {
+  @apply flex items-center gap-1 px-2 py-1 bg-transparent border border-surface-3 rounded text-muted-foreground text-xs font-[inherit] cursor-pointer transition-all duration-150;
+}
+
+.code-copy-btn:hover {
+  @apply bg-surface-2 border-status-idle text-foreground;
+}
+
+.code-copy-btn:active {
+  @apply bg-surface-3;
+}
+
+.code-copy-btn.copied {
+  @apply text-success border-success;
+}
+
+.code-copy-btn svg {
+  @apply shrink-0;
+}
+
+.code-block-wrapper pre {
+  @apply m-0 p-3 bg-transparent border-none rounded-none overflow-x-auto;
+}
+
+.code-block-wrapper pre code {
+  @apply bg-transparent p-0 text-[13px] leading-relaxed;
+}
+
+.external-link {
+  @apply text-primary no-underline cursor-pointer;
+}
+
+.external-link:hover {
+  @apply underline;
+}

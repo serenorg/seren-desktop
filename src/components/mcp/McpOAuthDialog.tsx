@@ -3,7 +3,6 @@
 
 import { createEffect, createSignal, Show } from "solid-js";
 import { clearOAuthState, startOAuthBrowserFlow } from "@/services/mcp-oauth";
-import "./McpOAuthDialog.css";
 
 interface McpOAuthDialogProps {
   isOpen: boolean;
@@ -70,13 +69,15 @@ export function McpOAuthDialog(props: McpOAuthDialogProps) {
 
   return (
     <Show when={props.isOpen}>
-      <div class="mcp-oauth-dialog-overlay">
-        <div class="mcp-oauth-dialog">
-          <div class="mcp-oauth-dialog-header">
-            <h2>Connect to Seren MCP</h2>
+      <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000]">
+        <div class="bg-surface-1 border border-border rounded-xl w-[400px] max-w-[90vw] shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+          <div class="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 class="m-0 text-lg font-semibold text-foreground">
+              Connect to Seren MCP
+            </h2>
             <button
               type="button"
-              class="mcp-oauth-dialog-close"
+              class="bg-transparent border-none text-muted-foreground text-2xl cursor-pointer p-0 leading-none transition-colors duration-200 hover:text-foreground"
               onClick={handleCancel}
               aria-label="Close"
             >
@@ -84,46 +85,56 @@ export function McpOAuthDialog(props: McpOAuthDialogProps) {
             </button>
           </div>
 
-          <div class="mcp-oauth-dialog-content">
+          <div class="px-5 py-8 min-h-[150px] flex items-center justify-center">
             <Show when={status() === "loading"}>
-              <div class="mcp-oauth-status">
-                <div class="mcp-oauth-spinner" />
-                <p>Preparing authorization...</p>
+              <div class="text-center">
+                <div class="w-10 h-10 border-[3px] border-border border-t-primary rounded-full animate-spin mx-auto mb-4" />
+                <p class="my-2 text-foreground">Preparing authorization...</p>
               </div>
             </Show>
 
             <Show when={status() === "authorizing"}>
-              <div class="mcp-oauth-status">
-                <div class="mcp-oauth-icon mcp-oauth-icon-info">→</div>
-                <p>Complete authorization in your browser</p>
-                <p class="mcp-oauth-hint">
+              <div class="text-center">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl mx-auto mb-4">
+                  →
+                </div>
+                <p class="my-2 text-foreground">
+                  Complete authorization in your browser
+                </p>
+                <p class="text-sm text-muted-foreground">
                   Your default browser has opened. Sign in there to continue.
                 </p>
               </div>
             </Show>
 
             <Show when={status() === "exchanging"}>
-              <div class="mcp-oauth-status">
-                <div class="mcp-oauth-spinner" />
-                <p>Completing authorization...</p>
+              <div class="text-center">
+                <div class="w-10 h-10 border-[3px] border-border border-t-primary rounded-full animate-spin mx-auto mb-4" />
+                <p class="my-2 text-foreground">Completing authorization...</p>
               </div>
             </Show>
 
             <Show when={status() === "success"}>
-              <div class="mcp-oauth-status mcp-oauth-success">
-                <div class="mcp-oauth-icon">✓</div>
-                <p>Connected to Seren MCP!</p>
+              <div class="text-center">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 bg-[rgba(34,197,94,0.12)] text-success">
+                  ✓
+                </div>
+                <p class="my-2 text-foreground">Connected to Seren MCP!</p>
               </div>
             </Show>
 
             <Show when={status() === "error"}>
-              <div class="mcp-oauth-status mcp-oauth-error">
-                <div class="mcp-oauth-icon">!</div>
-                <p>Authorization failed</p>
-                <p class="mcp-oauth-error-message">{errorMessage()}</p>
+              <div class="text-center">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 bg-[rgba(239,68,68,0.12)] text-destructive">
+                  !
+                </div>
+                <p class="my-2 text-foreground">Authorization failed</p>
+                <p class="text-sm text-destructive max-w-[300px] break-words">
+                  {errorMessage()}
+                </p>
                 <button
                   type="button"
-                  class="mcp-oauth-retry"
+                  class="mt-4 px-4 py-2 bg-primary text-white border-none rounded-md cursor-pointer text-sm transition-colors duration-200 hover:opacity-90"
                   onClick={startAuth}
                 >
                   Try Again
@@ -132,10 +143,10 @@ export function McpOAuthDialog(props: McpOAuthDialogProps) {
             </Show>
           </div>
 
-          <div class="mcp-oauth-dialog-footer">
+          <div class="px-5 py-4 border-t border-border flex justify-end">
             <button
               type="button"
-              class="mcp-oauth-cancel"
+              class="px-4 py-2 bg-transparent text-muted-foreground border border-border rounded-md cursor-pointer text-sm transition-all duration-200 hover:text-foreground hover:border-muted-foreground"
               onClick={handleCancel}
             >
               Cancel

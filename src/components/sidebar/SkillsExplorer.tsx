@@ -14,7 +14,6 @@ import { skills as skillsService } from "@/services/skills";
 import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { FileExplorer } from "./FileExplorer";
-import "./SkillsExplorer.css";
 
 interface FileEntry {
   name: string;
@@ -382,16 +381,18 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   return (
     <aside
-      class="skills-explorer"
-      classList={{ "skills-explorer--collapsed": props.collapsed }}
+      class="w-[var(--sidebar-width)] min-w-[var(--sidebar-width)] flex flex-col bg-surface-1 border-r border-border transition-all duration-200 overflow-hidden"
+      classList={{ "w-0 min-w-0 opacity-0 border-r-0": props.collapsed }}
     >
       {/* Header */}
-      <div class="skills-explorer__header">
-        <span class="skills-explorer__title">Skills</span>
-        <div class="skills-explorer__header-actions">
+      <div class="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
+        <span class="text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+          Skills
+        </span>
+        <div class="flex items-center gap-0.5">
           <button
             type="button"
-            class="skills-explorer__header-btn"
+            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={() => setShowCreateDialog(true)}
             title="Create skill"
           >
@@ -413,7 +414,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="skills-explorer__header-btn"
+            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handleUpload}
             title="Upload skill"
           >
@@ -436,7 +437,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="skills-explorer__header-btn"
+            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={handleDownload}
             disabled={
               !skillsStore.selected ||
@@ -463,7 +464,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="skills-explorer__header-btn"
+            class="flex items-center justify-center w-6 h-6 bg-transparent border-none rounded text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.1)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={() => skillsStore.refresh()}
             disabled={skillsStore.isLoading}
             title="Refresh skills"
@@ -496,9 +497,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
       {/* Create Skill dialog */}
       <Show when={showCreateDialog()}>
-        <div class="skills-explorer__create-dialog">
+        <div class="px-2.5 py-2 border-b border-border flex flex-col gap-1.5">
           <input
-            class="skills-explorer__create-input"
+            class="w-full px-2 py-1.5 text-[13px] bg-surface-2 border border-[rgba(148,163,184,0.2)] rounded-[5px] text-foreground outline-none transition-colors duration-150 placeholder:text-muted-foreground focus:border-primary"
             type="text"
             placeholder="Skill name (e.g. lead-finder)"
             value={newSkillName()}
@@ -509,10 +510,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
             }}
             autofocus
           />
-          <div class="skills-explorer__create-actions">
+          <div class="flex gap-1">
             <button
               type="button"
-              class="skills-explorer__create-btn skills-explorer__create-btn--primary"
+              class="flex-1 px-2 py-1 text-xs font-medium border border-[rgba(148,163,184,0.2)] rounded-[5px] bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed bg-[rgba(56,189,248,0.12)] text-primary border-primary hover:bg-[rgba(56,189,248,0.2)]"
               onClick={handleCreateSkill}
               disabled={!newSkillName().trim()}
             >
@@ -520,7 +521,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
             </button>
             <button
               type="button"
-              class="skills-explorer__create-btn"
+              class="flex-1 px-2 py-1 text-xs font-medium border border-[rgba(148,163,184,0.2)] rounded-[5px] bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)] hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={() => {
                 setShowCreateDialog(false);
                 setNewSkillName("");
@@ -533,15 +534,17 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       </Show>
 
       {/* Installed skills with folder trees */}
-      <div class="skills-explorer__installed">
+      <div class="flex-1 overflow-y-auto py-1 min-h-0">
         <Show when={skillsStore.isLoading}>
-          <div class="skills-explorer__loading">Loading skills...</div>
+          <div class="p-4 text-center text-xs text-muted-foreground opacity-50">
+            Loading skills...
+          </div>
         </Show>
 
         <Show
           when={!skillsStore.isLoading && skillsStore.installed.length === 0}
         >
-          <div class="skills-explorer__empty">
+          <div class="px-4 py-6 text-center text-[13px] text-muted-foreground opacity-60 leading-relaxed">
             No skills installed yet. Upload a SKILL.md or search for available
             skills below.
           </div>
@@ -550,12 +553,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         <Show when={!skillsStore.isLoading && skillsStore.installed.length > 0}>
           <For each={skillsStore.installed}>
             {(skill) => (
-              <div class="skills-explorer__skill">
+              <div class="mb-px">
                 <button
                   type="button"
-                  class="skills-explorer__skill-header"
+                  class="flex items-center gap-1 w-full px-2 py-1.5 pl-2.5 bg-transparent border-none text-foreground text-[13px] cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(148,163,184,0.06)]"
                   classList={{
-                    "skills-explorer__skill-header--selected":
+                    "bg-[rgba(56,189,248,0.08)]":
                       skillsStore.selectedId === skill.id,
                   }}
                   onClick={() => {
@@ -569,10 +572,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                 >
                   {/* Chevron */}
                   <svg
-                    class="skills-explorer__skill-chevron"
+                    class="w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform duration-150"
                     classList={{
-                      "skills-explorer__skill-chevron--open":
-                        expandedSkills().has(skill.id),
+                      "rotate-90": expandedSkills().has(skill.id),
                     }}
                     width="14"
                     height="14"
@@ -591,7 +593,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                   </svg>
                   {/* Folder icon */}
                   <svg
-                    class="skills-explorer__skill-icon"
+                    class="shrink-0 text-primary opacity-70"
                     width="14"
                     height="14"
                     viewBox="0 0 16 16"
@@ -605,38 +607,41 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                       stroke-width="1.2"
                     />
                   </svg>
-                  <span class="skills-explorer__skill-name">{skill.name}</span>
-                  <span class="skills-explorer__skill-scope">
+                  <span class="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium">
+                    {skill.name}
+                  </span>
+                  <span class="text-[10px] px-1 py-px rounded-[3px] bg-[rgba(148,163,184,0.1)] text-muted-foreground shrink-0">
                     {scopeLabel(skill.scope)}
                   </span>
                   <span
-                    class="skills-explorer__skill-status"
+                    class="w-1.5 h-1.5 rounded-full shrink-0"
                     classList={{
-                      "skills-explorer__skill-status--enabled":
-                        skillsStore.isEnabled(skill.id),
-                      "skills-explorer__skill-status--disabled":
-                        !skillsStore.isEnabled(skill.id),
+                      "bg-success": skillsStore.isEnabled(skill.id),
+                      "bg-muted-foreground opacity-30": !skillsStore.isEnabled(
+                        skill.id,
+                      ),
                     }}
                   />
                 </button>
 
                 {/* Expanded folder tree */}
                 <Show when={expandedSkills().has(skill.id)}>
-                  <div class="skills-explorer__tree">
+                  <div class="pl-[18px]">
                     <Show
                       when={skillChildren()[skill.id]?.length}
                       fallback={
-                        <div class="skills-explorer__loading">Loading...</div>
+                        <div class="p-4 text-center text-xs text-muted-foreground opacity-50">
+                          Loading...
+                        </div>
                       }
                     >
                       <For each={skillChildren()[skill.id]}>
                         {(entry) => (
                           <button
                             type="button"
-                            class="skills-explorer__tree-item"
+                            class="flex items-center gap-1 w-full px-2 py-[3px] pl-1.5 bg-transparent border-none text-muted-foreground text-xs cursor-pointer text-left transition-all duration-100 hover:bg-[rgba(148,163,184,0.06)] hover:text-foreground"
                             classList={{
-                              "skills-explorer__tree-item--dir":
-                                entry.is_directory,
+                              "text-foreground font-medium": entry.is_directory,
                             }}
                             onClick={() => {
                               if (!entry.is_directory) {
@@ -656,7 +661,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                               when={entry.is_directory}
                               fallback={
                                 <svg
-                                  class="skills-explorer__tree-icon"
+                                  class="w-3.5 h-3.5 shrink-0 opacity-60"
                                   width="14"
                                   height="14"
                                   viewBox="0 0 16 16"
@@ -678,7 +683,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                               }
                             >
                               <svg
-                                class="skills-explorer__tree-icon"
+                                class="w-3.5 h-3.5 shrink-0 opacity-60"
                                 width="14"
                                 height="14"
                                 viewBox="0 0 16 16"
@@ -693,7 +698,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                                 />
                               </svg>
                             </Show>
-                            <span class="skills-explorer__tree-name">
+                            <span class="overflow-hidden text-ellipsis whitespace-nowrap">
                               {entry.name}
                             </span>
                           </button>
@@ -709,21 +714,21 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       </div>
 
       {/* Search section */}
-      <div class="skills-explorer__search-section">
+      <div class="shrink-0 border-t border-border px-2.5 py-2">
         <input
-          class="skills-explorer__search"
+          class="w-full px-2 py-1.5 text-[13px] bg-surface-2 border border-[rgba(148,163,184,0.2)] rounded-[5px] text-foreground outline-none transition-colors duration-150 placeholder:text-muted-foreground focus:border-primary"
           type="text"
           placeholder="Search skills..."
           value={searchQuery()}
           onInput={(e) => setSearchQuery(e.currentTarget.value)}
         />
 
-        <div class="skills-explorer__search-tabs">
+        <div class="flex gap-0 mt-1.5 rounded-[5px] overflow-hidden border border-[rgba(148,163,184,0.2)]">
           <button
             type="button"
-            class="skills-explorer__search-tab"
+            class="flex-1 py-1 text-xs font-medium text-center border-none cursor-pointer bg-transparent text-muted-foreground transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)]"
             classList={{
-              "skills-explorer__search-tab--active":
+              "bg-[rgba(56,189,248,0.12)] text-foreground":
                 searchTab() === "installed",
             }}
             onClick={() => setSearchTab("installed")}
@@ -732,9 +737,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           </button>
           <button
             type="button"
-            class="skills-explorer__search-tab"
+            class="flex-1 py-1 text-xs font-medium text-center border-none cursor-pointer bg-transparent text-muted-foreground transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)]"
             classList={{
-              "skills-explorer__search-tab--active":
+              "bg-[rgba(56,189,248,0.12)] text-foreground":
                 searchTab() === "available",
             }}
             onClick={() => setSearchTab("available")}
@@ -744,12 +749,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         </div>
 
         <Show when={searchQuery() && searchResults().length > 0}>
-          <div class="skills-explorer__search-results">
+          <div class="max-h-[160px] overflow-y-auto mt-1.5">
             <For each={searchResults()}>
               {(skill) => (
                 <button
                   type="button"
-                  class="skills-explorer__search-item"
+                  class="flex flex-col gap-px w-full px-2 py-1.5 bg-transparent border-none rounded text-foreground text-[13px] cursor-pointer text-left transition-colors duration-100 hover:bg-[rgba(148,163,184,0.08)]"
                   onClick={() => {
                     if (searchTab() === "available") {
                       handleSearchInstall(skill);
@@ -758,10 +763,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                     }
                   }}
                 >
-                  <span class="skills-explorer__search-item-name">
+                  <span class="font-medium overflow-hidden text-ellipsis whitespace-nowrap">
                     {skill.name}
                   </span>
-                  <span class="skills-explorer__search-item-desc">
+                  <span class="text-[11px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
                     {skill.description}
                   </span>
                 </button>
@@ -772,15 +777,15 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       </div>
 
       {/* Collapsible File Explorer */}
-      <div class="skills-explorer__files-section">
+      <div class="shrink-0 border-t border-border">
         <button
           type="button"
-          class="skills-explorer__files-header"
+          class="flex items-center gap-1.5 w-full px-3 py-2 bg-transparent border-none text-muted-foreground text-xs font-semibold uppercase tracking-[0.04em] cursor-pointer transition-colors duration-100 hover:bg-[rgba(148,163,184,0.06)]"
           onClick={() => setShowFiles((v) => !v)}
         >
           <svg
-            class="skills-explorer__files-chevron"
-            classList={{ "skills-explorer__files-chevron--open": showFiles() }}
+            class="w-3 h-3 transition-transform duration-150"
+            classList={{ "rotate-90": showFiles() }}
             width="12"
             height="12"
             viewBox="0 0 16 16"
@@ -799,7 +804,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           Files
         </button>
         <Show when={showFiles()}>
-          <div class="skills-explorer__files-body">
+          <div class="max-h-[300px] overflow-y-auto">
             <FileExplorer />
           </div>
         </Show>

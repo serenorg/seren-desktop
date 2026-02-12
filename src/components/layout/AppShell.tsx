@@ -19,7 +19,6 @@ import { shortcuts } from "@/lib/shortcuts";
 import { SlidePanel } from "./SlidePanel";
 import { ThreadContent } from "./ThreadContent";
 import { Titlebar } from "./Titlebar";
-import "./AppShell.css";
 
 export type SlidePanelView =
   | "settings"
@@ -103,7 +102,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
   });
 
   return (
-    <div class="app-shell">
+    <div class="flex flex-col h-screen bg-background text-foreground">
       <Titlebar
         onSignInClick={handleSignInClick}
         onLogout={props.onLogout}
@@ -112,13 +111,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
         sidebarCollapsed={sidebarCollapsed()}
       />
 
-      <div class="app-shell__body">
+      <div class="flex flex-1 overflow-hidden relative">
         <ThreadSidebar
           collapsed={sidebarCollapsed()}
           onToggle={() => setSidebarCollapsed((v) => !v)}
         />
 
-        <main class="app-shell__main">
+        <main class="flex-1 overflow-hidden flex flex-col min-w-0">
           <ThreadContent onSignInClick={handleSignInClick} />
         </main>
 

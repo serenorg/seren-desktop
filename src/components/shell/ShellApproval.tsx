@@ -9,7 +9,6 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import "./ShellApproval.css";
 
 interface ShellApprovalRequest {
   approvalId: string;
@@ -80,33 +79,43 @@ export const ShellApproval: Component = () => {
   return (
     <Show when={request()}>
       {(req) => (
-        <div class="shell-approval-overlay">
-          <div class="shell-approval-dialog">
-            <div class="shell-approval-header">
-              <h2 class="shell-approval-title">Confirm Shell Command</h2>
+        <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-[10000] backdrop-blur-[4px]">
+          <div class="bg-background border border-border rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] w-[90%] max-w-[550px] max-h-[80vh] overflow-hidden flex flex-col animate-[slideInDown_200ms_ease-out]">
+            <div class="px-6 py-5 border-b border-border">
+              <h2 class="m-0 text-xl font-semibold text-foreground">
+                Confirm Shell Command
+              </h2>
             </div>
 
-            <div class="shell-approval-body">
-              <div class="shell-approval-section">
-                <span class="shell-approval-label">Command:</span>
-                <pre class="shell-approval-command">{req().command}</pre>
+            <div class="p-6 overflow-y-auto flex-1">
+              <div class="flex flex-col gap-1.5 mb-4">
+                <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                  Command:
+                </span>
+                <pre class="font-[var(--font-mono)] text-[0.9rem] bg-surface-1 px-4 py-3 rounded-md border border-border text-foreground whitespace-pre-wrap break-all m-0 overflow-x-auto">
+                  {req().command}
+                </pre>
               </div>
 
-              <div class="shell-approval-section">
-                <span class="shell-approval-label">Timeout:</span>
-                <span class="shell-approval-value">{req().timeoutSecs}s</span>
+              <div class="flex flex-col gap-1.5 mb-4">
+                <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                  Timeout:
+                </span>
+                <span class="text-base text-foreground">
+                  {req().timeoutSecs}s
+                </span>
               </div>
 
-              <div class="shell-approval-warning">
+              <div class="mt-4 px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-destructive text-[0.9rem]">
                 <strong>Warning:</strong> This command will execute on your
                 machine. Review it carefully before approving.
               </div>
             </div>
 
-            <div class="shell-approval-footer">
+            <div class="px-6 py-4 border-t border-border flex gap-3 justify-end">
               <button
                 type="button"
-                class="shell-approval-button shell-approval-deny"
+                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-transparent text-foreground border border-border hover:bg-surface-1 hover:border-muted-foreground"
                 onClick={handleDeny}
                 disabled={isProcessing()}
               >
@@ -114,7 +123,7 @@ export const ShellApproval: Component = () => {
               </button>
               <button
                 type="button"
-                class="shell-approval-button shell-approval-approve"
+                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-accent text-white hover:bg-[#4f46e5] hover:shadow-[0_2px_8px_rgba(99,102,241,0.3)]"
                 onClick={handleApprove}
                 disabled={isProcessing()}
               >

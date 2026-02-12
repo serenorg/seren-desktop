@@ -4,7 +4,6 @@
 import { For, Show } from "solid-js";
 import { getCompletions } from "@/lib/commands/parser";
 import type { SlashCommand } from "@/lib/commands/types";
-import "./SlashCommandPopup.css";
 
 interface SlashCommandPopupProps {
   input: string;
@@ -34,24 +33,30 @@ export function SlashCommandPopup(props: SlashCommandPopupProps) {
 
   return (
     <Show when={matches().length > 0}>
-      <div class="slash-popup">
+      <div class="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-[0_4px_16px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.05)] overflow-hidden z-[999] max-h-[300px] overflow-y-auto">
         <For each={matches()}>
           {(cmd, i) => (
             <button
               type="button"
-              class="slash-popup-item"
+              class="flex items-center gap-2.5 w-full px-3 py-2 bg-transparent border-none cursor-pointer text-left text-[13px] text-foreground transition-colors duration-100"
               classList={{
-                "slash-popup-item--active": i() === props.selectedIndex,
+                "bg-accent": i() === props.selectedIndex,
               }}
               onMouseDown={(e) => {
                 e.preventDefault(); // Prevent input blur
                 props.onSelect(cmd);
               }}
             >
-              <span class="slash-popup-name">/{cmd.name}</span>
-              <span class="slash-popup-desc">{cmd.description}</span>
+              <span class="font-semibold text-primary shrink-0 font-mono">
+                /{cmd.name}
+              </span>
+              <span class="text-muted-foreground flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                {cmd.description}
+              </span>
               {cmd.argHint && (
-                <span class="slash-popup-hint">{cmd.argHint}</span>
+                <span class="text-muted-foreground text-[11px] italic opacity-70 shrink-0">
+                  {cmd.argHint}
+                </span>
               )}
             </button>
           )}

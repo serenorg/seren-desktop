@@ -1,7 +1,6 @@
 import hljs from "highlight.js";
 import { marked, type Tokens } from "marked";
 import { escapeHtml } from "@/lib/escape-html";
-import "./render-markdown.css";
 
 // Custom renderer for markdown
 const renderer = new marked.Renderer();

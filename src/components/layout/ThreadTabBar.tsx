@@ -11,7 +11,6 @@ import {
 } from "solid-js";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
-import "./ThreadTabBar.css";
 
 export const ThreadTabBar: Component = () => {
   const [showNewMenu, setShowNewMenu] = createSignal(false);
@@ -59,37 +58,42 @@ export const ThreadTabBar: Component = () => {
   };
 
   return (
-    <div class="thread-tab-bar">
-      <div class="thread-tab-bar__tabs" role="tablist">
+    <div class="flex items-stretch h-9 bg-surface-1 border-b border-border shrink-0">
+      <div
+        class="flex items-stretch flex-1 min-w-0 overflow-x-auto scrollbar-thin"
+        role="tablist"
+      >
         <For each={threadStore.threads}>
           {(thread) => (
             <button
               type="button"
               role="tab"
-              class="thread-tab-bar__tab"
+              class="group flex items-center gap-1.5 px-3 min-w-0 max-w-[180px] bg-none border-none border-b-2 border-b-transparent text-muted-foreground text-[13px] cursor-pointer whitespace-nowrap transition-all duration-100 relative hover:bg-[rgba(148,163,184,0.06)] hover:text-foreground"
               classList={{
-                "thread-tab-bar__tab--active":
+                "!text-foreground !border-b-primary !bg-[rgba(148,163,184,0.04)]":
                   thread.id === threadStore.activeThreadId,
               }}
               aria-selected={thread.id === threadStore.activeThreadId}
               onClick={() => handleSelect(thread)}
               title={thread.title}
             >
-              <span class="thread-tab-bar__tab-icon">{threadIcon(thread)}</span>
-              <span class="thread-tab-bar__tab-title">{thread.title}</span>
+              <span class="text-[13px] shrink-0">{threadIcon(thread)}</span>
+              <span class="overflow-hidden text-ellipsis min-w-0">
+                {thread.title}
+              </span>
               <Show when={thread.status === "running"}>
-                <span class="thread-tab-bar__tab-status thread-tab-bar__tab-status--running" />
+                <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-success shadow-[0_0_4px_var(--color-success)] animate-[tabPulse_2s_ease-in-out_infinite]" />
               </Show>
               <Show when={thread.status === "waiting-input"}>
-                <span class="thread-tab-bar__tab-status thread-tab-bar__tab-status--waiting" />
+                <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-warning shadow-[0_0_4px_var(--color-warning)] animate-[tabPulse_1.5s_ease-in-out_infinite]" />
               </Show>
               <Show when={thread.status === "error"}>
-                <span class="thread-tab-bar__tab-status thread-tab-bar__tab-status--error" />
+                <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-destructive" />
               </Show>
               <span
                 role="button"
                 tabindex={0}
-                class="thread-tab-bar__tab-close"
+                class="hidden group-hover:flex items-center justify-center w-4 h-4 bg-none border-none rounded-sm text-muted-foreground cursor-pointer text-sm leading-none p-0 shrink-0 transition-all duration-100 hover:bg-[rgba(148,163,184,0.15)] hover:text-foreground"
                 onClick={(e) => handleClose(e, thread)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter")
@@ -105,10 +109,10 @@ export const ThreadTabBar: Component = () => {
       </div>
 
       {/* New thread button */}
-      <div class="thread-tab-bar__new" ref={menuRef}>
+      <div class="relative shrink-0" ref={menuRef}>
         <button
           type="button"
-          class="thread-tab-bar__new-btn"
+          class="flex items-center justify-center w-8 h-full bg-none border-none border-l border-l-border text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-[rgba(148,163,184,0.08)] hover:text-primary"
           onClick={() => setShowNewMenu((v) => !v)}
           title="New thread"
         >
@@ -130,18 +134,18 @@ export const ThreadTabBar: Component = () => {
         </button>
 
         <Show when={showNewMenu()}>
-          <div class="thread-tab-bar__new-menu">
+          <div class="absolute top-full right-0 min-w-[160px] bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
             <button
               type="button"
-              class="thread-tab-bar__new-menu-item"
+              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-[rgba(148,163,184,0.08)] disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={handleNewChat}
             >
-              <span class="thread-tab-bar__new-menu-icon">💬</span>
+              <span class="text-[13px] w-[18px] text-center">💬</span>
               Chat
             </button>
             <button
               type="button"
-              class="thread-tab-bar__new-menu-item"
+              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-[rgba(148,163,184,0.08)] disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={() => handleNewAgent("claude-code")}
               disabled={!fileTreeState.rootPath}
               title={
@@ -150,12 +154,12 @@ export const ThreadTabBar: Component = () => {
                   : undefined
               }
             >
-              <span class="thread-tab-bar__new-menu-icon">🤖</span>
+              <span class="text-[13px] w-[18px] text-center">🤖</span>
               Claude Agent
             </button>
             <button
               type="button"
-              class="thread-tab-bar__new-menu-item"
+              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-[rgba(148,163,184,0.08)] disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={() => handleNewAgent("codex")}
               disabled={!fileTreeState.rootPath}
               title={
@@ -164,7 +168,7 @@ export const ThreadTabBar: Component = () => {
                   : undefined
               }
             >
-              <span class="thread-tab-bar__new-menu-icon">⚡</span>
+              <span class="text-[13px] w-[18px] text-center">⚡</span>
               Codex Agent
             </button>
           </div>

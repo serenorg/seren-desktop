@@ -6,7 +6,6 @@ import { runIndexing } from "@/lib/indexing/orchestrator";
 import { fileTreeState } from "@/stores/fileTree";
 import { indexingStore } from "@/stores/indexing.store";
 import { settingsStore } from "@/stores/settings.store";
-import "./IndexingStatus.css";
 
 export function IndexingStatus() {
   // Check if indexing is enabled
@@ -78,12 +77,14 @@ export function IndexingStatus() {
   };
 
   return (
-    <div class="indexing-status">
-      <div class="indexing-status-header">
-        <span class="indexing-status-title">Codebase Index</span>
+    <div class="p-3 border-t border-border bg-surface-1">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-foreground uppercase tracking-[0.5px]">
+          Codebase Index
+        </span>
         <Show when={indexingStore.hasIndex}>
           <button
-            class="indexing-status-refresh"
+            class="bg-transparent border-none text-muted-foreground cursor-pointer text-base px-1.5 py-0.5 rounded transition-all duration-200 hover:bg-surface-2 hover:text-foreground"
             onClick={() => indexingStore.refreshStats()}
             title="Refresh statistics"
           >
@@ -100,13 +101,15 @@ export function IndexingStatus() {
           <Show
             when={indexingStore.hasIndex && indexingStore.stats}
             fallback={
-              <div class="indexing-status-empty">
-                <p>No index available</p>
-                <p class="indexing-status-hint">
+              <div class="py-4 text-center">
+                <p class="m-0 text-[13px] text-muted-foreground">
+                  No index available
+                </p>
+                <p class="m-0 text-[11px] text-muted-foreground mt-2 opacity-70">
                   Index your codebase to enable semantic code search
                 </p>
                 <button
-                  class="indexing-start-button"
+                  class="w-full mt-3 px-3 py-2 bg-primary text-white border-none rounded text-xs font-medium cursor-pointer transition-all duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleStartIndexing}
                   disabled={isIndexing() || !fileTreeState.rootPath}
                 >
@@ -115,28 +118,28 @@ export function IndexingStatus() {
               </div>
             }
           >
-            <div class="indexing-status-stats">
-              <div class="indexing-stat">
-                <span class="indexing-stat-label">Chunks</span>
-                <span class="indexing-stat-value">
+            <div class="flex flex-col gap-2">
+              <div class="flex justify-between items-center px-2 py-1.5 bg-surface-0 rounded">
+                <span class="text-xs text-muted-foreground">Chunks</span>
+                <span class="text-[13px] font-medium text-foreground">
                   {formatNumber(indexingStore.stats?.total_chunks)}
                 </span>
               </div>
-              <div class="indexing-stat">
-                <span class="indexing-stat-label">Files</span>
-                <span class="indexing-stat-value">
+              <div class="flex justify-between items-center px-2 py-1.5 bg-surface-0 rounded">
+                <span class="text-xs text-muted-foreground">Files</span>
+                <span class="text-[13px] font-medium text-foreground">
                   {formatNumber(indexingStore.stats?.total_files)}
                 </span>
               </div>
-              <div class="indexing-stat">
-                <span class="indexing-stat-label">Last Updated</span>
-                <span class="indexing-stat-value">
+              <div class="flex justify-between items-center px-2 py-1.5 bg-surface-0 rounded">
+                <span class="text-xs text-muted-foreground">Last Updated</span>
+                <span class="text-[13px] font-medium text-foreground">
                   {formatDate(indexingStore.stats?.last_indexed)}
                 </span>
               </div>
             </div>
             <button
-              class="indexing-reindex-button"
+              class="w-full mt-3 px-3 py-2 bg-surface-0 text-foreground border border-border rounded text-xs font-medium cursor-pointer transition-all duration-200 hover:bg-surface-2 hover:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleStartIndexing}
               disabled={isIndexing()}
             >
@@ -145,23 +148,25 @@ export function IndexingStatus() {
           </Show>
         }
       >
-        <div class="indexing-status-progress">
-          <div class="indexing-progress-bar">
+        <div class="py-2">
+          <div class="h-1 bg-surface-0 rounded-sm overflow-hidden mb-2">
             <div
-              class="indexing-progress-fill"
+              class="h-full bg-primary transition-[width] duration-300 ease-in-out"
               style={{ width: `${indexingStore.progress * 100}%` }}
             />
           </div>
-          <div class="indexing-progress-info">
-            <span class="indexing-phase">{indexingStore.phase}</span>
+          <div class="flex flex-col gap-1">
+            <span class="text-xs font-medium text-primary capitalize">
+              {indexingStore.phase}
+            </span>
             <Show when={indexingStore.currentFile}>
-              <span class="indexing-current-file">
+              <span class="text-[11px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
                 {indexingStore.currentFile}
               </span>
             </Show>
           </div>
           <Show when={indexingStore.estimatedTokens > 0}>
-            <div class="indexing-cost-estimate">
+            <div class="mt-2 px-2 py-1.5 bg-surface-0 rounded text-[11px] text-muted-foreground">
               <span>
                 Estimated: ~{formatNumber(indexingStore.estimatedTokens)} tokens
               </span>
@@ -171,9 +176,11 @@ export function IndexingStatus() {
       </Show>
 
       <Show when={indexingStore.error}>
-        <div class="indexing-status-error">
-          <span class="indexing-error-icon">⚠</span>
-          <span class="indexing-error-message">{indexingStore.error}</span>
+        <div class="flex items-start gap-2 p-2 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded mt-2">
+          <span class="text-destructive text-sm shrink-0">⚠</span>
+          <span class="text-[11px] text-destructive leading-normal">
+            {indexingStore.error}
+          </span>
         </div>
       </Show>
     </div>

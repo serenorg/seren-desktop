@@ -9,7 +9,6 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import "./GatewayToolApproval.css";
 
 interface ApprovalRequest {
   approvalId: string;
@@ -101,54 +100,64 @@ export const GatewayToolApproval: Component = () => {
   return (
     <Show when={request()}>
       {(req) => (
-        <div class="gateway-approval-overlay">
-          <div class="gateway-approval-dialog">
-            <div class="gateway-approval-header">
-              <h2 class="gateway-approval-title">
+        <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-[10000] backdrop-blur-[4px]">
+          <div class="bg-background border border-border rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] w-[90%] max-w-[550px] max-h-[80vh] overflow-hidden flex flex-col animate-[slideInDown_200ms_ease-out]">
+            <div class="px-6 py-5 border-b border-border">
+              <h2 class="m-0 text-xl font-semibold text-foreground">
                 {req().isDestructive
                   ? "⚠️ Confirm Destructive Operation"
                   : "🔐 Confirm Operation"}
               </h2>
             </div>
 
-            <div class="gateway-approval-body">
-              <div class="gateway-approval-section">
-                <span class="gateway-approval-label">Publisher:</span>
-                <span class="gateway-approval-value gateway-approval-publisher">
+            <div class="p-6 overflow-y-auto flex-1">
+              <div class="flex flex-col gap-1.5 mb-4">
+                <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                  Publisher:
+                </span>
+                <span class="text-base text-foreground font-semibold text-accent">
                   {req().publisherSlug}
                 </span>
               </div>
 
-              <div class="gateway-approval-section">
-                <span class="gateway-approval-label">Operation:</span>
-                <span class="gateway-approval-value">{req().description}</span>
+              <div class="flex flex-col gap-1.5 mb-4">
+                <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                  Operation:
+                </span>
+                <span class="text-base text-foreground">
+                  {req().description}
+                </span>
               </div>
 
-              <div class="gateway-approval-section">
-                <span class="gateway-approval-label">Endpoint:</span>
-                <span class="gateway-approval-value gateway-approval-endpoint">
+              <div class="flex flex-col gap-1.5 mb-4">
+                <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                  Endpoint:
+                </span>
+                <span class="text-base text-foreground font-[var(--font-mono)] text-[0.9rem] bg-surface-1 px-3 py-2 rounded-md border border-border">
                   {req().toolName}
                 </span>
               </div>
 
-              <div class="gateway-approval-section">
-                <span class="gateway-approval-label">Parameters:</span>
-                <span class="gateway-approval-value gateway-approval-args">
+              <div class="flex flex-col gap-1.5 mb-4">
+                <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                  Parameters:
+                </span>
+                <span class="text-base text-foreground font-[var(--font-mono)] text-[0.85rem] text-muted-foreground bg-surface-1 px-3 py-2 rounded-md border border-border">
                   {formatArgs(req().args)}
                 </span>
               </div>
 
               <Show when={req().isDestructive}>
-                <div class="gateway-approval-warning">
+                <div class="mt-4 px-4 py-3 bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] rounded-lg text-destructive text-[0.9rem]">
                   <strong>Warning:</strong> This operation cannot be undone.
                 </div>
               </Show>
             </div>
 
-            <div class="gateway-approval-footer">
+            <div class="px-6 py-4 border-t border-border flex gap-3 justify-end">
               <button
                 type="button"
-                class="gateway-approval-button gateway-approval-deny"
+                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-transparent text-foreground border border-border hover:bg-surface-1 hover:border-muted-foreground"
                 onClick={handleDeny}
                 disabled={isProcessing()}
               >
@@ -156,7 +165,7 @@ export const GatewayToolApproval: Component = () => {
               </button>
               <button
                 type="button"
-                class="gateway-approval-button gateway-approval-approve"
+                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-accent text-white hover:bg-[#4f46e5] hover:shadow-[0_2px_8px_rgba(99,102,241,0.3)]"
                 onClick={handleApprove}
                 disabled={isProcessing()}
               >

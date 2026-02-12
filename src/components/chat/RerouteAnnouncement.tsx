@@ -3,7 +3,6 @@
 
 import type { Component } from "solid-js";
 import type { UnifiedMessage } from "@/types/conversation";
-import "./RerouteAnnouncement.css";
 
 interface RerouteAnnouncementProps {
   message: UnifiedMessage;
@@ -13,9 +12,9 @@ export const RerouteAnnouncement: Component<RerouteAnnouncementProps> = (
   props,
 ) => {
   return (
-    <div class="reroute-announcement">
-      <span class="reroute-announcement__label">Rerouted</span>
-      <span class="reroute-announcement__reason">{props.message.content}</span>
+    <div class="flex items-center gap-2 px-3 py-1.5 border-l-2 border-warning text-warning text-xs leading-normal animate-[fadeInUp_300ms_ease-in]">
+      <span class="font-semibold whitespace-nowrap">Rerouted</span>
+      <span class="text-muted-foreground">{props.message.content}</span>
     </div>
   );
 };

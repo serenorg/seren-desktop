@@ -5,7 +5,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { updaterStore } from "@/stores/updater.store";
-import "./AboutDialog.css";
 
 interface BuildInfo {
   app_version: string;
@@ -96,14 +95,17 @@ export function AboutDialog() {
   return (
     <>
       <Show when={isOpen()}>
-        <div class="about-overlay" onClick={handleBackdropClick}>
-          <div class="about-dialog">
-            <div class="about-header">
-              <h2>Seren</h2>
+        <div
+          class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_150ms_ease-out]"
+          onClick={handleBackdropClick}
+        >
+          <div class="bg-popover border border-border rounded-xl w-[420px] max-w-[90vw] shadow-[0_8px_32px_rgba(0,0,0,0.4)] animate-[slideUp_200ms_ease-out] overflow-hidden">
+            <div class="px-6 pt-6 pb-4 text-center">
+              <h2 class="m-0 text-lg font-semibold text-foreground">Seren</h2>
             </div>
             <Show when={info()}>
               {(data) => (
-                <div class="about-content">
+                <div class="px-6 pb-4">
                   <Row label="Version" value={data().app_version} />
                   <Row label="Release" value={data().release_tag} />
                   <Row label="Commit" value={data().commit} />
@@ -116,8 +118,12 @@ export function AboutDialog() {
                 </div>
               )}
             </Show>
-            <div class="about-footer">
-              <button type="button" class="about-btn-ok" onClick={close}>
+            <div class="flex gap-3 px-6 py-4 border-t border-border justify-end">
+              <button
+                type="button"
+                class="px-5 py-2 rounded-md text-[13px] font-medium cursor-pointer border border-border transition-colors duration-150 bg-card text-foreground hover:bg-accent"
+                onClick={close}
+              >
                 OK
               </button>
               <Show
@@ -128,7 +134,7 @@ export function AboutDialog() {
               >
                 <button
                   type="button"
-                  class="about-btn-check-updates"
+                  class="px-5 py-2 rounded-md text-[13px] font-medium cursor-pointer border border-primary transition-colors duration-150 bg-primary text-white hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
                   onClick={checkForUpdates}
                   disabled={
                     isCheckingManually() ||
@@ -144,13 +150,17 @@ export function AboutDialog() {
               <Show when={updaterStore.state.status === "available"}>
                 <button
                   type="button"
-                  class="about-btn-install-update"
+                  class="px-5 py-2 rounded-md text-[13px] font-medium cursor-pointer border border-[#238636] transition-colors duration-150 bg-[#238636] text-white hover:bg-[#2ea043]"
                   onClick={installUpdate}
                 >
                   Install Update {updaterStore.state.availableVersion}
                 </button>
               </Show>
-              <button type="button" class="about-btn-copy" onClick={copyInfo}>
+              <button
+                type="button"
+                class="px-5 py-2 rounded-md text-[13px] font-medium cursor-pointer border border-primary transition-colors duration-150 bg-primary text-white hover:opacity-90"
+                onClick={copyInfo}
+              >
                 {copied() ? "Copied!" : "Copy"}
               </button>
             </div>
@@ -159,18 +169,23 @@ export function AboutDialog() {
       </Show>
 
       <Show when={showUpToDate()}>
-        <div class="about-overlay" onClick={closeUpToDate}>
-          <div class="about-dialog about-dialog-small">
-            <div class="about-header">
-              <h2>All Up to Date!</h2>
+        <div
+          class="fixed inset-0 bg-black/60 flex items-center justify-center z-[1000] animate-[fadeIn_150ms_ease-out]"
+          onClick={closeUpToDate}
+        >
+          <div class="bg-popover border border-border rounded-xl w-[360px] max-w-[90vw] shadow-[0_8px_32px_rgba(0,0,0,0.4)] animate-[slideUp_200ms_ease-out] overflow-hidden">
+            <div class="px-6 pt-6 pb-4 text-center">
+              <h2 class="m-0 text-lg font-semibold text-foreground">
+                All Up to Date!
+              </h2>
             </div>
-            <div class="about-content-centered">
+            <div class="px-6 pb-4 text-center">
               <p>You're running the latest version of Seren.</p>
             </div>
-            <div class="about-footer">
+            <div class="flex gap-3 px-6 py-4 border-t border-border justify-end">
               <button
                 type="button"
-                class="about-btn-ok"
+                class="px-5 py-2 rounded-md text-[13px] font-medium cursor-pointer border border-border transition-colors duration-150 bg-card text-foreground hover:bg-accent"
                 onClick={closeUpToDate}
               >
                 OK
@@ -185,9 +200,11 @@ export function AboutDialog() {
 
 function Row(props: { label: string; value: string }) {
   return (
-    <div class="about-row">
-      <span class="about-label">{props.label}</span>
-      <span class="about-value">{props.value}</span>
+    <div class="flex justify-between py-1.5 text-[13px] leading-normal">
+      <span class="text-muted-foreground shrink-0 mr-4">{props.label}</span>
+      <span class="text-foreground text-right break-all font-mono text-xs">
+        {props.value}
+      </span>
     </div>
   );
 }

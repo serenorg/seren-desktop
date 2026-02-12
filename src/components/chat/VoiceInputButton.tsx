@@ -4,7 +4,6 @@
 import { createEffect, onCleanup, Show } from "solid-js";
 import { useVoiceInput } from "@/lib/audio/useVoiceInput";
 import { settingsStore } from "@/stores/settings.store";
-import "./VoiceInputButton.css";
 
 interface VoiceInputButtonProps {
   onTranscript: (text: string) => void;
@@ -59,29 +58,39 @@ export function VoiceInputButton(props: VoiceInputButtonProps) {
   };
 
   return (
-    <div class="voice-input-group">
+    <div class="flex items-center gap-0.5 relative">
       <button
         type="button"
-        class="voice-input-btn"
-        data-state={voiceState()}
+        class="flex items-center justify-center w-8 h-8 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-150 relative shrink-0 hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        classList={{
+          "text-destructive bg-[rgba(248,113,113,0.1)]":
+            voiceState() === "recording",
+          "text-muted-foreground cursor-wait": voiceState() === "transcribing",
+          "text-destructive": voiceState() === "error",
+        }}
         onClick={toggle}
         disabled={voiceState() === "transcribing"}
         title={title()}
       >
         <Show when={voiceState() === "transcribing"} fallback={<MicIcon />}>
-          <div class="voice-spinner" />
+          <div class="w-4 h-4 border-2 border-surface-3 border-t-muted-foreground rounded-full animate-spin" />
         </Show>
         <Show when={voiceState() === "recording"}>
-          <div class="voice-recording-dot" />
+          <div class="absolute top-1 right-1 w-2 h-2 rounded-full bg-destructive animate-[voicePulse_1s_ease-in-out_infinite]" />
         </Show>
         <Show when={voiceState() === "error" && error()}>
-          <div class="voice-error-tooltip">{error()}</div>
+          <div class="absolute bottom-[calc(100%+8px)] right-0 bg-surface-2 border border-surface-3 rounded-md px-2.5 py-1.5 text-xs text-destructive whitespace-nowrap pointer-events-none z-[100]">
+            {error()}
+          </div>
         </Show>
       </button>
       <button
         type="button"
-        class="voice-auto-submit-toggle"
-        classList={{ active: autoSubmit() }}
+        class="voice-auto-submit-toggle flex items-center justify-center w-5 h-5 border-none rounded bg-transparent text-status-idle cursor-pointer transition-all duration-150 p-0 shrink-0 hover:bg-surface-2 hover:text-muted-foreground"
+        classList={{
+          "active text-success hover:bg-[rgba(52,211,153,0.1)] hover:text-success":
+            autoSubmit(),
+        }}
         onClick={toggleAutoSubmit}
         data-tooltip={
           autoSubmit()

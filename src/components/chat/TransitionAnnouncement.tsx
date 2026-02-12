@@ -3,7 +3,6 @@
 
 import type { Component } from "solid-js";
 import type { UnifiedMessage } from "@/types/conversation";
-import "./TransitionAnnouncement.css";
 
 interface TransitionAnnouncementProps {
   message: UnifiedMessage;
@@ -12,5 +11,9 @@ interface TransitionAnnouncementProps {
 export const TransitionAnnouncement: Component<TransitionAnnouncementProps> = (
   props,
 ) => {
-  return <div class="transition-announcement">{props.message.content}</div>;
+  return (
+    <div class="flex items-center gap-2 px-3 py-1.5 border-l-2 border-primary text-muted-foreground text-xs leading-normal animate-[fadeInUp_300ms_ease-in]">
+      {props.message.content}
+    </div>
+  );
 };
