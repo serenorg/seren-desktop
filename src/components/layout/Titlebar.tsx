@@ -10,7 +10,6 @@ import { updaterStore } from "@/stores/updater.store";
 
 interface TitlebarProps {
   onSignInClick: () => void;
-  onLogout: () => void;
   onToggleSettings: () => void;
   onToggleSidebar: () => void;
   sidebarCollapsed: boolean;
@@ -205,40 +204,13 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           </svg>
         </button>
 
-        <Show
-          when={authStore.isAuthenticated}
-          fallback={
-            <button
-              type="button"
-              class="flex items-center justify-center h-7 px-3 border border-primary/30 rounded-md bg-primary/10 text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/20 hover:border-primary/50 active:scale-95"
-              onClick={props.onSignInClick}
-            >
-              Sign In
-            </button>
-          }
-        >
+        <Show when={!authStore.isAuthenticated}>
           <button
             type="button"
-            class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
-            onClick={props.onLogout}
-            title="Sign Out"
+            class="flex items-center justify-center h-7 px-3 border border-primary/30 rounded-md bg-primary/10 text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/20 hover:border-primary/50 active:scale-95"
+            onClick={props.onSignInClick}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              role="img"
-              aria-label="Sign out"
-            >
-              <path
-                d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l3-3-3-3M5.5 8H14"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
+            Sign In
           </button>
         </Show>
       </div>

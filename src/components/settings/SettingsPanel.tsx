@@ -3,6 +3,7 @@
 
 import { type Component, createSignal, For, Show } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
+import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { providerStore } from "@/stores/provider.store";
@@ -37,6 +38,7 @@ type SettingsSection =
 
 interface SettingsPanelProps {
   onSignInClick?: () => void;
+  onLogout?: () => void;
 }
 
 export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
@@ -1332,6 +1334,26 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 </span>
               </label>
             </div>
+
+            <Show when={authStore.isAuthenticated}>
+              <div class="flex items-center justify-between py-3 border-b border-border">
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Sign Out
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Sign out of your Seren account
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  class="px-4 py-1.5 border border-red-500/30 rounded-md bg-red-500/10 text-red-400 text-[0.85rem] font-medium cursor-pointer transition-all duration-100 hover:bg-red-500/20 hover:border-red-500/50 active:scale-95"
+                  onClick={props.onLogout}
+                >
+                  Sign Out
+                </button>
+              </div>
+            </Show>
           </section>
         </Show>
 

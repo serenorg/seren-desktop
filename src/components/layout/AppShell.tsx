@@ -109,7 +109,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
     <div class="flex flex-col h-screen bg-background text-foreground">
       <Titlebar
         onSignInClick={handleSignInClick}
-        onLogout={props.onLogout}
         onToggleSettings={handleToggleSettings}
         onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
         sidebarCollapsed={sidebarCollapsed()}
@@ -133,7 +132,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
         >
           <Switch>
             <Match when={slidePanel() === "settings"}>
-              <SettingsPanel onSignInClick={handleSignInClick} />
+              <SettingsPanel
+                onSignInClick={handleSignInClick}
+                onLogout={props.onLogout}
+              />
             </Match>
             <Match when={slidePanel() === "database"}>
               <DatabasePanel />
