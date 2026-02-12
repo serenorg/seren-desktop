@@ -19,7 +19,8 @@ const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const PUBLISHER_SLUG: &str = "seren-models";
 
 /// Maximum number of tool execution rounds before forcing completion.
-const MAX_TOOL_ROUNDS: usize = 10;
+/// At ~$0.15/round (Opus), this allows up to ~$5.25 of tool execution.
+const MAX_TOOL_ROUNDS: usize = 35;
 
 /// Connect timeout for the HTTP client (seconds).
 const CONNECT_TIMEOUT_SECS: u64 = 30;
