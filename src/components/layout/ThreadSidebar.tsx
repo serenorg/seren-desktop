@@ -36,12 +36,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     return root.split("/").pop() || root;
   };
 
-  // Combined and filtered skills list for the active thread's project
+  // Combined and filtered skills list for the active thread
   const filteredSkills = createMemo(() => {
     const query = skillSearchQuery().toLowerCase().trim();
-    const projectRoot = threadStore.activeThread?.projectRoot ?? null;
-    const projectSkills = skillsStore.getProjectSkills(projectRoot);
-    const projectSkillPaths = new Set(projectSkills.map(s => s.path));
+    const threadId = threadStore.activeThread?.id ?? null;
+    const threadSkills = skillsStore.getThreadSkills(threadId);
+    const threadSkillPaths = new Set(threadSkills.map(s => s.path));
 
     const searchInSkill = (s: any) => {
       if (!query) return true;
@@ -53,17 +53,17 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       );
     };
 
-    // Project skills (enabled for this thread) - shown as installed
-    const enabledForProject = projectSkills
+    // Thread skills (enabled for this thread) - shown as installed
+    const enabledForThread = threadSkills
       .filter(searchInSkill)
-      .map(s => ({ ...s, isInstalled: true, isProjectSkill: true }));
+      .map(s => ({ ...s, isInstalled: true, isThreadSkill: true }));
 
-    // Other installed skills (not enabled for this project) - shown as available
+    // Other installed skills (not enabled for this thread) - shown as available
     const otherInstalled = skillsStore.installed
-      .filter(s => !projectSkillPaths.has(s.path) && searchInSkill(s))
-      .map(s => ({ ...s, isInstalled: false, isProjectSkill: false }));
+      .filter(s => !threadSkillPaths.has(s.path) && searchInSkill(s))
+      .map(s => ({ ...s, isInstalled: false, isThreadSkill: false }));
 
-    return [...enabledForProject, ...otherInstalled];
+    return [...enabledForThread, ...otherInstalled];
   });
 
   const handleClickOutside = (e: MouseEvent) => {
@@ -104,9 +104,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   };
 
   const handleSkillClick = async (skill: any) => {
-    const projectRoot = threadStore.activeThread?.projectRoot;
-    if (!projectRoot) {
-      console.warn("[ThreadSidebar] No active project to toggle skill");
+    const threadId = threadStore.activeThread?.id;
+    if (!threadId) {
+      console.warn("[ThreadSidebar] No active thread to toggle skill");
       return;
     }
 
@@ -116,12 +116,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     if (!installedSkill) {
       // Skill not installed globally - need to install it first
       // For now, just log a warning. In the future, we could auto-install or show a modal
-      console.warn("[ThreadSidebar] Skill not installed globally, cannot add to project:", skill.slug);
+      console.warn("[ThreadSidebar] Skill not installed globally, cannot add to thread:", skill.slug);
       return;
     }
 
-    // Toggle the skill for this project
-    skillsStore.toggleProjectSkill(projectRoot, installedSkill.path);
+    // Toggle the skill for this thread
+    skillsStore.toggleThreadSkill(threadId, installedSkill.path);
   };
 
   const handleCreateSkill = async () => {
