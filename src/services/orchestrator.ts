@@ -133,8 +133,9 @@ export async function orchestrate(
   const messages = conversationStore.getMessagesFor(conversationId);
   const history = serializeHistory(messages);
 
-  // 2. Build capabilities
-  const capabilities = buildCapabilities();
+  // 2. Build capabilities (thread-aware skills: thread -> project -> global)
+  await skillsStore.ensureContextLoaded(fileTreeState.rootPath, conversationId);
+  const capabilities = buildCapabilities(conversationId);
 
   // 3. Prepare streaming state (message added on completion)
   activeMessageId = crypto.randomUUID();
@@ -595,8 +596,11 @@ function serializeHistory(
  * Build the capabilities object from current frontend state.
  * Passes lightweight skill metadata — the Rust side reads actual content from disk.
  */
-function buildCapabilities(): UserCapabilities {
-  const enabledSkills = skillsStore.getProjectSkills(fileTreeState.rootPath);
+function buildCapabilities(threadId: string | null): UserCapabilities {
+  const enabledSkills = skillsStore.getThreadSkills(
+    fileTreeState.rootPath,
+    threadId,
+  );
   const activeModels =
     providerStore.getModels(providerStore.activeProvider) ?? [];
   const tools = getAllTools();

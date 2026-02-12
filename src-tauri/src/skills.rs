@@ -1,20 +1,64 @@
 // ABOUTME: Tauri commands for skills directory management.
 // ABOUTME: Provides commands to get seren, claude, and project skills directories.
 
+use rusqlite::{OptionalExtension, params};
 use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
-use tauri::Manager;
 
-/// Get the Seren-scope skills directory ({app_data_dir}/skills/).
+use crate::services::database::init_db;
+
+fn normalize_project_root(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let project_path = PathBuf::from(trimmed);
+    let abs = if project_path.is_absolute() {
+        project_path
+    } else {
+        std::env::current_dir().ok()?.join(project_path)
+    };
+
+    let normalized = abs.canonicalize().unwrap_or(abs);
+    Some(normalized.to_string_lossy().to_string())
+}
+
+fn project_seren_dir(project_root: &str) -> Result<PathBuf, String> {
+    let normalized =
+        normalize_project_root(project_root).ok_or("Invalid project root".to_string())?;
+    let root_path = PathBuf::from(normalized);
+    if !root_path.is_dir() {
+        return Err("Project root is not a directory".to_string());
+    }
+    Ok(root_path.join(".seren"))
+}
+
+fn project_config_path(project_root: &str) -> Result<PathBuf, String> {
+    Ok(project_seren_dir(project_root)?.join("config.json"))
+}
+
+fn seren_config_dir() -> Result<PathBuf, String> {
+    if let Some(xdg_config_home) = std::env::var_os("XDG_CONFIG_HOME") {
+        let path = PathBuf::from(xdg_config_home);
+        if !path.as_os_str().is_empty() && path.is_absolute() {
+            return Ok(path.join("seren"));
+        }
+    }
+
+    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+    Ok(home.join(".config").join("seren"))
+}
+
+/// Get the Seren-scope skills directory using XDG config home:
+/// - `$XDG_CONFIG_HOME/seren/skills` when `XDG_CONFIG_HOME` is set to an absolute path
+/// - `~/.config/seren/skills` otherwise
 /// Creates the directory if it doesn't exist.
 #[tauri::command]
-pub fn get_seren_skills_dir(app: AppHandle) -> Result<String, String> {
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Could not determine app data directory: {}", e))?;
-    let skills_dir = app_data.join("skills");
+pub fn get_seren_skills_dir() -> Result<String, String> {
+    let config_dir = seren_config_dir()?;
+    let skills_dir = config_dir.join("skills");
 
     if !skills_dir.exists() {
         fs::create_dir_all(&skills_dir)
@@ -127,6 +171,201 @@ pub fn create_skills_symlink(project_root: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to create symlink: {}", e))?;
     }
 
+    Ok(())
+}
+
+/// Read `{project}/.seren/config.json` if present.
+#[tauri::command]
+pub fn read_project_config(project_root: String) -> Result<Option<String>, String> {
+    let config_path = project_config_path(&project_root)?;
+    if !config_path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read project config: {}", e))?;
+    Ok(Some(content))
+}
+
+/// Write `{project}/.seren/config.json`.
+#[tauri::command]
+pub fn write_project_config(project_root: String, config: String) -> Result<(), String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(&config).map_err(|e| format!("Invalid config JSON: {}", e))?;
+
+    let seren_dir = project_seren_dir(&project_root)?;
+    if !seren_dir.exists() {
+        fs::create_dir_all(&seren_dir)
+            .map_err(|e| format!("Failed to create .seren directory: {}", e))?;
+    }
+
+    let config_path = seren_dir.join("config.json");
+    let mut serialized = serde_json::to_string_pretty(&parsed)
+        .map_err(|e| format!("Failed to serialize config JSON: {}", e))?;
+    if !serialized.ends_with('\n') {
+        serialized.push('\n');
+    }
+
+    fs::write(&config_path, serialized)
+        .map_err(|e| format!("Failed to write project config: {}", e))?;
+    Ok(())
+}
+
+/// Clear `{project}/.seren/config.json` (fall back to global defaults).
+#[tauri::command]
+pub fn clear_project_config(project_root: String) -> Result<(), String> {
+    let config_path = project_config_path(&project_root)?;
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    fs::remove_file(&config_path).map_err(|e| format!("Failed to clear project config: {}", e))?;
+    Ok(())
+}
+
+/// Get per-thread skill override refs for a project/thread pair.
+/// Returns `None` when no thread override exists.
+#[tauri::command]
+pub fn get_thread_skills(
+    app: AppHandle,
+    project_root: String,
+    thread_id: String,
+) -> Result<Option<Vec<String>>, String> {
+    let normalized_root =
+        normalize_project_root(&project_root).ok_or("Invalid project root".to_string())?;
+    let thread_id = thread_id.trim().to_string();
+    if thread_id.is_empty() {
+        return Err("Thread ID cannot be empty".to_string());
+    }
+
+    let conn = init_db(&app).map_err(|e| format!("Failed to open database: {}", e))?;
+
+    let has_override: Option<i64> = conn
+        .query_row(
+            "SELECT 1
+             FROM thread_skill_override_state
+             WHERE thread_id = ?1 AND project_root = ?2
+             LIMIT 1",
+            params![thread_id, normalized_root],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read thread override state: {}", e))?;
+
+    if has_override.is_none() {
+        return Ok(None);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT skill_ref
+             FROM thread_skills
+             WHERE thread_id = ?1 AND project_root = ?2
+             ORDER BY skill_ref ASC",
+        )
+        .map_err(|e| format!("Failed to prepare thread skills query: {}", e))?;
+
+    let rows = stmt
+        .query_map(params![thread_id, normalized_root], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| format!("Failed to query thread skills: {}", e))?;
+
+    let mut refs = Vec::new();
+    for row in rows {
+        refs.push(row.map_err(|e| format!("Failed to read thread skill ref: {}", e))?);
+    }
+
+    Ok(Some(refs))
+}
+
+/// Replace per-thread skill override refs for a project/thread pair.
+#[tauri::command]
+pub fn set_thread_skills(
+    app: AppHandle,
+    project_root: String,
+    thread_id: String,
+    skill_refs: Vec<String>,
+) -> Result<(), String> {
+    let normalized_root =
+        normalize_project_root(&project_root).ok_or("Invalid project root".to_string())?;
+    let thread_id = thread_id.trim().to_string();
+    if thread_id.is_empty() {
+        return Err("Thread ID cannot be empty".to_string());
+    }
+
+    let normalized_refs: Vec<String> = {
+        let mut unique = std::collections::BTreeSet::new();
+        for skill_ref in skill_refs {
+            let trimmed = skill_ref.trim();
+            if !trimmed.is_empty() {
+                unique.insert(trimmed.to_string());
+            }
+        }
+        unique.into_iter().collect()
+    };
+
+    let mut conn = init_db(&app).map_err(|e| format!("Failed to open database: {}", e))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Failed to start transaction: {}", e))?;
+
+    tx.execute(
+        "INSERT INTO thread_skill_override_state (thread_id, project_root)
+         VALUES (?1, ?2)
+         ON CONFLICT(thread_id, project_root) DO NOTHING",
+        params![thread_id, normalized_root],
+    )
+    .map_err(|e| format!("Failed to persist thread override state: {}", e))?;
+
+    tx.execute(
+        "DELETE FROM thread_skills
+         WHERE thread_id = ?1 AND project_root = ?2",
+        params![thread_id, normalized_root],
+    )
+    .map_err(|e| format!("Failed to clear existing thread skills: {}", e))?;
+
+    for skill_ref in normalized_refs {
+        tx.execute(
+            "INSERT INTO thread_skills (thread_id, project_root, skill_ref)
+             VALUES (?1, ?2, ?3)",
+            params![thread_id, normalized_root, skill_ref],
+        )
+        .map_err(|e| format!("Failed to insert thread skill ref: {}", e))?;
+    }
+
+    tx.commit()
+        .map_err(|e| format!("Failed to commit thread skills update: {}", e))?;
+    Ok(())
+}
+
+/// Clear per-thread skill overrides for a project/thread pair.
+#[tauri::command]
+pub fn clear_thread_skills(
+    app: AppHandle,
+    project_root: String,
+    thread_id: String,
+) -> Result<(), String> {
+    let normalized_root =
+        normalize_project_root(&project_root).ok_or("Invalid project root".to_string())?;
+    let thread_id = thread_id.trim().to_string();
+    if thread_id.is_empty() {
+        return Err("Thread ID cannot be empty".to_string());
+    }
+
+    let conn = init_db(&app).map_err(|e| format!("Failed to open database: {}", e))?;
+    conn.execute(
+        "DELETE FROM thread_skills
+         WHERE thread_id = ?1 AND project_root = ?2",
+        params![thread_id, normalized_root],
+    )
+    .map_err(|e| format!("Failed to clear thread skills: {}", e))?;
+    conn.execute(
+        "DELETE FROM thread_skill_override_state
+         WHERE thread_id = ?1 AND project_root = ?2",
+        params![thread_id, normalized_root],
+    )
+    .map_err(|e| format!("Failed to clear thread override state: {}", e))?;
     Ok(())
 }
 

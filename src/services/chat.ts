@@ -22,6 +22,7 @@ import { executeTools, getAllTools } from "@/lib/tools";
 import { getGatewayTools } from "@/services/mcp-gateway";
 import { storeAssistantResponse } from "@/services/memory";
 import { authStore } from "@/stores/auth.store";
+import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { projectStore } from "@/stores/project.store";
 import { providerStore } from "@/stores/provider.store";
@@ -382,8 +383,9 @@ export async function* streamMessageWithTools(
 
   // Inject enabled skills content
   try {
-    const skillsContent = await skillsStore.getProjectSkillsContent(
+    const skillsContent = await skillsStore.getThreadSkillsContent(
       fileTreeState.rootPath,
+      conversationStore.activeConversationId,
     );
     if (skillsContent) {
       systemContent += skillsContent;

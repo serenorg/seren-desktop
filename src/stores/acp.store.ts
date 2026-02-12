@@ -4,6 +4,7 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
 import { settingsStore } from "@/stores/settings.store";
+import { skillsStore } from "@/stores/skills.store";
 
 /** Per-session ready promises — resolved when backend emits "ready" status */
 const sessionReadyPromises = new Map<
@@ -1122,7 +1123,27 @@ export const acpStore = {
 
     console.log("[AcpStore] Calling acpService.sendPrompt...");
     try {
-      await acpService.sendPrompt(sessionId, prompt, context);
+      let mergedContext = context ? [...context] : [];
+      try {
+        const skillsContent = await skillsStore.getThreadSkillsContent(
+          session.cwd,
+          session.conversationId,
+        );
+        if (skillsContent) {
+          mergedContext = [
+            { type: "text", text: skillsContent },
+            ...mergedContext,
+          ];
+        }
+      } catch (error) {
+        console.warn("[AcpStore] Failed to load skills for ACP prompt:", error);
+      }
+
+      await acpService.sendPrompt(
+        sessionId,
+        prompt,
+        mergedContext.length > 0 ? mergedContext : undefined,
+      );
       console.log("[AcpStore] sendPrompt completed successfully");
     } catch (error) {
       console.error("[AcpStore] sendPrompt error:", error);

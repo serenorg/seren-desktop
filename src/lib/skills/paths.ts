@@ -11,7 +11,8 @@ let cachedSerenSkillsDir: string | null = null;
 let cachedClaudeSkillsDir: string | null = null;
 
 /**
- * Get the Seren-scope skills directory ({app_data_dir}/skills/).
+ * Get the Seren-scope skills directory.
+ * Uses $XDG_CONFIG_HOME/seren/skills, fallback ~/.config/seren/skills.
  * Creates the directory if it doesn't exist.
  */
 export async function getSerenSkillsDir(): Promise<string> {
@@ -20,7 +21,7 @@ export async function getSerenSkillsDir(): Promise<string> {
   }
 
   if (!isTauriRuntime()) {
-    return "{app_data}/skills";
+    return "~/.config/seren/skills";
   }
 
   const dir = await invoke<string>("get_seren_skills_dir");

@@ -26,6 +26,7 @@ import {
 } from "@/stores/auth.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { openclawStore } from "@/stores/openclaw.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
@@ -79,6 +80,23 @@ function App() {
     shortcuts.destroy();
     stopOpenClawAgent();
     openclawStore.destroy();
+  });
+
+  // Reload installed skill inventory when project root changes.
+  createEffect((prevRoot: string | null | undefined) => {
+    const root = fileTreeState.rootPath;
+    if (root === prevRoot) return root;
+    void skillsStore.refreshInstalled();
+    void skillsStore.loadProjectConfig(root);
+    return root;
+  }, fileTreeState.rootPath);
+
+  // Keep thread-level skill override cache in sync with selected thread.
+  createEffect(() => {
+    void skillsStore.ensureContextLoaded(
+      fileTreeState.rootPath,
+      threadStore.activeThreadId,
+    );
   });
 
   // Store cleanup function for auto top-up

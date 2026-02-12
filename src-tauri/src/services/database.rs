@@ -61,6 +61,34 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Thread skill overrides:
+    // - thread_skill_override_state tracks whether a thread has an explicit override
+    // - thread_skills stores the selected skill refs for that thread/project context
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS thread_skill_override_state (
+            thread_id TEXT NOT NULL,
+            project_root TEXT NOT NULL,
+            PRIMARY KEY (thread_id, project_root)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS thread_skills (
+            thread_id TEXT NOT NULL,
+            project_root TEXT NOT NULL,
+            skill_ref TEXT NOT NULL,
+            PRIMARY KEY (thread_id, project_root, skill_ref)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thread_skills_lookup
+         ON thread_skills(thread_id, project_root)",
+        [],
+    )?;
+
     // Migration: add agent conversation columns if they don't exist (for existing DBs)
     let has_kind: bool = conn
         .prepare("SELECT kind FROM conversations LIMIT 1")

@@ -1,5 +1,5 @@
 // ABOUTME: Skills store for managing skills state in the UI.
-// ABOUTME: Handles available skills, installed skills, per-project overrides, and selection state.
+// ABOUTME: Handles available skills, installed skills, and thread/project/global resolution.
 
 import { createStore } from "solid-js/store";
 import { log } from "@/lib/logger";
@@ -9,7 +9,7 @@ import type {
   SkillScope,
   SkillsState,
 } from "@/lib/skills";
-import { skills } from "@/services/skills";
+import { type ProjectSkillsConfig, skills } from "@/services/skills";
 import { getFileTreeState } from "@/stores/fileTree";
 
 const ENABLED_SKILLS_KEY = "seren:enabled_skills";
@@ -40,6 +40,60 @@ function saveEnabledState(state: Record<string, boolean>): void {
   }
 }
 
+function makeProjectConfig(enabled: string[]): ProjectSkillsConfig {
+  return {
+    version: 1,
+    skills: {
+      enabled,
+    },
+  };
+}
+
+function skillRef(skill: Pick<InstalledSkill, "scope" | "slug">): string {
+  return `${skill.scope}:${skill.slug}`;
+}
+
+function normalizeRefs(refs: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const value of refs) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    next.push(trimmed);
+  }
+  return next;
+}
+
+function sameSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every((item) => setB.has(item));
+}
+
+function threadKey(projectRoot: string, threadId: string): string {
+  return JSON.stringify([projectRoot, threadId]);
+}
+
+function parseThreadKey(
+  key: string,
+): { projectRoot: string; threadId: string } | null {
+  try {
+    const parsed = JSON.parse(key);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      typeof parsed[0] === "string" &&
+      typeof parsed[1] === "string"
+    ) {
+      return { projectRoot: parsed[0], threadId: parsed[1] };
+    }
+  } catch {
+    // Ignore invalid keys
+  }
+  return null;
+}
+
 const [state, setState] = createStore<SkillsState>({
   available: [],
   installed: [],
@@ -54,11 +108,23 @@ const [state, setState] = createStore<SkillsState>({
 const enabledState: Record<string, boolean> = loadEnabledState();
 
 /**
- * Per-project skill overrides. Key: project root path, Value: array of skill paths.
- * Missing key = use global defaults. Empty array = no skills for that project.
+ * Project defaults cache.
+ * - `undefined`: not loaded yet
+ * - `null`: no project config (falls back to global defaults)
+ * - `string[]`: explicit project defaults
  */
-const [projectSkillsState, setProjectSkillsState] = createStore<
-  Record<string, string[]>
+const [projectConfigState, setProjectConfigState] = createStore<
+  Record<string, string[] | null | undefined>
+>({});
+
+/**
+ * Thread override cache keyed by JSON stringified tuple [projectRoot, threadId].
+ * - `undefined`: not loaded yet
+ * - `null`: no thread override (falls back to project defaults)
+ * - `string[]`: explicit thread override, including [] (no skills)
+ */
+const [threadSkillsState, setThreadSkillsState] = createStore<
+  Record<string, string[] | null | undefined>
 >({});
 
 /**
@@ -142,84 +208,269 @@ export const skillsStore = {
   },
 
   /**
-   * Get enabled skills.
+   * Get globally enabled skills (tier 3 defaults).
    */
   get enabledSkills(): InstalledSkill[] {
     return state.installed.filter((s) => s.enabled !== false);
   },
 
   // --------------------------------------------------------------------------
-  // Per-project skill overrides
+  // Config loading
   // --------------------------------------------------------------------------
 
   /**
-   * Get the effective skills for a project.
-   * If the project has a custom override, returns those skills.
-   * Otherwise falls back to the global enabled skills.
+   * Load project config from `{project}/.seren/config.json` into cache.
+   */
+  async loadProjectConfig(
+    projectRoot: string | null,
+    force = false,
+  ): Promise<void> {
+    if (!projectRoot) return;
+    if (!force && projectConfigState[projectRoot] !== undefined) return;
+
+    try {
+      const config = await skills.readProjectConfig(projectRoot);
+      const refs = config ? normalizeRefs(config.skills.enabled) : null;
+      setProjectConfigState(projectRoot, refs);
+    } catch (error) {
+      console.warn("[SkillsStore] Failed to load project config:", error);
+      setProjectConfigState(projectRoot, null);
+    }
+  },
+
+  /**
+   * Load thread override from SQLite into cache.
+   */
+  async loadThreadSkills(
+    projectRoot: string | null,
+    threadId: string | null,
+    force = false,
+  ): Promise<void> {
+    if (!projectRoot || !threadId) return;
+    const key = threadKey(projectRoot, threadId);
+    if (!force && threadSkillsState[key] !== undefined) return;
+
+    try {
+      const refs = await skills.getThreadSkills(projectRoot, threadId);
+      setThreadSkillsState(key, refs ? normalizeRefs(refs) : null);
+    } catch (error) {
+      console.warn("[SkillsStore] Failed to load thread skills:", error);
+      setThreadSkillsState(key, null);
+    }
+  },
+
+  /**
+   * Ensure cache for current context is loaded.
+   */
+  async ensureContextLoaded(
+    projectRoot: string | null,
+    threadId: string | null,
+  ): Promise<void> {
+    await this.loadProjectConfig(projectRoot);
+    await this.loadThreadSkills(projectRoot, threadId);
+  },
+
+  // --------------------------------------------------------------------------
+  // Resolution helpers
+  // --------------------------------------------------------------------------
+
+  /**
+   * Resolve refs to installed skills.
+   * Supports backwards compatibility with full skill paths.
+   */
+  resolveRefs(refs: string[]): InstalledSkill[] {
+    const set = new Set(refs);
+    return state.installed.filter((installed) => {
+      const ref = skillRef(installed);
+      return set.has(ref) || set.has(installed.path);
+    });
+  },
+
+  /**
+   * Get global default skill refs.
+   */
+  getGlobalRefs(): string[] {
+    return this.enabledSkills.map((s) => skillRef(s));
+  },
+
+  /**
+   * Persist project refs:
+   * - if equal to global defaults, clear project config (fallback)
+   * - otherwise write explicit project config
+   */
+  async persistProjectRefs(projectRoot: string, refs: string[]): Promise<void> {
+    const normalized = normalizeRefs(refs);
+    const globalRefs = this.getGlobalRefs();
+
+    if (sameSet(normalized, globalRefs)) {
+      await skills.clearProjectConfig(projectRoot);
+      setProjectConfigState(projectRoot, null);
+      return;
+    }
+
+    await skills.writeProjectConfig(projectRoot, makeProjectConfig(normalized));
+    setProjectConfigState(projectRoot, normalized);
+  },
+
+  // --------------------------------------------------------------------------
+  // Project-level defaults
+  // --------------------------------------------------------------------------
+
+  /**
+   * Get the effective project defaults (tier 2 → tier 3).
    */
   getProjectSkills(projectRoot: string | null): InstalledSkill[] {
     if (!projectRoot) {
       return this.enabledSkills;
     }
-    const override = projectSkillsState[projectRoot];
-    if (!override) {
+
+    const refs = projectConfigState[projectRoot];
+    if (!Array.isArray(refs)) {
       return this.enabledSkills;
     }
-    const paths = new Set(override);
-    return state.installed.filter((s) => paths.has(s.path));
+
+    return this.resolveRefs(refs);
   },
 
   /**
-   * Check if a project's skills diverge from the global defaults.
+   * Check if project defaults diverge from global defaults.
    */
   hasProjectOverride(projectRoot: string | null): boolean {
     if (!projectRoot) return false;
-    const override = projectSkillsState[projectRoot];
-    if (!override) return false;
-    const globalPaths = this.enabledSkills.map((s) => s.path);
-    if (override.length !== globalPaths.length) return true;
-    const globalSet = new Set(globalPaths);
-    return override.some((p) => !globalSet.has(p));
+    const refs = projectConfigState[projectRoot];
+    if (!Array.isArray(refs)) return false;
+    return !sameSet(refs, this.getGlobalRefs());
   },
 
   /**
-   * Toggle a single skill for a specific project.
-   * On first toggle, copies the current global enabled set as the starting point.
+   * Toggle a single skill in project defaults.
    */
-  toggleProjectSkill(projectRoot: string, skillPath: string): void {
-    if (!projectSkillsState[projectRoot]) {
-      const globalPaths = this.enabledSkills.map((s) => s.path);
-      setProjectSkillsState(projectRoot, globalPaths);
-    }
+  async toggleProjectSkill(
+    projectRoot: string,
+    skillPath: string,
+  ): Promise<void> {
+    await this.loadProjectConfig(projectRoot);
 
-    const current = projectSkillsState[projectRoot];
-    if (current.includes(skillPath)) {
-      setProjectSkillsState(
-        projectRoot,
-        current.filter((p) => p !== skillPath),
-      );
-    } else {
-      setProjectSkillsState(projectRoot, [...current, skillPath]);
-    }
+    const installed = state.installed.find((s) => s.path === skillPath);
+    if (!installed) return;
+    const target = skillRef(installed);
+
+    const currentRefs = projectConfigState[projectRoot];
+    const base = Array.isArray(currentRefs)
+      ? [...currentRefs]
+      : this.getGlobalRefs();
+
+    const next = base.includes(target)
+      ? base.filter((r) => r !== target)
+      : [...base, target];
+
+    await this.persistProjectRefs(projectRoot, next);
   },
 
   /**
-   * Clear project override, reverting to global defaults.
+   * Reset project defaults to global defaults.
    */
-  resetProjectSkills(projectRoot: string): void {
-    setProjectSkillsState((prev) => {
-      const next = { ...prev };
-      delete next[projectRoot];
-      return next;
-    });
+  async resetProjectSkills(projectRoot: string): Promise<void> {
+    await skills.clearProjectConfig(projectRoot);
+    setProjectConfigState(projectRoot, null);
   },
 
   /**
-   * Get formatted skill content for a project's active skills.
+   * Get formatted project-level skills content for prompt injection.
    */
   async getProjectSkillsContent(projectRoot: string | null): Promise<string> {
-    const projectSkills = this.getProjectSkills(projectRoot);
-    return skills.getEnabledSkillsContent(projectSkills);
+    await this.loadProjectConfig(projectRoot);
+    return skills.getEnabledSkillsContent(this.getProjectSkills(projectRoot));
+  },
+
+  // --------------------------------------------------------------------------
+  // Thread-level overrides
+  // --------------------------------------------------------------------------
+
+  /**
+   * Get effective thread skills (tier 1 → tier 2 → tier 3).
+   */
+  getThreadSkills(
+    projectRoot: string | null,
+    threadId: string | null,
+  ): InstalledSkill[] {
+    if (!projectRoot || !threadId) {
+      return this.getProjectSkills(projectRoot);
+    }
+
+    const key = threadKey(projectRoot, threadId);
+    const refs = threadSkillsState[key];
+    if (!Array.isArray(refs)) {
+      return this.getProjectSkills(projectRoot);
+    }
+
+    return this.resolveRefs(refs);
+  },
+
+  /**
+   * Whether this thread has an explicit override.
+   */
+  hasThreadOverride(
+    projectRoot: string | null,
+    threadId: string | null,
+  ): boolean {
+    if (!projectRoot || !threadId) return false;
+    const refs = threadSkillsState[threadKey(projectRoot, threadId)];
+    return Array.isArray(refs);
+  },
+
+  /**
+   * Toggle a single skill for a specific thread.
+   */
+  async toggleThreadSkill(
+    projectRoot: string,
+    threadId: string,
+    skillPath: string,
+  ): Promise<void> {
+    await this.loadProjectConfig(projectRoot);
+    await this.loadThreadSkills(projectRoot, threadId);
+
+    const installed = state.installed.find((s) => s.path === skillPath);
+    if (!installed) return;
+    const target = skillRef(installed);
+
+    const key = threadKey(projectRoot, threadId);
+    const current = threadSkillsState[key];
+    const base = Array.isArray(current)
+      ? [...current]
+      : this.getProjectSkills(projectRoot).map((s) => skillRef(s));
+
+    const next = base.includes(target)
+      ? base.filter((r) => r !== target)
+      : [...base, target];
+
+    const normalized = normalizeRefs(next);
+    await skills.setThreadSkills(projectRoot, threadId, normalized);
+    setThreadSkillsState(key, normalized);
+  },
+
+  /**
+   * Clear thread override (revert to project defaults).
+   */
+  async resetThreadSkills(
+    projectRoot: string,
+    threadId: string,
+  ): Promise<void> {
+    await skills.clearThreadSkills(projectRoot, threadId);
+    setThreadSkillsState(threadKey(projectRoot, threadId), null);
+  },
+
+  /**
+   * Get formatted thread-effective skills content for prompt injection.
+   */
+  async getThreadSkillsContent(
+    projectRoot: string | null,
+    threadId: string | null,
+  ): Promise<string> {
+    await this.ensureContextLoaded(projectRoot, threadId);
+    return skills.getEnabledSkillsContent(
+      this.getThreadSkills(projectRoot, threadId),
+    );
   },
 
   // --------------------------------------------------------------------------
@@ -308,7 +559,7 @@ export const skillsStore = {
   },
 
   /**
-   * Toggle a skill's enabled state.
+   * Toggle a skill's global enabled state.
    */
   toggleEnabled(skillId: string): void {
     const skill = state.installed.find((s) => s.id === skillId);
@@ -433,6 +684,27 @@ export const skillsStore = {
     delete enabledState[skill.path];
     saveEnabledState(enabledState);
 
+    const removedRef = skillRef(skill);
+
+    // Clean loaded project configs that reference this skill
+    for (const [projectRoot, refs] of Object.entries(projectConfigState)) {
+      if (!Array.isArray(refs)) continue;
+      if (!refs.includes(removedRef) && !refs.includes(skill.path)) continue;
+      const next = refs.filter((r) => r !== removedRef && r !== skill.path);
+      await this.persistProjectRefs(projectRoot, next);
+    }
+
+    // Clean loaded thread overrides that reference this skill
+    for (const [key, refs] of Object.entries(threadSkillsState)) {
+      if (!Array.isArray(refs)) continue;
+      if (!refs.includes(removedRef) && !refs.includes(skill.path)) continue;
+      const parsed = parseThreadKey(key);
+      if (!parsed) continue;
+      const next = refs.filter((r) => r !== removedRef && r !== skill.path);
+      await skills.setThreadSkills(parsed.projectRoot, parsed.threadId, next);
+      setThreadSkillsState(key, next);
+    }
+
     // Clear selection if this skill was selected and no other installation remains
     if (
       state.selectedId === skill.id &&
@@ -445,7 +717,7 @@ export const skillsStore = {
   },
 
   /**
-   * Get content for enabled skills to inject into agent system prompt.
+   * Get content for globally enabled skills to inject into system prompt.
    */
   async getEnabledContent(): Promise<string> {
     return skills.getEnabledSkillsContent(this.enabledSkills);

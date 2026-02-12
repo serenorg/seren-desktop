@@ -24,6 +24,13 @@ const INDEX_CACHE_KEY = "seren:skills_index";
 const PUBLISHER_SKILLS_CACHE_KEY = "seren:publisher_skills";
 const INDEX_CACHE_DURATION = 1000 * 60 * 60; // 1 hour
 
+export interface ProjectSkillsConfig {
+  version: number;
+  skills: {
+    enabled: string[];
+  };
+}
+
 /**
  * Transform an index entry to a Skill.
  */
@@ -191,11 +198,12 @@ export const skills = {
   },
 
   /**
-   * Get the Seren-scope skills directory ({app_data_dir}/skills/).
+   * Get the Seren-scope skills directory.
+   * Uses $XDG_CONFIG_HOME/seren/skills, fallback ~/.config/seren/skills.
    */
   async getSerenSkillsDir(): Promise<string> {
     if (!isTauriRuntime()) {
-      return "{app_data}/skills";
+      return "~/.config/seren/skills";
     }
     return invoke<string>("get_seren_skills_dir");
   },
@@ -220,6 +228,108 @@ export const skills = {
       return null;
     }
     return invoke<string | null>("get_project_skills_dir", { projectRoot });
+  },
+
+  /**
+   * Read `{project}/.seren/config.json`.
+   */
+  async readProjectConfig(
+    projectRoot: string,
+  ): Promise<ProjectSkillsConfig | null> {
+    if (!isTauriRuntime()) return null;
+
+    const raw = await invoke<string | null>("read_project_config", {
+      projectRoot,
+    });
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as ProjectSkillsConfig;
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        typeof parsed.version !== "number" ||
+        !parsed.skills ||
+        !Array.isArray(parsed.skills.enabled)
+      ) {
+        return null;
+      }
+      return {
+        version: parsed.version,
+        skills: {
+          enabled: parsed.skills.enabled.filter((s) => typeof s === "string"),
+        },
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Write `{project}/.seren/config.json`.
+   */
+  async writeProjectConfig(
+    projectRoot: string,
+    config: ProjectSkillsConfig,
+  ): Promise<void> {
+    if (!isTauriRuntime()) return;
+    await invoke("write_project_config", {
+      projectRoot,
+      config: JSON.stringify(config),
+    });
+  },
+
+  /**
+   * Remove `{project}/.seren/config.json`.
+   */
+  async clearProjectConfig(projectRoot: string): Promise<void> {
+    if (!isTauriRuntime()) return;
+    await invoke("clear_project_config", { projectRoot });
+  },
+
+  /**
+   * Get thread-scoped skill refs for a project/thread pair.
+   * Returns `null` when no override exists.
+   */
+  async getThreadSkills(
+    projectRoot: string,
+    threadId: string,
+  ): Promise<string[] | null> {
+    if (!isTauriRuntime()) return null;
+    return invoke<string[] | null>("get_thread_skills", {
+      projectRoot,
+      threadId,
+    });
+  },
+
+  /**
+   * Replace thread-scoped skill refs for a project/thread pair.
+   */
+  async setThreadSkills(
+    projectRoot: string,
+    threadId: string,
+    skillRefs: string[],
+  ): Promise<void> {
+    if (!isTauriRuntime()) return;
+    await invoke("set_thread_skills", {
+      projectRoot,
+      threadId,
+      skillRefs,
+    });
+  },
+
+  /**
+   * Clear thread-scoped skill override for a project/thread pair.
+   */
+  async clearThreadSkills(
+    projectRoot: string,
+    threadId: string,
+  ): Promise<void> {
+    if (!isTauriRuntime()) return;
+    await invoke("clear_thread_skills", {
+      projectRoot,
+      threadId,
+    });
   },
 
   /**

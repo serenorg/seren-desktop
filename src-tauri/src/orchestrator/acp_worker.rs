@@ -4,6 +4,7 @@
 use async_trait::async_trait;
 use log;
 use serde_json::Value;
+use serde_json::json;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use tokio::sync::{Mutex, mpsc};
@@ -41,7 +42,7 @@ impl Worker for AcpWorker {
         prompt: &str,
         _conversation_context: &[Value],
         routing: &RoutingDecision,
-        _skill_content: &str,
+        skill_content: &str,
         _app: &tauri::AppHandle,
         _images: &[ImageAttachment],
         event_tx: mpsc::Sender<WorkerEvent>,
@@ -79,13 +80,22 @@ impl Worker for AcpWorker {
                 .ok_or_else(|| "ACP session not initialized".to_string())?
         };
 
+        let context = if skill_content.trim().is_empty() {
+            None
+        } else {
+            Some(vec![json!({
+                "type": "text",
+                "text": skill_content
+            })])
+        };
+
         // Send the prompt via the existing command channel
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
         command_tx
             .send(crate::acp::AcpCommand::Prompt {
                 prompt: prompt.to_string(),
-                context: None,
+                context,
                 response_tx,
             })
             .await

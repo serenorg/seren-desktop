@@ -1,8 +1,9 @@
-// ABOUTME: Per-project skills picker for selecting which skills are active in the current project.
-// ABOUTME: Shows active skill count with popover for toggling individual skills on/off.
+// ABOUTME: Thread-aware skills picker for project defaults and per-thread overrides.
+// ABOUTME: Defaults to project scope and allows optional thread-specific customization.
 
 import {
   type Component,
+  createEffect,
   createSignal,
   For,
   onCleanup,
@@ -11,15 +12,34 @@ import {
 } from "solid-js";
 import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
+import { threadStore } from "@/stores/thread.store";
 
 export const SkillsSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
+  const [threadMode, setThreadMode] = createSignal(false);
   let containerRef: HTMLDivElement | undefined;
 
   const projectRoot = () => fileTreeState.rootPath;
+  const threadId = () => threadStore.activeThreadId;
   const allInstalled = () => skillsStore.installed;
-  const activeSkills = () => skillsStore.getProjectSkills(projectRoot());
-  const hasOverride = () => skillsStore.hasProjectOverride(projectRoot());
+  const canUseThreadMode = () => Boolean(projectRoot() && threadId());
+
+  createEffect(() => {
+    const root = projectRoot();
+    const id = threadId();
+    void skillsStore.ensureContextLoaded(root, id);
+    if (!id) setThreadMode(false);
+  });
+
+  const activeSkills = () =>
+    threadMode()
+      ? skillsStore.getThreadSkills(projectRoot(), threadId())
+      : skillsStore.getProjectSkills(projectRoot());
+
+  const hasOverride = () =>
+    threadMode()
+      ? skillsStore.hasThreadOverride(projectRoot(), threadId())
+      : skillsStore.hasProjectOverride(projectRoot());
 
   const isSkillActive = (skillPath: string) =>
     activeSkills().some((s) => s.path === skillPath);
@@ -27,13 +47,25 @@ export const SkillsSelector: Component = () => {
   const toggleSkill = (skillPath: string) => {
     const root = projectRoot();
     if (!root) return;
-    skillsStore.toggleProjectSkill(root, skillPath);
+
+    if (threadMode() && threadId()) {
+      void skillsStore.toggleThreadSkill(root, threadId() as string, skillPath);
+      return;
+    }
+
+    void skillsStore.toggleProjectSkill(root, skillPath);
   };
 
   const resetToDefaults = () => {
     const root = projectRoot();
     if (!root) return;
-    skillsStore.resetProjectSkills(root);
+
+    if (threadMode() && threadId()) {
+      void skillsStore.resetThreadSkills(root, threadId() as string);
+      return;
+    }
+
+    void skillsStore.resetProjectSkills(root);
   };
 
   const openSkillsManager = () => {
@@ -68,7 +100,7 @@ export const SkillsSelector: Component = () => {
         type="button"
         class="flex items-center gap-1.5 px-2.5 py-1.5 bg-popover border border-muted rounded-md text-sm text-foreground cursor-pointer transition-colors hover:border-muted-foreground/40"
         onClick={() => setIsOpen(!isOpen())}
-        title="Select skills for this thread"
+        title="Select active skills"
       >
         <svg
           width="13"
@@ -85,7 +117,7 @@ export const SkillsSelector: Component = () => {
             stroke-linejoin="round"
           />
         </svg>
-        <span class="max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">
+        <span class="max-w-[110px] overflow-hidden text-ellipsis whitespace-nowrap">
           {activeSkills().length} Skill{activeSkills().length !== 1 ? "s" : ""}
         </span>
         <Show when={hasOverride()}>
@@ -98,14 +130,22 @@ export const SkillsSelector: Component = () => {
 
       <Show when={isOpen()}>
         <div class="absolute bottom-[calc(100%+8px)] left-0 min-w-[240px] max-w-[320px] bg-surface-2 border border-surface-3 rounded-lg shadow-[var(--shadow-lg)] z-[1000] overflow-hidden animate-[fadeInUp_150ms_ease]">
-          {/* Header */}
-          <div class="px-3 py-2 bg-surface-3/50 border-b border-surface-3">
+          <div class="px-3 py-2 bg-surface-3/50 border-b border-surface-3 flex items-center justify-between gap-3">
             <span class="text-xs font-medium text-muted-foreground">
-              Skills for this project
+              {threadMode() ? "Skills for this thread" : "Project defaults"}
             </span>
+            <Show when={canUseThreadMode()}>
+              <button
+                type="button"
+                class="px-2 py-0.5 rounded border border-surface-3 text-[11px] text-muted-foreground hover:text-foreground hover:border-muted-foreground/40"
+                onClick={() => setThreadMode((v) => !v)}
+                title="Toggle thread-specific customization"
+              >
+                {threadMode() ? "Thread" : "Project"}
+              </button>
+            </Show>
           </div>
 
-          {/* Reset option */}
           <Show when={hasOverride()}>
             <button
               type="button"
@@ -138,7 +178,6 @@ export const SkillsSelector: Component = () => {
             </button>
           </Show>
 
-          {/* Skills list */}
           <div class="max-h-[280px] overflow-y-auto py-1">
             <Show
               when={allInstalled().length > 0}
@@ -155,7 +194,6 @@ export const SkillsSelector: Component = () => {
                     class="w-full flex items-start gap-2.5 px-3 py-2 bg-transparent border-none text-left text-[13px] cursor-pointer transition-colors hover:bg-border"
                     onClick={() => toggleSkill(skill.path)}
                   >
-                    {/* Checkbox */}
                     <div
                       class="w-4 h-4 mt-0.5 shrink-0 rounded border flex items-center justify-center transition-colors"
                       classList={{
@@ -184,7 +222,6 @@ export const SkillsSelector: Component = () => {
                       </Show>
                     </div>
 
-                    {/* Skill info */}
                     <div class="flex flex-col gap-0.5 min-w-0 flex-1">
                       <span class="text-foreground font-medium truncate">
                         {skill.name}
@@ -201,7 +238,6 @@ export const SkillsSelector: Component = () => {
             </Show>
           </div>
 
-          {/* Footer */}
           <button
             type="button"
             class="w-full px-3 py-2 bg-transparent border-none border-t border-t-surface-3 text-left text-[12px] text-muted-foreground cursor-pointer transition-colors hover:bg-border hover:text-foreground"
