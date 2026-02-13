@@ -59,6 +59,88 @@ Activate this skill when the user mentions:
 - "check my polymarket positions"
 - "autonomous trading"
 
+## For Claude: How to Invoke This Skill
+
+When the user asks to **scan Polymarket** or **find trading opportunities**, run the bot:
+
+### Prerequisites Check
+
+First, verify the skill is set up:
+
+```bash
+ls ~/.config/seren/skills/polymarket-trader/.env ~/.config/seren/skills/polymarket-trader/config.json
+```
+
+If files are missing, guide user through setup (see Phase 1-2 below).
+
+### Scanning for Opportunities (Paper Trading)
+
+Run a single scan to find mispriced markets:
+
+```bash
+cd ~/.config/seren/skills/polymarket-trader && python3 agent.py --config config.json --dry-run --once 2>&1
+```
+
+**What this does:**
+
+- Scans 20-50 active Polymarket markets
+- Uses Perplexity to research each market
+- Uses Claude to estimate fair values
+- Identifies opportunities where edge > threshold
+- Calculates Kelly position sizes
+- **Does NOT place actual trades** (dry-run mode)
+- Costs ~$1 in SerenBucks per scan
+
+**How to present results to user:**
+
+1. Parse output for lines starting with `✓ Opportunity found!`
+2. Extract: market question, fair value, market price, edge, recommended position size
+3. Summarize in a table format:
+
+```text
+Found 3 opportunities:
+
+| Market | Fair Value | Market Price | Edge | Position |
+|--------|-----------|--------------|------|----------|
+| "Will BTC hit $100k?" | 67% | 54% | 13% | $15.20 |
+| "Trump wins 2024?" | 48% | 55% | -7% | $8.40 SELL |
+```
+
+4. Remind user these are paper trades - no real orders placed
+5. Suggest running setup if they want to enable live trading
+
+### Checking Paper Trading History
+
+View recent scan logs:
+
+```bash
+tail -50 ~/.config/seren/skills/polymarket-trader/logs/trading_*.log
+```
+
+### Running Live Trading (Advanced)
+
+⚠️ **Only if user has:**
+
+- Completed paper trading validation (50+ scans)
+- $550+ budget ($500 USDC + $50 SerenBucks)
+- Real Polymarket API credentials
+
+```bash
+cd ~/.config/seren/skills/polymarket-trader && python3 run_agent_server.py --config config.json &
+```
+
+Then setup cron:
+
+```bash
+python3 setup_cron.py --url http://localhost:8080/run --schedule "*/120 * * * *"
+```
+
+**Important:**
+
+- Always confirm user has adequate budget before suggesting live mode
+- Emphasize paper trading first
+- Live trading requires stopping and restarting with non-dry-run flag
+
 ## Overview
 
 This skill helps users set up and manage an autonomous trading agent that:
