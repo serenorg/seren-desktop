@@ -2,7 +2,7 @@
 // ABOUTME: Shows ChatContent for chat threads, AgentChat for agent threads, or empty state.
 
 import { open } from "@tauri-apps/plugin-dialog";
-import { type Component, Match, Show, Switch, createEffect } from "solid-js";
+import { type Component, Match, Show, Switch } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
