@@ -62,7 +62,7 @@
     ],
     "resources": {
       "embedded-runtime/": "embedded-runtime/",
-      "skills/": "skills/"
+      "../skills/": "skills/"
     },
     "macOS": {
       "entitlements": "entitlements.plist",
