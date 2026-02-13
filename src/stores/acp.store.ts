@@ -2083,12 +2083,27 @@ export const acpStore = {
         currentModelId: string;
         availableModels: AgentModelInfo[];
       };
+      console.log(
+        "[ACP] Setting models for session:",
+        sessionId,
+        "currentModel:",
+        models.currentModelId,
+        "available:",
+        models.availableModels,
+      );
       setState("sessions", sessionId, "currentModelId", models.currentModelId);
       setState(
         "sessions",
         sessionId,
         "availableModels",
         models.availableModels,
+      );
+    } else {
+      console.log(
+        "[ACP] No models in status event for session:",
+        sessionId,
+        "data:",
+        data,
       );
     }
 
