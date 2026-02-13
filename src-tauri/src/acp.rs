@@ -1355,14 +1355,20 @@ pub async fn acp_spawn(
     api_key: Option<String>,
     approval_policy: Option<String>,
     search_enabled: Option<bool>,
+    network_enabled: Option<bool>,
 ) -> Result<AcpSessionInfo, String> {
     let cwd = normalize_cwd(&cwd)?;
-    let parsed_sandbox_mode = sandbox_mode
+    let mut parsed_sandbox_mode = sandbox_mode
         .as_deref()
         .map(|s| s.parse::<crate::sandbox::SandboxMode>())
         .transpose()
         .map_err(|e| e)?
         .unwrap_or_default();
+
+    // Override to full-access mode if network access is explicitly enabled
+    if network_enabled.unwrap_or(false) {
+        parsed_sandbox_mode = crate::sandbox::SandboxMode::FullAccess;
+    }
     let session_id = local_session_id
         .as_deref()
         .map(str::trim)
