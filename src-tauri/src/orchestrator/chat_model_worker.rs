@@ -25,6 +25,10 @@ const MAX_TOOL_ROUNDS: usize = 35;
 /// Connect timeout for the HTTP client (seconds).
 const CONNECT_TIMEOUT_SECS: u64 = 30;
 
+/// Overall request timeout for Gateway API calls (10 minutes).
+/// Allows for long-running agent requests with multiple tool execution rounds.
+const REQUEST_TIMEOUT_SECS: u64 = 600;
+
 /// Timeout for waiting on frontend tool execution (5 minutes).
 const TOOL_EXECUTION_TIMEOUT_SECS: u64 = 300;
 
@@ -104,6 +108,7 @@ impl ChatModelWorker {
         Self {
             client: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
                 .build()
                 .unwrap_or_default(),
             cancelled: Arc::new(Mutex::new(false)),
@@ -115,6 +120,7 @@ impl ChatModelWorker {
     pub fn with_tools(tools: Vec<serde_json::Value>) -> Self {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
