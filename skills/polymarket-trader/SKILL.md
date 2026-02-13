@@ -1,17 +1,54 @@
 ---
-name: polymarket-trader
-description: Autonomous prediction market trading agent. Scans Polymarket, estimates fair value with Claude, finds mispricing, and executes trades using Kelly criterion. Use when the user wants to trade on Polymarket or set up autonomous trading.
-tags: [trading, polymarket, prediction-markets, autonomous, seren-ecosystem]
+name: polymarket-bot
+description: Autonomous trading agent for Polymarket prediction markets using Seren ecosystem
+author: Seren AI
 version: 1.0.0
+tags: [trading, polymarket, prediction-markets, ai, autonomous, seren]
 ---
 
-# Polymarket Trading Skill
+# Polymarket Trading Bot
 
-Autonomous trading agent for prediction markets. This skill showcases the full Seren ecosystem by integrating:
-- **Seren-cron** for autonomous scheduling
-- **Seren MCP publishers** (polymarket-data, perplexity, seren-models)
-- **SerenBucks** for API payments
-- **Seren Desktop** secure credential storage
+Autonomous trading agent for prediction markets integrating the Seren ecosystem.
+
+## ⚠️ IMPORTANT LEGAL DISCLAIMERS
+
+**READ THIS BEFORE USING**
+
+### Geographic Restrictions - CRITICAL
+⚠️ **Polymarket is BLOCKED in the United States** following their 2022 CFTC settlement.
+⚠️ **Using VPNs or other methods to circumvent geographic restrictions may violate laws**.
+⚠️ **You are responsible for verifying that prediction market trading is legal in your jurisdiction**.
+
+### Regulatory Status
+- Prediction markets exist in a **regulatory gray area** in many jurisdictions
+- Some governments classify them as **gambling**, others as **financial instruments**
+- Some jurisdictions **prohibit them entirely**
+- **Consult local laws and seek professional advice if uncertain**
+
+### Not Financial Advice
+- This bot is provided for **informational and educational purposes only**
+- It does NOT constitute **financial, investment, legal, or tax advice**
+- AI-generated estimates are **not guarantees and may be inaccurate**
+- You are **solely responsible** for your trading decisions and any resulting gains or losses
+
+### Risk of Loss
+- Trading prediction markets involves **substantial risk of loss**
+- Only risk capital you **can afford to lose completely**
+- **Past performance does not indicate future results**
+- Market conditions can change rapidly and unpredictably
+
+### Tax Obligations
+- Trading profits **may be subject to taxation** in your jurisdiction
+- Consult a tax professional regarding your **reporting obligations**
+
+### Age Restriction
+- You must be **at least 18 years old** (or the age of majority in your jurisdiction) to use this bot
+
+### No Warranty
+- This software is provided **"as is" without warranty of any kind**
+- The developers assume **no liability** for trading losses, technical failures, or regulatory consequences
+
+---
 
 ## When to Use This Skill
 
@@ -25,212 +62,98 @@ Activate this skill when the user mentions:
 ## Overview
 
 This skill helps users set up and manage an autonomous trading agent that:
+
 1. **Scans** Polymarket for active prediction markets
-2. **Researches** opportunities using Perplexity
-3. **Estimates** fair value with Claude (seren-models)
+2. **Researches** opportunities using Perplexity AI
+3. **Estimates** fair value with Claude (Anthropic)
 4. **Identifies** mispriced markets (edge > threshold)
 5. **Executes** trades using Kelly Criterion for position sizing
 6. **Runs autonomously** on seren-cron schedule
 7. **Monitors** positions and reports P&L
 
+## Architecture
+
+**Pure Python Implementation**
+- Python agent calls Seren publishers via HTTP
+- Credentials stored in `.env` file (environment variables)
+- Logs written to JSONL files
+- Seren-cron executes Python script on schedule
+
+**Components:**
+- `agent.py` - Main trading loop
+- `seren_client.py` - Seren API client (calls publishers)
+- `polymarket_client.py` - Polymarket CLOB API wrapper
+- `kelly.py` - Position sizing calculator
+- `position_tracker.py` - Position management
+- `logger.py` - Trading logger
+
+**Seren Publishers Used:**
+- `polymarket-trading-serenai` - Market data + trading
+- `perplexity` - AI-powered research
+- `seren-models` - LLM inference (Claude)
+- `seren-cron` - Job scheduling
+
+---
+
 ## Setup Workflow
 
-### Phase 1: Credential Check & Setup
+### Phase 1: Install Dependencies
 
-First, check if Polymarket credentials are configured:
+Check Python version and install requirements:
 
-```typescript
-const creds = await invoke('get_polymarket_credentials');
+```bash
+cd skills/polymarket-trader
+
+# Check Python version (need 3.9+)
+python3 --version
+
+# Install dependencies
+pip3 install -r requirements.txt
 ```
 
-If missing, guide the user through obtaining credentials:
+### Phase 2: Configure Credentials
 
+Create `.env` file from template:
+
+```bash
+cp .env.example .env
 ```
-You'll need Polymarket API credentials to trade. Here's how to get them:
 
-1. Visit https://polymarket.com
+Edit `.env` and add your credentials:
+
+```bash
+# Seren API key - get from https://app.serendb.com/settings/api-keys
+SEREN_API_KEY=your_seren_api_key_here
+
+# Polymarket credentials - get from https://polymarket.com
+# (Settings > API Keys > Derive API Key)
+POLY_API_KEY=your_polymarket_api_key_here
+POLY_PASSPHRASE=your_polymarket_passphrase_here
+POLY_SECRET=your_polymarket_secret_here
+POLY_ADDRESS=your_wallet_address_here
+```
+
+**How to get Polymarket credentials:**
+1. Visit [polymarket.com](https://polymarket.com)
 2. Connect your wallet
 3. Navigate to Settings > API Keys
 4. Click "Derive API Key"
 5. Save your credentials securely
 
-Once you have them, I can store them securely in Seren Desktop.
+**Security Note:**
+- Never commit `.env` to git (already in `.gitignore`)
+- Keep credentials secure
+- Credentials grant access to your Polymarket wallet
 
-Please provide:
-• API Key: [wait for input]
-• API Secret: [wait for input]
-• Passphrase: [wait for input]
-• Wallet Address: [wait for input]
+### Phase 3: Configure Risk Parameters
+
+Copy the example config and customize:
+
+```bash
+cp config.example.json config.json
 ```
 
-Then store credentials securely:
-
-```typescript
-await invoke('store_polymarket_credentials', {
-  apiKey: user_input.apiKey,
-  apiSecret: user_input.apiSecret,
-  passphrase: user_input.passphrase,
-  address: user_input.address
-});
-```
-
-**Alternative:** Users can also configure credentials via Settings > Wallet > Polymarket Trading.
-
-### Phase 2: Balance Check & Funding
-
-Check both required balances:
-
-1. **SerenBucks balance** (for API calls):
-```typescript
-const balance = await fetch('/api/wallet/balance');
-```
-
-2. **Polymarket balance** (for trades):
-```python
-# Via Python agent using Polymarket API
-balance = get_polymarket_balance(api_key, api_secret)
-```
-
-Display current state:
-```
-Current balances:
-  • SerenBucks: $X.XX (for API calls - Claude, Perplexity, data)
-  • Polymarket: $Y.YY USDC (for placing trades)
-
-Estimated costs:
-  • ~$0.50-2.00 in SerenBucks per scan cycle (varies with market count)
-  • Your configured bankroll for trades
-```
-
-If insufficient, guide through funding:
-
-**For SerenBucks:**
-```
-Your SerenBucks balance is low. You can deposit at:
-https://app.serendb.com/wallet/deposit
-
-The agent will cost approximately $0.50-2.00 per scan cycle depending on:
-- Number of markets scanned
-- Research depth (Perplexity calls)
-- Fair value estimates (Claude calls)
-```
-
-**For Polymarket:**
-```
-To fund your Polymarket wallet:
-1. Bridge USDC to Polygon PoS
-2. Send USDC to your Polymarket address: {address}
-3. Wait for confirmation (usually < 1 minute)
-
-You can check your balance at: https://polymarket.com/wallet
-```
-
-### Phase 3: Risk Parameter Configuration
-
-Walk the user through EACH parameter with clear explanations:
-
-#### 1. Bankroll
-```
-BANKROLL - Total capital available for trading
-
-This is the maximum amount the agent can have deployed across all positions.
-
-Recommendations:
-  • Testing: $50-100 (learn the system with minimal risk)
-  • Serious trading: $500+ (enough for diversification)
-  • Always only risk what you can afford to lose
-
-Your bankroll: $___
-```
-
-**Validate:** Must be > $10
-
-#### 2. Mispricing Threshold
-```
-MISPRICING THRESHOLD - Minimum edge required to trade
-
-Only trade when estimated fair value differs from market price by at least this percentage.
-Higher threshold = fewer but higher-quality opportunities.
-
-Examples:
-  • 5%: Aggressive (more trades, smaller edges)
-  • 8%: Balanced (recommended)
-  • 12%: Conservative (fewer trades, larger edges)
-
-Your threshold: ___% (default: 8%)
-```
-
-**Validate:** Range 5-15%
-
-#### 3. Max Kelly Fraction
-```
-MAX KELLY FRACTION - Maximum % of bankroll per trade
-
-Controls position sizing using the Kelly Criterion. The agent uses quarter-Kelly
-(conservative) but this caps the maximum position size.
-
-Examples:
-  • 3%: Very conservative (max $3 per trade on $100 bankroll)
-  • 6%: Balanced (recommended)
-  • 10%: Aggressive (larger positions, higher variance)
-
-Your max fraction: ___% (default: 6%)
-```
-
-**Validate:** Range 3-10%
-
-#### 4. Scan Interval
-```
-SCAN INTERVAL - How often to scan for opportunities
-
-More frequent scanning finds opportunities faster but costs more in API calls.
-
-Options:
-  • 5 minutes: High frequency (higher costs, ~$5-10/day)
-  • 10 minutes: Balanced (recommended, ~$2-5/day)
-  • 15 minutes: Moderate (~$1-3/day)
-  • 30 minutes: Conservative (~$0.50-1.50/day)
-
-Your interval: ___ minutes (default: 10)
-```
-
-**Validate:** Options: 5, 10, 15, 30 minutes
-
-#### 5. Max Positions
-```
-MAX POSITIONS - Maximum concurrent open positions
-
-Limits exposure and encourages diversification.
-
-Recommendations:
-  • Small bankroll (<$100): 5-10 positions
-  • Medium bankroll ($100-500): 10-20 positions
-  • Large bankroll (>$500): 20-50 positions
-
-Your max positions: ___ (default: 10)
-```
-
-**Validate:** Range 1-50
-
-#### 6. Stop Loss Bankroll
-```
-STOP LOSS - Stop trading if bankroll drops to this amount
-
-Protective circuit breaker to prevent total loss.
-
-Recommendations:
-  • $0 - Stop only if completely depleted
-  • 50% of initial bankroll - Stop if down 50%
-  • 25% of initial bankroll - Stop if down 75%
-
-Your stop loss: $___ (default: $0)
-```
-
-**Validate:** Must be >= 0 and < bankroll
-
-#### Save Configuration
-
-Create `config.json` in the skill directory:
+Edit `config.json` to set your risk parameters:
 
 ```json
 {
@@ -239,110 +162,129 @@ Create `config.json` in the skill directory:
   "max_kelly_fraction": 0.06,
   "scan_interval_minutes": 10,
   "max_positions": 10,
-  "stop_loss_bankroll": 0.0,
-  "created_at": "2026-02-12T14:30:00Z",
-  "last_updated": "2026-02-12T14:30:00Z"
+  "stop_loss_bankroll": 0.0
 }
 ```
 
-### Phase 4: Dependency Check & Installation
+**Parameter Guide:**
 
-Check for Python and required packages:
+#### bankroll
+Total capital available for trading (in USDC).
+- Testing: $50-100
+- Serious: $500+
+- **Only risk what you can afford to lose**
+
+#### mispricing_threshold
+Minimum edge required to trade (as decimal, e.g., 0.08 = 8%).
+- 0.05: Aggressive (more trades, smaller edges)
+- 0.08: Balanced (recommended)
+- 0.12: Conservative (fewer trades, larger edges)
+
+#### max_kelly_fraction
+Maximum % of bankroll per trade (as decimal, e.g., 0.06 = 6%).
+- 0.03: Very conservative
+- 0.06: Balanced (recommended)
+- 0.10: Aggressive (higher variance)
+
+#### scan_interval_minutes
+How often to scan for opportunities.
+- 5 minutes: High frequency (~$5-10/day in API costs)
+- 10 minutes: Balanced (~$2-5/day)
+- 30 minutes: Conservative (~$0.50-1.50/day)
+
+#### max_positions
+Maximum concurrent open positions.
+- Small bankroll (<$100): 5-10
+- Medium bankroll ($100-500): 10-20
+- Large bankroll (>$500): 20-50
+
+#### stop_loss_bankroll
+Stop trading if bankroll drops to this amount.
+- 0: Stop only if completely depleted
+- 50% of initial: Stop if down 50%
+
+### Phase 4: Check Balances
+
+Before running, ensure you have sufficient balances:
+
+**SerenBucks** (for API calls):
+- Visit: https://app.serendb.com/wallet/deposit
+- Recommended: $20+ for uninterrupted operation
+- Cost: ~$0.50-2.00 per scan cycle
+
+**Polymarket** (for trading):
+- Bridge USDC to Polygon PoS
+- Send to your Polymarket wallet address
+- Check balance: https://polymarket.com/wallet
+
+### Phase 5: Dry-Run Test (STRONGLY RECOMMENDED)
+
+Test the bot without placing real trades:
 
 ```bash
-# Check Python version (need 3.9+)
-python3 --version
-
-# Check if dependencies installed
-python3 -c "import seren_agent; import requests; print('✓ Dependencies ready')"
+python3 agent.py --config config.json --dry-run
 ```
 
-If missing, auto-install:
+**Dry-run mode:**
+- ✅ Scans markets (when implemented)
+- ✅ Researches opportunities using Perplexity
+- ✅ Estimates fair values using Claude
+- ✅ Calculates position sizes using Kelly Criterion
+- ✅ Logs everything to files
+- ❌ Does NOT place actual trades
 
-```bash
-# Install from requirements.txt
-pip3 install -r skills/polymarket-trader/requirements.txt
-
-# Verify installation
-python3 -c "import seren_agent; import requests; print('✓ Installation successful')"
+**Expected output:**
 ```
+============================================================
+🔍 Polymarket Scan Starting - 2026-02-12 14:35:00 UTC
+============================================================
 
-Show progress to user:
-```
-Installing dependencies...
-  ✓ seren_agent>=0.1.0
-  ✓ requests>=2.31.0
+Balances:
+  SerenBucks: $23.45
+  Polymarket: $100.00
 
-Dependencies installed successfully!
-```
+Scanning markets...
+  Found 23 markets
 
-### Phase 5: Dry-Run Test (Recommended)
+Evaluating: "Will BTC hit $100k by March 2026?"
+  Current price: 54.0%
+  🧠 Researching: "Will BTC hit $100k by March 2026?"
+  💡 Estimating fair value...
+     Fair value: 67.0% (confidence: medium)
+    ✓ Opportunity found!
+      Edge: 13.0%
+      Side: BUY
+      Size: $3.24 (5.4% of available)
+      Expected value: +$0.42
 
-Strongly recommend testing before live trading:
+    [DRY-RUN] Would place BUY order:
+      Market: "Will BTC hit $100k by March 2026?"
+      Size: $3.24
+      Price: 54.0%
+      Expected value: +$0.42
 
-```
-Setup complete! Before going live with real money, I recommend a dry-run test.
-
-DRY-RUN MODE will:
-  ✓ Scan real markets on Polymarket
-  ✓ Research opportunities using Perplexity
-  ✓ Estimate fair value with Claude
-  ✓ Calculate position sizes using Kelly Criterion
-  ✗ NOT place actual trades (simulation only)
-
-This costs SerenBucks for API calls (~$0.50-2.00) but won't risk your trading capital.
-
-Would you like to run a dry-run test first? (Recommended: Yes)
-```
-
-If user agrees, run dry-run:
-
-```bash
-cd skills/polymarket-trader
-python3 agent.py --dry-run --config config.json
-```
-
-Show real-time output as it runs:
-```
-🔍 Scanning 500 active markets...
-📊 Found 23 potential opportunities
-
-🧠 Researching: "Will BTC hit $100k by March 2026?"
-   Current market price: 54%
-
-💡 Fair value estimate: 67% (confidence: medium)
-   Edge: 13% (exceeds 8% threshold ✓)
-
-💰 Position size: $3.24 (5.4% Kelly, capped at 6%)
-   Side: BUY (fair value > market price)
-
-[DRY-RUN] Would place BUY order:
-  • Market: "Will BTC hit $100k by March 2026?"
-  • Size: $3.24
-  • Price: 54%
-  • Expected value: +$0.42
-
-... (continues for all opportunities) ...
-
-Dry-run complete!
-
-Results:
-  • Markets scanned: 500
-  • Opportunities found: 23
-  • Would have placed: 8 trades
-  • Total would-be capital deployed: $28.45
-  • Largest position: $5.20
-  • Estimated EV: +$3.67
-  • API cost: $1.23 SerenBucks
-
-The agent is working correctly. Ready to go live?
+============================================================
+Scan complete!
+  Markets scanned: 23
+  Opportunities: 8
+  Trades executed: 0 (dry-run)
+  Capital deployed: $0.00
+  API cost: ~$0.46 SerenBucks
+============================================================
 ```
 
 ### Phase 6: Live Trading Confirmation
 
-**CRITICAL - Must get explicit confirmation before enabling live trading**
+⚠️ **CRITICAL - You must explicitly confirm before enabling live trading**
 
-Display warning and configuration summary:
+**Before going live, ask yourself:**
+1. Have I tested in dry-run mode?
+2. Do I understand the risks?
+3. Can I afford to lose this capital?
+4. Is prediction market trading legal in my jurisdiction?
+5. Have I funded both SerenBucks and Polymarket?
+
+**Display this warning:**
 
 ```
 ⚠️  LIVE TRADING CONFIRMATION
@@ -368,348 +310,148 @@ Risks:
   ⚠️  Market conditions can change rapidly
   ⚠️  Slippage and fees may reduce returns
 
-The agent will run automatically via seren-cron until you stop it.
-You can monitor positions and P&L anytime with 'show status'.
+The agent will run on schedule until you stop it.
 
 Type exactly: START LIVE TRADING
 (or 'cancel' to abort)
 ```
 
-Wait for EXACT confirmation text. Do not proceed unless user types "START LIVE TRADING".
+**Wait for EXACT confirmation.** Do not proceed unless user types "START LIVE TRADING".
 
-### Phase 7: Enable Autonomous Trading
+### Phase 7: Run Live
 
-Once confirmed, set up seren-cron job:
+Once confirmed, run the agent:
 
-```typescript
-// Call seren-cron publisher via MCP
-const cronResult = await mcpPublisher.call('seren-cron', 'create_job', {
-  name: 'polymarket-trader',
-  schedule: `*/${config.scan_interval_minutes} * * * *`, // Cron expression
-  command: `cd ${skillPath} && python3 agent.py --config config.json`,
-  environment: {
-    SEREN_API_KEY: await getApiKey(),
-    POLYMARKET_API_KEY: creds.apiKey,
-    POLYMARKET_API_SECRET: creds.apiSecret,
-    POLYMARKET_PASSPHRASE: creds.passphrase,
-    POLYMARKET_ADDRESS: creds.address
-  }
-});
+```bash
+# Run once
+python3 agent.py --config config.json
+
+# Or set up with seren-cron for autonomous operation
 ```
 
-Update config with cron job ID:
+**Setting up seren-cron** (for autonomous scheduling):
 
-```json
-{
-  ...existing config...,
-  "cron_job_id": cronResult.job_id,
-  "enabled": true,
-  "enabled_at": "2026-02-12T14:35:00Z"
-}
+```python
+from seren_client import SerenClient
+
+seren = SerenClient()
+
+# Create cron job
+job = seren.create_cron_job(
+    name='polymarket-trader',
+    schedule='*/10 * * * *',  # Every 10 minutes
+    url='http://localhost:8000/run-scan',  # Your endpoint
+    method='POST',
+    headers={
+        'Authorization': 'Bearer YOUR_WEBHOOK_TOKEN'
+    }
+)
+
+print(f"Cron job created: {job['id']}")
 ```
 
-Confirm to user:
+**Note:** You'll need to set up a web endpoint that calls `agent.py` when triggered.
 
-```
-✓ Live trading enabled successfully!
-
-Status:
-  ✓ Seren-cron job created (ID: {job_id})
-  ✓ Next scan: in {scan_interval_minutes} minutes
-  ✓ Logs: skills/polymarket-trader/logs/
-
-The agent is now running autonomously. You can:
-  • 'show status' - See current positions and P&L
-  • 'show recent trades' - View trade history
-  • 'pause trading' - Temporarily stop scanning (keeps positions)
-  • 'resume trading' - Restart after pause
-  • 'stop trading' - Disable completely
-  • 'update config' - Modify risk parameters
-
-I'll notify you of important events:
-  • Significant wins/losses
-  • Errors or API issues
-  • Bankroll milestones
-  • Stop loss triggered
-
-Happy trading! 📊
-```
+---
 
 ## Control Commands
 
 ### Show Status
 
-Command: `show status` or `status`
+Read current positions and display status:
 
-Display current state:
+```python
+import json
 
-```typescript
-// Read current positions
-const positions = JSON.parse(await readFile('skills/polymarket-trader/logs/positions.json'));
+# Read positions
+with open('skills/polymarket-trader/logs/positions.json', 'r') as f:
+    data = json.load(f)
 
-// Read config
-const config = JSON.parse(await readFile('skills/polymarket-trader/config.json'));
+# Display
+print("📊 Polymarket Trading Status\n")
+print(f"Positions: {data['position_count']}")
+print(f"Total unrealized P&L: ${data['total_unrealized_pnl']:.2f}")
 
-// Calculate current bankroll
-const currentBankroll = calculateCurrentBankroll(positions, config);
-
-// Get recent trades
-const trades = await readLastNLines('skills/polymarket-trader/logs/trades.jsonl', 5);
-```
-
-Format output:
-
-```
-📊 Polymarket Trading Status
-
-Agent: ACTIVE ✓
-Next scan: in 3 minutes
-
-Bankroll:
-  • Initial: $100.00
-  • Current: $103.45
-  • P&L: +$3.45 (+3.45%)
-  • Available: $78.30 (not deployed)
-
-Positions: 4 / 10 max
-  1. "Will BTC hit $100k by March?" - BUY $5.20 @ 54% → Now: 58% (+$0.84)
-  2. "Will Fed cut rates in Q1?" - SELL $3.80 @ 32% → Now: 30% (+$0.76)
-  3. "Will Trump win 2024?" - BUY $6.00 @ 45% → Now: 44% (-$0.60)
-  4. "Will inflation exceed 3%?" - BUY $4.50 @ 61% → Now: 63% (+$0.90)
-
-Recent Activity:
-  • Last trade: 12 minutes ago (BUY $4.50)
-  • Last scan: 3 minutes ago
-  • Today's trades: 6
-  • Today's P&L: +$2.34
-
-Configuration:
-  • Scan interval: 10 minutes
-  • Max per trade: 6% ($6.00)
-  • Mispricing threshold: 8%
+for pos in data['positions']:
+    pnl_symbol = '+' if pos['unrealized_pnl'] >= 0 else ''
+    print(f"\n  {pos['market']}")
+    print(f"  {pos['side']} ${pos['size']:.2f} @ {pos['entry_price'] * 100:.1f}%")
+    print(f"  Now: {pos['current_price'] * 100:.1f}% ({pnl_symbol}${pos['unrealized_pnl']:.2f})")
 ```
 
 ### Show Recent Trades
 
-Command: `show recent trades` or `show trades`
+Read and display trade history:
 
-Read and format trades log:
+```python
+import json
 
-```typescript
-const trades = await readLastNLines('skills/polymarket-trader/logs/trades.jsonl', 20);
-const parsedTrades = trades.map(line => JSON.parse(line));
+# Read last 20 trades
+with open('skills/polymarket-trader/logs/trades.jsonl', 'r') as f:
+    lines = f.readlines()
+
+trades = [json.loads(line) for line in lines[-20:]]
+
+print("📝 Recent Trades (Last 20)\n")
+
+for i, trade in enumerate(reversed(trades), 1):
+    pnl_symbol = '' if trade['pnl'] is None else ('+' if trade['pnl'] >= 0 else '')
+    status_emoji = '🟢' if trade['status'] == 'open' else '✓' if trade['pnl'] and trade['pnl'] > 0 else '✗'
+
+    print(f"{i}. {status_emoji} {trade['side']} ${trade['size']:.2f} @ {trade['price'] * 100:.1f}%")
+    print(f"   \"{trade['market']}\"")
+    if trade['pnl'] is not None:
+        print(f"   P&L: {pnl_symbol}${trade['pnl']:.2f}")
+    print()
 ```
 
-Display:
+### Pause/Resume Trading
 
-```
-📝 Recent Trades (Last 20)
+**Pause** (stop scanning, keep positions):
+```python
+seren = SerenClient()
+config = json.load(open('config.json'))
 
-1. 12 min ago - BUY $4.50 @ 61% "Will inflation exceed 3%?"
-   Status: OPEN → Now: 63% (+$0.90 unrealized)
-
-2. 2 hrs ago - SELL $3.80 @ 32% "Will Fed cut rates in Q1?"
-   Status: OPEN → Now: 30% (+$0.76 unrealized)
-
-3. 5 hrs ago - BUY $5.20 @ 54% "Will BTC hit $100k by March?"
-   Status: OPEN → Now: 58% (+$0.84 unrealized)
-
-4. 1 day ago - BUY $4.20 @ 48% "Will unemployment drop?"
-   Status: CLOSED @ 52% → P&L: +$1.68 ✓
-
-5. 1 day ago - SELL $3.50 @ 67% "Will gas prices rise?"
-   Status: CLOSED @ 71% → P&L: -$1.40 ✗
-
-... (continues) ...
-
-Summary (Last 20 trades):
-  • Wins: 12 (60%)
-  • Losses: 8 (40%)
-  • Total P&L: +$5.67
-  • Avg win: +$1.23
-  • Avg loss: -$0.87
+seren.pause_cron_job(config['cron_job_id'])
+print("⏸️  Trading paused")
 ```
 
-### Pause Trading
-
-Command: `pause trading` or `pause`
-
-Pause the cron job without canceling it:
-
-```typescript
-await mcpPublisher.call('seren-cron', 'pause_job', {
-  job_id: config.cron_job_id
-});
-
-// Update config
-config.enabled = false;
-config.paused_at = new Date().toISOString();
-```
-
-Confirm:
-
-```
-⏸️  Trading paused
-
-The agent will stop scanning for new opportunities.
-Your existing positions remain open.
-
-To resume: 'resume trading'
-To close all positions: 'stop trading' (requires confirmation)
-```
-
-### Resume Trading
-
-Command: `resume trading` or `resume`
-
-Resume the paused cron job:
-
-```typescript
-await mcpPublisher.call('seren-cron', 'resume_job', {
-  job_id: config.cron_job_id
-});
-
-config.enabled = true;
-config.resumed_at = new Date().toISOString();
-```
-
-Confirm:
-
-```
-▶️  Trading resumed
-
-The agent will resume scanning for opportunities.
-Next scan: in {scan_interval_minutes} minutes
+**Resume**:
+```python
+seren.resume_cron_job(config['cron_job_id'])
+print("▶️  Trading resumed")
 ```
 
 ### Stop Trading
 
-Command: `stop trading` or `stop`
-
-**Requires confirmation - this is a significant action**
-
-First, ask for confirmation:
-
-```
-⚠️  Stop Trading Confirmation
-
-This will:
-  ✓ Cancel the seren-cron job (no more scans)
-  ✓ Stop the autonomous trading agent
-  ✗ Your open positions will remain on Polymarket
-
-Current positions: 4 (total value: $21.50)
-
-Options:
-  1. Stop agent, keep positions (you manage them manually)
-  2. Stop agent AND close all positions immediately
-  3. Cancel (don't stop)
-
-Your choice (1/2/3):
-```
-
-If option 1 (stop only):
-
-```typescript
-await mcpPublisher.call('seren-cron', 'delete_job', {
-  job_id: config.cron_job_id
-});
-
-config.enabled = false;
-config.stopped_at = new Date().toISOString();
-```
-
-If option 2 (stop + close positions):
-
+**Stop completely** (cancel cron job):
 ```python
-# Via Python agent
-for position in open_positions:
-    close_position(position.market_id, position.size)
+seren.delete_cron_job(config['cron_job_id'])
+print("🛑 Trading stopped")
 ```
 
-Confirm:
+---
 
-```
-🛑 Trading stopped
+## Monitoring & Logs
 
-The autonomous agent is disabled.
-Your positions: {kept open / closed}
+All activity is logged to JSONL files in `logs/`:
 
-To start trading again: 'I want to trade on Polymarket'
-```
-
-### Update Config
-
-Command: `update config` or `change [parameter]`
-
-Allow users to modify risk parameters:
-
-```
-Which parameter would you like to update?
-
-1. Bankroll (current: $100.00)
-2. Mispricing threshold (current: 8%)
-3. Max Kelly fraction (current: 6%)
-4. Scan interval (current: 10 minutes)
-5. Max positions (current: 10)
-6. Stop loss (current: $0.00)
-
-Your choice (1-6):
-```
-
-Then walk through updating that specific parameter with the same guidance as in Phase 3.
-
-Update config file and restart cron job if needed.
-
-## Monitoring & Notifications
-
-### Real-Time Chat Updates
-
-During scan cycles (when user is active in chat), show progress:
-
-```
-🔍 Polymarket Scan Starting...
-
-Scanning 500 active markets...
-Found 23 potential opportunities
-
-Researching top prospects:
-  1. "Will BTC hit $100k by March 2026?"
-     Market: 54% → Fair value: 67% → Edge: 13% ✓
-     Position: BUY $3.24 (5.4% Kelly)
-     ✅ Order placed
-
-  2. "Will Fed cut rates in Q1 2026?"
-     Market: 32% → Fair value: 28% → Edge: 4% ✗
-     Skipped (edge below 8% threshold)
-
-... (continues) ...
-
-Scan complete!
-  • Trades executed: 3
-  • Capital deployed: $9.45
-  • API cost: $1.12 SerenBucks
-  • Next scan: in 10 minutes
-```
-
-### Log Files
-
-All activity automatically written to log files:
-
-**trades.jsonl** - One line per trade:
+### trades.jsonl
+One line per trade (opened or closed):
 
 ```json
 {"timestamp": "2026-02-12T14:35:00Z", "market": "Will BTC hit $100k by March?", "market_id": "0x123...", "side": "BUY", "size": 3.24, "price": 0.54, "fair_value": 0.67, "edge": 0.13, "status": "open", "pnl": null}
-{"timestamp": "2026-02-12T18:22:00Z", "market": "Will BTC hit $100k by March?", "market_id": "0x123...", "side": "BUY", "size": 3.24, "price": 0.54, "fair_value": 0.67, "edge": 0.13, "status": "closed", "pnl": 0.84}
 ```
 
-**scan_results.jsonl** - One line per scan cycle:
+### scan_results.jsonl
+One line per scan cycle:
 
 ```json
 {"timestamp": "2026-02-12T14:35:00Z", "dry_run": false, "markets_scanned": 500, "opportunities_found": 23, "trades_executed": 3, "capital_deployed": 9.45, "api_cost": 1.12, "serenbucks_balance": 48.88, "polymarket_balance": 103.45}
 ```
 
-**positions.json** - Current state (updated after each trade):
+### positions.json
+Current state (updated after each trade):
 
 ```json
 {
@@ -717,6 +459,7 @@ All activity automatically written to log files:
     {
       "market": "Will BTC hit $100k by March?",
       "market_id": "0x123...",
+      "token_id": "0x456...",
       "side": "BUY",
       "entry_price": 0.54,
       "current_price": 0.58,
@@ -725,229 +468,155 @@ All activity automatically written to log files:
       "opened_at": "2026-02-12T14:35:00Z"
     }
   ],
-  "total_value": 103.45,
-  "unrealized_pnl": 3.45,
+  "total_unrealized_pnl": 0.84,
+  "position_count": 1,
   "last_updated": "2026-02-12T18:00:00Z"
 }
 ```
 
-### Chat Notifications (Critical Events)
+### notifications.jsonl
+Critical events for user notification:
 
-Send chat messages for important events:
-
-#### Bankroll Depletion
-
-```
-⚠️ Polymarket Trader Alert - Bankroll Depleted
-
-Your bankroll has dropped below the stop loss threshold:
-  • Current bankroll: $2.15
-  • Stop loss threshold: $0.00
-  • Status: ❌ Trading paused automatically
-
-Open positions: 3 (total exposure: $18.45)
-Unrealized P&L: -$4.32
-
-The agent has stopped scanning. To resume trading:
-1. Deposit more funds to Polymarket
-2. Update bankroll: 'update config'
-3. Resume trading: 'resume trading'
+```json
+{"timestamp": "2026-02-12T15:00:00Z", "level": "warning", "title": "Low SerenBucks Balance", "message": "Current: $1.23, Recommended: $20.00"}
 ```
 
-#### API Errors
+---
 
-```
-⚠️ Polymarket Trader Alert - API Error
+## How It Works (Technical Details)
 
-Scan cycle failed:
-  • Error: Polymarket API timeout (HTTP 504)
-  • Time: 2:35 PM
-  • Retry: Will retry in 10 minutes
+### Fair Value Estimation
 
-If errors persist, check:
-  • Polymarket API status: https://status.polymarket.com
-  • Your network connectivity
-  • API credentials: 'update polymarket credentials'
+The bot uses Claude to estimate true probabilities:
 
-Current status: Agent still enabled, will retry automatically
-```
+```python
+def estimate_fair_value(market_question, current_price, research):
+    prompt = f"""You are an expert analyst estimating the true probability of prediction market outcomes.
 
-#### Credential Issues
+Market Question: {market_question}
 
-```
-⚠️ Polymarket Trader Alert - Authentication Failed
+Current Market Price: {current_price * 100:.1f}%
 
-Your Polymarket credentials appear to be invalid or expired:
-  • Error: Invalid signature (HTTP 401)
-  • Status: ❌ Trading paused
+Research Summary:
+{research}
 
-Please update your credentials:
-  • Via Settings: Settings > Wallet > Polymarket Trading
-  • Via chat: 'update polymarket credentials'
+Based on the research and your analysis, estimate the TRUE probability of this outcome occurring.
 
-Once updated, resume with: 'resume trading'
-```
+Provide your response in this exact format:
+PROBABILITY: [number between 0 and 100]
+CONFIDENCE: [low, medium, or high]
+REASONING: [brief explanation]"""
 
-#### Large Win
+    # Call Claude via seren-models
+    response = seren.call_publisher(
+        publisher='seren-models',
+        method='POST',
+        path='/chat/completions',
+        body={
+            'model': 'anthropic/claude-sonnet-4-20250514',
+            'messages': [{'role': 'user', 'content': prompt}],
+            'temperature': 0.3
+        }
+    )
 
-```
-🎉 Polymarket Trader - Significant Win!
-
-Position closed with profit:
-  • Market: "Will BTC hit $100k by March?"
-  • Outcome: YES (won)
-  • Entry: $3.24 @ 54%
-  • Exit: $6.00 (resolved)
-  • Profit: +$2.76 (+85%)
-
-Current status:
-  • Session P&L: +$8.45
-  • Bankroll: $108.45
-  • Win rate: 65% (13/20 trades)
-
-Keep it up! 📈
+    # Parse and return
+    # (parsing logic extracts PROBABILITY and CONFIDENCE from response)
 ```
 
-#### Large Loss
+### Position Sizing (Kelly Criterion)
 
-```
-📊 Polymarket Trader - Position Closed
+```python
+def calculate_position_size(fair_value, market_price, bankroll, max_kelly=0.06):
+    """
+    Calculate optimal position size using Kelly Criterion
 
-Significant loss on position:
-  • Market: "Will Fed cut rates in Q1?"
-  • Outcome: NO (lost)
-  • Entry: $4.50 @ 68%
-  • Exit: $0.00 (resolved against us)
-  • Loss: -$4.50 (-100%)
+    Formula: kelly = (fair_value - price) / (1 - price) for BUY
+    Uses quarter-Kelly (divide by 4) for conservatism
+    Caps at max_kelly of bankroll
+    """
+    kelly = (fair_value - market_price) / (1 - market_price)
+    kelly_adjusted = kelly / 4  # Quarter-Kelly
+    kelly_capped = min(kelly_adjusted, max_kelly)
 
-Current status:
-  • Session P&L: -$2.23
-  • Bankroll: $97.77
-  • Win rate: 58% (11/19 trades)
-
-The agent continues scanning for opportunities.
-```
-
-## Error Handling & Recovery
-
-### Graceful Degradation
-
-The agent handles errors without crashing:
-
-#### Low SerenBucks Balance
-
-```
-⚠️ Low SerenBucks Balance
-
-Current balance: $0.75 (need ~$0.50-2.00 per scan)
-
-The agent will continue scanning but may fail if balance runs out.
-Please deposit SerenBucks: https://app.serendb.com/wallet/deposit
+    position_size = bankroll * kelly_capped
+    return round(position_size, 2)
 ```
 
-Agent continues until balance is completely depleted.
+---
 
-#### Low Polymarket Balance
+## Known Limitations & TODOs
 
-```
-⚠️ Low Polymarket Trading Balance
+### Currently Implemented ✅
+- ✅ Seren API client
+- ✅ Polymarket client wrapper
+- ✅ Fair value estimation via Claude
+- ✅ Kelly Criterion calculator
+- ✅ Position tracking
+- ✅ Comprehensive logging
+- ✅ Dry-run mode
+- ✅ Configuration system
+- ✅ Environment variable credentials
 
-Current balance: $15.20
-Configured bankroll: $100.00
+### Not Yet Implemented ❌
+- ❌ **Market scanning** - Placeholder code only (needs polymarket-data integration)
+- ❌ **Actual Polymarket balance checking** - Placeholder (needs blockchain query)
+- ❌ **EIP-712 order signing** - Simplified (needs cryptographic signing)
+- ❌ **Position closing logic** - Not automated
+- ❌ **Email/webhook notifications** - Only logs to files
+- ❌ **Web dashboard** - Command-line only
+- ❌ **Backtesting** - No historical data testing
 
-The agent will only place trades up to your available balance.
-Position sizes will be smaller than configured.
+**To complete the implementation:**
+1. Integrate with Polymarket public API for market scanning
+2. Implement proper EIP-712 signature generation for orders
+3. Add position closing/rebalancing logic
+4. Build notification system (email, webhook, or chat integration)
+5. Create web dashboard for monitoring
 
-To restore full functionality, deposit USDC to: {address}
-```
+---
 
-Agent trades with available funds, smaller positions.
+## Cost Estimation
 
-#### API Rate Limits
+### SerenBucks (API Calls)
+Per scan cycle:
+- Perplexity research: $0.01 × markets researched
+- Claude fair value: $0.01 × markets evaluated
+- Total: ~$0.50-2.00 per scan (depends on markets scanned)
 
-```
-⚠️ Polymarket API Rate Limit Hit
+**Daily costs:**
+- Every 5 min: $5-10/day
+- Every 10 min: $2-5/day
+- Every 30 min: $0.50-1.50/day
 
-The agent has hit Polymarket's rate limit:
-  • Limit: 100 requests/minute
-  • Current usage: 105 requests/minute
+### Polymarket Trading
+- Order placement: $0.005 per order
+- Order cancellation: $0.002 per cancellation
+- Price queries: $0.001 per request
 
-Automatic response:
-  ✓ Reducing scan frequency temporarily
-  ✓ Will retry in 2 minutes
-  ✓ Normal frequency resumes after 10 minutes
+---
 
-No action needed - this is handled automatically.
-```
+## Troubleshooting
 
-Agent backs off, reduces frequency temporarily.
+### "SEREN_API_KEY is required"
+- Create `.env` file from `.env.example`
+- Add your Seren API key
 
-#### Repeated Failures
+### "Polymarket credentials required"
+- Add `POLY_API_KEY`, `POLY_PASSPHRASE`, `POLY_ADDRESS` to `.env`
 
-```
-⚠️ Polymarket Trader - Multiple Failures
+### "Market scanning not yet implemented"
+- This is expected - market scanning needs to be implemented
+- See "Known Limitations" section above
 
-The agent has encountered 3 consecutive scan failures:
-  1. 2:30 PM - Polymarket API timeout
-  2. 2:40 PM - Polymarket API timeout
-  3. 2:50 PM - Polymarket API timeout
+### "Low SerenBucks balance"
+- Deposit at: https://app.serendb.com/wallet/deposit
+- Maintain at least $20 for smooth operation
 
-Status: ❌ Trading paused automatically (circuit breaker)
+### "Publisher call failed: 401"
+- Check your API keys are correct
+- Verify credentials haven't expired
 
-This usually indicates:
-  • Polymarket API is down
-  • Network connectivity issues
-  • Rate limiting
-
-Check Polymarket status: https://status.polymarket.com
-
-The agent will not retry automatically. To resume:
-1. Verify Polymarket API is working
-2. Resume trading: 'resume trading'
-```
-
-After 3 consecutive failures, agent pauses automatically.
-
-### Safety Guardrails
-
-Built-in protections:
-
-1. **Maximum Position Size Enforced**
-   - No single trade can exceed `max_kelly_fraction` of bankroll
-   - Prevents over-concentration
-
-2. **Stop Loss Automatically Pauses**
-   - When bankroll drops to `stop_loss_bankroll`, trading stops
-   - Prevents total loss
-
-3. **Sanity Checks on Fair Value**
-   - Rejects estimates with "low" confidence
-   - Requires confidence level of "medium" or "high"
-
-4. **Rate Limiting on API Calls**
-   - Tracks SerenBucks spend per cycle
-   - Warns if costs exceed $5 per cycle
-
-5. **Explicit Confirmation Required**
-   - User must type "START LIVE TRADING" exactly
-   - No accidental live trading
-
-## Testing Checklist
-
-Before considering the skill working, verify:
-
-- [ ] Credential storage/retrieval works
-- [ ] Balance checking (SerenBucks + Polymarket)
-- [ ] Dry-run mode executes without placing trades
-- [ ] Live trading requires exact confirmation text
-- [ ] Seren-cron scheduling works
-- [ ] Real-time chat updates display during scans
-- [ ] Log files written correctly (trades.jsonl, scan_results.jsonl, positions.json)
-- [ ] Error notifications trigger (low balance, API errors, etc.)
-- [ ] Stop loss pauses trading when triggered
-- [ ] All control commands work (status, pause, resume, stop)
-- [ ] Config updates persist and restart cron if needed
-- [ ] Positions tracked accurately with P&L
+---
 
 ## Best Practices
 
@@ -955,51 +624,21 @@ Before considering the skill working, verify:
 
 1. **Start small**: Test with $50-100 before scaling up
 2. **Use dry-run first**: Always test before going live
-3. **Monitor regularly**: Check 'show status' daily
-4. **Adjust conservatively**: Increase bankroll gradually based on results
+3. **Monitor regularly**: Check logs and positions daily
+4. **Adjust conservatively**: Increase bankroll gradually
 5. **Understand the risks**: Only trade what you can afford to lose
-6. **Keep SerenBucks funded**: Maintain at least $20 balance for uninterrupted operation
+6. **Keep funded**: Maintain sufficient SerenBucks balance
 
-### For the Agent (Implementation Notes)
+### For Developers
 
-1. **Always validate inputs**: Check all config parameters are in valid ranges
-2. **Never skip confirmation**: Live trading requires exact "START LIVE TRADING" text
+1. **Always validate inputs**: Check config parameters are in valid ranges
+2. **Never skip confirmation**: Live trading requires explicit user consent
 3. **Log everything**: All trades, scans, errors go to log files
 4. **Handle errors gracefully**: Never crash - log and notify
-5. **Protect credentials**: Pass via environment variables, never log
-6. **Estimate costs proactively**: Warn users about SerenBucks costs before starting
+5. **Protect credentials**: Use environment variables, never log secrets
+6. **Estimate costs proactively**: Warn users about SerenBucks costs
 
-## Common Pitfalls
-
-### User Mistakes
-
-1. **Insufficient balance**: Forgetting to fund SerenBucks or Polymarket
-2. **Over-aggressive config**: Setting thresholds too low, positions too large
-3. **Ignoring notifications**: Missing alerts about errors or low balances
-4. **Expecting instant profits**: Prediction markets take time, variance is high
-
-### Implementation Mistakes
-
-1. **Not handling expired credentials**: API keys can expire, must detect and notify
-2. **Silent failures**: Always notify user of errors via chat
-3. **Incorrect Kelly calculation**: Double-check the math: `kelly = (p * (b + 1) - 1) / b`
-4. **Not validating API responses**: Check for errors before using data
-5. **Skipping dry-run**: Always offer dry-run, don't go straight to live
-
-## Success Criteria
-
-The skill is working when:
-
-✅ User can set up trading in < 5 minutes
-✅ Dry-run mode works without real trades
-✅ Live trading requires explicit confirmation with risk warnings
-✅ Agent runs autonomously via seren-cron
-✅ All control commands work intuitively
-✅ Real-time chat updates during scans
-✅ Persistent logs with complete trade history
-✅ Error handling for all failure modes
-✅ Stop loss automatically pauses trading
-✅ Users can monitor P&L easily
+---
 
 ## AgentSkills.io Standard
 
