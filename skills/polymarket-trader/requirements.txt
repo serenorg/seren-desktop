@@ -4,6 +4,9 @@
 requests>=2.31.0
 python-dotenv>=1.0.0
 
+# Ethereum account management for EIP-712 signing
+eth-account>=0.10.0
+
 # Polymarket CLOB client (official Python SDK)
 # Note: Install with: pip install py-clob-client
 py-clob-client>=0.1.0

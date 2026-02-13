@@ -23,7 +23,7 @@ from datetime import datetime
 
 # Import our modules
 from seren_client import SerenClient
-from polymarket_client import PolymarketClient
+from polymarket_client_updated import PolymarketClient
 from position_tracker import PositionTracker
 from logger import TradingLogger
 import kelly
@@ -98,22 +98,21 @@ class TradingAgent:
         """
         Scan Polymarket for active markets
 
-        NOTE: This is a placeholder. Real implementation would need to:
-        1. Call polymarket-data publisher or public API
-        2. Filter for active markets
-        3. Extract market details (question, token_id, current_price, etc.)
-
         Args:
             limit: Max markets to return
 
         Returns:
             List of market dicts
         """
-        # TODO: Implement actual market scanning
-        # For now, return empty list
-        print("⚠️  Market scanning not yet implemented")
-        print("    This would call polymarket-data publisher to fetch active markets")
-        return []
+        try:
+            print(f"  Fetching up to {limit} active markets from Polymarket...")
+            markets = self.polymarket.get_markets(limit=limit, active=True)
+            print(f"  ✓ Retrieved {len(markets)} markets with sufficient liquidity")
+            return markets
+        except Exception as e:
+            print(f"  ⚠️  Market scanning failed: {e}")
+            print(f"     This may indicate polymarket-data publisher is unavailable")
+            return []
 
     def research_opportunity(self, market_question: str) -> str:
         """
@@ -355,7 +354,7 @@ class TradingAgent:
         print()
 
         if not markets:
-            print("⚠️  No markets to scan (market scanning not yet implemented)")
+            print("⚠️  No markets found - check polymarket-data publisher availability")
             print()
 
             # Log scan result
@@ -368,15 +367,16 @@ class TradingAgent:
                 api_cost=0.0,
                 serenbucks_balance=balances['serenbucks'],
                 polymarket_balance=balances['polymarket'],
-                errors=['Market scanning not implemented']
+                errors=['No markets returned from polymarket-data']
             )
             return
 
         # Evaluate opportunities
         opportunities = []
-        for market in markets:
+        for market in markets[:20]:  # Limit to top 20 to control API costs
             print(f"Evaluating: \"{market['question']}\"")
             print(f"  Current price: {market['price'] * 100:.1f}%")
+            print(f"  Liquidity: ${market['liquidity']:.2f}")
 
             # Research
             research = self.research_opportunity(market['question'])
@@ -413,7 +413,7 @@ class TradingAgent:
 
         # Log scan result
         # Estimate API cost (rough approximation)
-        api_cost = len(markets) * 0.02  # ~$0.02 per market scanned
+        api_cost = len(markets[:20]) * 0.05  # ~$0.05 per market (research + estimate)
         self.logger.log_scan_result(
             dry_run=self.dry_run,
             markets_scanned=len(markets),
@@ -428,10 +428,11 @@ class TradingAgent:
         print("=" * 60)
         print("Scan complete!")
         print(f"  Markets scanned: {len(markets)}")
+        print(f"  Markets analyzed: {min(20, len(markets))}")
         print(f"  Opportunities: {len(opportunities)}")
         print(f"  Trades executed: {trades_executed}")
         print(f"  Capital deployed: ${capital_deployed:.2f}")
-        print(f"  API cost: ~${api_cost:.2f} SerenBucks")
+        print(f"  Estimated API cost: ~${api_cost:.2f} SerenBucks")
         print("=" * 60)
         print()
 

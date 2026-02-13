@@ -34,6 +34,8 @@
 - ✅ Max position limits
 - ✅ Dry-run mode
 - ✅ Configuration validation
+- ✅ Market scanning via polymarket-data publisher
+- ✅ EIP-712 order signing with eth-account
 
 ### Legal & Compliance
 - ✅ Geographic restriction warnings (US ban)
@@ -46,29 +48,48 @@
 
 ---
 
-## ❌ Not Yet Implemented (Placeholders)
+## ✅ Recently Completed
 
-### Critical Missing Pieces
+#### 1. Market Scanning ✅ **COMPLETED**
+**Status:** Fully implemented
 
-#### 1. Market Scanning ❌
-**Status:** Placeholder code only
+**What was added:**
+- Integration with polymarket-data publisher via Seren MCP
+- Fetches active markets with liquidity filtering (min $100)
+- Extracts market data (question, token_id, price, volume, liquidity)
+- Error handling for API failures
 
-**What's needed:**
-- Integration with Polymarket public API or polymarket-data publisher
-- Fetch list of active markets
-- Extract market data (question, token_id, current_price, etc.)
-
-**Current workaround:**
-- `scan_markets()` returns empty list
-- Agent will run but find no opportunities
-
-**Implementation priority:** HIGH
-
-**Estimated effort:** 2-4 hours
+**Implementation:**
+- `get_markets()` in polymarket_client.py calls polymarket-data publisher
+- `scan_markets()` in agent.py wraps with error handling
+- Filters markets by liquidity to focus on tradeable opportunities
 
 ---
 
-#### 2. Polymarket Balance Checking ❌
+#### 2. EIP-712 Order Signing ✅ **COMPLETED**
+**Status:** Fully implemented with eth-account
+
+**What was added:**
+- EIP-712 typed data structure builder
+- Private key signing using eth-account library
+- Proper nonce and expiration handling
+- Maker/taker amount calculations
+
+**Implementation:**
+- `_build_eip712_order()` creates properly formatted typed data
+- `_sign_order()` signs with POLY_PRIVATE_KEY from environment
+- `place_order()` submits signed orders to CLOB
+- Added eth-account>=0.10.0 to requirements.txt
+
+**Note:** Requires POLY_PRIVATE_KEY environment variable
+
+---
+
+## ❌ Still Not Implemented
+
+### Remaining Placeholders
+
+#### 1. Polymarket Balance Checking ❌
 **Status:** Placeholder code only
 
 **What's needed:**
@@ -83,20 +104,6 @@
 **Implementation priority:** MEDIUM
 
 **Estimated effort:** 1-2 hours
-
----
-
-#### 3. EIP-712 Order Signing ❌
-**Status:** Simplified (not production-ready)
-
-**What's needed:**
-- Build EIP-712 typed data structure
-- Sign order with private key (from POLY_SECRET)
-- Submit signed order to CLOB
-
-**Current state:**
-- `place_order()` sends unsigned order data
-- Will fail on actual Polymarket API
 
 **Implementation priority:** HIGH (required for trading)
 
