@@ -86,7 +86,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     try {
       // If skill is from marketplace (not installed), install it first
       let installedSkill: InstalledSkill;
-      if ('scope' in skill && 'path' in skill) {
+      if ("scope" in skill && "path" in skill) {
         // Already installed
         installedSkill = skill as InstalledSkill;
       } else {
@@ -94,16 +94,18 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         const marketplaceSkill = skill as Skill;
         const content = await skillsService.fetchContent(marketplaceSkill);
         if (!content) {
-          console.error('[ThreadSidebar] Failed to fetch skill content');
+          console.error("[ThreadSidebar] Failed to fetch skill content");
           return;
         }
-        await skillsStore.install(marketplaceSkill, content, 'seren');
+        await skillsStore.install(marketplaceSkill, content, "seren");
         await skillsStore.refreshInstalled();
 
         // Find the newly installed skill
-        const found = skillsStore.installed.find(s => s.slug === marketplaceSkill.slug);
+        const found = skillsStore.installed.find(
+          (s) => s.slug === marketplaceSkill.slug,
+        );
         if (!found) {
-          console.error('[ThreadSidebar] Skill installed but not found');
+          console.error("[ThreadSidebar] Skill installed but not found");
           return;
         }
         installedSkill = found;
@@ -115,7 +117,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     }
   };
 
-  const openSkillsManager = () => {
+  const _openSkillsManager = () => {
     // Open Settings page with Skills tab selected
     window.dispatchEvent(
       new CustomEvent("seren:open-settings", { detail: { tab: "skills" } }),
@@ -141,11 +143,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     }
 
     // When searching, include installed + available marketplace skills
-    const installedSlugs = new Set(skillsStore.installed.map(s => s.slug));
+    const installedSlugs = new Set(skillsStore.installed.map((s) => s.slug));
     const allSkills = [
       ...skillsStore.installed,
       ...skillsStore.available.filter(
-        (available) => !installedSlugs.has(available.slug)
+        (available) => !installedSlugs.has(available.slug),
       ),
     ];
 
@@ -157,13 +159,13 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     );
   };
 
-  const showJustChat = () => {
+  const _showJustChat = () => {
     const q = launcherQuery().toLowerCase().trim();
     if (!q) return true;
     return "just chat".includes(q) || "chat".includes(q);
   };
 
-  const [showAgentPicker, setShowAgentPicker] = createSignal(false);
+  const [_showAgentPicker, setShowAgentPicker] = createSignal(false);
 
   const currentAgentLabel = () => {
     if (threadStore.preferChat) return "Seren Agent";
@@ -171,7 +173,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     const selected = agents.find(
       (a) => a.type === acpStore.selectedAgentType && a.available,
     );
-    if (selected) return selected.type === "codex" ? "Codex Agent" : "Claude Agent";
+    if (selected)
+      return selected.type === "codex" ? "Codex Agent" : "Claude Agent";
 
     const claude = agents.find((a) => a.type === "claude-code" && a.available);
     if (claude) return "Claude Agent";
@@ -180,17 +183,17 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     return "Seren Agent";
   };
 
-  const currentAgentIcon = () => {
+  const _currentAgentIcon = () => {
     const label = currentAgentLabel();
     if (label === "Codex Agent") return "\u26A1";
     if (label === "Claude Agent") return "\u{1F916}";
     return "\u{1F4AC}";
   };
 
-  const availableAgentOptions = () =>
+  const _availableAgentOptions = () =>
     acpStore.availableAgents.filter((a) => a.available);
 
-  const selectPreferredAgent = (agentType: AgentType) => {
+  const _selectPreferredAgent = (agentType: AgentType) => {
     threadStore.setPreferChat(false);
     acpStore.setSelectedAgentType(agentType);
     setShowAgentPicker(false);
@@ -340,7 +343,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               />
             </svg>
           </Show>
-          {spawning() ? "Starting..." : "New"}
+          {spawning() ? "Starting..." : "New Agent"}
         </button>
 
         <Show when={showLauncher()}>
@@ -356,7 +359,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             </button>
 
             {/* Claude Agent */}
-            <Show when={acpStore.availableAgents.some(a => a.type === "claude-code" && a.available)}>
+            <Show
+              when={acpStore.availableAgents.some(
+                (a) => a.type === "claude-code" && a.available,
+              )}
+            >
               <button
                 type="button"
                 class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
@@ -373,7 +380,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             </Show>
 
             {/* Codex Agent */}
-            <Show when={acpStore.availableAgents.some(a => a.type === "codex" && a.available)}>
+            <Show
+              when={acpStore.availableAgents.some(
+                (a) => a.type === "codex" && a.available,
+              )}
+            >
               <button
                 type="button"
                 class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
@@ -468,8 +479,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               class="flex items-center justify-center gap-2 w-full mt-2 py-2 px-3 bg-primary/8 border border-primary/15 rounded-md text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/15 hover:border-primary/25 active:scale-[0.98]"
               onClick={async () => {
                 // Find Skill Creator in installed or available skills
-                const skillCreator = skillsStore.installed.find(s => s.slug === 'skill-creator') ||
-                  skillsStore.available.find(s => s.slug === 'skill-creator');
+                const skillCreator =
+                  skillsStore.installed.find(
+                    (s) => s.slug === "skill-creator",
+                  ) ||
+                  skillsStore.available.find((s) => s.slug === "skill-creator");
                 if (skillCreator) {
                   await handleSkillThread(skillCreator);
                 }
@@ -483,6 +497,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                 stroke="currentColor"
                 stroke-width="1.5"
                 stroke-linecap="round"
+                aria-label="Plus icon"
+                role="img"
               >
                 <path d="M8 3v10M3 8h10" />
               </svg>
@@ -524,7 +540,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         </svg>
                       </span>
                       <div class="flex-1 min-w-0">
-                        <div class="text-[13px] font-medium text-foreground">{skill.name}</div>
+                        <div class="text-[13px] font-medium text-foreground">
+                          {skill.name}
+                        </div>
                         <Show when={skill.description}>
                           <div class="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
                             {skill.description}
@@ -646,7 +664,10 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           class="opacity-0 group-hover:opacity-100 hover:!opacity-100 ml-1 shrink-0 w-4 h-4 flex items-center justify-center rounded hover:bg-surface-3 text-muted-foreground hover:text-foreground transition-all"
                           onClick={async (e) => {
                             e.stopPropagation();
-                            await threadStore.archiveThread(thread.id, thread.kind);
+                            await threadStore.archiveThread(
+                              thread.id,
+                              thread.kind,
+                            );
                           }}
                           title="Close thread"
                         >

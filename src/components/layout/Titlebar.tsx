@@ -176,14 +176,6 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
 
         <Show when={authStore.isAuthenticated}>
           <BalanceDisplay />
-          <button
-            type="button"
-            class="flex items-center justify-center h-7 px-3 border border-destructive/30 rounded-md bg-transparent text-destructive text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-destructive/10 hover:border-destructive/50 active:scale-95"
-            onClick={props.onSignOutClick}
-            title="Sign out of your Seren account"
-          >
-            Sign Out
-          </button>
         </Show>
 
         <button
@@ -195,23 +187,45 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           <svg
             width="16"
             height="16"
-            viewBox="0 0 16 16"
+            viewBox="0 0 24 24"
             fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
             role="img"
             aria-label="Settings"
           >
-            <path
-              d="M8 10a2 2 0 100-4 2 2 0 000 4z"
-              stroke="currentColor"
-              stroke-width="1.2"
-            />
-            <path
-              d="M13.5 8a5.5 5.5 0 01-.4 2.1l1.3 1.3-1.4 1.4-1.3-1.3A5.5 5.5 0 018 13.5a5.5 5.5 0 01-2.1-.4l-1.3 1.3-1.4-1.4 1.3-1.3A5.5 5.5 0 012.5 8c0-.7.1-1.4.4-2.1L1.6 4.6 3 3.2l1.3 1.3A5.5 5.5 0 018 2.5c.7 0 1.4.1 2.1.4l1.3-1.3 1.4 1.4-1.3 1.3c.3.7.4 1.4.4 2.1z"
-              stroke="currentColor"
-              stroke-width="1.2"
-            />
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <circle cx="12" cy="12" r="3" />
           </svg>
         </button>
+
+        <Show when={authStore.isAuthenticated}>
+          <button
+            type="button"
+            class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
+            onClick={props.onSignOutClick}
+            title="Sign out"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-label="Sign out icon"
+              role="img"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
+        </Show>
 
         <Show when={!authStore.isAuthenticated}>
           <button
