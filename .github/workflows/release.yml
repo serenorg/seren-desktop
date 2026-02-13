@@ -11,6 +11,11 @@ on:
 permissions:
   contents: write
 
+# Prevent multiple releases from running simultaneously
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
