@@ -572,18 +572,86 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
-      - name: Setup AWS CLI for R2
-        run: |
-          pip install awscli
+      # Step 1: Upload assets to GitHub release and publish (undraft) it
+      - name: Publish release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
 
-      - name: Verify GitHub release exists before R2 upload
+            const releaseId = '${{ needs.create-release.outputs.release_id }}';
+            const artifactsDir = 'artifacts';
+
+            if (!releaseId) {
+              throw new Error('No release ID available - create-release job may have failed');
+            }
+
+            console.log(`Publishing to release ID: ${releaseId}`);
+
+            // Get existing assets to avoid duplicates
+            const existingAssets = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId
+            });
+            const existingNames = new Set(existingAssets.data.map(a => a.name));
+
+            // Upload all artifact files (track names to prevent duplicates within this run)
+            const uploadAsset = async (filePath, fileName) => {
+              if (existingNames.has(fileName)) {
+                console.log(`Skipping ${fileName} - already exists`);
+                return;
+              }
+              const content = fs.readFileSync(filePath);
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+                name: fileName,
+                data: content
+              });
+              existingNames.add(fileName);
+            };
+
+            // Walk through artifacts directory
+            const walkDir = async (dir) => {
+              const files = fs.readdirSync(dir);
+              for (const file of files) {
+                const filePath = path.join(dir, file);
+                const stat = fs.statSync(filePath);
+                if (stat.isDirectory()) {
+                  await walkDir(filePath);
+                } else {
+                  console.log(`Uploading: ${filePath}`);
+                  await uploadAsset(filePath, file);
+                }
+              }
+            };
+
+            await walkDir(artifactsDir);
+
+            // Undraft the release
+            console.log('Setting release to published (non-draft)');
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              draft: false
+            });
+
+            console.log('Release published successfully!');
+
+      # Step 2: Verify the release is now published before uploading to R2
+      # This ensures the auto-updater (latest.json) only points to a fully published release
+      - name: Verify GitHub release is published before R2 upload
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
-          echo "Verifying GitHub release exists for $TAG..."
+          echo "Verifying GitHub release is published for $TAG..."
 
-          # Check if release exists and is published
+          # Check if release exists and is published (not draft)
           RELEASE_INFO=$(gh api repos/${{ github.repository }}/releases/tags/$TAG 2>&1)
 
           if [ $? -ne 0 ]; then
@@ -593,7 +661,19 @@ jobs:
             exit 1
           fi
 
-          echo "✓ GitHub release verified: $TAG exists"
+          IS_DRAFT=$(echo "$RELEASE_INFO" | jq -r '.draft')
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "ERROR: GitHub release for $TAG is still a draft!"
+            echo "The publish step may have failed. Cannot upload to R2."
+            exit 1
+          fi
+
+          echo "✓ GitHub release verified: $TAG is published"
+
+      # Step 3: Now safe to upload to R2 — release is confirmed published
+      - name: Setup AWS CLI for R2
+        run: |
+          pip install awscli
 
       - name: Upload updater artifacts to R2
         env:
@@ -779,72 +859,3 @@ jobs:
               --content-type "application/vnd.debian.binary-package"
             echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
           done
-
-      - name: Publish release
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-
-            const releaseId = '${{ needs.create-release.outputs.release_id }}';
-            const artifactsDir = 'artifacts';
-
-            if (!releaseId) {
-              throw new Error('No release ID available - create-release job may have failed');
-            }
-
-            console.log(`Publishing to release ID: ${releaseId}`);
-
-            // Get existing assets to avoid duplicates
-            const existingAssets = await github.rest.repos.listReleaseAssets({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: releaseId
-            });
-            const existingNames = new Set(existingAssets.data.map(a => a.name));
-
-            // Upload all artifact files (track names to prevent duplicates within this run)
-            const uploadAsset = async (filePath, fileName) => {
-              if (existingNames.has(fileName)) {
-                console.log(`Skipping ${fileName} - already exists`);
-                return;
-              }
-              const content = fs.readFileSync(filePath);
-              await github.rest.repos.uploadReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: releaseId,
-                name: fileName,
-                data: content
-              });
-              existingNames.add(fileName);
-            };
-
-            // Walk through artifacts directory
-            const walkDir = async (dir) => {
-              const files = fs.readdirSync(dir);
-              for (const file of files) {
-                const filePath = path.join(dir, file);
-                const stat = fs.statSync(filePath);
-                if (stat.isDirectory()) {
-                  await walkDir(filePath);
-                } else {
-                  console.log(`Uploading: ${filePath}`);
-                  await uploadAsset(filePath, file);
-                }
-              }
-            };
-
-            await walkDir(artifactsDir);
-
-            // Undraft the release
-            console.log('Setting release to published (non-draft)');
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: releaseId,
-              draft: false
-            });
-
-            console.log('Release published successfully!');
