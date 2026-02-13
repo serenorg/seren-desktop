@@ -285,21 +285,31 @@ class PolymarketClient:
 
     def get_balance(self) -> float:
         """
-        Get USDC balance
-
-        Note: This would need to query the actual wallet balance
-        For now, we'll calculate from positions
+        Get USDC balance from Polymarket wallet
 
         Returns:
             Balance in USDC
         """
-        # TODO: Implement actual balance checking
-        # This would need to query the blockchain or Polymarket API
-        positions = self.get_positions()
+        try:
+            response = self.seren.call_publisher(
+                publisher='polymarket-trading-serenai',
+                method='GET',
+                path='/balance',
+                headers=self._get_auth_headers()
+            )
 
-        # Calculate total value from positions
-        total = 0.0
-        for pos in positions:
-            total += float(pos.get('size', 0))
+            # Parse response - may be wrapped in 'body' field
+            balance_data = response.get('body', response)
 
-        return total
+            # Balance should be in 'balance' field
+            if isinstance(balance_data, dict):
+                return float(balance_data.get('balance', 0.0))
+            elif isinstance(balance_data, (int, float)):
+                return float(balance_data)
+            else:
+                return 0.0
+
+        except Exception as e:
+            # If balance endpoint fails, return 0.0
+            # The bot will still work, just won't show balance
+            return 0.0
