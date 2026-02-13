@@ -7,9 +7,13 @@ Tests all components without placing actual trades.
 import sys
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Add current directory to path
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Load environment variables from .env
+load_dotenv()
 
 print("=" * 70)
 print("POLYMARKET SKILL DRY-RUN TEST")
@@ -112,10 +116,9 @@ print("  4b. Testing Kelly Criterion calculator...")
 try:
     kelly_fraction = calculate_kelly_fraction(
         fair_value=0.65,
-        market_price=0.50,
-        confidence='high'
+        market_price=0.50
     )
-    print(f"  ✅ Kelly calculation: {kelly_fraction:.2%} (fair=65%, market=50%, high confidence)")
+    print(f"  ✅ Kelly calculation: {kelly_fraction:.2%} (fair=65%, market=50%)")
 except Exception as e:
     print(f"  ❌ Failed: {e}")
 
@@ -125,8 +128,16 @@ print()
 print("Test 5: Testing logging system...")
 try:
     logger = TradingLogger()
-    logger.log_scan_start()
-    logger.log_scan_complete(markets_scanned=5, opportunities_found=1, trades_executed=0)
+    logger.log_scan_result(
+        dry_run=True,
+        markets_scanned=5,
+        opportunities_found=1,
+        trades_executed=0,
+        capital_deployed=0.0,
+        api_cost=1.0,
+        serenbucks_balance=50.0,
+        polymarket_balance=100.0
+    )
     print("✅ Logger working")
 except Exception as e:
     print(f"❌ Failed: {e}")

@@ -59,20 +59,19 @@ print("Test 3: Testing Kelly Criterion calculator...")
 try:
     # Test various scenarios
     tests = [
-        {'fair': 0.65, 'market': 0.50, 'conf': 'high', 'expected_positive': True},
-        {'fair': 0.45, 'market': 0.50, 'conf': 'high', 'expected_positive': False},
-        {'fair': 0.50, 'market': 0.50, 'conf': 'medium', 'expected_positive': False},
+        {'fair': 0.65, 'market': 0.50, 'expected_positive': True, 'desc': 'BUY edge'},
+        {'fair': 0.45, 'market': 0.50, 'expected_positive': False, 'desc': 'SELL edge'},
+        {'fair': 0.50, 'market': 0.50, 'expected_positive': False, 'desc': 'No edge'},
     ]
 
     for test in tests:
         result = calculate_kelly_fraction(
             fair_value=test['fair'],
-            market_price=test['market'],
-            confidence=test['conf']
+            market_price=test['market']
         )
         is_positive = result > 0.001
         if is_positive == test['expected_positive']:
-            print(f"  ✅ Kelly({test['fair']:.0%} fair, {test['market']:.0%} market, {test['conf']}): {result:.2%}")
+            print(f"  ✅ Kelly({test['fair']:.0%} fair, {test['market']:.0%} market, {test['desc']}): {result:.2%}")
         else:
             print(f"  ❌ Kelly calculation unexpected: {result:.2%}")
 
