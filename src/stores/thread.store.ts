@@ -259,6 +259,12 @@ export const threadStore = {
   selectThread(id: string, kind: "chat" | "agent") {
     console.log("[Thread] selectThread - id:", id, "kind:", kind);
     setState({ activeThreadId: id, activeThreadKind: kind });
+    console.log(
+      "[Thread] selectThread - AFTER setState - activeThreadId:",
+      state.activeThreadId,
+      "activeThreadKind:",
+      state.activeThreadKind,
+    );
 
     // Keep the project context aligned with the selected thread.
     const thread = this.threads.find((t) => t.id === id);
