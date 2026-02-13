@@ -88,7 +88,8 @@ This skill helps users set up and manage an autonomous trading agent that:
 - `logger.py` - Trading logger
 
 **Seren Publishers Used:**
-- `polymarket-trading-serenai` - Market data + trading
+- `polymarket-data` - Market data (prices, volume, liquidity)
+- `polymarket-trading-serenai` - Trading operations (orders, positions, balance)
 - `perplexity` - AI-powered research
 - `seren-models` - LLM inference (Claude)
 - `seren-cron` - Job scheduling
@@ -558,7 +559,7 @@ def calculate_position_size(fair_value, market_price, bankroll, max_kelly=0.06):
 - ✅ Environment variable credentials
 
 ### Not Yet Implemented ❌
-- ❌ **Market scanning** - Placeholder code only (needs polymarket-data integration)
+
 - ❌ **Actual Polymarket balance checking** - Placeholder (needs blockchain query)
 - ❌ **EIP-712 order signing** - Simplified (needs cryptographic signing)
 - ❌ **Position closing logic** - Not automated

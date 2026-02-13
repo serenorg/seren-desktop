@@ -1,15 +1,12 @@
 # Polymarket Trading Bot Dependencies
+#
+# This skill uses Seren publishers for all Polymarket operations:
+# - polymarket-data: Market data (prices, volume, liquidity)
+# - polymarket-trading-serenai: Trading operations (orders, positions, balance)
 
 # Core dependencies
 requests>=2.31.0
 python-dotenv>=1.0.0
 
-# Polymarket CLOB client (official Python SDK)
-# Note: Install with: pip install py-clob-client
-py-clob-client>=0.1.0
-
-# Optional: For better date handling
+# Date handling
 python-dateutil>=2.8.2
-
-# Optional: For async operations (if needed later)
-# aiohttp>=3.9.0
