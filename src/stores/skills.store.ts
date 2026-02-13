@@ -206,6 +206,13 @@ export const skillsStore = {
     return state.installed.filter((s) => s.enabled !== false);
   },
 
+  /**
+   * Get thread skills state map.
+   */
+  get threadSkills(): Record<string, string[] | null | undefined> {
+    return threadSkillsState;
+  },
+
   // --------------------------------------------------------------------------
   // Config loading
   // --------------------------------------------------------------------------
