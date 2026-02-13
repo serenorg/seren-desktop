@@ -97,32 +97,38 @@ class PolymarketClient:
             # Skip closed markets
             if market_data.get('closed', False):
                 continue
-            # Extract relevant fields
-            market_id = market_data.get('condition_id') or market_data.get('id')
+
+            # Extract relevant fields (API uses camelCase)
+            market_id = market_data.get('conditionId') or market_data.get('id')
             question = market_data.get('question', '')
 
-            # Get YES token ID (we trade YES/NO outcomes)
-            tokens = market_data.get('tokens', [])
-            yes_token = None
-            for token in tokens:
-                if token.get('outcome', '').upper() == 'YES':
-                    yes_token = token
-                    break
+            # Get token IDs - they're stored as a JSON string
+            import json
+            clob_token_ids_str = market_data.get('clobTokenIds', '[]')
+            try:
+                token_ids = json.loads(clob_token_ids_str) if isinstance(clob_token_ids_str, str) else clob_token_ids_str
+            except:
+                token_ids = []
 
-            if not yes_token:
-                continue  # Skip markets without YES token
+            # Use first token ID (typically YES outcome for binary markets)
+            if not token_ids or len(token_ids) == 0:
+                continue  # Skip markets without tokens
 
-            token_id = yes_token.get('token_id', '')
+            token_id = token_ids[0]
 
-            # Get current price (best ask for YES)
-            price = float(market_data.get('outcome_prices', [0.5])[0])  # Default to 50%
+            # Get current price from outcomePrices (first is YES for binary)
+            outcome_prices = market_data.get('outcomePrices', ['0.5'])
+            try:
+                price = float(outcome_prices[0]) if outcome_prices else 0.5
+            except:
+                price = 0.5
 
             # Volume and liquidity
             volume = float(market_data.get('volume', 0))
             liquidity = float(market_data.get('liquidity', 0))
 
-            # End date
-            end_date = market_data.get('end_date_iso', '')
+            # End date (check both camelCase and snake_case)
+            end_date = market_data.get('endDateIso') or market_data.get('end_date_iso', '')
 
             # Only include markets with sufficient liquidity
             if liquidity < 100:  # Skip markets with < $100 liquidity
