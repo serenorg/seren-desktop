@@ -48,6 +48,10 @@ try:
     assert hasattr(PolymarketClient, 'get_positions'), "PolymarketClient missing get_positions"
     print("  ✅ PolymarketClient has all required methods")
 
+    # Check PositionTracker methods
+    assert hasattr(PositionTracker, 'sync_with_polymarket'), "PositionTracker missing sync_with_polymarket"
+    print("  ✅ PositionTracker has sync_with_polymarket method")
+
 except AssertionError as e:
     print(f"  ❌ {e}")
     sys.exit(1)
