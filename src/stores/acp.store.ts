@@ -634,6 +634,7 @@ export const acpStore = {
         apiKey ?? undefined,
         settingsStore.settings.agentApprovalPolicy,
         settingsStore.settings.agentSearchEnabled,
+        settingsStore.settings.agentNetworkEnabled,
         localSessionId,
         resumeAgentSessionId,
       );

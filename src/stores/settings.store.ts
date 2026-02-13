@@ -95,6 +95,7 @@ export interface Settings {
   agentSandboxMode: "read-only" | "workspace-write" | "full-access";
   agentApprovalPolicy: "untrusted" | "on-failure" | "on-request" | "never";
   agentSearchEnabled: boolean;
+  agentNetworkEnabled: boolean;
   agentAutoApproveReads: boolean;
 
   // Voice settings
@@ -180,6 +181,7 @@ const DEFAULT_SETTINGS: Settings = {
   agentSandboxMode: "workspace-write",
   agentApprovalPolicy: "on-request",
   agentSearchEnabled: false,
+  agentNetworkEnabled: true,
   agentAutoApproveReads: true,
   // Voice
   voiceAutoSubmit: true,

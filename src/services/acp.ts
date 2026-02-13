@@ -221,6 +221,7 @@ export type AcpEvent =
  * @param apiKey - Optional API key to enable Seren MCP tools for the agent
  * @param approvalPolicy - Optional approval policy for command execution
  * @param searchEnabled - Optional flag to enable web search
+ * @param networkEnabled - Optional flag to enable direct network access (uses full-access sandbox)
  */
 export async function spawnAgent(
   agentType: AgentType,
@@ -229,6 +230,7 @@ export async function spawnAgent(
   apiKey?: string,
   approvalPolicy?: string,
   searchEnabled?: boolean,
+  networkEnabled?: boolean,
   localSessionId?: string,
   resumeAgentSessionId?: string,
 ): Promise<AcpSessionInfo> {
@@ -241,6 +243,7 @@ export async function spawnAgent(
     apiKey: apiKey ?? null,
     approvalPolicy: approvalPolicy ?? null,
     searchEnabled: searchEnabled ?? null,
+    networkEnabled: networkEnabled ?? null,
   });
 }
 
