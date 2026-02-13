@@ -564,6 +564,16 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     });
 
     try {
+      // Include conversation history up to (but not including) the failed message
+      // so the AI can continue from where it left off instead of starting over
+      const messageIndex = conversationStore.messages.findIndex(
+        (m) => m.id === message.id,
+      );
+      const historyBeforeRetry =
+        messageIndex > 0
+          ? conversationStore.messages.slice(0, messageIndex)
+          : undefined;
+
       const content = await sendMessageWithRetry(
         message.request.prompt,
         message.model ?? chatStore.selectedModel,
@@ -574,6 +584,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             attemptCount: attempt + 1,
           });
         },
+        historyBeforeRetry,
       );
 
       const updated = {
