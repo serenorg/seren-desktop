@@ -80,8 +80,19 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   };
 
   const handleSkillThread = async (skill: InstalledSkill | Skill) => {
-    setShowLauncher(false);
-    setLauncherQuery("");
+    // Skills can only be added to an active thread
+    const activeThread = threadStore.activeThread;
+    if (!activeThread) {
+      console.warn("[ThreadSidebar] No active thread, cannot add skill");
+      return;
+    }
+
+    const cwd = fileTreeState.rootPath;
+    if (!cwd) {
+      console.warn("[ThreadSidebar] No project root, cannot add skill");
+      return;
+    }
+
     setSpawning(true);
     try {
       // If skill is from marketplace (not installed), install it first
@@ -111,7 +122,20 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         installedSkill = found;
       }
 
-      await threadStore.createSkillThread(installedSkill);
+      // Add skill to the active thread's enabled skills
+      const skillRef = `${installedSkill.scope}:${installedSkill.slug}`;
+      const currentSkills = skillsStore.threadSkills.get(activeThread.id) || [];
+      const newSkills = [...currentSkills, skillRef];
+
+      await skillsService.setThreadSkills(cwd, activeThread.id, newSkills);
+      await skillsStore.loadThreadSkills(cwd, activeThread.id, true);
+
+      console.log(
+        "[ThreadSidebar] Added skill",
+        skillRef,
+        "to thread",
+        activeThread.id,
+      );
     } finally {
       setSpawning(false);
     }
@@ -408,8 +432,14 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         {/* Skills header */}
         <button
           type="button"
-          class="flex items-center gap-2 w-full px-3 py-2 bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2"
+          class="flex items-center gap-2 w-full px-3 py-2 bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={() => setSkillsExpanded((v) => !v)}
+          disabled={!threadStore.activeThread}
+          title={
+            !threadStore.activeThread
+              ? "Select a thread to manage skills"
+              : undefined
+          }
         >
           <svg
             width="10"
@@ -476,7 +506,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             {/* Create New Skill button */}
             <button
               type="button"
-              class="flex items-center justify-center gap-2 w-full mt-2 py-2 px-3 bg-primary/8 border border-primary/15 rounded-md text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/15 hover:border-primary/25 active:scale-[0.98]"
+              class="flex items-center justify-center gap-2 w-full mt-2 py-2 px-3 bg-primary/8 border border-primary/15 rounded-md text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/15 hover:border-primary/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!threadStore.activeThread}
               onClick={async () => {
                 // Find Skill Creator in installed or available skills
                 const skillCreator =
@@ -519,7 +550,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   {(skill) => (
                     <button
                       type="button"
-                      class="flex items-start gap-2 w-full px-2.5 py-2 mb-1 bg-transparent border border-transparent rounded-md cursor-pointer text-left transition-all duration-100 hover:bg-surface-2 hover:border-border"
+                      class="flex items-start gap-2 w-full px-2.5 py-2 mb-1 bg-transparent border border-transparent rounded-md cursor-pointer text-left transition-all duration-100 hover:bg-surface-2 hover:border-border disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={!threadStore.activeThread}
                       onClick={() => handleSkillThread(skill)}
                     >
                       <span class="w-5 h-5 flex items-center justify-center rounded bg-primary/10 text-primary shrink-0 mt-0.5">
