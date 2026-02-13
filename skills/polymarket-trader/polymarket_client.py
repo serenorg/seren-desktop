@@ -8,6 +8,7 @@ Uses the polymarket-trading-serenai publisher to:
 """
 
 import os
+import json
 from typing import Dict, List, Any, Optional
 from seren_client import SerenClient
 
@@ -103,7 +104,6 @@ class PolymarketClient:
             question = market_data.get('question', '')
 
             # Get token IDs - they're stored as a JSON string
-            import json
             clob_token_ids_str = market_data.get('clobTokenIds', '[]')
             try:
                 token_ids = json.loads(clob_token_ids_str) if isinstance(clob_token_ids_str, str) else clob_token_ids_str
