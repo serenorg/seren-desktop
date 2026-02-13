@@ -61,7 +61,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "embedded-runtime/": "embedded-runtime/"
+      "embedded-runtime/": "embedded-runtime/",
+      "skills/": "skills/"
     },
     "macOS": {
       "entitlements": "entitlements.plist",

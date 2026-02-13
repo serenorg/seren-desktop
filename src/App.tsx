@@ -78,6 +78,9 @@ function App() {
     // Detect available agents (Claude, Codex)
     await acpStore.initialize();
 
+    // Install bundled skills (polymarket-trader, skill-creator) on first run
+    await skillsStore.installBundledSkills();
+
     // Load skills and threads after auth check completes
     await skillsStore.refresh();
     await threadStore.refresh();

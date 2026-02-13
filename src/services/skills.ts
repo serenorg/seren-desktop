@@ -600,4 +600,14 @@ export const skills = {
     }
     return Array.from(tagSet).sort();
   },
+
+  /**
+   * Install bundled skills from app resources to ~/.config/seren/skills.
+   * Only installs skills that don't already exist.
+   * Returns the list of skill slugs that were installed.
+   */
+  async installBundledSkills(): Promise<string[]> {
+    if (!isTauriRuntime()) return [];
+    return invoke<string[]>("install_bundled_skills");
+  },
 };
