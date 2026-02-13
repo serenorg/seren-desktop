@@ -10,8 +10,9 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import type { InstalledSkill } from "@/lib/skills";
+import type { InstalledSkill, Skill } from "@/lib/skills";
 import type { AgentType } from "@/services/acp";
+import { skills as skillsService } from "@/services/skills";
 import { acpStore } from "@/stores/acp.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
@@ -77,12 +78,37 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     }
   };
 
-  const handleSkillThread = async (skill: InstalledSkill) => {
+  const handleSkillThread = async (skill: InstalledSkill | Skill) => {
     setShowLauncher(false);
     setLauncherQuery("");
     setSpawning(true);
     try {
-      await threadStore.createSkillThread(skill);
+      // If skill is from marketplace (not installed), install it first
+      let installedSkill: InstalledSkill;
+      if ('scope' in skill && 'filePath' in skill) {
+        // Already installed
+        installedSkill = skill as InstalledSkill;
+      } else {
+        // Marketplace skill - need to install first
+        const marketplaceSkill = skill as Skill;
+        const content = await skillsService.fetchContent(marketplaceSkill);
+        if (!content) {
+          console.error('[ThreadSidebar] Failed to fetch skill content');
+          return;
+        }
+        await skillsStore.install(marketplaceSkill, content, 'seren');
+        await skillsStore.refreshInstalled();
+
+        // Find the newly installed skill
+        const found = skillsStore.installed.find(s => s.slug === marketplaceSkill.slug);
+        if (!found) {
+          console.error('[ThreadSidebar] Skill installed but not found');
+          return;
+        }
+        installedSkill = found;
+      }
+
+      await threadStore.createSkillThread(installedSkill);
     } finally {
       setSpawning(false);
     }
@@ -107,10 +133,20 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   };
 
   const filteredSkills = () => {
-    const installed = skillsStore.enabledSkills;
     const q = launcherQuery().toLowerCase().trim();
-    if (!q) return installed;
-    return installed.filter(
+
+    // If no search query, show enabled skills only
+    if (!q) return skillsStore.enabledSkills;
+
+    // When searching, include both installed AND available marketplace skills
+    const allSkills = [
+      ...skillsStore.installed,
+      ...skillsStore.available.filter(
+        (available) => !skillsStore.installed.some((inst) => inst.slug === available.slug)
+      ),
+    ];
+
+    return allSkills.filter(
       (s) =>
         s.name.toLowerCase().includes(q) ||
         (s.description ?? "").toLowerCase().includes(q) ||
@@ -469,7 +505,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                 </button>
 
                 <Show when={showAgentPicker()}>
-                  <div class="absolute left-0 bottom-[calc(100%+4px)] min-w-[140px] bg-surface-1 border border-border rounded-lg shadow-lg z-30 py-1 animate-[fadeIn_100ms_ease]">
+                  <div class="absolute left-0 bottom-[calc(100%+4px)] min-w-[140px] max-h-[280px] overflow-y-auto bg-surface-1 border border-border rounded-lg shadow-lg z-30 py-1 animate-[fadeIn_100ms_ease]">
                     <For each={availableAgentOptions()}>
                       {(agent) => (
                         <button
@@ -592,6 +628,43 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </Show>
       </div>
 
+      {/* Skills section */}
+      <div class="px-2 py-2 border-b border-border/40">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground px-2.5 mb-1.5">
+          Skills
+        </div>
+        <For each={skillsStore.enabledSkills.filter(s => s.slug === 'polymarket-trader' || s.slug === 'skill-creator')}>
+          {(skill) => (
+            <button
+              type="button"
+              class="flex items-center gap-2.5 w-full py-2 px-2.5 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-2 text-left mb-0.5"
+              onClick={() => handleSkillThread(skill)}
+            >
+              <span class="w-5 h-5 flex items-center justify-center rounded bg-primary/10 text-primary shrink-0">
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  role="img"
+                  aria-label="Skill"
+                >
+                  <path
+                    d="M8 2L9.5 6H14L10.5 8.5L12 13L8 10L4 13L5.5 8.5L2 6H6.5L8 2Z"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </span>
+              <div class="flex-1 min-w-0">
+                <span class="block truncate font-medium">{skill.name}</span>
+              </div>
+            </button>
+          )}
+        </For>
+      </div>
+
       {/* Thread list grouped by project */}
       <div class="flex-1 overflow-y-auto px-2 py-1">
         <Show
@@ -654,7 +727,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     {(thread) => (
                       <button
                         type="button"
-                        class="flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60"
+                        class="group flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60"
                         classList={{
                           "!bg-surface-2/80 border-l-2 !border-l-primary !pl-2":
                             thread.id === threadStore.activeThreadId,
@@ -692,6 +765,33 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         <Show when={thread.status === "error"}>
                           <span class="w-2 h-2 rounded-full shrink-0 bg-status-error" />
                         </Show>
+
+                        {/* Close button */}
+                        <button
+                          type="button"
+                          class="opacity-0 group-hover:opacity-100 hover:!opacity-100 ml-1 shrink-0 w-4 h-4 flex items-center justify-center rounded hover:bg-surface-3 text-muted-foreground hover:text-foreground transition-all"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await threadStore.archiveThread(thread.id, thread.kind);
+                          }}
+                          title="Close thread"
+                        >
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            role="img"
+                            aria-label="Close"
+                          >
+                            <path
+                              d="M4 4l8 8M12 4l-8 8"
+                              stroke="currentColor"
+                              stroke-width="1.5"
+                              stroke-linecap="round"
+                            />
+                          </svg>
+                        </button>
                       </button>
                     )}
                   </For>
