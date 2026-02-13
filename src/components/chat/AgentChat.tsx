@@ -65,9 +65,37 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
 
+  // Get the active agent thread (must be defined before thread-specific memos)
+  const activeAgentThread = createMemo(() => {
+    const thread = threadStore.activeThread;
+    if (!thread || thread.kind !== "agent") return null;
+    return thread;
+  });
+
+  // Get messages for THIS thread's conversation ID, not the active session
+  const threadMessages = createMemo(() => {
+    const thread = activeAgentThread();
+    if (!thread) return [];
+    return acpStore.getMessagesForConversation(thread.id);
+  });
+
+  // Get streaming content for THIS thread's conversation ID
+  const threadStreamingContent = createMemo(() => {
+    const thread = activeAgentThread();
+    if (!thread) return "";
+    return acpStore.getStreamingContentForConversation(thread.id);
+  });
+
+  // Get streaming thinking for THIS thread's conversation ID
+  const threadStreamingThinking = createMemo(() => {
+    const thread = activeAgentThread();
+    if (!thread) return "";
+    return acpStore.getStreamingThinkingForConversation(thread.id);
+  });
+
   // Build reversed list of user prompts for Up/Down arrow navigation
   const userMessageHistory = createMemo(() =>
-    acpStore.messages
+    threadMessages()
       .filter((m) => m.type === "user")
       .map((m) => m.content)
       .reverse(),
@@ -100,11 +128,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const isReady = () => acpStore.activeSession?.info.status === "ready";
   const isPrompting = () => acpStore.activeSession?.info.status === "prompting";
   const sessionError = () => acpStore.error;
-  const activeAgentThread = createMemo(() => {
-    const thread = threadStore.activeThread;
-    if (!thread || thread.kind !== "agent") return null;
-    return thread;
-  });
   const lockedAgentType = createMemo<AgentType>(() => {
     const sessionAgent = acpStore.activeSession?.info.agentType;
     if (sessionAgent === "codex" || sessionAgent === "claude-code") {
@@ -124,11 +147,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   // Refresh project-scoped remote sessions (agent source-of-truth) and focus
   // any live session tied to the selected folder.
+  // Skip refresh if a prompt is active to avoid backend rejection.
   createEffect(
     on(
       () => [fileTreeState.rootPath, lockedAgentType()] as const,
       ([newPath, agentType]) => {
-        if (newPath) {
+        if (newPath && !isPrompting()) {
           void acpStore.refreshRemoteSessions(newPath, agentType);
           acpStore.focusProjectSession(newPath);
         }
@@ -145,8 +169,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   // Auto-scroll when messages change or permission dialogs appear
   createEffect(() => {
-    const messages = acpStore.messages;
-    const streaming = acpStore.streamingContent;
+    const messages = threadMessages();
+    const streaming = threadStreamingContent();
     const permissions = acpStore.pendingPermissions;
     const diffProposals = acpStore.pendingDiffProposals;
     console.log("[AgentChat] Effect triggered:", {
@@ -315,16 +339,23 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   // Process queued messages when agent becomes ready
-  createEffect(() => {
-    if (isReady() && messageQueue().length > 0) {
-      const [nextMessage, ...remaining] = messageQueue();
-      setMessageQueue(remaining);
-      console.log("[AgentChat] Processing queued message:", nextMessage);
-      setTimeout(() => {
-        acpStore.sendPrompt(nextMessage);
-      }, 100);
-    }
-  });
+  // Use on() to only fire when isReady transitions from false→true
+  // This prevents the effect from firing multiple times for multiple queued messages
+  createEffect(
+    on(
+      isReady,
+      (ready) => {
+        if (ready && messageQueue().length > 0) {
+          const [nextMessage, ...remaining] = messageQueue();
+          setMessageQueue(remaining);
+          console.log("[AgentChat] Processing queued message:", nextMessage);
+          // Send without delay - the on() guard ensures this only fires once per ready transition
+          acpStore.sendPrompt(nextMessage);
+        }
+      },
+      { defer: true },
+    ),
+  );
 
   const handleCancel = async () => {
     // Clear queued messages so they don't auto-send after cancellation
@@ -431,7 +462,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   /** Group consecutive tool messages into collapsed groups */
   const groupConsecutiveToolCalls = createMemo(() => {
-    const messages = acpStore.messages;
+    const messages = threadMessages();
     const grouped: GroupedMessage[] = [];
     let currentGroup: AgentMessage[] = [];
 
@@ -697,7 +728,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         >
           {/* Session Messages */}
           <Show
-            when={acpStore.messages.length > 0 || acpStore.streamingContent}
+            when={threadMessages().length > 0 || threadStreamingContent()}
             fallback={
               <div class="flex flex-col items-center justify-center p-10 text-muted-foreground">
                 <h3 class="m-0 mb-2 text-base font-medium text-foreground">
@@ -728,8 +759,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             <Show
               when={
                 isPrompting() &&
-                !acpStore.streamingContent &&
-                !acpStore.streamingThinking
+                !threadStreamingContent() &&
+                !threadStreamingThinking()
               }
             >
               <article class="px-5 py-4 border-b border-surface-2">
@@ -738,21 +769,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             </Show>
 
             {/* Streaming Thinking */}
-            <Show when={acpStore.streamingThinking}>
+            <Show when={threadStreamingThinking()}>
               <article class="px-5 py-3 border-b border-surface-2">
                 <ThinkingBlock
-                  thinking={acpStore.streamingThinking}
+                  thinking={threadStreamingThinking()}
                   isStreaming={true}
                 />
               </article>
             </Show>
 
             {/* Streaming Content */}
-            <Show when={acpStore.streamingContent}>
+            <Show when={threadStreamingContent()}>
               <article class="px-5 py-4 border-b border-surface-2">
                 <div
                   class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
-                  innerHTML={renderMarkdown(acpStore.streamingContent)}
+                  innerHTML={renderMarkdown(threadStreamingContent())}
                 />
                 <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
               </article>

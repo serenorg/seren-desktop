@@ -2022,6 +2022,9 @@ async fn run_session_worker(
         }
     }
 
+    // Clone stderr_tail so we can access it in timeout error messages
+    let _stderr_tail_for_errors = Arc::clone(&stderr_tail);
+
     // Command processing loop
     while let Some(cmd) = command_rx.recv().await {
         match cmd {
@@ -2095,9 +2098,31 @@ async fn run_session_worker(
                             }
                             _ = tokio::time::sleep_until(deadline) => {
                                 log::warn!("[ACP] Prompt did not resolve within 5s after cancel — agent unresponsive");
+
+                                // Capture stderr to help diagnose why cancel failed
+                                let stderr_lines = {
+                                    let buf = _stderr_tail_for_errors.lock().await;
+                                    buf.iter()
+                                        .rev()
+                                        .take(STDERR_TAIL_ON_ERROR)
+                                        .cloned()
+                                        .collect::<Vec<_>>()
+                                        .into_iter()
+                                        .rev()
+                                        .collect::<Vec<_>>()
+                                };
+
+                                let mut error_msg = "Agent unresponsive after cancel request. Session will restart automatically.".to_string();
+                                if !stderr_lines.is_empty() {
+                                    error_msg.push_str("\n\nAgent stderr (last 50 lines):\n");
+                                    error_msg.push_str(&stderr_lines.join("\n"));
+                                }
+
+                                log::error!("[ACP] Cancel timeout error details: {}", error_msg);
+
                                 force_stopped = true;
                                 break Err(agent_client_protocol::Error::internal_error().data(
-                                    serde_json::Value::String("Agent unresponsive — session will restart automatically".into()),
+                                    serde_json::Value::String(error_msg),
                                 ));
                             }
                             cmd = command_rx.recv() => {
@@ -2144,11 +2169,34 @@ async fn run_session_worker(
                                     "[ACP] Prompt timed out after {}s of inactivity — agent unresponsive",
                                     PROMPT_TIMEOUT_SECS
                                 );
+
+                                // Capture stderr to help diagnose the hang
+                                let stderr_lines = {
+                                    let buf = _stderr_tail_for_errors.lock().await;
+                                    buf.iter()
+                                        .rev()
+                                        .take(STDERR_TAIL_ON_ERROR)
+                                        .cloned()
+                                        .collect::<Vec<_>>()
+                                        .into_iter()
+                                        .rev()
+                                        .collect::<Vec<_>>()
+                                };
+
+                                let mut error_msg = format!(
+                                    "Agent unresponsive after {} seconds of inactivity. Session will restart automatically.",
+                                    PROMPT_TIMEOUT_SECS
+                                );
+                                if !stderr_lines.is_empty() {
+                                    error_msg.push_str("\n\nAgent stderr (last 50 lines):\n");
+                                    error_msg.push_str(&stderr_lines.join("\n"));
+                                }
+
+                                log::error!("[ACP] Timeout error details: {}", error_msg);
+
                                 force_stopped = true;
                                 break Err(agent_client_protocol::Error::internal_error().data(
-                                    serde_json::Value::String(
-                                        "Agent unresponsive — session will restart automatically".into(),
-                                    ),
+                                    serde_json::Value::String(error_msg),
                                 ));
                             }
                             _ = activity_rx.recv() => {

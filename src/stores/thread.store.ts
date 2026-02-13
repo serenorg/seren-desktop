@@ -279,6 +279,12 @@ export const threadStore = {
       const liveSession = Object.values(acpStore.sessions).find(
         (s) => s.conversationId === id,
       );
+      console.log(
+        "[Thread] selectThread - looking for session with conversationId:",
+        id,
+        "found:",
+        liveSession?.info.id,
+      );
       if (liveSession) {
         acpStore.setActiveSession(liveSession.info.id);
       } else {
