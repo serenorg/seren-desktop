@@ -111,7 +111,7 @@ class SerenClient:
         market_question: str,
         current_price: float,
         research: str,
-        model: str = 'anthropic/claude-sonnet-4-20250514'
+        model: str = 'anthropic/claude-sonnet-4.5'
     ) -> tuple[float, str]:
         """
         Estimate fair value probability using Claude via seren-models
