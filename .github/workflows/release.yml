@@ -576,6 +576,33 @@ jobs:
         run: |
           pip install awscli
 
+      - name: Verify GitHub release exists before R2 upload
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          echo "Verifying GitHub release exists for $TAG..."
+
+          # Check if release exists and is published
+          RELEASE_INFO=$(gh api repos/${{ github.repository }}/releases/tags/$TAG 2>&1)
+
+          if [ $? -ne 0 ]; then
+            echo "ERROR: GitHub release for $TAG does not exist!"
+            echo "Cannot upload to R2 without a valid GitHub release."
+            echo "Release details: $RELEASE_INFO"
+            exit 1
+          fi
+
+          # Check if release is published (not draft)
+          IS_DRAFT=$(echo "$RELEASE_INFO" | jq -r '.draft')
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "ERROR: GitHub release for $TAG is still a draft!"
+            echo "Publish the release before R2 artifacts are uploaded."
+            exit 1
+          fi
+
+          echo "✓ GitHub release verified: $TAG is published"
+
       - name: Upload updater artifacts to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
