@@ -1,11 +1,11 @@
 ---
-name: polymarket-trader
+name: Polymarket Bot
 description: Autonomous prediction market trading agent. Scans Polymarket, estimates fair value with Claude, finds mispricing, and executes trades using Kelly criterion. Use when the user wants to trade on Polymarket or set up autonomous trading.
 tags: [trading, polymarket, prediction-markets, autonomous, seren-ecosystem]
 version: 1.0.0
 ---
 
-# Polymarket Trading Skill
+# Polymarket Bot
 
 Autonomous trading agent for prediction markets. This skill showcases the full Seren ecosystem by integrating:
 - **Seren-cron** for autonomous scheduling
