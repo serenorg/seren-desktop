@@ -98,9 +98,16 @@ class SerenClient:
             return {'text': response.text}
 
     def get_wallet_balance(self) -> Dict[str, Any]:
-        """Get SerenBucks balance"""
-        # Note: This should use the MCP tool directly in production
-        # For now, we'll call a hypothetical endpoint
+        """
+        Get SerenBucks balance
+
+        Returns:
+            {
+                'balance_atomic': int,  # Balance in atomic units (1/1000000)
+                'balance_usd': float,   # Balance in USD
+                'tier': str            # Account tier
+            }
+        """
         url = f"{self.gateway_url}/wallet/balance"
         response = self.session.get(url, timeout=30)
         response.raise_for_status()

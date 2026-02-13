@@ -80,13 +80,16 @@ class TradingAgent:
         """
         try:
             wallet_status = self.seren.get_wallet_balance()
-            serenbucks = float(wallet_status.get('balance', 0))
-        except:
+            # API returns balance_usd (float) and balance_atomic (int)
+            serenbucks = float(wallet_status.get('balance_usd', 0.0))
+        except Exception as e:
+            print(f"Warning: Failed to fetch SerenBucks balance: {e}")
             serenbucks = 0.0
 
         try:
             polymarket = self.polymarket.get_balance()
-        except:
+        except Exception as e:
+            print(f"Warning: Failed to fetch Polymarket balance: {e}")
             polymarket = 0.0
 
         return {
