@@ -1092,16 +1092,17 @@ fn handle_session_notification(
                     .and_then(|s| serde_json::to_value(s).ok())
                     .and_then(|v| v.as_str().map(String::from))
                     .unwrap_or_else(|| "pending".to_string());
-                let _ = app.emit(
-                    events::TOOL_CALL,
-                    serde_json::json!({
-                        "sessionId": session_id,
-                        "toolCallId": update.tool_call_id.to_string(),
-                        "title": title,
-                        "kind": kind_str,
-                        "status": status_str
-                    }),
-                );
+                let mut payload = serde_json::json!({
+                    "sessionId": session_id,
+                    "toolCallId": update.tool_call_id.to_string(),
+                    "title": title,
+                    "kind": kind_str,
+                    "status": status_str
+                });
+                if let Some(ref raw_input) = update.fields.raw_input {
+                    payload["parameters"] = raw_input.clone();
+                }
+                let _ = app.emit(events::TOOL_CALL, payload);
             }
 
             // Check for diffs in content
