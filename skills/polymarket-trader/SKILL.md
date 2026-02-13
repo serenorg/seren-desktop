@@ -299,35 +299,77 @@ With $500 bankroll:
 
 ---
 
-#### If You Have Less Than $550
+#### Paper Trading (RECOMMENDED FOR EVERYONE)
 
-##### Option 1: Manual Mode
+**Before deploying real capital, paper trade for 1-2 weeks to validate your edge.**
 
-Run scans manually instead of autonomous cron scheduling:
+Paper trading uses real market data and real AI analysis, but simulates trades instead of placing actual orders. This lets you:
 
-```bash
-python3 agent.py --config config.json --once
-```
+- Validate the strategy actually finds mispriced markets
+- Measure real win rate and average edge
+- Test different risk parameters (Kelly fraction, mispricing threshold)
+- Build confidence before risking capital
 
-- You control when to burn API credits ($1 per scan)
-- With $50 SerenBucks: run 50 scans over weeks/months
-- Scout for opportunities at your own pace
-
-##### Option 2: Paper Trading
-
-Use dry-run mode to learn without spending:
+**How to paper trade:**
 
 ```bash
 python3 agent.py --config config.json --dry-run
 ```
 
-- See what the bot would do
-- Build confidence before committing capital
-- API costs still apply (you're still calling Perplexity + Claude)
+**What happens in dry-run mode:**
 
-##### Option 3: Save Up
+- ✅ Scans real Polymarket markets
+- ✅ Researches opportunities with Perplexity (real API calls)
+- ✅ Estimates fair values with Claude (real API calls)
+- ✅ Calculates Kelly position sizes
+- ✅ Logs paper trades to `logs/trading_*.log`
+- ❌ Does NOT place actual Polymarket orders
+- ❌ Does NOT require Polymarket API credentials
 
-Wait until you have $550+ to deploy. Trading with insufficient capital is a guaranteed way to lose money on net.
+**Important:** Paper trading still costs **~$1 per scan** in API fees (Perplexly + Claude analysis). With $50 SerenBucks, you can run 50 paper trades over 1-2 weeks to validate the strategy.
+
+**Recommended paper trading plan:**
+
+1. Fund $50 SerenBucks (covers ~50 scans)
+2. Set `"scan_interval_minutes": 120` in config.json (2-hour intervals)
+3. Run paper trading for 5-7 days (60-84 scans)
+4. Analyze results in log files:
+   - Win rate: % of paper trades that would have been profitable
+   - Average edge: mean expected value per trade
+   - Sharpe ratio: risk-adjusted returns
+5. If paper trading shows consistent edge, move to live trading with $550+ budget
+
+**Manual paper trading (if <$50 SerenBucks):**
+
+Run scans one at a time when you want:
+
+```bash
+python3 agent.py --config config.json --dry-run --once
+```
+
+- You control when to spend API credits ($1 per scan)
+- With $20 SerenBucks: run 20 scans over weeks/months
+- Scout for opportunities at your own pace
+- No autonomous scheduling
+
+---
+
+#### Moving from Paper to Live Trading
+
+Once paper trading validates your edge (recommended: 50+ scans with positive expected value), you're ready for live trading.
+
+**Requirements for live trading:**
+
+- ✅ Successful paper trading period (1-2 weeks, 50+ scans)
+- ✅ Minimum $550 budget ($500 USDC + $50 SerenBucks)
+- ✅ Polymarket API credentials (see Phase 2)
+- ✅ Understanding of Kelly Criterion risk management
+
+**If you don't have $550 yet:**
+
+- Continue paper trading to refine strategy
+- Save up capital while accumulating paper trade data
+- Use smaller scan intervals once you have budget
 
 ---
 
