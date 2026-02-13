@@ -74,22 +74,29 @@ class PolymarketClient:
                 'end_date': str
             }
         """
+        # Build query parameters for GET request
+        # Use query params instead of body for GET requests
+        params = f"?limit={limit}&active={'true' if active else 'false'}&closed=false"
+
         # Call polymarket-data publisher to get markets
         response = self.seren.call_publisher(
             publisher='polymarket-data',
             method='GET',
-            path='/markets',
-            body={
-                'limit': limit,
-                'active': active,
-                'closed': False
-            }
+            path=f'/markets{params}'
         )
 
         markets = []
 
-        # Parse response and normalize to our format
-        for market_data in response.get('data', []):
+        # Parse response - publisher returns data in 'body' field
+        market_list = response.get('body', [])
+        if not market_list and 'data' in response:
+            # Fallback for older API versions
+            market_list = response.get('data', [])
+
+        for market_data in market_list:
+            # Skip closed markets
+            if market_data.get('closed', False):
+                continue
             # Extract relevant fields
             market_id = market_data.get('condition_id') or market_data.get('id')
             question = market_data.get('question', '')

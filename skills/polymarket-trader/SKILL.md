@@ -567,12 +567,12 @@ def calculate_position_size(fair_value, market_price, bankroll, max_kelly=0.06):
 - ✅ **Price fetching** - Market data via publishers
 - ✅ **Kelly Criterion position sizing** - Full implementation
 - ✅ **Fair value estimation** - AI-powered via Perplexity + Claude
+- ✅ **Autonomous scheduling** - Via seren-cron integration (`setup_cron.py`)
 
 ### Not Yet Implemented ❌
 
 - ❌ **Actual wallet balance checking** - Currently calculates from positions only (TODO: blockchain query)
 - ❌ **Automated position closing** - Manual closing only
-- ❌ **Autonomous scheduling** - No seren-cron integration yet
 - ❌ **Email/webhook notifications** - Only logs to files
 - ❌ **Web dashboard** - Command-line only
 - ❌ **Backtesting** - No historical data testing
