@@ -233,12 +233,9 @@ export type ToolStreamEvent =
  * Anthropic API only supports: image/jpeg, image/png, image/gif, image/webp
  */
 function isVisionCompatibleMime(mimeType: string): boolean {
-  return [
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-  ].includes(mimeType);
+  return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(
+    mimeType,
+  );
 }
 
 /**
