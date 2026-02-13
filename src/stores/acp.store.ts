@@ -627,6 +627,16 @@ export const acpStore = {
 
       // Get Seren API key to enable MCP tools for the agent
       const apiKey = await getSerenApiKey();
+
+      // Determine timeout based on enabled skills:
+      // - Long-running skills (polymarket-trader, polymarket-data) get unlimited timeout
+      // - Other sessions get default 300s timeout
+      const longRunningSkills = ["polymarket-trader", "polymarket-data"];
+      const hasLongRunningSkill = skillsStore.installed.some(
+        (skill) => skill.enabled && longRunningSkills.includes(skill.slug),
+      );
+      const timeoutSecs = hasLongRunningSkill ? undefined : 300;
+
       const info = await acpService.spawnAgent(
         resolvedAgentType,
         cwd,
@@ -637,6 +647,7 @@ export const acpStore = {
         settingsStore.settings.agentNetworkEnabled,
         localSessionId,
         resumeAgentSessionId,
+        timeoutSecs,
       );
       console.log("[AcpStore] Spawn result:", info);
 
