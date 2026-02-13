@@ -4,7 +4,7 @@
 use rusqlite::{OptionalExtension, params};
 use std::fs;
 use std::path::PathBuf;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::services::database::init_db;
 
@@ -526,4 +526,95 @@ pub fn read_skill_content(skills_dir: String, slug: String) -> Result<Option<Str
         fs::read_to_string(&skill_file).map_err(|e| format!("Failed to read SKILL.md: {}", e))?;
 
     Ok(Some(content))
+}
+
+/// Install bundled skills from the app resources to the Seren skills directory.
+/// Only installs skills that don't already exist.
+/// Returns the list of skill slugs that were installed.
+#[tauri::command]
+pub fn install_bundled_skills(app: AppHandle) -> Result<Vec<String>, String> {
+    let seren_skills_dir = get_seren_skills_dir()?;
+    let seren_path = PathBuf::from(&seren_skills_dir);
+
+    // Get bundled skills directory from app resources
+    // In dev: skills/ from project root
+    // In prod: skills/ from resources directory in app bundle
+    let bundled_skills_path = if cfg!(dev) {
+        // In development, use skills/ from project root
+        let current_exe = std::env::current_exe()
+            .map_err(|e| format!("Failed to get current exe path: {}", e))?;
+        current_exe
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .ok_or("Failed to get project root")?
+            .join("skills")
+    } else {
+        // In production, use resource dir
+        app.path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource dir: {}", e))?
+            .join("skills")
+    };
+
+    if !bundled_skills_path.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut installed_slugs = Vec::new();
+
+    // Read bundled skills directory
+    let entries = fs::read_dir(&bundled_skills_path)
+        .map_err(|e| format!("Failed to read bundled skills directory: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let skill_file = path.join("SKILL.md");
+        if !skill_file.exists() {
+            continue;
+        }
+
+        let slug = match path.file_name() {
+            Some(name) => name.to_string_lossy().to_string(),
+            None => continue,
+        };
+
+        // Check if skill already exists in Seren skills directory
+        let target_dir = seren_path.join(&slug);
+        if target_dir.exists() {
+            continue;
+        }
+
+        // Copy the entire skill directory
+        copy_dir_recursive(&path, &target_dir)
+            .map_err(|e| format!("Failed to copy bundled skill '{}': {}", slug, e))?;
+
+        installed_slugs.push(slug);
+    }
+
+    Ok(installed_slugs)
+}
+
+/// Recursively copy a directory and its contents.
+fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
 }

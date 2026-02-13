@@ -283,7 +283,55 @@ export const acpStore = {
    */
   get messages(): AgentMessage[] {
     const session = this.activeSession;
+    console.log(
+      "[ACP] messages getter - activeSessionId:",
+      state.activeSessionId,
+      "session:",
+      session?.info.id,
+      "messageCount:",
+      session?.messages.length ?? 0,
+    );
     return session?.messages ?? [];
+  },
+
+  /**
+   * Get messages for a specific conversation ID (thread ID).
+   * Use this instead of `messages` getter when you need messages for a specific thread,
+   * not just the active session.
+   */
+  getMessagesForConversation(conversationId: string): AgentMessage[] {
+    const session = Object.values(state.sessions).find(
+      (s) => s.conversationId === conversationId,
+    );
+    console.log(
+      "[ACP] getMessagesForConversation - conversationId:",
+      conversationId,
+      "found session:",
+      session?.info.id,
+      "messageCount:",
+      session?.messages.length ?? 0,
+    );
+    return session?.messages ?? [];
+  },
+
+  /**
+   * Get streaming content for a specific conversation ID.
+   */
+  getStreamingContentForConversation(conversationId: string): string {
+    const session = Object.values(state.sessions).find(
+      (s) => s.conversationId === conversationId,
+    );
+    return session?.streamingContent ?? "";
+  },
+
+  /**
+   * Get streaming thinking for a specific conversation ID.
+   */
+  getStreamingThinkingForConversation(conversationId: string): string {
+    const session = Object.values(state.sessions).find(
+      (s) => s.conversationId === conversationId,
+    );
+    return session?.streamingThinking ?? "";
   },
 
   /**
@@ -518,6 +566,14 @@ export const acpStore = {
       globalUnsubscribe = await acpService.subscribeToAllEvents((event) => {
         const eventSessionId = event.data.sessionId;
         if (!eventSessionId) return;
+        console.log(
+          "[ACP] Event received - type:",
+          event.type,
+          "sessionId:",
+          eventSessionId,
+          "conversationId:",
+          state.sessions[eventSessionId]?.conversationId,
+        );
         if (state.sessions[eventSessionId]) {
           this.handleSessionEvent(eventSessionId, event);
           return;
@@ -1009,6 +1065,12 @@ export const acpStore = {
    * Set the active session.
    */
   setActiveSession(sessionId: string | null) {
+    console.log(
+      "[ACP] setActiveSession - old:",
+      state.activeSessionId,
+      "new:",
+      sessionId,
+    );
     setState("activeSessionId", sessionId);
   },
 
@@ -1094,6 +1156,14 @@ export const acpStore = {
       timestamp: Date.now(),
     };
 
+    console.log(
+      "[ACP] Adding user message to session:",
+      sessionId,
+      "conversationId:",
+      state.sessions[sessionId]?.conversationId,
+      "content:",
+      prompt.slice(0, 50),
+    );
     setState("sessions", sessionId, "messages", (msgs) => [
       ...msgs,
       userMessage,
@@ -2082,6 +2152,14 @@ export const acpStore = {
         timestamp: session.streamingContentTimestamp ?? Date.now(),
         duration,
       };
+      console.log(
+        "[ACP] Adding assistant message to session:",
+        sessionId,
+        "conversationId:",
+        session.conversationId,
+        "content:",
+        session.streamingContent.slice(0, 50),
+      );
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
 
       // If the agent streamed a short auth error as text, surface it as a session error

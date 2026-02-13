@@ -13,6 +13,13 @@ interface ThreadContentProps {
 }
 
 export const ThreadContent: Component<ThreadContentProps> = (props) => {
+  console.log(
+    "[ThreadContent] Rendering - activeThreadKind:",
+    threadStore.activeThreadKind,
+    "activeThreadId:",
+    threadStore.activeThreadId,
+  );
+
   return (
     <div class="flex flex-col h-full overflow-hidden">
       <div class="flex-1 flex flex-col overflow-hidden min-h-0">

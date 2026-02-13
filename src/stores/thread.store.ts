@@ -257,6 +257,7 @@ export const threadStore = {
    * to match.
    */
   selectThread(id: string, kind: "chat" | "agent") {
+    console.log("[Thread] selectThread - id:", id, "kind:", kind);
     setState({ activeThreadId: id, activeThreadKind: kind });
 
     // Keep the project context aligned with the selected thread.
@@ -278,6 +279,12 @@ export const threadStore = {
       // For agent threads, set active session if one exists
       const liveSession = Object.values(acpStore.sessions).find(
         (s) => s.conversationId === id,
+      );
+      console.log(
+        "[Thread] selectThread - looking for session with conversationId:",
+        id,
+        "found:",
+        liveSession?.info.id,
       );
       if (liveSession) {
         acpStore.setActiveSession(liveSession.info.id);

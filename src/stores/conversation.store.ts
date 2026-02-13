@@ -176,7 +176,8 @@ export const conversationStore = {
       if (remaining.length > 0) {
         setState("activeConversationId", remaining[0].id);
       } else {
-        await this.createConversation();
+        // Allow closing the last thread - don't auto-create a new one
+        setState("activeConversationId", null);
       }
     }
   },
