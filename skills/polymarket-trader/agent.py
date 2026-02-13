@@ -1,626 +1,480 @@
 #!/usr/bin/env python3
 """
-Autonomous Polymarket trading agent.
+Polymarket Trading Agent - Autonomous prediction market trader
 
-Scans markets, estimates fair value with Claude, finds mispricing,
-and executes trades using Kelly criterion.
+This agent:
+1. Scans Polymarket for active markets
+2. Researches opportunities using Perplexity
+3. Estimates fair value with Claude
+4. Identifies mispriced markets
+5. Executes trades using Kelly Criterion
+6. Monitors positions and reports P&L
+
+Usage:
+    python agent.py --config config.json [--dry-run]
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
-import logging
-import time
-from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional
-from collections import deque
+from datetime import datetime
 
-try:
-    from seren_agent import SerenaAgent
-except ImportError as e:
-    print(f"Error: Required dependency missing: {e}")
-    print("Please run: pip3 install -r requirements.txt")
-    sys.exit(1)
-
-
-# Configuration
-SKILL_DIR = Path(__file__).parent
-LOGS_DIR = SKILL_DIR / "logs"
-CONFIG_FILE = SKILL_DIR / "config.json"
-TRADES_LOG = LOGS_DIR / "trades.jsonl"
-SCAN_LOG = LOGS_DIR / "scan_results.jsonl"
-POSITIONS_FILE = LOGS_DIR / "positions.json"
-
-# Ensure logs directory exists
-LOGS_DIR.mkdir(exist_ok=True)
-
-# Logging setup
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(LOGS_DIR / 'agent.log')
-    ]
-)
-logger = logging.getLogger(__name__)
+# Import our modules
+from seren_client import SerenClient
+from polymarket_client import PolymarketClient
+from position_tracker import PositionTracker
+from logger import TradingLogger
+import kelly
 
 
-class PolymarketTrader:
-    """Autonomous trading agent for Polymarket."""
+class TradingAgent:
+    """Autonomous Polymarket trading agent"""
 
-    # Rate limit: 60 orders/minute per Polymarket API docs
-    MAX_ORDERS_PER_MINUTE = 60
-    RATE_LIMIT_WINDOW = 60  # seconds
-
-    def __init__(self, config_path: Path, dry_run: bool = False):
+    def __init__(self, config_path: str, dry_run: bool = False):
         """
-        Initialize the trading agent.
+        Initialize trading agent
 
         Args:
             config_path: Path to config.json
-            dry_run: If True, simulate trades without placing real orders
+            dry_run: If True, don't place actual trades
         """
-        self.config = self._load_config(config_path)
+        # Load config
+        with open(config_path, 'r') as f:
+            self.config = json.load(f)
+
         self.dry_run = dry_run
-        self.agent = self._init_agent()
 
-        # Rate limiting tracker
-        self.order_timestamps = deque()  # Track order timestamps for rate limiting
+        # Initialize clients
+        print("Initializing Seren client...")
+        self.seren = SerenClient()
 
-        logger.info(f"Initialized PolymarketTrader (dry_run={dry_run})")
-        logger.info(f"Bankroll: ${self.config['bankroll']:.2f}")
-        logger.info(f"Scan interval: {self.config['scan_interval_minutes']} minutes")
+        print("Initializing Polymarket client...")
+        self.polymarket = PolymarketClient(self.seren)
 
-    def _load_config(self, path: Path) -> Dict:
-        """Load configuration from JSON file."""
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Config file not found: {path}\n"
-                f"Please run the skill setup first."
-            )
+        # Initialize position tracker and logger
+        self.positions = PositionTracker()
+        self.logger = TradingLogger()
 
-        with open(path, 'r') as f:
-            config = json.load(f)
+        # Trading parameters from config
+        self.bankroll = float(self.config['bankroll'])
+        self.mispricing_threshold = float(self.config['mispricing_threshold'])
+        self.max_kelly_fraction = float(self.config['max_kelly_fraction'])
+        self.max_positions = int(self.config['max_positions'])
+        self.stop_loss_bankroll = float(self.config.get('stop_loss_bankroll', 0.0))
 
-        # Validate required fields
-        required = [
-            'bankroll',
-            'mispricing_threshold',
-            'max_kelly_fraction',
-            'scan_interval_minutes',
-            'max_positions',
-            'stop_loss_bankroll'
-        ]
-
-        for field in required:
-            if field not in config:
-                raise ValueError(f"Missing required config field: {field}")
-
-        return config
-
-    def _init_agent(self) -> SerenaAgent:
-        """Initialize Seren agent for MCP publisher calls."""
-        api_key = os.getenv('SEREN_API_KEY')
-        if not api_key:
-            raise ValueError(
-                "SEREN_API_KEY environment variable not set\n"
-                "This should be set automatically by the skill."
-            )
-
-        return SerenaAgent(api_key=api_key)
+        print(f"✓ Agent initialized (Dry-run: {dry_run})")
+        print(f"  Bankroll: ${self.bankroll:.2f}")
+        print(f"  Mispricing threshold: {self.mispricing_threshold * 100:.1f}%")
+        print(f"  Max Kelly fraction: {self.max_kelly_fraction * 100:.1f}%")
+        print(f"  Max positions: {self.max_positions}")
+        print()
 
     def check_balances(self) -> Dict[str, float]:
-        """Check SerenBucks and Polymarket balances."""
-        logger.info("Checking balances...")
+        """
+        Check SerenBucks and Polymarket balances
 
-        # Check SerenBucks via Seren API
+        Returns:
+            Dict with 'serenbucks' and 'polymarket' balances
+        """
         try:
-            serenbucks_result = self.agent.call_publisher(
-                'seren-wallet',
-                'get_balance',
-                {}
-            )
-            serenbucks = float(serenbucks_result.get('balance', 0))
-        except Exception as e:
-            logger.error(f"Failed to check SerenBucks balance: {e}")
+            wallet_status = self.seren.get_wallet_balance()
+            serenbucks = float(wallet_status.get('balance', 0))
+        except:
             serenbucks = 0.0
 
-        # Check Polymarket balance
         try:
-            polymarket_balance = self._get_polymarket_balance()
-        except Exception as e:
-            logger.error(f"Failed to check Polymarket balance: {e}")
-            polymarket_balance = 0.0
+            polymarket = self.polymarket.get_balance()
+        except:
+            polymarket = 0.0
 
-        balances = {
+        return {
             'serenbucks': serenbucks,
-            'polymarket': polymarket_balance
+            'polymarket': polymarket
         }
 
-        logger.info(f"Balances: SerenBucks=${balances['serenbucks']:.2f}, Polymarket=${balances['polymarket']:.2f}")
-        return balances
+    def scan_markets(self, limit: int = 100) -> List[Dict]:
+        """
+        Scan Polymarket for active markets
 
-    def _get_polymarket_balance(self) -> float:
-        """Get Polymarket wallet balance via Seren polymarket publisher."""
+        Args:
+            limit: Max markets to return
+
+        Returns:
+            List of market dicts
+        """
         try:
-            result = self.agent.call_publisher(
-                'polymarket',
-                'get_balance',
-                {}
-            )
-            return float(result.get('balance', 0))
-        except Exception as e:
-            logger.error(f"Failed to get Polymarket balance via MCP: {e}")
-            return 0.0
-
-    def scan_markets(self) -> List[Dict]:
-        """Scan Polymarket for active markets."""
-        logger.info("Scanning active markets...")
-
-        try:
-            result = self.agent.call_publisher(
-                'polymarket-data',
-                'scan_active_markets',
-                {
-                    'limit': 500,
-                    'min_volume': 1000.0,
-                    'status': 'active'
-                }
-            )
-
-            markets = result.get('markets', [])
-            logger.info(f"Found {len(markets)} active markets")
+            print(f"  Fetching up to {limit} active markets from Polymarket...")
+            markets = self.polymarket.get_markets(limit=limit, active=True)
+            print(f"  ✓ Retrieved {len(markets)} markets with sufficient liquidity")
             return markets
-
         except Exception as e:
-            logger.error(f"Failed to scan markets: {e}")
+            print(f"  ⚠️  Market scanning failed: {e}")
+            print(f"     This may indicate polymarket-data publisher is unavailable")
             return []
 
-    def research_market(self, question: str) -> str:
-        """Research a market question using Perplexity."""
-        logger.info(f"Researching: {question}")
+    def research_opportunity(self, market_question: str) -> str:
+        """
+        Research a market using Perplexity
+
+        Args:
+            market_question: Market question to research
+
+        Returns:
+            Research summary
+        """
+        print(f"  🧠 Researching: \"{market_question}\"")
 
         try:
-            result = self.agent.call_publisher(
-                'perplexity',
-                'research',
-                {
-                    'question': question,
-                    'depth': 'standard'
-                }
-            )
-
-            research = result.get('summary', '')
-            logger.info(f"Research complete ({len(research)} chars)")
+            research = self.seren.research_market(market_question)
             return research
-
         except Exception as e:
-            logger.error(f"Failed to research market: {e}")
+            print(f"    ⚠️  Research failed: {e}")
             return ""
 
-    def estimate_fair_value(self, question: str, research: str) -> Optional[Dict]:
-        """Estimate fair probability using Claude via seren-models."""
-        logger.info(f"Estimating fair value for: {question}")
+    def estimate_fair_value(
+        self,
+        market_question: str,
+        current_price: float,
+        research: str
+    ) -> tuple[Optional[float], Optional[str]]:
+        """
+        Estimate fair value using Claude
 
-        prompt = f"""You are a probabilistic forecaster. Based on the research below, estimate the probability that the following event will occur:
+        Args:
+            market_question: Market question
+            current_price: Current market price (0.0-1.0)
+            research: Research summary
 
-Question: {question}
-
-Research:
-{research}
-
-Provide:
-1. Your probability estimate (0-100%, as a decimal 0.0-1.0)
-2. Confidence level (low/medium/high)
-3. Brief reasoning (1-2 sentences)
-
-Respond ONLY with valid JSON in this exact format:
-{{
-    "probability": 0.67,
-    "confidence": "medium",
-    "reasoning": "Based on historical trends and current data..."
-}}"""
+        Returns:
+            (fair_value, confidence) or (None, None) if failed
+        """
+        print(f"  💡 Estimating fair value...")
 
         try:
-            result = self.agent.call_publisher(
-                'seren-models',
-                'generate',
-                {
-                    'model': 'claude-sonnet-4.5',
-                    'prompt': prompt,
-                    'temperature': 0.3,
-                    'max_tokens': 500
-                }
+            fair_value, confidence = self.seren.estimate_fair_value(
+                market_question,
+                current_price,
+                research
             )
 
-            # Parse JSON response
-            text = result.get('text', '').strip()
+            print(f"     Fair value: {fair_value * 100:.1f}% (confidence: {confidence})")
+            return fair_value, confidence
 
-            # Try to extract JSON if response includes extra text
-            if '{' in text and '}' in text:
-                start = text.index('{')
-                end = text.rindex('}') + 1
-                json_str = text[start:end]
-                estimate = json.loads(json_str)
-            else:
-                estimate = json.loads(text)
-
-            # Validate response
-            required_fields = ['probability', 'confidence', 'reasoning']
-            if not all(field in estimate for field in required_fields):
-                logger.error(f"Invalid estimate response: {estimate}")
-                return None
-
-            # Validate probability is in range
-            if not (0.0 <= estimate['probability'] <= 1.0):
-                logger.error(f"Probability out of range: {estimate['probability']}")
-                return None
-
-            # Validate confidence level
-            if estimate['confidence'] not in ['low', 'medium', 'high']:
-                logger.error(f"Invalid confidence level: {estimate['confidence']}")
-                return None
-
-            logger.info(f"Estimate: {estimate['probability']:.1%} (confidence: {estimate['confidence']})")
-            return estimate
-
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse estimate JSON: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Failed to estimate fair value: {e}")
+            print(f"    ⚠️  Fair value estimation failed: {e}")
+            return None, None
+
+    def evaluate_opportunity(
+        self,
+        market: Dict,
+        research: str,
+        fair_value: float,
+        confidence: str
+    ) -> Optional[Dict]:
+        """
+        Evaluate if a market presents a trading opportunity
+
+        Args:
+            market: Market data dict
+            research: Research summary
+            fair_value: Estimated fair value (0.0-1.0)
+            confidence: Confidence level ('low'|'medium'|'high')
+
+        Returns:
+            Trade recommendation dict or None if no opportunity
+        """
+        current_price = market['price']
+
+        # Calculate edge
+        edge = kelly.calculate_edge(fair_value, current_price)
+
+        # Check if edge exceeds threshold
+        if edge < self.mispricing_threshold:
+            print(f"    ✗ Edge {edge * 100:.1f}% below threshold {self.mispricing_threshold * 100:.1f}%")
             return None
 
-    def find_opportunities(self, markets: List[Dict]) -> List[Dict]:
-        """Find mispriced markets."""
-        opportunities = []
-        processed = 0
-        max_to_research = 50  # Limit research to top 50 markets to control costs
+        # Reject low confidence estimates
+        if confidence == 'low':
+            print(f"    ✗ Confidence too low: {confidence}")
+            return None
 
-        logger.info(f"Analyzing up to {max_to_research} markets for opportunities...")
+        # Check if we already have a position
+        if self.positions.has_position(market['market_id']):
+            print(f"    ✗ Already have position in this market")
+            return None
 
-        for market in markets[:max_to_research]:
-            processed += 1
+        # Check if we're at max positions
+        if len(self.positions.get_all_positions()) >= self.max_positions:
+            print(f"    ✗ At max positions ({self.max_positions})")
+            return None
 
-            try:
-                # Research the market
-                research = self.research_market(market['question'])
-                if not research:
-                    logger.warning(f"Skipping market (no research): {market['question']}")
-                    continue
+        # Calculate current bankroll
+        current_bankroll = self.positions.get_current_bankroll(self.bankroll)
 
-                # Estimate fair value
-                estimate = self.estimate_fair_value(market['question'], research)
-                if not estimate:
-                    logger.warning(f"Skipping market (no estimate): {market['question']}")
-                    continue
+        # Check stop loss
+        if current_bankroll <= self.stop_loss_bankroll:
+            print(f"    ✗ Bankroll below stop loss (${current_bankroll:.2f} <= ${self.stop_loss_bankroll:.2f})")
+            return None
 
-                # Skip low-confidence estimates
-                if estimate['confidence'] == 'low':
-                    logger.info(f"Skipping low-confidence estimate: {market['question']}")
-                    continue
-
-                fair_value = estimate['probability']
-                current_price = market['current_price']
-                edge = abs(fair_value - current_price)
-
-                # Check if mispricing exceeds threshold
-                if edge >= self.config['mispricing_threshold']:
-                    opportunities.append({
-                        'market': market,
-                        'fair_value': fair_value,
-                        'current_price': current_price,
-                        'edge': edge,
-                        'confidence': estimate['confidence'],
-                        'reasoning': estimate['reasoning']
-                    })
-
-                    logger.info(f"✓ Opportunity found: {market['question']}")
-                    logger.info(f"  Fair: {fair_value:.1%}, Market: {current_price:.1%}, Edge: {edge:.1%}")
-                else:
-                    logger.debug(f"Edge too small ({edge:.1%}): {market['question']}")
-
-            except Exception as e:
-                logger.error(f"Error analyzing market '{market.get('question', 'unknown')}': {e}")
-                continue
-
-        logger.info(f"Analyzed {processed} markets, found {len(opportunities)} opportunities")
-        return opportunities
-
-    def calculate_position_size(self, opportunity: Dict) -> float:
-        """Calculate position size using Kelly criterion."""
-        p = opportunity['fair_value']  # Probability of winning
-        b = 1.0  # Even money bet (1:1 odds)
-
-        # Full Kelly formula: (p * (b + 1) - 1) / b
-        kelly = (p * (b + 1) - 1) / b
-
-        # Apply quarter-Kelly for conservative sizing
-        fraction_kelly = kelly * 0.25
-
-        # Apply max Kelly fraction cap
-        position_fraction = min(abs(fraction_kelly), self.config['max_kelly_fraction'])
-
-        # Calculate dollar amount
-        position_size = self.config['bankroll'] * position_fraction
-
-        # Minimum position size
-        return max(position_size, 1.0)
-
-    def _check_rate_limit(self):
-        """
-        Check and enforce rate limit (60 orders/minute).
-        Sleeps if necessary to stay within limits.
-        """
-        now = datetime.utcnow()
-        cutoff = now - timedelta(seconds=self.RATE_LIMIT_WINDOW)
-
-        # Remove timestamps older than 1 minute
-        while self.order_timestamps and self.order_timestamps[0] < cutoff:
-            self.order_timestamps.popleft()
-
-        # Check if at rate limit
-        if len(self.order_timestamps) >= self.MAX_ORDERS_PER_MINUTE:
-            # Calculate how long to wait
-            oldest = self.order_timestamps[0]
-            wait_until = oldest + timedelta(seconds=self.RATE_LIMIT_WINDOW)
-            wait_seconds = (wait_until - now).total_seconds()
-
-            if wait_seconds > 0:
-                logger.warning(
-                    f"Rate limit reached ({self.MAX_ORDERS_PER_MINUTE} orders/min). "
-                    f"Waiting {wait_seconds:.1f}s..."
-                )
-                time.sleep(wait_seconds)
-
-                # Clean up old timestamps after waiting
-                now = datetime.utcnow()
-                cutoff = now - timedelta(seconds=self.RATE_LIMIT_WINDOW)
-                while self.order_timestamps and self.order_timestamps[0] < cutoff:
-                    self.order_timestamps.popleft()
-
-    def place_trade(self, opportunity: Dict) -> Optional[Dict]:
-        """Place a trade on Polymarket."""
         # Calculate position size
-        position_size = self.calculate_position_size(opportunity)
+        available = self.positions.get_available_capital(self.bankroll)
+        position_size, side = kelly.calculate_position_size(
+            fair_value,
+            current_price,
+            available,
+            self.max_kelly_fraction
+        )
 
-        # Determine side (BUY if we think fair value > market, SELL otherwise)
-        side = 'BUY' if opportunity['fair_value'] > opportunity['current_price'] else 'SELL'
+        if position_size == 0:
+            print(f"    ✗ Position size too small")
+            return None
 
-        # Log trade intent
-        logger.info(f"{'[DRY-RUN] ' if self.dry_run else ''}Placing {side} order:")
-        logger.info(f"  Market: {opportunity['market']['question']}")
-        logger.info(f"  Size: ${position_size:.2f}")
-        logger.info(f"  Price: {opportunity['current_price']:.1%}")
-        logger.info(f"  Fair value: {opportunity['fair_value']:.1%}")
-        logger.info(f"  Edge: {opportunity['edge']:.1%}")
-        logger.info(f"  Reasoning: {opportunity['reasoning']}")
+        # Calculate expected value
+        ev = kelly.calculate_expected_value(fair_value, current_price, position_size, side)
 
-        trade = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'dry_run': self.dry_run,
-            'market': opportunity['market']['question'],
-            'market_id': opportunity['market'].get('id', 'unknown'),
+        print(f"    ✓ Opportunity found!")
+        print(f"      Edge: {edge * 100:.1f}%")
+        print(f"      Side: {side}")
+        print(f"      Size: ${position_size:.2f} ({(position_size / available) * 100:.1f}% of available)")
+        print(f"      Expected value: ${ev:+.2f}")
+
+        return {
+            'market': market,
+            'fair_value': fair_value,
+            'confidence': confidence,
+            'edge': edge,
             'side': side,
-            'size': position_size,
-            'price': opportunity['current_price'],
-            'fair_value': opportunity['fair_value'],
-            'edge': opportunity['edge'],
-            'confidence': opportunity['confidence'],
-            'reasoning': opportunity['reasoning'],
-            'status': 'simulated' if self.dry_run else 'open',
-            'pnl': None
+            'position_size': position_size,
+            'expected_value': ev
         }
+
+    def execute_trade(self, opportunity: Dict) -> bool:
+        """
+        Execute a trade
+
+        Args:
+            opportunity: Trade opportunity dict
+
+        Returns:
+            True if trade executed successfully
+        """
+        market = opportunity['market']
+        side = opportunity['side']
+        size = opportunity['position_size']
+        price = market['price']
 
         if self.dry_run:
-            # In dry-run mode, just log and return
-            logger.info(f"[DRY-RUN] Trade simulated (not placed)")
-            self._log_trade(trade)
-            return trade
+            print(f"    [DRY-RUN] Would place {side} order:")
+            print(f"      Market: \"{market['question']}\"")
+            print(f"      Size: ${size:.2f}")
+            print(f"      Price: {price * 100:.1f}%")
+            print(f"      Expected value: ${opportunity['expected_value']:+.2f}")
+            print()
 
-        # Check rate limit before placing order
-        self._check_rate_limit()
-
-        # Place actual order via Seren polymarket publisher
-        try:
-            result = self.agent.call_publisher(
-                'polymarket',
-                'place_order',
-                {
-                    'market_id': opportunity['market']['id'],
-                    'side': side,
-                    'size': position_size,
-                    'price': opportunity['current_price'],
-                    'order_type': 'limit'  # Use limit orders for better price control
-                }
+            # Log the trade
+            self.logger.log_trade(
+                market=market['question'],
+                market_id=market['market_id'],
+                side=side,
+                size=size,
+                price=price,
+                fair_value=opportunity['fair_value'],
+                edge=opportunity['edge'],
+                status='dry_run'
             )
 
-            # Update trade with order details
-            trade['order_id'] = result.get('order_id')
-            trade['status'] = result.get('status', 'open')
-
-            # Track order for rate limiting
-            self.order_timestamps.append(datetime.utcnow())
-
-            # Log trade
-            self._log_trade(trade)
-
-            logger.info(f"Order placed successfully: {trade['order_id']}")
-            return trade
-
-        except Exception as e:
-            logger.error(f"Failed to place trade via MCP: {e}")
-            return None
-
-    def _log_trade(self, trade: Dict):
-        """Append trade to trades log file."""
-        with open(TRADES_LOG, 'a') as f:
-            f.write(json.dumps(trade) + '\n')
-
-    def _load_positions(self) -> List[Dict]:
-        """Load current open positions."""
-        if not POSITIONS_FILE.exists():
-            return []
-
-        try:
-            with open(POSITIONS_FILE, 'r') as f:
-                data = json.load(f)
-                return data.get('positions', [])
-        except Exception as e:
-            logger.error(f"Failed to load positions: {e}")
-            return []
-
-    def _save_positions(self, positions: List[Dict]):
-        """Save current positions to file."""
-        data = {
-            'positions': positions,
-            'last_updated': datetime.utcnow().isoformat()
-        }
-
-        with open(POSITIONS_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
-
-    def check_stop_loss(self) -> bool:
-        """Check if stop loss threshold has been reached."""
-        # Calculate current bankroll (initial - deployed capital)
-        positions = self._load_positions()
-        deployed = sum(p.get('size', 0) for p in positions)
-        current_bankroll = self.config['bankroll'] - deployed
-
-        if current_bankroll <= self.config['stop_loss_bankroll']:
-            logger.warning(f"Stop loss triggered: ${current_bankroll:.2f} <= ${self.config['stop_loss_bankroll']:.2f}")
             return True
 
-        return False
+        # Execute actual trade
+        try:
+            print(f"    📊 Placing {side} order...")
 
-    def run_cycle(self):
-        """Run one complete trading cycle."""
-        logger.info("=" * 60)
-        logger.info(f"Starting {'DRY-RUN ' if self.dry_run else ''}scan cycle")
-        logger.info("=" * 60)
+            order = self.polymarket.place_order(
+                token_id=market['token_id'],
+                side=side,
+                size=size,
+                price=price
+            )
 
-        cycle_start = datetime.utcnow()
+            print(f"    ✓ Order placed: {order.get('orderID', 'unknown')}")
+
+            # Add position to tracker
+            self.positions.add_position(
+                market=market['question'],
+                market_id=market['market_id'],
+                token_id=market['token_id'],
+                side=side,
+                entry_price=price,
+                size=size
+            )
+
+            # Log the trade
+            self.logger.log_trade(
+                market=market['question'],
+                market_id=market['market_id'],
+                side=side,
+                size=size,
+                price=price,
+                fair_value=opportunity['fair_value'],
+                edge=opportunity['edge'],
+                status='open'
+            )
+
+            return True
+
+        except Exception as e:
+            print(f"    ✗ Trade failed: {e}")
+            self.logger.notify_api_error(str(e))
+            return False
+
+    def run_scan_cycle(self):
+        """Run a single scan cycle"""
+        print("=" * 60)
+        print(f"🔍 Polymarket Scan Starting - {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        print("=" * 60)
+        print()
 
         # Check balances
         balances = self.check_balances()
+        print(f"Balances:")
+        print(f"  SerenBucks: ${balances['serenbucks']:.2f}")
+        print(f"  Polymarket: ${balances['polymarket']:.2f}")
+        print()
 
-        if balances['serenbucks'] < 1.0:
-            logger.warning("Insufficient SerenBucks balance - cannot run scan")
-            logger.warning("Please deposit SerenBucks to continue")
-            return
-
-        # Check stop loss
-        if self.check_stop_loss():
-            logger.error("Stop loss triggered - trading halted")
-            logger.error("Please increase bankroll to resume trading")
-            return
-
-        # Load current positions
-        positions = self._load_positions()
-        logger.info(f"Current open positions: {len(positions)}/{self.config['max_positions']}")
-
-        # Check if at max positions
-        if len(positions) >= self.config['max_positions']:
-            logger.info("Max positions reached - skipping scan")
-            return
+        # Check for low balances
+        if balances['serenbucks'] < 5.0:
+            self.logger.notify_low_balance('serenbucks', balances['serenbucks'], 20.0)
 
         # Scan markets
-        markets = self.scan_markets()
+        print("Scanning markets...")
+        markets = self.scan_markets(limit=100)
+        print(f"  Found {len(markets)} markets")
+        print()
+
         if not markets:
-            logger.warning("No markets found - skipping cycle")
+            print("⚠️  No markets found - check polymarket-data publisher availability")
+            print()
+
+            # Log scan result
+            self.logger.log_scan_result(
+                dry_run=self.dry_run,
+                markets_scanned=0,
+                opportunities_found=0,
+                trades_executed=0,
+                capital_deployed=0.0,
+                api_cost=0.0,
+                serenbucks_balance=balances['serenbucks'],
+                polymarket_balance=balances['polymarket'],
+                errors=['No markets returned from polymarket-data']
+            )
             return
 
-        # Find opportunities
-        opportunities = self.find_opportunities(markets)
-        logger.info(f"Found {len(opportunities)} opportunities")
+        # Evaluate opportunities
+        opportunities = []
+        for market in markets[:20]:  # Limit to top 20 to control API costs
+            print(f"Evaluating: \"{market['question']}\"")
+            print(f"  Current price: {market['price'] * 100:.1f}%")
+            print(f"  Liquidity: ${market['liquidity']:.2f}")
+
+            # Research
+            research = self.research_opportunity(market['question'])
+            if not research:
+                continue
+
+            # Estimate fair value
+            fair_value, confidence = self.estimate_fair_value(
+                market['question'],
+                market['price'],
+                research
+            )
+            if not fair_value:
+                continue
+
+            # Evaluate opportunity
+            opp = self.evaluate_opportunity(market, research, fair_value, confidence)
+            if opp:
+                opportunities.append(opp)
+
+            print()
+
+        print(f"📊 Found {len(opportunities)} opportunities")
+        print()
 
         # Execute trades
         trades_executed = 0
-        max_new_positions = self.config['max_positions'] - len(positions)
+        capital_deployed = 0.0
 
-        for opp in opportunities[:max_new_positions]:
-            trade = self.place_trade(opp)
-            if trade:
+        for opp in opportunities:
+            if self.execute_trade(opp):
                 trades_executed += 1
+                capital_deployed += opp['position_size']
 
-                # Add to positions if not dry-run
-                if not self.dry_run:
-                    positions.append({
-                        'market': trade['market'],
-                        'market_id': trade['market_id'],
-                        'side': trade['side'],
-                        'entry_price': trade['price'],
-                        'current_price': trade['price'],
-                        'size': trade['size'],
-                        'unrealized_pnl': 0.0,
-                        'opened_at': trade['timestamp']
-                    })
+        # Log scan result
+        # Estimate API cost (rough approximation)
+        api_cost = len(markets[:20]) * 0.05  # ~$0.05 per market (research + estimate)
+        self.logger.log_scan_result(
+            dry_run=self.dry_run,
+            markets_scanned=len(markets),
+            opportunities_found=len(opportunities),
+            trades_executed=trades_executed,
+            capital_deployed=capital_deployed,
+            api_cost=api_cost,
+            serenbucks_balance=balances['serenbucks'],
+            polymarket_balance=balances['polymarket']
+        )
 
-        # Save updated positions
-        if not self.dry_run and trades_executed > 0:
-            self._save_positions(positions)
-
-        # Calculate cycle duration
-        cycle_duration = (datetime.utcnow() - cycle_start).total_seconds()
-
-        # Log scan results
-        scan_result = {
-            'timestamp': cycle_start.isoformat(),
-            'dry_run': self.dry_run,
-            'markets_scanned': len(markets),
-            'opportunities_found': len(opportunities),
-            'trades_executed': trades_executed,
-            'cycle_duration_seconds': cycle_duration,
-            'serenbucks_balance': balances['serenbucks'],
-            'polymarket_balance': balances['polymarket']
-        }
-
-        with open(SCAN_LOG, 'a') as f:
-            f.write(json.dumps(scan_result) + '\n')
-
-        logger.info(f"Scan cycle complete in {cycle_duration:.1f}s")
-        logger.info(f"Trades executed: {trades_executed}")
-        logger.info(f"Next scan: in {self.config['scan_interval_minutes']} minutes")
-        logger.info("=" * 60)
+        print("=" * 60)
+        print("Scan complete!")
+        print(f"  Markets scanned: {len(markets)}")
+        print(f"  Markets analyzed: {min(20, len(markets))}")
+        print(f"  Opportunities: {len(opportunities)}")
+        print(f"  Trades executed: {trades_executed}")
+        print(f"  Capital deployed: ${capital_deployed:.2f}")
+        print(f"  Estimated API cost: ~${api_cost:.2f} SerenBucks")
+        print("=" * 60)
+        print()
 
 
 def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description='Polymarket Trading Agent - Autonomous prediction market trading'
-    )
+    """Main entry point"""
+    parser = argparse.ArgumentParser(description='Polymarket Trading Agent')
     parser.add_argument(
         '--config',
-        type=Path,
-        default=CONFIG_FILE,
-        help='Path to config.json file'
+        required=True,
+        help='Path to config.json'
     )
     parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Run in dry-run mode (simulate trades without placing real orders)'
+        help='Dry-run mode (no actual trades)'
     )
 
     args = parser.parse_args()
 
+    # Check config exists
+    if not os.path.exists(args.config):
+        print(f"Error: Config file not found: {args.config}")
+        sys.exit(1)
+
+    # Initialize agent
     try:
-        trader = PolymarketTrader(args.config, dry_run=args.dry_run)
-        trader.run_cycle()
-        sys.exit(0)
-
-    except FileNotFoundError as e:
-        logger.error(f"Configuration error: {e}")
-        sys.exit(1)
-
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
-        sys.exit(1)
-
+        agent = TradingAgent(args.config, dry_run=args.dry_run)
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        print(f"Error initializing agent: {e}")
+        sys.exit(1)
+
+    # Run scan cycle
+    try:
+        agent.run_scan_cycle()
+    except KeyboardInterrupt:
+        print("\n\nScan interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\nError during scan: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
