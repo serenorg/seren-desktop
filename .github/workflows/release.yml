@@ -593,15 +593,7 @@ jobs:
             exit 1
           fi
 
-          # Check if release is published (not draft)
-          IS_DRAFT=$(echo "$RELEASE_INFO" | jq -r '.draft')
-          if [ "$IS_DRAFT" = "true" ]; then
-            echo "ERROR: GitHub release for $TAG is still a draft!"
-            echo "Publish the release before R2 artifacts are uploaded."
-            exit 1
-          fi
-
-          echo "✓ GitHub release verified: $TAG is published"
+          echo "✓ GitHub release verified: $TAG exists"
 
       - name: Upload updater artifacts to R2
         env:
