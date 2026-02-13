@@ -154,7 +154,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       ([newPath, agentType]) => {
         if (newPath && !isPrompting()) {
           void acpStore.refreshRemoteSessions(newPath, agentType);
-          acpStore.focusProjectSession(newPath);
+          // Only auto-focus a project session if there's no active session
+          // or if the active session belongs to a different project.
+          // This prevents overriding explicit user thread selections.
+          const activeSession = acpStore.activeSession;
+          if (!activeSession || activeSession.cwd !== newPath) {
+            acpStore.focusProjectSession(newPath);
+          }
         }
       },
       { defer: true },
