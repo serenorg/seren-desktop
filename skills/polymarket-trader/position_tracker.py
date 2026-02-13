@@ -225,3 +225,91 @@ class PositionTracker:
     def has_position(self, market_id: str) -> bool:
         """Check if we have a position in this market"""
         return market_id in self.positions
+
+    def sync_with_polymarket(self, polymarket_client) -> Dict[str, int]:
+        """
+        Sync positions with Polymarket API
+
+        Args:
+            polymarket_client: PolymarketClient instance
+
+        Returns:
+            Dict with 'added', 'removed', 'updated' counts
+        """
+        try:
+            # Get current positions from Polymarket API
+            api_positions = polymarket_client.get_positions()
+
+            # Track changes
+            added = 0
+            removed = 0
+            updated = 0
+
+            # Build set of market_ids from API
+            api_market_ids = set()
+
+            # Process each API position
+            for api_pos in api_positions:
+                # Extract market info (handle different possible formats)
+                market_id = api_pos.get('market_id') or api_pos.get('conditionId') or api_pos.get('market')
+                if not market_id:
+                    continue
+
+                api_market_ids.add(market_id)
+
+                # Check if we already track this position
+                if market_id in self.positions:
+                    # Update existing position with latest price
+                    current_price = float(api_pos.get('current_price', 0) or api_pos.get('price', 0))
+                    if current_price > 0:
+                        self.positions[market_id].update_price(current_price)
+                        updated += 1
+                else:
+                    # Add new position from API
+                    try:
+                        pos = Position(
+                            market=api_pos.get('question', '') or api_pos.get('market_name', ''),
+                            market_id=market_id,
+                            token_id=api_pos.get('token_id', ''),
+                            side=api_pos.get('side', 'BUY').upper(),
+                            entry_price=float(api_pos.get('entry_price', 0) or api_pos.get('price', 0)),
+                            size=float(api_pos.get('size', 0) or api_pos.get('amount', 0)),
+                            opened_at=api_pos.get('created_at', datetime.utcnow().isoformat() + 'Z')
+                        )
+
+                        # Update with current price if available
+                        current_price = float(api_pos.get('current_price', 0) or api_pos.get('price', 0))
+                        if current_price > 0:
+                            pos.update_price(current_price)
+
+                        self.positions[market_id] = pos
+                        added += 1
+                    except Exception as e:
+                        print(f"Warning: Could not add position {market_id}: {e}")
+                        continue
+
+            # Remove positions that no longer exist in API
+            local_market_ids = set(self.positions.keys())
+            closed_market_ids = local_market_ids - api_market_ids
+
+            for market_id in closed_market_ids:
+                del self.positions[market_id]
+                removed += 1
+
+            # Save updated positions
+            if added > 0 or removed > 0 or updated > 0:
+                self.save()
+
+            return {
+                'added': added,
+                'removed': removed,
+                'updated': updated
+            }
+
+        except Exception as e:
+            print(f"Error syncing positions with Polymarket: {e}")
+            return {
+                'added': 0,
+                'removed': 0,
+                'updated': 0
+            }

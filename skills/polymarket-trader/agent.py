@@ -71,6 +71,19 @@ class TradingAgent:
         print(f"  Max positions: {self.max_positions}")
         print()
 
+        # Sync positions on startup
+        print("Syncing positions with Polymarket...")
+        try:
+            sync_result = self.positions.sync_with_polymarket(self.polymarket)
+            print(f"✓ Position sync complete:")
+            print(f"  Added: {sync_result['added']}")
+            print(f"  Updated: {sync_result['updated']}")
+            print(f"  Removed: {sync_result['removed']}")
+            print(f"  Total positions: {len(self.positions.get_all_positions())}")
+        except Exception as e:
+            print(f"⚠️  Position sync failed: {e}")
+        print()
+
     def check_balances(self) -> Dict[str, float]:
         """
         Check SerenBucks and Polymarket balances
@@ -341,6 +354,18 @@ class TradingAgent:
         print(f"Balances:")
         print(f"  SerenBucks: ${balances['serenbucks']:.2f}")
         print(f"  Polymarket: ${balances['polymarket']:.2f}")
+        print()
+
+        # Sync positions with Polymarket API
+        print("Syncing positions...")
+        try:
+            sync_result = self.positions.sync_with_polymarket(self.polymarket)
+            if sync_result['added'] > 0 or sync_result['removed'] > 0 or sync_result['updated'] > 0:
+                print(f"  Added: {sync_result['added']}, Updated: {sync_result['updated']}, Removed: {sync_result['removed']}")
+            else:
+                print(f"  All positions in sync ({len(self.positions.get_all_positions())} open)")
+        except Exception as e:
+            print(f"  ⚠️  Sync failed: {e}")
         print()
 
         # Check for low balances
