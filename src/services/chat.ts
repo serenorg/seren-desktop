@@ -231,7 +231,6 @@ export type ToolStreamEvent =
 /**
  * Check if a MIME type is supported for vision/multimodal content blocks.
  * Anthropic API only supports: image/jpeg, image/png, image/gif, image/webp
- * (Note: SVG and PDF are NOT supported and must be handled separately)
  */
 function isVisionCompatibleMime(mimeType: string): boolean {
   return [
@@ -244,7 +243,10 @@ function isVisionCompatibleMime(mimeType: string): boolean {
 
 /**
  * Build multimodal content blocks from text and optional attachments.
- * Vision-compatible images become content blocks; text/code files are inlined; PDFs are noted as unsupported.
+ * - Vision-compatible images (jpg, png, gif, webp) become image_url content blocks
+ * - PDFs become document content blocks (Anthropic format)
+ * - Text/code files are inlined as code blocks
+ * - Other formats (SVG, etc.) are noted as unsupported
  */
 function buildUserContent(
   text: string,
@@ -256,6 +258,7 @@ function buildUserContent(
 
   // Separate files by type
   const visionImages: Attachment[] = [];
+  const pdfDocuments: Attachment[] = [];
   const inlinedParts: string[] = [];
   const unsupportedFiles: string[] = [];
 
@@ -265,11 +268,14 @@ function buildUserContent(
       const decoded = atob(att.base64);
       const ext = att.name.split(".").pop() || "";
       inlinedParts.push(`\`\`\`${ext} (${att.name})\n${decoded}\n\`\`\``);
+    } else if (att.mimeType === "application/pdf") {
+      // PDFs use document content blocks (Anthropic format)
+      pdfDocuments.push(att);
     } else if (isVisionCompatibleMime(att.mimeType)) {
       // Vision-compatible image formats
       visionImages.push(att);
     } else {
-      // PDFs and other unsupported formats
+      // SVGs and other unsupported formats
       unsupportedFiles.push(`${att.name} (${att.mimeType})`);
     }
   }
@@ -281,26 +287,42 @@ function buildUserContent(
   }
   if (unsupportedFiles.length > 0) {
     textParts.push(
-      `[Note: The following files cannot be processed as they are not vision-compatible images: ${unsupportedFiles.join(", ")}]`,
+      `[Note: The following files cannot be processed: ${unsupportedFiles.join(", ")}. Supported formats: images (jpg, png, gif, webp), PDFs, and text/code files.]`,
     );
   }
   textParts.push(text);
 
   const fullText = textParts.join("\n\n");
 
-  // If no vision images, return plain text
-  if (visionImages.length === 0) {
+  // If no media files, return plain text
+  if (visionImages.length === 0 && pdfDocuments.length === 0) {
     return fullText;
   }
 
-  // Build content blocks with vision-compatible images only
+  // Build content blocks for images and PDFs
   const blocks: ContentBlock[] = [];
+
+  // Add PDF documents first
+  for (const att of pdfDocuments) {
+    blocks.push({
+      type: "document",
+      source: {
+        type: "base64",
+        media_type: "application/pdf",
+        data: att.base64,
+      },
+    });
+  }
+
+  // Add vision-compatible images
   for (const att of visionImages) {
     blocks.push({
       type: "image_url",
       image_url: { url: toDataUrl(att) },
     });
   }
+
+  // Add text content last
   blocks.push({ type: "text", text: fullText });
 
   return blocks;
