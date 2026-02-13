@@ -8,6 +8,7 @@ Uses the polymarket-trading-serenai publisher to:
 """
 
 import os
+import json
 from typing import Dict, List, Any, Optional
 from seren_client import SerenClient
 
@@ -74,48 +75,60 @@ class PolymarketClient:
                 'end_date': str
             }
         """
+        # Build query parameters for GET request
+        # Use query params instead of body for GET requests
+        params = f"?limit={limit}&active={'true' if active else 'false'}&closed=false"
+
         # Call polymarket-data publisher to get markets
         response = self.seren.call_publisher(
             publisher='polymarket-data',
             method='GET',
-            path='/markets',
-            body={
-                'limit': limit,
-                'active': active,
-                'closed': False
-            }
+            path=f'/markets{params}'
         )
 
         markets = []
 
-        # Parse response and normalize to our format
-        for market_data in response.get('data', []):
-            # Extract relevant fields
-            market_id = market_data.get('condition_id') or market_data.get('id')
+        # Parse response - publisher returns data in 'body' field
+        market_list = response.get('body', [])
+        if not market_list and 'data' in response:
+            # Fallback for older API versions
+            market_list = response.get('data', [])
+
+        for market_data in market_list:
+            # Skip closed markets
+            if market_data.get('closed', False):
+                continue
+
+            # Extract relevant fields (API uses camelCase)
+            market_id = market_data.get('conditionId') or market_data.get('id')
             question = market_data.get('question', '')
 
-            # Get YES token ID (we trade YES/NO outcomes)
-            tokens = market_data.get('tokens', [])
-            yes_token = None
-            for token in tokens:
-                if token.get('outcome', '').upper() == 'YES':
-                    yes_token = token
-                    break
+            # Get token IDs - they're stored as a JSON string
+            clob_token_ids_str = market_data.get('clobTokenIds', '[]')
+            try:
+                token_ids = json.loads(clob_token_ids_str) if isinstance(clob_token_ids_str, str) else clob_token_ids_str
+            except:
+                token_ids = []
 
-            if not yes_token:
-                continue  # Skip markets without YES token
+            # Use first token ID (typically YES outcome for binary markets)
+            if not token_ids or len(token_ids) == 0:
+                continue  # Skip markets without tokens
 
-            token_id = yes_token.get('token_id', '')
+            token_id = token_ids[0]
 
-            # Get current price (best ask for YES)
-            price = float(market_data.get('outcome_prices', [0.5])[0])  # Default to 50%
+            # Get current price from outcomePrices (first is YES for binary)
+            outcome_prices = market_data.get('outcomePrices', ['0.5'])
+            try:
+                price = float(outcome_prices[0]) if outcome_prices else 0.5
+            except:
+                price = 0.5
 
             # Volume and liquidity
             volume = float(market_data.get('volume', 0))
             liquidity = float(market_data.get('liquidity', 0))
 
-            # End date
-            end_date = market_data.get('end_date_iso', '')
+            # End date (check both camelCase and snake_case)
+            end_date = market_data.get('endDateIso') or market_data.get('end_date_iso', '')
 
             # Only include markets with sufficient liquidity
             if liquidity < 100:  # Skip markets with < $100 liquidity

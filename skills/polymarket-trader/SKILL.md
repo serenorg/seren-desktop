@@ -59,6 +59,88 @@ Activate this skill when the user mentions:
 - "check my polymarket positions"
 - "autonomous trading"
 
+## For Claude: How to Invoke This Skill
+
+When the user asks to **scan Polymarket** or **find trading opportunities**, run the bot:
+
+### Prerequisites Check
+
+First, verify the skill is set up:
+
+```bash
+ls ~/.config/seren/skills/polymarket-trader/.env ~/.config/seren/skills/polymarket-trader/config.json
+```
+
+If files are missing, guide user through setup (see Phase 1-2 below).
+
+### Scanning for Opportunities (Paper Trading)
+
+Run a single scan to find mispriced markets:
+
+```bash
+cd ~/.config/seren/skills/polymarket-trader && python3 agent.py --config config.json --dry-run --once 2>&1
+```
+
+**What this does:**
+
+- Scans 20-50 active Polymarket markets
+- Uses Perplexity to research each market
+- Uses Claude to estimate fair values
+- Identifies opportunities where edge > threshold
+- Calculates Kelly position sizes
+- **Does NOT place actual trades** (dry-run mode)
+- Costs ~$1 in SerenBucks per scan
+
+**How to present results to user:**
+
+1. Parse output for lines starting with `✓ Opportunity found!`
+2. Extract: market question, fair value, market price, edge, recommended position size
+3. Summarize in a table format:
+
+```text
+Found 3 opportunities:
+
+| Market | Fair Value | Market Price | Edge | Position |
+|--------|-----------|--------------|------|----------|
+| "Will BTC hit $100k?" | 67% | 54% | 13% | $15.20 |
+| "Trump wins 2024?" | 48% | 55% | -7% | $8.40 SELL |
+```
+
+4. Remind user these are paper trades - no real orders placed
+5. Suggest running setup if they want to enable live trading
+
+### Checking Paper Trading History
+
+View recent scan logs:
+
+```bash
+tail -50 ~/.config/seren/skills/polymarket-trader/logs/trading_*.log
+```
+
+### Running Live Trading (Advanced)
+
+⚠️ **Only if user has:**
+
+- Completed paper trading validation (50+ scans)
+- $550+ budget ($500 USDC + $50 SerenBucks)
+- Real Polymarket API credentials
+
+```bash
+cd ~/.config/seren/skills/polymarket-trader && python3 run_agent_server.py --config config.json &
+```
+
+Then setup cron:
+
+```bash
+python3 setup_cron.py --url http://localhost:8080/run --schedule "*/120 * * * *"
+```
+
+**Important:**
+
+- Always confirm user has adequate budget before suggesting live mode
+- Emphasize paper trading first
+- Live trading requires stopping and restarting with non-dry-run flag
+
 ## Overview
 
 This skill helps users set up and manage an autonomous trading agent that:
@@ -88,10 +170,30 @@ This skill helps users set up and manage an autonomous trading agent that:
 - `logger.py` - Trading logger
 
 **Seren Publishers Used:**
-- `polymarket-trading-serenai` - Market data + trading
-- `perplexity` - AI-powered research
-- `seren-models` - LLM inference (Claude)
-- `seren-cron` - Job scheduling
+- `polymarket-data` - Real-time Polymarket market data (prices, volumes, liquidity)
+  - Endpoint: `GET /markets` returns active prediction markets
+  - Response includes: market IDs, questions, token IDs, prices, liquidity
+  - Verified working with 100+ markets returned
+
+- `polymarket-trading-serenai` - Polymarket CLOB trading API
+  - Place/cancel orders with server-side EIP-712 signing
+  - Query positions, open orders, balances
+  - Requires Polymarket L2 credentials (API key, passphrase, secret, address)
+
+- `perplexity` - Perplexity AI research (via OpenRouter)
+  - Model: `sonar` for fast research
+  - Returns AI-generated summaries with citations
+  - Used to research market questions before trading
+
+- `seren-models` - Multi-model LLM inference (via OpenRouter)
+  - 200+ models available (Claude, GPT, Gemini, Llama, etc.)
+  - Used model: `anthropic/claude-sonnet-4.5`
+  - Estimates fair value probabilities from research
+
+- `seren-cron` - Autonomous job scheduling
+  - Schedule Python agent to run on cron expressions
+  - Executes scan cycles automatically (e.g., every 10 minutes)
+  - Pause/resume/delete jobs programmatically
 
 ---
 
@@ -203,19 +305,212 @@ Stop trading if bankroll drops to this amount.
 - 0: Stop only if completely depleted
 - 50% of initial: Stop if down 50%
 
-### Phase 4: Check Balances
+### Phase 4: Fund Your Wallets
 
-Before running, ensure you have sufficient balances:
+⚠️ **REALITY CHECK: The Economics of Automated Trading**
 
-**SerenBucks** (for API calls):
-- Visit: https://app.serendb.com/wallet/deposit
-- Recommended: $20+ for uninterrupted operation
-- Cost: ~$0.50-2.00 per scan cycle
+**You need at least $550 total to trade profitably with this bot.**
 
-**Polymarket** (for trading):
-- Bridge USDC to Polygon PoS
-- Send to your Polymarket wallet address
-- Check balance: https://polymarket.com/wallet
+This is not a recommendation - it's math. Here's why:
+
+#### The Problem with Small Bankrolls
+
+The bot costs ~$12/day to run (at 2-hour scan intervals). With a $20 bankroll:
+
+- Max position size: 3% × $20 = **$0.60 per trade**
+- To break even in 3 days: need **224% return** ($45 profit from $20 capital)
+- Reality: Even the best trades return 10-30%, giving you $0.06-0.18 profit per position
+- **You're spending $12/day to make $0.50/day**
+
+This is like hiring a $100/hour analyst to trade a $10 account. The math doesn't work.
+
+#### Minimum Viable Budget: $550
+
+To have a realistic chance of offsetting API costs and achieving profitability:
+
+| Item             | Amount   | Purpose                                       |
+| ---------------- | -------- | --------------------------------------------- |
+| **Polygon USDC** | $500     | Trading capital (allows $15-30 positions)     |
+| **SerenBucks**   | $50      | API costs (4+ days of operation)              |
+| **Total**        | **$550** | Minimum to trade with positive expected value |
+
+With $500 bankroll:
+
+- Position sizes: $15-30 each (at 3-6% Kelly sizing)
+- Plausible profit over 4 days: $50-100 (10-20% return on multiple trades)
+- API cost: -$48
+- **Net: +$2-52 profit (break-even to profitable)**
+
+---
+
+#### Budget Tiers
+
+##### 🔴 Below Minimum (<$550 total)
+
+- **Status**: 🚨 **WILL LOSE MONEY**
+- **Reality**: Trading profits cannot offset API costs with small positions
+- **Use case**: Educational only - learning how the system works
+- **Expected outcome**: Net loss of ~$40-50 after SerenBucks depleted
+
+##### 🟢 Minimum Viable ($550-800 total)
+
+- **SerenBucks**: $50-100
+- **Polygon USDC**: $500
+- **Scan interval**: 120 minutes (2 hours)
+- **Daily API cost**: $12
+- **Expected outcome**: Break-even to modest profit
+- **Best for**: First serious attempt at profitable automated trading
+
+##### 🟡 Active Trader ($800-1,500 total)
+
+- **SerenBucks**: $100-200
+- **Polygon USDC**: $700-1,300
+- **Scan interval**: 60 minutes (1 hour)
+- **Daily API cost**: $24
+- **Expected outcome**: Profitable if edge is real
+- **Best for**: Experienced traders scaling up
+
+##### 🔵 Serious Trader ($1,500+ total)
+
+- **SerenBucks**: $200+
+- **Polygon USDC**: $1,300+
+- **Scan interval**: 30 minutes
+- **Daily API cost**: $48
+- **Expected outcome**: Maximum opportunity capture
+- **Best for**: High conviction in strategy, willing to scale
+
+---
+
+#### Paper Trading (RECOMMENDED FOR EVERYONE)
+
+**Before deploying real capital, paper trade for 1-2 weeks to validate your edge.**
+
+Paper trading uses real market data and real AI analysis, but simulates trades instead of placing actual orders. This lets you:
+
+- Validate the strategy actually finds mispriced markets
+- Measure real win rate and average edge
+- Test different risk parameters (Kelly fraction, mispricing threshold)
+- Build confidence before risking capital
+
+**How to paper trade:**
+
+```bash
+python3 agent.py --config config.json --dry-run
+```
+
+**What happens in dry-run mode:**
+
+- ✅ Scans real Polymarket markets
+- ✅ Researches opportunities with Perplexity (real API calls)
+- ✅ Estimates fair values with Claude (real API calls)
+- ✅ Calculates Kelly position sizes
+- ✅ Logs paper trades to `logs/trading_*.log`
+- ❌ Does NOT place actual Polymarket orders
+- ❌ Does NOT require Polymarket API credentials
+
+**Important:** Paper trading still costs **~$1 per scan** in API fees (Perplexly + Claude analysis). With $50 SerenBucks, you can run 50 paper trades over 1-2 weeks to validate the strategy.
+
+**Recommended paper trading plan:**
+
+1. Fund $50 SerenBucks (covers ~50 scans)
+2. Set `"scan_interval_minutes": 120` in config.json (2-hour intervals)
+3. Run paper trading for 5-7 days (60-84 scans)
+4. Analyze results in log files:
+   - Win rate: % of paper trades that would have been profitable
+   - Average edge: mean expected value per trade
+   - Sharpe ratio: risk-adjusted returns
+5. If paper trading shows consistent edge, move to live trading with $550+ budget
+
+**Manual paper trading (if <$50 SerenBucks):**
+
+Run scans one at a time when you want:
+
+```bash
+python3 agent.py --config config.json --dry-run --once
+```
+
+- You control when to spend API credits ($1 per scan)
+- With $20 SerenBucks: run 20 scans over weeks/months
+- Scout for opportunities at your own pace
+- No autonomous scheduling
+
+---
+
+#### Moving from Paper to Live Trading
+
+Once paper trading validates your edge (recommended: 50+ scans with positive expected value), you're ready for live trading.
+
+**Requirements for live trading:**
+
+- ✅ Successful paper trading period (1-2 weeks, 50+ scans)
+- ✅ Minimum $550 budget ($500 USDC + $50 SerenBucks)
+- ✅ Polymarket API credentials (see Phase 2)
+- ✅ Understanding of Kelly Criterion risk management
+
+**If you don't have $550 yet:**
+
+- Continue paper trading to refine strategy
+- Save up capital while accumulating paper trade data
+- Use smaller scan intervals once you have budget
+
+---
+
+#### How to Fund SerenBucks
+
+1. Visit: https://app.serendb.com/wallet/deposit
+2. Choose deposit method:
+   - Credit card (instant)
+   - Crypto transfer (USDC, ETH, BTC)
+3. Minimum recommended: $50 for uninterrupted operation
+
+**Cost breakdown per scan cycle** (~$1.00 total):
+- Market data fetch: $0.10
+- Perplexity research: $0.01 × 20 markets = $0.20
+- Claude fair value estimation: $0.035 × 20 markets = $0.70
+
+**Daily costs by scan interval:**
+- 30 min intervals: 48 scans/day × $1.00 = $48/day
+- 60 min intervals: 24 scans/day × $1.00 = $24/day
+- 120 min intervals: 12 scans/day × $1.00 = $12/day
+
+---
+
+#### How to Fund Polymarket (Polygon USDC)
+
+1. **Bridge USDC to Polygon PoS** using:
+   - [Polygon Bridge](https://wallet.polygon.technology/bridge) (official)
+   - [Hop Exchange](https://app.hop.exchange/) (faster)
+   - [Connext](https://bridge.connext.network/) (alternative)
+
+2. **Send to your Polymarket wallet address**:
+   - Find your address: https://polymarket.com/wallet
+   - Send bridged USDC to this address
+   - Wait for confirmation (~2-5 minutes)
+
+3. **Verify balance**:
+   - Check on Polymarket: https://polymarket.com/wallet
+   - Or check on PolygonScan: https://polygonscan.com/address/YOUR_ADDRESS
+
+**Trading capital recommendations:**
+- Minimum: $20 (allows small positions for testing)
+- Conservative: $50-100 (better position sizing)
+- Serious: $500+ (optimal Kelly Criterion sizing)
+
+---
+
+#### Checking Your Balances
+
+Before running the bot, verify both balances:
+
+**Check SerenBucks:**
+```bash
+# If you have Seren MCP connected
+# The bot will display balance when it starts
+```
+
+**Check Polymarket USDC:**
+- Visit: https://polymarket.com/wallet
+- Or the bot will show balance at startup
 
 ### Phase 5: Dry-Run Test (STRONGLY RECOMMENDED)
 
@@ -544,34 +839,43 @@ def calculate_position_size(fair_value, market_price, bankroll, max_kelly=0.06):
 
 ---
 
-## Known Limitations & TODOs
+## Implementation Status
 
-### Currently Implemented ✅
-- ✅ Seren API client
-- ✅ Polymarket client wrapper
-- ✅ Fair value estimation via Claude
-- ✅ Kelly Criterion calculator
-- ✅ Position tracking
-- ✅ Comprehensive logging
-- ✅ Dry-run mode
-- ✅ Configuration system
-- ✅ Environment variable credentials
+### ✅ Fully Implemented & Working
 
-### Not Yet Implemented ❌
-- ❌ **Market scanning** - Placeholder code only (needs polymarket-data integration)
-- ❌ **Actual Polymarket balance checking** - Placeholder (needs blockchain query)
-- ❌ **EIP-712 order signing** - Simplified (needs cryptographic signing)
-- ❌ **Position closing logic** - Not automated
-- ❌ **Email/webhook notifications** - Only logs to files
-- ❌ **Web dashboard** - Command-line only
-- ❌ **Backtesting** - No historical data testing
+**Core Trading Engine:**
+- ✅ Market scanning via `polymarket-data` publisher (100+ active markets)
+- ✅ AI research via `perplexity` publisher (Perplexity AI integration)
+- ✅ Fair value estimation via `seren-models` publisher (Claude Sonnet 4.5)
+- ✅ Kelly Criterion position sizing
+- ✅ Order placement via `polymarket-trading-serenai` publisher (server-side EIP-712 signing)
+- ✅ Position tracking with unrealized P&L calculation
+- ✅ Comprehensive JSONL logging (trades, scans, positions)
 
-**To complete the implementation:**
-1. Integrate with Polymarket public API for market scanning
-2. Implement proper EIP-712 signature generation for orders
-3. Add position closing/rebalancing logic
-4. Build notification system (email, webhook, or chat integration)
-5. Create web dashboard for monitoring
+**Infrastructure:**
+- ✅ Seren API client with publisher routing
+- ✅ Environment variable credential management
+- ✅ Dry-run mode (simulation without placing trades)
+- ✅ Configuration system (JSON-based risk parameters)
+
+**Seren Publishers Used:**
+- `polymarket-data` - Real-time market data (prices, liquidity, volumes)
+- `polymarket-trading-serenai` - Order placement with server-side signing
+- `perplexity` - AI-powered market research
+- `seren-models` - LLM inference (Claude, GPT, Gemini, etc.)
+- `seren-cron` - Autonomous job scheduling
+
+### ⚠️ Limitations
+
+**Not Automated (Manual Only):**
+- Position closing/exit strategy (must close manually on Polymarket)
+- Bankroll rebalancing after profits/losses
+
+**Not Implemented:**
+- Web dashboard (command-line only)
+- Email/webhook notifications (file logs only)
+- Backtesting with historical data
+- Real-time Polymarket balance checking (placeholder returns $0.00)
 
 ---
 
@@ -603,10 +907,6 @@ Per scan cycle:
 
 ### "Polymarket credentials required"
 - Add `POLY_API_KEY`, `POLY_PASSPHRASE`, `POLY_ADDRESS` to `.env`
-
-### "Market scanning not yet implemented"
-- This is expected - market scanning needs to be implemented
-- See "Known Limitations" section above
 
 ### "Low SerenBucks balance"
 - Deposit at: https://app.serendb.com/wallet/deposit

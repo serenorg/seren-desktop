@@ -111,7 +111,7 @@ class SerenClient:
         market_question: str,
         current_price: float,
         research: str,
-        model: str = 'anthropic/claude-sonnet-4-20250514'
+        model: str = 'anthropic/claude-sonnet-4.5'
     ) -> tuple[float, str]:
         """
         Estimate fair value probability using Claude via seren-models
@@ -164,8 +164,10 @@ Be calibrated and honest about uncertainty."""
             }
         )
 
-        # Parse response
-        content = response['choices'][0]['message']['content']
+        # Parse response - handle wrapped response format
+        # Publisher response may be wrapped in 'body' field
+        response_data = response.get('body', response)
+        content = response_data['choices'][0]['message']['content']
 
         # Extract probability and confidence
         probability = None
@@ -232,7 +234,10 @@ Provide a concise summary (200-300 words) with citations."""
             }
         )
 
-        return response['choices'][0]['message']['content']
+        # Parse response - handle wrapped response format
+        # Publisher response may be wrapped in 'body' field
+        response_data = response.get('body', response)
+        return response_data['choices'][0]['message']['content']
 
     def create_cron_job(
         self,
