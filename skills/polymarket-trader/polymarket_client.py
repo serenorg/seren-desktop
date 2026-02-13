@@ -8,8 +8,6 @@ Uses the polymarket-trading-serenai publisher to:
 """
 
 import os
-import json
-import hashlib
 from typing import Dict, List, Any, Optional
 from seren_client import SerenClient
 
@@ -212,134 +210,6 @@ class PolymarketClient:
         )
         return response.get('data', [])
 
-    def _build_eip712_order(
-        self,
-        token_id: str,
-        side: str,
-        size: float,
-        price: float,
-        order_type: str = 'GTC'
-    ) -> Dict[str, Any]:
-        """
-        Build EIP-712 typed data for order
-
-        Args:
-            token_id: ERC1155 token ID
-            side: 'BUY' or 'SELL'
-            size: Order size in USDC
-            price: Limit price (0.0-1.0)
-            order_type: Order type (GTC, GTD, FOK, FAK)
-
-        Returns:
-            EIP-712 typed data structure
-        """
-        # Convert to maker/taker amounts
-        # For BUY orders: maker_amount is USDC we're spending
-        # For SELL orders: maker_amount is tokens we're selling
-        if side == 'BUY':
-            maker_amount = int(size * 1e6)  # USDC has 6 decimals
-            taker_amount = int((size / price) * 1e6) if price > 0 else 0
-        else:  # SELL
-            maker_amount = int(size * 1e6)
-            taker_amount = int(size * price * 1e6)
-
-        # Build EIP-712 domain
-        domain = {
-            'name': 'Polymarket CTF Exchange',
-            'version': '1',
-            'chainId': 137,  # Polygon mainnet
-            'verifyingContract': '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E'  # CLOB contract
-        }
-
-        # Build order struct
-        import time
-        nonce = int(time.time() * 1000)  # Millisecond timestamp as nonce
-        expiration = int(time.time()) + 86400  # 24 hours from now
-
-        message = {
-            'salt': nonce,
-            'maker': self.poly_address,
-            'signer': self.poly_address,
-            'taker': '0x0000000000000000000000000000000000000000',  # Anyone can fill
-            'tokenId': token_id,
-            'makerAmount': str(maker_amount),
-            'takerAmount': str(taker_amount),
-            'side': side,
-            'expiration': str(expiration),
-            'nonce': str(nonce),
-            'feeRateBps': '0',  # 0 basis points fee
-            'signatureType': 0  # EOA signature
-        }
-
-        # EIP-712 types
-        types = {
-            'EIP712Domain': [
-                {'name': 'name', 'type': 'string'},
-                {'name': 'version', 'type': 'string'},
-                {'name': 'chainId', 'type': 'uint256'},
-                {'name': 'verifyingContract', 'type': 'address'}
-            ],
-            'Order': [
-                {'name': 'salt', 'type': 'uint256'},
-                {'name': 'maker', 'type': 'address'},
-                {'name': 'signer', 'type': 'address'},
-                {'name': 'taker', 'type': 'address'},
-                {'name': 'tokenId', 'type': 'uint256'},
-                {'name': 'makerAmount', 'type': 'uint256'},
-                {'name': 'takerAmount', 'type': 'uint256'},
-                {'name': 'side', 'type': 'uint8'},
-                {'name': 'expiration', 'type': 'uint256'},
-                {'name': 'nonce', 'type': 'uint256'},
-                {'name': 'feeRateBps', 'type': 'uint256'},
-                {'name': 'signatureType', 'type': 'uint8'}
-            ]
-        }
-
-        return {
-            'types': types,
-            'domain': domain,
-            'primaryType': 'Order',
-            'message': message
-        }
-
-    def _sign_order(self, typed_data: Dict[str, Any]) -> str:
-        """
-        Sign EIP-712 typed data with private key
-
-        Note: This requires eth-account library and private key.
-        For production, the private key should be securely managed.
-
-        Args:
-            typed_data: EIP-712 typed data structure
-
-        Returns:
-            Hex-encoded signature
-        """
-        try:
-            from eth_account import Account
-            from eth_account.messages import encode_structured_data
-
-            # Get private key from environment
-            private_key = os.getenv('POLY_PRIVATE_KEY')
-            if not private_key:
-                raise ValueError("POLY_PRIVATE_KEY environment variable required for signing")
-
-            # Encode structured data
-            encoded_data = encode_structured_data(typed_data)
-
-            # Sign
-            account = Account.from_key(private_key)
-            signed_message = account.sign_message(encoded_data)
-
-            # Return signature as hex
-            return signed_message.signature.hex()
-
-        except ImportError:
-            raise ImportError(
-                "eth-account library required for EIP-712 signing. "
-                "Install with: pip install eth-account"
-            )
-
     def place_order(
         self,
         token_id: str,
@@ -351,6 +221,9 @@ class PolymarketClient:
         """
         Place an order
 
+        Note: The polymarket-trading-serenai publisher handles EIP-712 signing
+        server-side using the credentials provided in headers.
+
         Args:
             token_id: ERC1155 token ID
             side: 'BUY' or 'SELL'
@@ -361,17 +234,12 @@ class PolymarketClient:
         Returns:
             Order details
         """
-        # Build EIP-712 typed data
-        typed_data = self._build_eip712_order(token_id, side, size, price, order_type)
-
-        # Sign the order
-        signature = self._sign_order(typed_data)
-
-        # Submit signed order to Polymarket CLOB
         order_data = {
-            **typed_data['message'],
-            'signature': signature,
-            'orderType': order_type
+            'token_id': token_id,
+            'side': side,
+            'size': str(size),
+            'price': str(price),
+            'type': order_type
         }
 
         response = self.seren.call_publisher(

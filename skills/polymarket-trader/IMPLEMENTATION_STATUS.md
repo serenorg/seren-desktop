@@ -35,7 +35,7 @@
 - ✅ Dry-run mode
 - ✅ Configuration validation
 - ✅ Market scanning via polymarket-data publisher
-- ✅ EIP-712 order signing with eth-account
+- ✅ Order placement via polymarket-trading-serenai (handles EIP-712 signing server-side)
 
 ### Legal & Compliance
 - ✅ Geographic restriction warnings (US ban)
@@ -66,22 +66,22 @@
 
 ---
 
-#### 2. EIP-712 Order Signing ✅ **COMPLETED**
-**Status:** Fully implemented with eth-account
+#### 2. Order Placement ✅ **COMPLETED**
+**Status:** Fully implemented via polymarket-trading-serenai publisher
 
 **What was added:**
-- EIP-712 typed data structure builder
-- Private key signing using eth-account library
-- Proper nonce and expiration handling
-- Maker/taker amount calculations
+- Order placement via polymarket-trading-serenai Seren MCP publisher
+- EIP-712 signing handled server-side by the publisher
+- Simplified client-side code (no cryptography needed)
+- Uses Polymarket API credentials for authentication
 
 **Implementation:**
-- `_build_eip712_order()` creates properly formatted typed data
-- `_sign_order()` signs with POLY_PRIVATE_KEY from environment
-- `place_order()` submits signed orders to CLOB
-- Added eth-account>=0.10.0 to requirements.txt
+- `place_order()` calls polymarket-trading-serenai publisher with order params
+- Publisher handles all EIP-712 signing, nonce management, and submission
+- Credentials passed via headers (POLY_API_KEY, POLY_PASSPHRASE, POLY_ADDRESS)
+- No client-side private key or signing library required
 
-**Note:** Requires POLY_PRIVATE_KEY environment variable
+**Note:** The polymarket-trading-serenai MCP server abstracts away all cryptographic complexity
 
 ---
 

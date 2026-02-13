@@ -23,7 +23,7 @@ from datetime import datetime
 
 # Import our modules
 from seren_client import SerenClient
-from polymarket_client_updated import PolymarketClient
+from polymarket_client import PolymarketClient
 from position_tracker import PositionTracker
 from logger import TradingLogger
 import kelly
