@@ -194,11 +194,6 @@ fn auth_error_message(agent_type: AgentType) -> String {
     }
 }
 
-/// Maximum time to wait for an agent prompt to produce any response (5 minutes).
-/// If the agent process is hung or the API is unreachable, this prevents infinite waits.
-/// Increased from 120s to allow complex operations like deep reasoning, refactoring, and multi-step tool execution.
-const PROMPT_TIMEOUT_SECS: u64 = 300;
-
 /// Debounce window: suppress duplicate login launches within this many seconds.
 const LOGIN_DEBOUNCE_SECS: i64 = 15;
 
@@ -299,6 +294,8 @@ pub struct AcpSessionInfo {
     pub cwd: String,
     pub status: SessionStatus,
     pub created_at: String,
+    /// Prompt timeout in seconds. None means unlimited (no timeout).
+    pub timeout_secs: Option<u64>,
 }
 
 /// Session info returned by ACP `listSessions` (unstable).
@@ -369,6 +366,8 @@ pub(crate) struct AcpSession {
     cwd: String,
     status: SessionStatus,
     created_at: jiff::Timestamp,
+    /// Prompt timeout in seconds. None means unlimited (no timeout).
+    timeout_secs: Option<u64>,
     /// Channel to send commands to the worker thread
     pub(crate) command_tx: Option<mpsc::Sender<AcpCommand>>,
     /// Handle to the worker thread
@@ -933,7 +932,14 @@ impl Client for ClientDelegate {
         Err(agent_client_protocol::Error::method_not_found())
     }
 
-    async fn ext_notification(&self, _args: ExtNotification) -> AcpResult<()> {
+    async fn ext_notification(&self, args: ExtNotification) -> AcpResult<()> {
+        // Handle heartbeat notifications - these reset the inactivity timer
+        // without producing visible output in the UI
+        if args.method.as_ref() == "heartbeat" {
+            log::debug!("[ACP] Received heartbeat notification");
+            // Signal activity to reset timeout
+            let _ = self.activity_tx.send(());
+        }
         Ok(())
     }
 }
@@ -1356,6 +1362,7 @@ pub async fn acp_spawn(
     approval_policy: Option<String>,
     search_enabled: Option<bool>,
     network_enabled: Option<bool>,
+    timeout_secs: Option<u64>,
 ) -> Result<AcpSessionInfo, String> {
     let cwd = normalize_cwd(&cwd)?;
     let mut parsed_sandbox_mode = sandbox_mode
@@ -1392,6 +1399,7 @@ pub async fn acp_spawn(
         cwd: cwd.clone(),
         status: SessionStatus::Initializing,
         created_at: now,
+        timeout_secs,
         command_tx: Some(command_tx),
         _worker_handle: None,
         pending_permissions: Arc::clone(&pending_permissions),
@@ -1453,6 +1461,7 @@ pub async fn acp_spawn(
                 search_enabled,
                 resume_agent_session_id_clone,
                 spawn_lock,
+                timeout_secs,
             )
             .await
             {
@@ -1532,6 +1541,7 @@ pub async fn acp_spawn(
         cwd,
         status: SessionStatus::Initializing,
         created_at: now.to_string(),
+        timeout_secs,
     })
 }
 
@@ -1550,6 +1560,7 @@ async fn run_session_worker(
     search_enabled: Option<bool>,
     mut resume_agent_session_id: Option<String>,
     spawn_lock: Arc<Mutex<()>>,
+    timeout_secs: Option<u64>,
 ) -> Result<(), String> {
     let command = agent_type.command()?;
     // Acquire spawn lock to prevent concurrent sidecar spawns for the same agent type.
@@ -2090,10 +2101,12 @@ async fn run_session_worker(
                 let mut force_stopped = false;
                 // Activity-aware timeout: resets whenever the agent sends a
                 // notification (message chunk, tool call, tool result, etc.).
-                // Only fires when the agent is truly silent for PROMPT_TIMEOUT_SECS.
+                // Only fires when the agent is truly silent for the configured timeout.
                 // Use channel (not Notify) to prevent lost signals during rapid tool calls.
-                let mut idle_deadline = tokio::time::Instant::now()
-                    + std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS);
+                // If timeout_secs is None, set deadline to far future (effectively unlimited).
+                let mut idle_deadline = timeout_secs
+                    .map(|secs| tokio::time::Instant::now() + std::time::Duration::from_secs(secs))
+                    .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(u64::MAX));
 
                 let prompt_result = loop {
                     // If cancel was sent, enforce a deadline for the prompt to finish
@@ -2171,9 +2184,12 @@ async fn run_session_worker(
                                 break result;
                             }
                             _ = tokio::time::sleep_until(idle_deadline) => {
+                                let timeout_desc = timeout_secs
+                                    .map(|s| format!("{}s", s))
+                                    .unwrap_or_else(|| "unlimited".to_string());
                                 log::warn!(
-                                    "[ACP] Prompt timed out after {}s of inactivity — agent unresponsive",
-                                    PROMPT_TIMEOUT_SECS
+                                    "[ACP] Prompt timed out after {} of inactivity — agent unresponsive",
+                                    timeout_desc
                                 );
 
                                 // Capture stderr to help diagnose the hang
@@ -2190,8 +2206,8 @@ async fn run_session_worker(
                                 };
 
                                 let mut error_msg = format!(
-                                    "Agent unresponsive after {} seconds of inactivity. Session will restart automatically.",
-                                    PROMPT_TIMEOUT_SECS
+                                    "Agent unresponsive after {} of inactivity. Session will restart automatically.",
+                                    timeout_desc
                                 );
                                 if !stderr_lines.is_empty() {
                                     error_msg.push_str("\n\nAgent stderr (last 50 lines):\n");
@@ -2208,8 +2224,9 @@ async fn run_session_worker(
                             _ = activity_rx.recv() => {
                                 // Agent sent a notification — reset the idle deadline
                                 // Channel ensures no lost signals during rapid tool execution
-                                idle_deadline = tokio::time::Instant::now()
-                                    + std::time::Duration::from_secs(PROMPT_TIMEOUT_SECS);
+                                idle_deadline = timeout_secs
+                                    .map(|secs| tokio::time::Instant::now() + std::time::Duration::from_secs(secs))
+                                    .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(u64::MAX));
                             }
                             cmd = command_rx.recv() => {
                                 match cmd {
@@ -2610,6 +2627,7 @@ pub async fn acp_list_sessions(state: State<'_, AcpState>) -> Result<Vec<AcpSess
             cwd: session.cwd.clone(),
             status: session.status,
             created_at: session.created_at.to_string(),
+            timeout_secs: session.timeout_secs,
         });
     }
 

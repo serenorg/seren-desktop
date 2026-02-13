@@ -25,6 +25,8 @@ export interface AcpSessionInfo {
   createdAt: string;
   /** Remote ACP session id (e.g., Codex thread id). Populated after ready. */
   agentSessionId?: string;
+  /** Prompt timeout in seconds. Undefined means unlimited (no timeout). */
+  timeoutSecs?: number;
 }
 
 export interface AgentInfo {
@@ -222,6 +224,7 @@ export type AcpEvent =
  * @param approvalPolicy - Optional approval policy for command execution
  * @param searchEnabled - Optional flag to enable web search
  * @param networkEnabled - Optional flag to enable direct network access (uses full-access sandbox)
+ * @param timeoutSecs - Optional timeout in seconds for prompts. Undefined means unlimited.
  */
 export async function spawnAgent(
   agentType: AgentType,
@@ -233,6 +236,7 @@ export async function spawnAgent(
   networkEnabled?: boolean,
   localSessionId?: string,
   resumeAgentSessionId?: string,
+  timeoutSecs?: number,
 ): Promise<AcpSessionInfo> {
   return invoke<AcpSessionInfo>("acp_spawn", {
     agentType,
@@ -244,6 +248,7 @@ export async function spawnAgent(
     approvalPolicy: approvalPolicy ?? null,
     searchEnabled: searchEnabled ?? null,
     networkEnabled: networkEnabled ?? null,
+    timeoutSecs: timeoutSecs ?? null,
   });
 }
 
