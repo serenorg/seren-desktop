@@ -147,11 +147,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   // Refresh project-scoped remote sessions (agent source-of-truth) and focus
   // any live session tied to the selected folder.
+  // Skip refresh if a prompt is active to avoid backend rejection.
   createEffect(
     on(
       () => [fileTreeState.rootPath, lockedAgentType()] as const,
       ([newPath, agentType]) => {
-        if (newPath) {
+        if (newPath && !isPrompting()) {
           void acpStore.refreshRemoteSessions(newPath, agentType);
           acpStore.focusProjectSession(newPath);
         }
@@ -338,16 +339,23 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   // Process queued messages when agent becomes ready
-  createEffect(() => {
-    if (isReady() && messageQueue().length > 0) {
-      const [nextMessage, ...remaining] = messageQueue();
-      setMessageQueue(remaining);
-      console.log("[AgentChat] Processing queued message:", nextMessage);
-      setTimeout(() => {
-        acpStore.sendPrompt(nextMessage);
-      }, 100);
-    }
-  });
+  // Use on() to only fire when isReady transitions from false→true
+  // This prevents the effect from firing multiple times for multiple queued messages
+  createEffect(
+    on(
+      isReady,
+      (ready) => {
+        if (ready && messageQueue().length > 0) {
+          const [nextMessage, ...remaining] = messageQueue();
+          setMessageQueue(remaining);
+          console.log("[AgentChat] Processing queued message:", nextMessage);
+          // Send without delay - the on() guard ensures this only fires once per ready transition
+          acpStore.sendPrompt(nextMessage);
+        }
+      },
+      { defer: true },
+    ),
+  );
 
   const handleCancel = async () => {
     // Clear queued messages so they don't auto-send after cancellation
