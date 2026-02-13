@@ -10,6 +10,7 @@ import { updaterStore } from "@/stores/updater.store";
 
 interface TitlebarProps {
   onSignInClick: () => void;
+  onSignOutClick: () => void;
   onToggleSettings: () => void;
   onToggleSidebar: () => void;
   sidebarCollapsed: boolean;
@@ -175,6 +176,14 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
 
         <Show when={authStore.isAuthenticated}>
           <BalanceDisplay />
+          <button
+            type="button"
+            class="flex items-center justify-center h-7 px-3 border border-destructive/30 rounded-md bg-transparent text-destructive text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-destructive/10 hover:border-destructive/50 active:scale-95"
+            onClick={props.onSignOutClick}
+            title="Sign out of your Seren account"
+          >
+            Sign Out
+          </button>
         </Show>
 
         <button

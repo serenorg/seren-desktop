@@ -109,6 +109,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
     <div class="flex flex-col h-screen bg-background text-foreground">
       <Titlebar
         onSignInClick={handleSignInClick}
+        onSignOutClick={props.onLogout}
         onToggleSettings={handleToggleSettings}
         onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
         sidebarCollapsed={sidebarCollapsed()}
