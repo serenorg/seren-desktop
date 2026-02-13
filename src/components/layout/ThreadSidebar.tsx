@@ -301,7 +301,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               />
             </svg>
           </Show>
-          {spawning() ? "Starting agent..." : "New Thread"}
+          {spawning() ? "Starting..." : "New"}
         </button>
 
         <Show when={showLauncher()}>
