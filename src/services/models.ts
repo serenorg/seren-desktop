@@ -104,6 +104,7 @@ function extractProvider(modelId: string): string {
     perplexity: "Perplexity",
     deepseek: "DeepSeek",
     qwen: "Qwen",
+    minimax: "MiniMax",
     "x-ai": "xAI",
     microsoft: "Microsoft",
     nvidia: "NVIDIA",
@@ -130,6 +131,12 @@ function capitalize(str: string): string {
 
 function getDefaultModels(): Model[] {
   return [
+    {
+      id: "minimax/minimax-m2.5",
+      name: "MiniMax M2.5",
+      provider: "MiniMax",
+      contextWindow: 128000,
+    },
     {
       id: "anthropic/claude-sonnet-4",
       name: "Claude Sonnet 4",
