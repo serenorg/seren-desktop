@@ -59,6 +59,25 @@ export function isAgentFallbackError(message: string): boolean {
   return isRateLimitError(message) || isPromptTooLongError(message);
 }
 
+/** Patterns that indicate a request timeout error. */
+const TIMEOUT_PATTERNS = [
+  "request timed out",
+  "timeout",
+  "timed out",
+  "deadline exceeded",
+  "operation timeout",
+];
+
+/**
+ * Check whether an error message indicates a request timeout.
+ * These errors are often spurious race conditions where the error event
+ * is emitted but the operation actually completes successfully.
+ */
+export function isTimeoutError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return TIMEOUT_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
 /**
  * Keywords extracted from agent model IDs mapped to their Seren chat equivalents.
  * Order matters — first match wins, so more specific patterns come first.
