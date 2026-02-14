@@ -98,7 +98,9 @@ export const AgentModelSelector: Component = () => {
                 >
                   <div class="flex items-center justify-between gap-2">
                     <div class="flex flex-col gap-0.5 min-w-0 flex-1">
-                      <span class="text-sm text-foreground font-medium">{model.name}</span>
+                      <span class="text-sm text-foreground font-medium">
+                        {model.name}
+                      </span>
                       <Show when={model.description}>
                         <span class="text-[11px] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
                           {model.description}

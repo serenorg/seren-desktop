@@ -16,6 +16,7 @@ import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
   isPromptTooLongError,
   isRateLimitError,
+  isTimeoutError,
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
 import {
@@ -1741,6 +1742,14 @@ export const acpStore = {
           // restores message history to the new session.
           console.info(
             "[AcpStore] Skipping error message for unresponsive agent — sendPrompt handles recovery",
+          );
+        } else if (isTimeoutError(String(event.data.error))) {
+          // Timeout errors are often spurious race conditions where the error
+          // event is emitted but the operation completes successfully. Skip
+          // displaying these errors to avoid confusing the user with false
+          // error messages when their request actually succeeded.
+          console.info(
+            "[AcpStore] Skipping timeout error message — likely spurious race condition",
           );
         } else if (isPromptTooLongError(String(event.data.error))) {
           // Context window full — flag the session so the UI shows the
