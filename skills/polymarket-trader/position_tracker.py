@@ -14,6 +14,13 @@ from typing import List, Dict, Optional
 from datetime import datetime
 
 
+try:
+    from serendb_storage import SerenDBStorage
+    SERENDB_AVAILABLE = True
+except ImportError:
+    SERENDB_AVAILABLE = False
+
+
 class Position:
     """Represents a single position"""
 
@@ -85,43 +92,79 @@ class Position:
 class PositionTracker:
     """Tracks all open positions and P&L"""
 
-    def __init__(self, positions_file: str = 'logs/positions.json'):
+    def __init__(
+        self,
+        positions_file: str = 'logs/positions.json',
+        serendb_storage: Optional['SerenDBStorage'] = None,
+        use_serendb: bool = True
+    ):
+        """
+        Initialize position tracker
+
+        Args:
+            positions_file: Legacy file path for JSON storage
+            serendb_storage: SerenDB storage instance (if None, uses file storage)
+            use_serendb: Whether to prefer SerenDB over file storage
+        """
         self.positions_file = positions_file
+        self.serendb = serendb_storage if use_serendb and SERENDB_AVAILABLE else None
         self.positions: Dict[str, Position] = {}
         self.load()
 
     def load(self):
-        """Load positions from file"""
-        if not os.path.exists(self.positions_file):
-            self.positions = {}
-            return
+        """Load positions from SerenDB or file"""
+        if self.serendb:
+            # Load from SerenDB
+            try:
+                db_positions = self.serendb.get_positions()
+                self.positions = {}
+                for pos_data in db_positions:
+                    pos = Position.from_dict(pos_data)
+                    self.positions[pos.market_id] = pos
+            except Exception as e:
+                print(f"Error loading positions from SerenDB: {e}")
+                self.positions = {}
+        else:
+            # Legacy file-based loading
+            if not os.path.exists(self.positions_file):
+                self.positions = {}
+                return
 
-        try:
-            with open(self.positions_file, 'r') as f:
-                data = json.load(f)
+            try:
+                with open(self.positions_file, 'r') as f:
+                    data = json.load(f)
 
-            self.positions = {}
-            for pos_data in data.get('positions', []):
-                pos = Position.from_dict(pos_data)
-                self.positions[pos.market_id] = pos
+                self.positions = {}
+                for pos_data in data.get('positions', []):
+                    pos = Position.from_dict(pos_data)
+                    self.positions[pos.market_id] = pos
 
-        except Exception as e:
-            print(f"Error loading positions: {e}")
-            self.positions = {}
+            except Exception as e:
+                print(f"Error loading positions from file: {e}")
+                self.positions = {}
 
     def save(self):
-        """Save positions to file"""
-        os.makedirs(os.path.dirname(self.positions_file), exist_ok=True)
+        """Save positions to SerenDB or file"""
+        if self.serendb:
+            # Save to SerenDB
+            try:
+                for pos in self.positions.values():
+                    self.serendb.save_position(pos.to_dict())
+            except Exception as e:
+                print(f"Error saving positions to SerenDB: {e}")
+        else:
+            # Legacy file-based saving
+            os.makedirs(os.path.dirname(self.positions_file), exist_ok=True)
 
-        data = {
-            'positions': [pos.to_dict() for pos in self.positions.values()],
-            'total_unrealized_pnl': self.get_total_unrealized_pnl(),
-            'position_count': len(self.positions),
-            'last_updated': datetime.utcnow().isoformat() + 'Z'
-        }
+            data = {
+                'positions': [pos.to_dict() for pos in self.positions.values()],
+                'total_unrealized_pnl': self.get_total_unrealized_pnl(),
+                'position_count': len(self.positions),
+                'last_updated': datetime.utcnow().isoformat() + 'Z'
+            }
 
-        with open(self.positions_file, 'w') as f:
-            json.dump(data, f, indent=2)
+            with open(self.positions_file, 'w') as f:
+                json.dump(data, f, indent=2)
 
     def add_position(
         self,

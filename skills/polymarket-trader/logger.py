@@ -13,25 +13,46 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 
+try:
+    from serendb_storage import SerenDBStorage
+    SERENDB_AVAILABLE = True
+except ImportError:
+    SERENDB_AVAILABLE = False
+
+
 class TradingLogger:
-    """Logs all trading activity to JSONL files"""
+    """Logs all trading activity to SerenDB or JSONL files"""
 
     def __init__(
         self,
         trades_log: str = 'logs/trades.jsonl',
         scans_log: str = 'logs/scan_results.jsonl',
-        notifications_log: str = 'logs/notifications.jsonl'
+        notifications_log: str = 'logs/notifications.jsonl',
+        serendb_storage: Optional['SerenDBStorage'] = None,
+        use_serendb: bool = True
     ):
+        """
+        Initialize trading logger
+
+        Args:
+            trades_log: Legacy trades log file path
+            scans_log: Legacy scans log file path
+            notifications_log: Legacy notifications log file path
+            serendb_storage: SerenDB storage instance (if None, uses file storage)
+            use_serendb: Whether to prefer SerenDB over file storage
+        """
         self.trades_log = trades_log
         self.scans_log = scans_log
         self.notifications_log = notifications_log
+        self.serendb = serendb_storage if use_serendb and SERENDB_AVAILABLE else None
 
-        # Ensure log directory exists
-        for log_file in [trades_log, scans_log, notifications_log]:
-            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        # Ensure log directory exists (for legacy file mode)
+        if not self.serendb:
+            for log_file in [trades_log, scans_log, notifications_log]:
+                os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
     def _append_jsonl(self, filepath: str, data: Dict[str, Any]):
-        """Append a JSON line to a file"""
+        """Append a JSON line to a file (legacy mode only)"""
         # Add timestamp if not present
         if 'timestamp' not in data:
             data['timestamp'] = datetime.utcnow().isoformat() + 'Z'
@@ -77,7 +98,23 @@ class TradingLogger:
             'pnl': pnl
         }
 
-        self._append_jsonl(self.trades_log, trade_data)
+        if self.serendb:
+            # Save to SerenDB
+            try:
+                self.serendb.save_trade({
+                    'market_id': market_id,
+                    'market': market,
+                    'side': side,
+                    'price': price,
+                    'size': size,
+                    'executed_at': datetime.utcnow().isoformat() + 'Z',
+                    'tx_hash': None
+                })
+            except Exception as e:
+                print(f"Error logging trade to SerenDB: {e}")
+        else:
+            # Legacy file mode
+            self._append_jsonl(self.trades_log, trade_data)
 
     def log_scan_result(
         self,
@@ -117,7 +154,24 @@ class TradingLogger:
             'errors': errors or []
         }
 
-        self._append_jsonl(self.scans_log, scan_data)
+        if self.serendb:
+            # Save to SerenDB
+            try:
+                self.serendb.save_scan_log({
+                    'scan_at': datetime.utcnow().isoformat() + 'Z',
+                    'markets_scanned': markets_scanned,
+                    'opportunities_found': opportunities_found,
+                    'trades_executed': trades_executed,
+                    'capital_deployed': capital_deployed,
+                    'api_cost': api_cost,
+                    'serenbucks_balance': serenbucks_balance,
+                    'polymarket_balance': polymarket_balance
+                })
+            except Exception as e:
+                print(f"Error logging scan to SerenDB: {e}")
+        else:
+            # Legacy file mode
+            self._append_jsonl(self.scans_log, scan_data)
 
     def log_notification(
         self,
