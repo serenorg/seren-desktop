@@ -26,6 +26,7 @@ from seren_client import SerenClient
 from polymarket_client import PolymarketClient
 from position_tracker import PositionTracker
 from logger import TradingLogger
+from serendb_storage import SerenDBStorage
 import kelly
 
 
@@ -53,9 +54,18 @@ class TradingAgent:
         print("Initializing Polymarket client...")
         self.polymarket = PolymarketClient(self.seren)
 
-        # Initialize position tracker and logger
-        self.positions = PositionTracker()
-        self.logger = TradingLogger()
+        # Initialize SerenDB storage
+        print("Initializing SerenDB storage...")
+        self.storage = SerenDBStorage(self.seren)
+
+        # Setup database (creates tables if they don't exist)
+        if not self.storage.setup_database():
+            print("⚠️  Warning: SerenDB setup failed, falling back to file storage")
+            self.storage = None
+
+        # Initialize position tracker and logger with SerenDB
+        self.positions = PositionTracker(serendb_storage=self.storage)
+        self.logger = TradingLogger(serendb_storage=self.storage)
 
         # Trading parameters from config
         self.bankroll = float(self.config['bankroll'])
