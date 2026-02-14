@@ -2103,10 +2103,12 @@ async fn run_session_worker(
                 // notification (message chunk, tool call, tool result, etc.).
                 // Only fires when the agent is truly silent for the configured timeout.
                 // Use channel (not Notify) to prevent lost signals during rapid tool calls.
-                // If timeout_secs is None, set deadline to far future (effectively unlimited).
+                // If timeout_secs is None, use a very large but safe timeout (1 year = effectively unlimited).
+                // Note: u64::MAX causes instant overflow when added to Instant::now(), so we use 365 days instead.
+                const ONE_YEAR_SECS: u64 = 365 * 24 * 60 * 60;
                 let mut idle_deadline = timeout_secs
                     .map(|secs| tokio::time::Instant::now() + std::time::Duration::from_secs(secs))
-                    .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(u64::MAX));
+                    .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(ONE_YEAR_SECS));
 
                 let prompt_result = loop {
                     // If cancel was sent, enforce a deadline for the prompt to finish
@@ -2226,7 +2228,7 @@ async fn run_session_worker(
                                 // Channel ensures no lost signals during rapid tool execution
                                 idle_deadline = timeout_secs
                                     .map(|secs| tokio::time::Instant::now() + std::time::Duration::from_secs(secs))
-                                    .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(u64::MAX));
+                                    .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(ONE_YEAR_SECS));
                             }
                             cmd = command_rx.recv() => {
                                 match cmd {
@@ -2316,12 +2318,27 @@ async fn run_session_worker(
                 }
 
                 // If the agent was force-stopped (timeout or unresponsive cancel),
-                // kill the agent process and exit the worker. The frontend will
-                // detect the dead session and auto-recover with a fresh spawn.
+                // emit a terminated status to prevent the frontend from retrying on this session,
+                // then kill the agent process and exit the worker.
                 if force_stopped {
                     log::info!(
-                        "[ACP] Session force-stopped — exiting worker to kill agent process"
+                        "[ACP] Session force-stopped — marking as terminated and exiting worker"
                     );
+
+                    // Emit terminated status BEFORE breaking to prevent race condition
+                    // where frontend recovery tries to retry before cleanup completes
+                    let _ = app.emit(
+                        events::SESSION_STATUS,
+                        serde_json::json!({
+                            "sessionId": session_id,
+                            "status": "terminated"
+                        }),
+                    );
+
+                    // Give the frontend a moment to process the terminated status
+                    // before we clean up the session (prevents retry on dead session)
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
                     break;
                 }
 
