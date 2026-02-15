@@ -20,7 +20,6 @@ import {
   isTimeoutError,
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
-import { telemetry } from "@/services/telemetry";
 import {
   createAgentConversation,
   type AgentConversation as DbAgentConversation,
@@ -30,7 +29,6 @@ import {
   setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
 } from "@/lib/tauri-bridge";
-
 import type {
   AcpEvent,
   AcpSessionInfo,
@@ -46,6 +44,7 @@ import type {
   ToolCallEvent,
 } from "@/services/acp";
 import * as acpService from "@/services/acp";
+import { telemetry } from "@/services/telemetry";
 
 // ============================================================================
 // Types
