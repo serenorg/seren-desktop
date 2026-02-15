@@ -11,6 +11,7 @@ const CODE_PREFERRED_MODELS: &[&str] = &["anthropic/claude-opus-4-6", "openai/gp
 
 /// Preferred models for simple Q&A (ordered by speed/cost).
 const SIMPLE_PREFERRED_MODELS: &[&str] = &[
+    "minimax/minimax-m2.5",
     "google/gemini-3-flash-preview",
     "google/gemini-2.5-flash",
     "anthropic/claude-haiku-4.5",
