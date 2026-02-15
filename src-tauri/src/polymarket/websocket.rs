@@ -83,7 +83,7 @@ impl<R: Runtime> PolymarketWebSocket<R> {
         let subs = self.subscriptions.read().await.clone();
         for channel in subs {
             let subscribe_msg = self.build_subscribe_message(&channel);
-            write.send(Message::Text(subscribe_msg)).await?;
+            write.send(Message::Text(subscribe_msg.into())).await?;
             log::info!("Subscribed to channel: {:?}", channel);
         }
 

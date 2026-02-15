@@ -603,8 +603,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     const isSearching = launcherQuery().trim().length > 0;
 
                     const handleClick = () => {
-                      if (!isSearching && isActive) {
-                        // Default view + active skill = Invoke the skill
+                      if (isActive) {
+                        // Active skill (in thread) = Invoke the skill
                         const skillSlug = "slug" in skill ? skill.slug : "";
                         if (skillSlug) {
                           window.dispatchEvent(
@@ -617,7 +617,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           );
                         }
                       } else {
-                        // Search view OR inactive skill = Toggle (add/remove)
+                        // Inactive skill (not in thread) = Add to thread
                         handleSkillThread(skill);
                       }
                     };
@@ -636,11 +636,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           disabled={!threadStore.activeThread}
                           onClick={handleClick}
                           title={
-                            !isSearching && isActive
+                            isActive
                               ? "Click to invoke skill in chat"
-                              : isActive
-                                ? "Click to remove from thread"
-                                : "Click to add to thread"
+                              : "Click to add to thread"
                           }
                         >
                           {/* Star icon - filled if active, outline if inactive */}
@@ -687,8 +685,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           </div>
                         </button>
 
-                        {/* X button for active skills (default view only) */}
-                        <Show when={isActive && !isSearching}>
+                        {/* X button for active skills */}
+                        <Show when={isActive}>
                           <button
                             type="button"
                             class="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-muted text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted-foreground/20"

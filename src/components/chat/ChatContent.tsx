@@ -24,6 +24,7 @@ import { pickAndReadAttachments } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import type { ToolCallEvent } from "@/services/acp";
+import { getToken } from "@/services/auth";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
   CHAT_MAX_RETRIES,
@@ -36,7 +37,6 @@ import {
   orchestrate,
   retryOrchestration,
 } from "@/services/orchestrator";
-import { getToken } from "@/services/auth";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
