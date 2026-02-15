@@ -36,6 +36,7 @@ import {
   orchestrate,
   retryOrchestration,
 } from "@/services/orchestrator";
+import { getToken } from "@/services/auth";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -686,7 +687,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     try {
       // Save to Seren Notes
       const title = `Chat History - ${new Date().toLocaleDateString()}`;
-      const apiKey = await authStore.getToken();
+      const apiKey = await getToken();
       const response = await fetch(
         "https://api.serendb.com/publishers/seren-notes/notes",
         {
