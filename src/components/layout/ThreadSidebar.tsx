@@ -495,12 +495,19 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               stroke-linejoin="round"
             />
           </svg>
-          <span class="flex-1 text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-            Skills
-          </span>
-          <span class="text-[10px] font-medium text-muted-foreground opacity-60">
-            {filteredSkills().length}
-          </span>
+          <div class="flex-1 flex flex-col gap-0.5">
+            <span class="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+              Skills
+            </span>
+            <Show when={threadStore.activeThread}>
+              <span class="text-[10px] text-muted-foreground/70">
+                {filteredSkills().length} active
+                {threadStore.activeThread?.title
+                  ? ` · ${threadStore.activeThread.title.length > 20 ? `${threadStore.activeThread.title.slice(0, 20)}…` : threadStore.activeThread.title}`
+                  : ""}
+              </span>
+            </Show>
+          </div>
         </button>
 
         {/* Skills content (search + list) */}
@@ -588,6 +595,23 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     const isActive = isSkillActiveInThread(skill);
                     const isSearching = launcherQuery().trim().length > 0;
 
+                    const handleClick = () => {
+                      if (!isSearching && isActive) {
+                        // Default view + active skill = Invoke the skill
+                        const skillSlug = "slug" in skill ? skill.slug : "";
+                        if (skillSlug) {
+                          window.dispatchEvent(
+                            new CustomEvent("seren:set-chat-input", {
+                              detail: `/${skillSlug} `,
+                            }),
+                          );
+                        }
+                      } else {
+                        // Search view OR inactive skill = Toggle (add/remove)
+                        handleSkillThread(skill);
+                      }
+                    };
+
                     return (
                       <div class="relative group">
                         <button
@@ -600,7 +624,14 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                               !isActive,
                           }}
                           disabled={!threadStore.activeThread}
-                          onClick={() => handleSkillThread(skill)}
+                          onClick={handleClick}
+                          title={
+                            !isSearching && isActive
+                              ? "Click to invoke skill in chat"
+                              : isActive
+                                ? "Click to remove from thread"
+                                : "Click to add to thread"
+                          }
                         >
                           {/* Star icon - filled if active, outline if inactive */}
                           <span
