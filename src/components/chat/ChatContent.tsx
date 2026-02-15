@@ -51,7 +51,6 @@ import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { RerouteAnnouncement } from "./RerouteAnnouncement";
 import { SatisfactionSignal } from "./SatisfactionSignal";
-import { SkillsSelector } from "./SkillsSelector";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
 import { ThinkingToggle } from "./ThinkingToggle";
@@ -253,6 +252,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
     // Listen for slash command events
     window.addEventListener("seren:pick-images", handlePickImages);
+    window.addEventListener("seren:set-chat-input", handleSetChatInput);
 
     try {
       await conversationStore.loadHistory();
@@ -292,6 +292,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     window.removeEventListener(
       "seren:pick-images",
       handlePickImages as EventListener,
+    );
+    window.removeEventListener(
+      "seren:set-chat-input",
+      handleSetChatInput as EventListener,
     );
 
     // Reset loading state if still active when unmounting (e.g., HMR)
@@ -425,6 +429,15 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Event handler for slash command - must be defined after handleAttachImages
   const handlePickImages = () => handleAttachImages();
+
+  // Event handler for setting chat input (e.g., from skill invocation)
+  const handleSetChatInput = (event: Event) => {
+    const customEvent = event as CustomEvent<string>;
+    if (customEvent.detail) {
+      setInput(customEvent.detail);
+      inputRef?.focus();
+    }
+  };
 
   const handleRemoveImage = (index: number) => {
     setAttachedImages((prev) => prev.filter((_, i) => i !== index));
@@ -1282,7 +1295,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               <div class="flex items-center gap-3">
                 <ModelSelector />
                 <ToolsetSelector />
-                <SkillsSelector />
                 <Show when={conversationStore.isLoading}>
                   <ThinkingStatus />
                 </Show>

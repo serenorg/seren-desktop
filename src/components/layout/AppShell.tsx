@@ -15,7 +15,6 @@ import { EditorContent } from "@/components/editor/EditorContent";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
-import { SkillsExplorer } from "@/components/sidebar/SkillsExplorer";
 import { shortcuts } from "@/lib/shortcuts";
 import { SlidePanel } from "./SlidePanel";
 import { ThreadContent } from "./ThreadContent";
@@ -26,7 +25,6 @@ export type SlidePanelView =
   | "database"
   | "editor"
   | "account"
-  | "skills"
   | null;
 
 interface AppShellProps {
@@ -64,8 +62,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setSlidePanel("settings");
     } else if (p === "database") {
       setSlidePanel("database");
-    } else if (p === "skills") {
-      setSlidePanel("skills");
     }
   }) as EventListener;
 
@@ -143,9 +139,6 @@ export const AppShell: Component<AppShellProps> = (props) => {
             </Match>
             <Match when={slidePanel() === "editor"}>
               <EditorContent onClose={handleCloseSlidePanel} />
-            </Match>
-            <Match when={slidePanel() === "skills"}>
-              <SkillsExplorer panelMode />
             </Match>
             <Match when={slidePanel() === "account"}>
               <SignIn onSuccess={handleLoginSuccess} />

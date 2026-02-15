@@ -185,9 +185,13 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     }
 
     // When searching, include installed + available marketplace skills
-    const installedSlugs = new Set(skillsStore.installed.map((s) => s.slug));
+    // Deduplicate installed skills by path (in case same skill is in multiple scopes)
+    const uniqueInstalled = Array.from(
+      new Map(skillsStore.installed.map((s) => [s.path, s])).values(),
+    );
+    const installedSlugs = new Set(uniqueInstalled.map((s) => s.slug));
     const allSkills = [
-      ...skillsStore.installed,
+      ...uniqueInstalled,
       ...skillsStore.available.filter(
         (available) => !installedSlugs.has(available.slug),
       ),
