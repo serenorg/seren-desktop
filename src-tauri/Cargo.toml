@@ -76,7 +76,7 @@ dirs = "6"
 
 # ACP (Agent Client Protocol) support
 agent-client-protocol = { version = "0.9", features = ["unstable"], optional = true }
-tokio-tungstenite = { version = "0.24", optional = true }
+tokio-tungstenite = { version = "0.28", optional = true }
 
 
 # Platform-specific dependencies
