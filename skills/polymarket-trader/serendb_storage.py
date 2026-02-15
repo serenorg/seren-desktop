@@ -126,6 +126,63 @@ class SerenDBStorage:
                 )
             """)
 
+            # Create predictions table for tracking AI fair value predictions
+            self._execute_sql("""
+                CREATE TABLE IF NOT EXISTS predictions (
+                    id SERIAL PRIMARY KEY,
+                    market_id TEXT NOT NULL,
+                    market_question TEXT NOT NULL,
+                    predicted_fair_value REAL NOT NULL,
+                    market_price_at_prediction REAL NOT NULL,
+                    edge_calculated REAL NOT NULL,
+                    prediction_timestamp TIMESTAMP NOT NULL,
+                    resolution_outcome TEXT,
+                    resolution_timestamp TIMESTAMP,
+                    actual_probability REAL,
+                    brier_score REAL,
+                    traded BOOLEAN DEFAULT FALSE,
+                    trade_size REAL,
+                    trade_price REAL
+                )
+            """)
+
+            # Create performance_metrics table for aggregate statistics
+            self._execute_sql("""
+                CREATE TABLE IF NOT EXISTS performance_metrics (
+                    id SERIAL PRIMARY KEY,
+                    calculated_at TIMESTAMP NOT NULL,
+                    total_predictions INTEGER NOT NULL,
+                    resolved_predictions INTEGER NOT NULL,
+                    avg_brier_score REAL,
+                    calibration_slope REAL,
+                    calibration_intercept REAL,
+                    total_trades INTEGER,
+                    winning_trades INTEGER,
+                    total_realized_pnl REAL,
+                    roi_percentage REAL,
+                    kelly_multiplier REAL,
+                    edge_threshold REAL
+                )
+            """)
+
+            # Create resolved_markets table for win/loss tracking
+            self._execute_sql("""
+                CREATE TABLE IF NOT EXISTS resolved_markets (
+                    id SERIAL PRIMARY KEY,
+                    market_id TEXT UNIQUE NOT NULL,
+                    market_question TEXT NOT NULL,
+                    resolution_outcome TEXT NOT NULL,
+                    resolution_timestamp TIMESTAMP NOT NULL,
+                    final_price REAL,
+                    traded BOOLEAN DEFAULT FALSE,
+                    entry_price REAL,
+                    exit_price REAL,
+                    position_size REAL,
+                    realized_pnl REAL,
+                    roi_percentage REAL
+                )
+            """)
+
             print(f"✅ SerenDB setup complete")
             return True
 
@@ -406,6 +463,320 @@ class SerenDBStorage:
         except Exception as e:
             print(f"Error getting config: {e}")
             return default
+
+    # Prediction tracking methods
+
+    def save_prediction(self, prediction: Dict[str, Any]) -> bool:
+        """
+        Save a prediction for later performance tracking
+
+        Args:
+            prediction: Prediction data dict with keys:
+                - market_id: Market ID
+                - market_question: Question text
+                - predicted_fair_value: AI's fair value estimate (0.0-1.0)
+                - market_price_at_prediction: Market price when prediction made
+                - edge_calculated: Edge calculated (fair - price)
+                - prediction_timestamp: ISO timestamp
+                - traded: Whether a trade was placed (optional, default False)
+                - trade_size: Size of trade if placed (optional)
+                - trade_price: Price of trade if placed (optional)
+
+        Returns:
+            True if successful
+        """
+        try:
+            self._execute_sql("""
+                INSERT INTO predictions (
+                    market_id, market_question, predicted_fair_value,
+                    market_price_at_prediction, edge_calculated,
+                    prediction_timestamp, traded, trade_size, trade_price
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                prediction['market_id'],
+                prediction['market_question'],
+                prediction['predicted_fair_value'],
+                prediction['market_price_at_prediction'],
+                prediction['edge_calculated'],
+                prediction['prediction_timestamp'],
+                prediction.get('traded', False),
+                prediction.get('trade_size'),
+                prediction.get('trade_price')
+            ))
+            return True
+        except Exception as e:
+            print(f"Error saving prediction: {e}")
+            return False
+
+    def get_unresolved_predictions(self) -> List[Dict[str, Any]]:
+        """
+        Get all predictions that haven't been resolved yet
+
+        Returns:
+            List of prediction dicts
+        """
+        try:
+            result = self._execute_sql(
+                "SELECT * FROM predictions WHERE resolution_outcome IS NULL ORDER BY prediction_timestamp DESC"
+            )
+            return result.get('rows', [])
+        except Exception as e:
+            print(f"Error getting unresolved predictions: {e}")
+            return []
+
+    def update_prediction_resolution(
+        self,
+        market_id: str,
+        resolution_outcome: str,
+        resolution_timestamp: str,
+        actual_probability: float
+    ) -> bool:
+        """
+        Update a prediction with its resolution outcome
+
+        Args:
+            market_id: Market ID
+            resolution_outcome: 'YES', 'NO', or 'INVALID'
+            resolution_timestamp: ISO timestamp of resolution
+            actual_probability: 1.0 for YES, 0.0 for NO, None for INVALID
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Get the prediction to calculate Brier score
+            result = self._execute_sql(
+                "SELECT predicted_fair_value FROM predictions WHERE market_id = ?",
+                (market_id,)
+            )
+            rows = result.get('rows', [])
+            if not rows:
+                print(f"Prediction not found for market {market_id}")
+                return False
+
+            predicted_value = rows[0]['predicted_fair_value']
+
+            # Calculate Brier score if outcome is valid
+            brier_score = None
+            if actual_probability is not None:
+                brier_score = (predicted_value - actual_probability) ** 2
+
+            # Update prediction
+            self._execute_sql("""
+                UPDATE predictions
+                SET resolution_outcome = ?,
+                    resolution_timestamp = ?,
+                    actual_probability = ?,
+                    brier_score = ?
+                WHERE market_id = ?
+            """, (
+                resolution_outcome,
+                resolution_timestamp,
+                actual_probability,
+                brier_score,
+                market_id
+            ))
+            return True
+        except Exception as e:
+            print(f"Error updating prediction resolution: {e}")
+            return False
+
+    def get_resolved_predictions(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get resolved predictions for performance analysis
+
+        Args:
+            limit: Maximum number to return
+
+        Returns:
+            List of resolved prediction dicts
+        """
+        try:
+            result = self._execute_sql(
+                "SELECT * FROM predictions WHERE resolution_outcome IS NOT NULL ORDER BY resolution_timestamp DESC LIMIT ?",
+                (limit,)
+            )
+            return result.get('rows', [])
+        except Exception as e:
+            print(f"Error getting resolved predictions: {e}")
+            return []
+
+    # Performance metrics methods
+
+    def save_performance_metrics(self, metrics: Dict[str, Any]) -> bool:
+        """
+        Save calculated performance metrics
+
+        Args:
+            metrics: Metrics data dict with keys:
+                - calculated_at: ISO timestamp
+                - total_predictions: Total predictions made
+                - resolved_predictions: Predictions that have resolved
+                - avg_brier_score: Average Brier score
+                - calibration_slope: Calibration slope
+                - calibration_intercept: Calibration intercept
+                - total_trades: Total trades executed
+                - winning_trades: Trades that were profitable
+                - total_realized_pnl: Total P&L
+                - roi_percentage: ROI percentage
+                - kelly_multiplier: Current Kelly multiplier
+                - edge_threshold: Current edge threshold
+
+        Returns:
+            True if successful
+        """
+        try:
+            self._execute_sql("""
+                INSERT INTO performance_metrics (
+                    calculated_at, total_predictions, resolved_predictions,
+                    avg_brier_score, calibration_slope, calibration_intercept,
+                    total_trades, winning_trades, total_realized_pnl,
+                    roi_percentage, kelly_multiplier, edge_threshold
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                metrics['calculated_at'],
+                metrics['total_predictions'],
+                metrics['resolved_predictions'],
+                metrics.get('avg_brier_score'),
+                metrics.get('calibration_slope'),
+                metrics.get('calibration_intercept'),
+                metrics.get('total_trades', 0),
+                metrics.get('winning_trades', 0),
+                metrics.get('total_realized_pnl', 0.0),
+                metrics.get('roi_percentage', 0.0),
+                metrics.get('kelly_multiplier'),
+                metrics.get('edge_threshold')
+            ))
+            return True
+        except Exception as e:
+            print(f"Error saving performance metrics: {e}")
+            return False
+
+    def get_latest_metrics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent performance metrics
+
+        Returns:
+            Metrics dict or None
+        """
+        try:
+            result = self._execute_sql(
+                "SELECT * FROM performance_metrics ORDER BY calculated_at DESC LIMIT 1"
+            )
+            rows = result.get('rows', [])
+            return rows[0] if rows else None
+        except Exception as e:
+            print(f"Error getting latest metrics: {e}")
+            return None
+
+    def get_metrics_history(self, limit: int = 30) -> List[Dict[str, Any]]:
+        """
+        Get historical performance metrics
+
+        Args:
+            limit: Maximum number to return
+
+        Returns:
+            List of metrics dicts
+        """
+        try:
+            result = self._execute_sql(
+                "SELECT * FROM performance_metrics ORDER BY calculated_at DESC LIMIT ?",
+                (limit,)
+            )
+            return result.get('rows', [])
+        except Exception as e:
+            print(f"Error getting metrics history: {e}")
+            return []
+
+    # Resolved markets methods
+
+    def save_resolved_market(self, market: Dict[str, Any]) -> bool:
+        """
+        Save a resolved market with P&L data
+
+        Args:
+            market: Resolved market data dict with keys:
+                - market_id: Market ID
+                - market_question: Question text
+                - resolution_outcome: 'YES', 'NO', or 'INVALID'
+                - resolution_timestamp: ISO timestamp
+                - final_price: Final market price
+                - traded: Whether we traded this market
+                - entry_price: Our entry price (if traded)
+                - exit_price: Our exit price (if traded)
+                - position_size: Size of position (if traded)
+                - realized_pnl: Realized P&L (if traded)
+                - roi_percentage: ROI percentage (if traded)
+
+        Returns:
+            True if successful
+        """
+        try:
+            self._execute_sql("""
+                INSERT INTO resolved_markets (
+                    market_id, market_question, resolution_outcome,
+                    resolution_timestamp, final_price, traded,
+                    entry_price, exit_price, position_size,
+                    realized_pnl, roi_percentage
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                market['market_id'],
+                market['market_question'],
+                market['resolution_outcome'],
+                market['resolution_timestamp'],
+                market.get('final_price'),
+                market.get('traded', False),
+                market.get('entry_price'),
+                market.get('exit_price'),
+                market.get('position_size'),
+                market.get('realized_pnl'),
+                market.get('roi_percentage')
+            ))
+            return True
+        except Exception as e:
+            print(f"Error saving resolved market: {e}")
+            return False
+
+    def get_resolved_markets(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get resolved markets
+
+        Args:
+            limit: Maximum number to return
+
+        Returns:
+            List of resolved market dicts
+        """
+        try:
+            result = self._execute_sql(
+                "SELECT * FROM resolved_markets ORDER BY resolution_timestamp DESC LIMIT ?",
+                (limit,)
+            )
+            return result.get('rows', [])
+        except Exception as e:
+            print(f"Error getting resolved markets: {e}")
+            return []
+
+    def get_traded_resolved_markets(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get resolved markets where we had a position
+
+        Args:
+            limit: Maximum number to return
+
+        Returns:
+            List of resolved market dicts with P&L data
+        """
+        try:
+            result = self._execute_sql(
+                "SELECT * FROM resolved_markets WHERE traded = TRUE ORDER BY resolution_timestamp DESC LIMIT ?",
+                (limit,)
+            )
+            return result.get('rows', [])
+        except Exception as e:
+            print(f"Error getting traded resolved markets: {e}")
+            return []
 
     # Private helper methods
 

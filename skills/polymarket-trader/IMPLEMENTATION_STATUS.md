@@ -148,6 +148,56 @@
 
 ---
 
+### Learning & Performance Tracking ✅ **NEW**
+
+#### Prediction Accuracy Tracking ✅
+- **Status:** Fully implemented
+- Tracks all fair value predictions to database
+- Records market conditions at time of prediction
+- Updates with actual outcomes when markets resolve
+- Calculates Brier scores for prediction quality
+
+#### Brier Score & Calibration Metrics ✅
+- **Status:** Fully implemented
+- Calculates industry-standard Brier score for probabilistic forecasts
+- Generates calibration curves (predicted vs actual by probability bucket)
+- Linear regression analysis for calibration slope/intercept
+- Stored in SerenDB for historical tracking
+
+#### Performance-Based Threshold Adjustment ✅
+- **Status:** Fully implemented
+- Dynamically adjusts Kelly multiplier based on historical accuracy
+- Adjusts edge threshold based on calibration and P&L
+- Logic considers:
+  - Brier score (prediction quality)
+  - Calibration slope (over/underconfidence)
+  - ROI (financial performance)
+- Safe min/max bounds prevent extreme adjustments
+
+#### Win/Loss Tracking on Resolved Markets ✅
+- **Status:** Fully implemented
+- Tracks all market resolutions with outcomes
+- Records realized P&L when positions close
+- Calculates win rate, avg win, avg loss, profit factor
+- ROI percentage tracking per trade
+
+#### Database Schema ✅
+- **predictions** table: All fair value estimates with outcomes
+- **performance_metrics** table: Aggregate statistics over time
+- **resolved_markets** table: P&L tracking for closed positions
+- All data stored in user's SerenDB instance (cloud-based)
+
+#### Performance Module ✅
+- **performance.py**: Standalone module with:
+  - `calculate_brier_score()`
+  - `calculate_calibration_curve()`
+  - `adjust_kelly_multiplier()`
+  - `adjust_edge_threshold()`
+  - `calculate_win_rate()`
+  - `summarize_performance()`
+
+---
+
 ### Nice to Have Features
 
 #### Notifications ❌
