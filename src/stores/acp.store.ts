@@ -1089,6 +1089,16 @@ export const acpStore = {
   },
 
   /**
+   * Clear all messages in a session.
+   */
+  clearSessionMessages(sessionId: string) {
+    const session = state.sessions[sessionId];
+    if (!session) return;
+
+    setState("sessions", sessionId, "messages", []);
+  },
+
+  /**
    * Focus an already-running session that belongs to the given project cwd.
    * Returns true when a matching session is found.
    */
