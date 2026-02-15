@@ -55,7 +55,7 @@ rand_distr = "0.5"
 sha2 = "0.10"
 base64 = "0.22"
 libc = "0.2"
-reqwest = { version = "0.13", features = ["json"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
 seren-memory-sdk = "0.1"
 rmcp = { version = "0.14", features = [
     "client",

@@ -415,18 +415,18 @@ pub async fn mcp_connect_http(
 ) -> Result<McpInitializeResult, String> {
     // Build reqwest client with auth header if token provided
     let client = if let Some(token) = auth_token {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = tauri_plugin_http::reqwest::header::HeaderMap::new();
         headers.insert(
-            reqwest::header::AUTHORIZATION,
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))
+            tauri_plugin_http::reqwest::header::AUTHORIZATION,
+            tauri_plugin_http::reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))
                 .map_err(|e| format!("Invalid auth token: {}", e))?,
         );
-        reqwest::Client::builder()
+        tauri_plugin_http::reqwest::Client::builder()
             .default_headers(headers)
             .build()
             .map_err(|e| format!("Failed to build HTTP client: {}", e))?
     } else {
-        reqwest::Client::new()
+        tauri_plugin_http::reqwest::Client::new()
     };
 
     // Build transport config with URL
