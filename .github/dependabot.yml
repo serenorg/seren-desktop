@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # Frontend dependencies (npm/pnpm)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      # Group Playwright updates together
+      playwright:
+        patterns:
+          - "@playwright/*"
+          - "playwright*"
+      # Group Tauri updates together
+      tauri:
+        patterns:
+          - "@tauri-apps/*"
+      # Group dev tools
+      dev-tools:
+        patterns:
+          - "@biomejs/*"
+          - "vite*"
+          - "vitest"
+          - "typescript"
+
+  # Rust dependencies (Cargo)
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
