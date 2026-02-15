@@ -8,6 +8,7 @@ use tauri_plugin_store::StoreExt;
 
 pub mod commands {
     pub mod chat;
+    pub mod cli_installer;
     pub mod indexing;
     pub mod memory;
     pub mod orchestrator;

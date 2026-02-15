@@ -3304,97 +3304,55 @@ pub fn acp_launch_login(agent_type: AgentType) {
     launch_agent_login(agent_type);
 }
 
-/// Ensure Claude Code CLI is installed, auto-installing via npm if needed.
-/// Returns the bin directory path containing the claude binary.
+/// Ensure Claude Code CLI is installed, auto-installing via official native installer if needed.
+/// Returns the directory path containing the claude binary.
+///
+/// This function:
+/// 1. Checks if `claude` is available on the system PATH (native install location)
+/// 2. If not found, automatically downloads and runs the official Anthropic installer
+/// 3. Emits progress events to the frontend for UI feedback
+///
+/// Note: Uses the official native installer (https://claude.ai/install.sh|.ps1) instead of
+/// the deprecated npm package (@anthropic-ai/claude-code) to ensure users always get the
+/// latest version with auto-update support.
 #[tauri::command]
 pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
-    let cli_tools_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("No app data dir: {e}"))?
-        .join("cli-tools");
-
-    let bin_dir = cli_tools_dir.join("node_modules").join(".bin");
-    let claude_bin = if cfg!(target_os = "windows") {
-        bin_dir.join("claude.cmd")
-    } else {
-        bin_dir.join("claude")
-    };
-
-    // Minimum required CLI version for SDK compatibility
-    const MIN_CLI_VERSION: &str = "2.1.30";
-
-    // Already installed locally? Check version and upgrade if needed.
-    if claude_bin.exists() {
-        // Check version - must set PATH so the claude shebang can find Node.js
-        let embedded_path = crate::embedded_runtime::get_embedded_path();
-        if let Ok(output) = std::process::Command::new(&claude_bin)
-            .arg("--version")
-            .env("PATH", embedded_path)
-            .output()
-        {
-            let version_str = String::from_utf8_lossy(&output.stdout);
-            let version = version_str
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().next())
-                .unwrap_or("")
-                .trim();
-
-            if is_version_sufficient(version, MIN_CLI_VERSION) {
-                log::info!("[ACP] Claude CLI {} at: {}", version, claude_bin.display());
-                return Ok(bin_dir.to_string_lossy().to_string());
-            }
-
-            // Version is outdated - upgrade silently
-            log::info!(
-                "[ACP] Claude CLI {} is outdated (need {}), upgrading...",
-                version,
-                MIN_CLI_VERSION
-            );
-
-            if let Err(e) = upgrade_claude_cli_sync(&cli_tools_dir, &app) {
-                log::warn!(
-                    "[ACP] Auto-upgrade failed: {}. Will retry on next launch.",
-                    e
-                );
-            } else {
-                log::info!("[ACP] Claude CLI upgraded successfully");
-            }
-
-            return Ok(bin_dir.to_string_lossy().to_string());
-        }
-
-        // Couldn't check version, return existing path
-        log::info!("[ACP] Claude CLI at: {}", claude_bin.display());
-        return Ok(bin_dir.to_string_lossy().to_string());
-    }
-
-    // Check if claude is available on the system PATH
+    // First, check if claude is already installed on the system PATH
     let which_cmd = if cfg!(target_os = "windows") {
         "where"
     } else {
         "which"
     };
-    let which_arg = if cfg!(target_os = "windows") {
-        "claude.cmd"
-    } else {
-        "claude"
-    };
+
     if let Ok(output) = std::process::Command::new(which_cmd)
-        .arg(which_arg)
+        .arg("claude")
         .output()
     {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Some(parent) = std::path::Path::new(&path).parent() {
-                log::info!("[ACP] Found claude on system PATH: {}", path);
+                log::info!("[ACP] Found Claude CLI on system PATH: {}", path);
                 return Ok(parent.to_string_lossy().to_string());
             }
         }
     }
 
-    log::info!("[ACP] Claude CLI not found, installing via npm...");
+    log::info!("[ACP] Claude CLI not found, installing via official native installer...");
+
+    let _ = app.emit(
+        "acp://cli-install-progress",
+        serde_json::json!({
+            "stage": "downloading",
+            "message": "Downloading Claude Code CLI installer..."
+        }),
+    );
+
+    // Use the official native installer for the platform
+    let install_script = if cfg!(target_os = "windows") {
+        "irm https://claude.ai/install.ps1 | iex"
+    } else {
+        "curl -fsSL https://claude.ai/install.sh | bash"
+    };
 
     let _ = app.emit(
         "acp://cli-install-progress",
@@ -3404,92 +3362,87 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         }),
     );
 
-    // Create directory
-    std::fs::create_dir_all(&cli_tools_dir)
-        .map_err(|e| format!("Failed to create cli-tools dir: {e}"))?;
-
-    // Run npm install using embedded Node runtime.
-    // We invoke node directly with the npm CLI script because the top-level
-    // `npm` shim has a broken require path in the extracted Node tarball.
-    let embedded_path = crate::embedded_runtime::get_embedded_path();
-    let paths = crate::embedded_runtime::discover_embedded_runtime(&app);
-    let node_bin = paths
-        .node_dir
-        .as_ref()
-        .map(|d| {
-            if cfg!(target_os = "windows") {
-                d.join("node.exe")
-            } else {
-                d.join("node")
-            }
-        })
-        .ok_or_else(|| "Embedded Node.js not found".to_string())?;
-
-    // Find the npm CLI script relative to the node binary.
-    // On macOS/Linux: node is at node/bin/node, npm at node/lib/node_modules/npm/bin/npm-cli.js
-    // On Windows: node is at node/node.exe, npm at node/node_modules/npm/bin/npm-cli.js
-    let npm_cli = if cfg!(target_os = "windows") {
-        node_bin
-            .parent()
-            .unwrap()
-            .join("node_modules/npm/bin/npm-cli.js")
+    // Run the installation command
+    let output = if cfg!(target_os = "windows") {
+        tokio::process::Command::new("powershell")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg(install_script)
+            .output()
+            .await
     } else {
-        node_bin
-            .parent()
-            .unwrap()
-            .join("../lib/node_modules/npm/bin/npm-cli.js")
+        tokio::process::Command::new("bash")
+            .arg("-c")
+            .arg(install_script)
+            .output()
+            .await
     };
-    let npm_cli = npm_cli.canonicalize().map_err(|e| {
-        format!(
-            "npm CLI script not found at {:?}: {}. Ensure embedded Node.js runtime is properly installed.",
-            npm_cli, e
-        )
-    })?;
 
-    let output = tokio::process::Command::new(&node_bin)
-        .args([
-            npm_cli.to_string_lossy().as_ref(),
-            "install",
-            "--prefix",
-            &cli_tools_dir.to_string_lossy(),
-            "@anthropic-ai/claude-code",
-        ])
-        .env("PATH", embedded_path)
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run npm install: {e}"))?;
+    match output {
+        Ok(output) if output.status.success() => {
+            log::info!("[ACP] Claude CLI installed successfully via native installer");
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let _ = app.emit(
-            "acp://cli-install-progress",
-            serde_json::json!({
-                "stage": "error",
-                "message": format!("Install failed: {stderr}")
-            }),
-        );
-        return Err(format!("npm install failed: {stderr}"));
+            let _ = app.emit(
+                "acp://cli-install-progress",
+                serde_json::json!({
+                    "stage": "complete",
+                    "message": "Claude Code CLI installed successfully"
+                }),
+            );
+
+            // The native installer puts claude in ~/.local/bin or system PATH
+            // Check again to find the installed location
+            if let Ok(output) = std::process::Command::new(which_cmd)
+                .arg("claude")
+                .output()
+            {
+                if output.status.success() {
+                    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if let Some(parent) = std::path::Path::new(&path).parent() {
+                        return Ok(parent.to_string_lossy().to_string());
+                    }
+                }
+            }
+
+            // Fallback: return the expected installation location
+            if cfg!(target_os = "windows") {
+                let home = std::env::var("USERPROFILE").unwrap_or_else(|_| String::from("C:\\Users\\Default"));
+                Ok(format!("{}/.local/bin", home))
+            } else {
+                let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/root"));
+                Ok(format!("{}/.local/bin", home))
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let error_msg = format!("Installation failed: {}", stderr);
+
+            let _ = app.emit(
+                "acp://cli-install-progress",
+                serde_json::json!({
+                    "stage": "error",
+                    "message": error_msg.clone()
+                }),
+            );
+
+            log::error!("[ACP] {}", error_msg);
+            Err(error_msg)
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to run installer: {}", e);
+
+            let _ = app.emit(
+                "acp://cli-install-progress",
+                serde_json::json!({
+                    "stage": "error",
+                    "message": error_msg.clone()
+                }),
+            );
+
+            log::error!("[ACP] {}", error_msg);
+            Err(error_msg)
+        }
     }
-
-    // Verify the binary exists
-    if !claude_bin.exists() {
-        return Err("Install completed but claude binary not found".to_string());
-    }
-
-    log::info!(
-        "[ACP] Claude CLI installed successfully at: {}",
-        claude_bin.display()
-    );
-
-    let _ = app.emit(
-        "acp://cli-install-progress",
-        serde_json::json!({
-            "stage": "complete",
-            "message": "Claude Code CLI installed successfully"
-        }),
-    );
-
-    Ok(bin_dir.to_string_lossy().to_string())
 }
 
 /// Get the cli-tools bin directory if it exists.
