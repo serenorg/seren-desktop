@@ -68,6 +68,19 @@ const TIMEOUT_PATTERNS = [
   "operation timeout",
 ];
 
+/** Tighter patterns for assistant content that should be treated as timeout errors. */
+const TIMEOUT_ASSISTANT_PATTERNS = [
+  /api error:\s*request timed out/i,
+  /request timed out/i,
+  /request timeout/i,
+  /408 request timeout/i,
+  /deadline exceeded/i,
+  /operation timeout/i,
+  /connection timed out/i,
+  /network timeout/i,
+  /timed out\.\s*check your internet/i,
+];
+
 /**
  * Check whether an error message indicates a request timeout.
  * These errors are often spurious race conditions where the error event
@@ -76,6 +89,14 @@ const TIMEOUT_PATTERNS = [
 export function isTimeoutError(message: string): boolean {
   const lower = message.toLowerCase();
   return TIMEOUT_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+/**
+ * Stricter timeout detection for assistant content to avoid suppressing
+ * normal responses that mention timeouts in passing.
+ */
+export function isTimeoutAssistantContent(message: string): boolean {
+  return TIMEOUT_ASSISTANT_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 /**
