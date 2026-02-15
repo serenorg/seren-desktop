@@ -609,7 +609,10 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         if (skillSlug) {
                           window.dispatchEvent(
                             new CustomEvent("seren:set-chat-input", {
-                              detail: `/${skillSlug} `,
+                              detail: {
+                                text: `/${skillSlug} `,
+                                autoSend: true,
+                              },
                             }),
                           );
                         }
