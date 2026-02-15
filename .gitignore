@@ -69,3 +69,4 @@ yarn.lock
 skills/*
 !skills/skill-creator/
 !skills/polymarket-trader/
+!skills/getting-started-with-skills/

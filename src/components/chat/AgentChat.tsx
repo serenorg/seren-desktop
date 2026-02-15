@@ -39,7 +39,6 @@ import { AgentModeSelector } from "./AgentModeSelector";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { PlanHeader } from "./PlanHeader";
-import { SkillsSelector } from "./SkillsSelector";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ThinkingStatus } from "./ThinkingStatus";
@@ -271,6 +270,94 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const handleRemoveImage = (index: number) => {
     setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const copyAllChatHistory = async () => {
+    const messages = threadMessages();
+    if (messages.length === 0) {
+      alert("No chat history to copy");
+      return;
+    }
+
+    // Format messages as markdown
+    let markdown = "# Agent Chat History\n\n";
+    for (const msg of messages) {
+      if (msg.type === "user") {
+        markdown += `**You:** ${msg.content}\n\n`;
+      } else if (msg.type === "assistant") {
+        markdown += `**Agent:** ${msg.content}\n\n`;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(markdown);
+      alert("Chat history copied to clipboard!");
+    } catch (error) {
+      console.error("Failed to copy:", error);
+      alert("Failed to copy chat history");
+    }
+  };
+
+  const downloadChatHistory = async () => {
+    const messages = threadMessages();
+    if (messages.length === 0) {
+      alert("No chat history to download");
+      return;
+    }
+
+    // Format messages as markdown
+    let markdown = "# Agent Chat History\n\n";
+    for (const msg of messages) {
+      if (msg.type === "user") {
+        markdown += `**You:** ${msg.content}\n\n`;
+      } else if (msg.type === "assistant") {
+        markdown += `**Agent:** ${msg.content}\n\n`;
+      }
+    }
+
+    try {
+      // Create a blob and download it
+      const blob = new Blob([markdown], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `agent-chat-${new Date().toISOString().split("T")[0]}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Failed to download:", error);
+      alert("Failed to download chat history");
+    }
+  };
+
+  const clearHistory = async () => {
+    const confirmClear = window.confirm("Clear all agent chat history for this session?");
+    if (!confirmClear) return;
+
+    const session = acpStore.activeSession;
+    if (!session) return;
+
+    // Clear messages in the active session
+    acpStore.clearSessionMessages(session.info.id);
+  };
+
+  const compactConversation = async (preserveCount: number) => {
+    const messages = threadMessages();
+    if (messages.length <= preserveCount) {
+      alert("Not enough messages to compact");
+      return;
+    }
+
+    const confirmCompact = window.confirm(
+      `Compact older messages, preserving the most recent ${preserveCount}?`,
+    );
+    if (!confirmCompact) return;
+
+    // For now, show a message that this feature is coming soon
+    // TODO: Implement agent conversation compaction
+    alert("Agent conversation compaction coming soon!");
   };
 
   const executeSlashCommand = (trimmed: string) => {
@@ -630,6 +717,73 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     <div class="flex-1 flex flex-col min-h-0">
       {/* Plan Header */}
       <PlanHeader />
+
+      {/* Action Buttons Header */}
+      <Show when={threadMessages().length > 0}>
+        <div class="flex items-center justify-end gap-2 px-4 py-2 border-b border-surface-3">
+          <button
+            type="button"
+            class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
+            onClick={() => compactConversation(settingsStore.get("autoCompactPreserveMessages"))}
+            title="Compact older messages"
+          >
+            Compact
+          </button>
+          <button
+            type="button"
+            class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
+            onClick={copyAllChatHistory}
+            title="Copy all chat history"
+          >
+            <svg
+              class="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              role="img"
+              aria-label="Copy"
+            >
+              <title>Copy chat history</title>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
+            onClick={downloadChatHistory}
+            title="Download chat history"
+          >
+            <svg
+              class="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              role="img"
+              aria-label="Download"
+            >
+              <title>Download chat history</title>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
+            onClick={clearHistory}
+          >
+            Clear
+          </button>
+        </div>
+      </Show>
 
       {/* Messages Area */}
       <div
@@ -1093,7 +1247,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <AgentModelSelector />
                 <AgentModeSelector />
                 <AgentEffortSelector />
-                <SkillsSelector />
                 <Show when={isPrompting()}>
                   <ThinkingStatus />
                 </Show>
