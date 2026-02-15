@@ -2161,6 +2161,19 @@ export const acpStore = {
 
     // Finalize assistant content if any
     if (session.streamingContent) {
+      if (isTimeoutError(session.streamingContent)) {
+        // Some agents emit a timeout string as assistant content even when the
+        // prompt completes successfully. Surface this as a session error banner
+        // instead of adding a misleading assistant message.
+        console.info(
+          "[AcpStore] Suppressing timeout assistant message — surfacing banner instead",
+        );
+        setState("sessions", sessionId, "error", session.streamingContent);
+        setState("sessions", sessionId, "streamingContent", "");
+        setState("sessions", sessionId, "streamingContentTimestamp", undefined);
+        setState("sessions", sessionId, "promptStartTime", undefined);
+        return;
+      }
       // Calculate duration if we have a start time
       const duration = session.promptStartTime
         ? Date.now() - session.promptStartTime
