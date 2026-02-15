@@ -102,10 +102,26 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const onPickImages = () => handleAttachImages();
   const onSetChatInput = (event: Event) => {
-    const customEvent = event as CustomEvent<string>;
-    if (customEvent.detail) {
-      setInput(customEvent.detail);
+    const customEvent = event as CustomEvent<
+      string | { text: string; autoSend?: boolean }
+    >;
+    const detail = customEvent.detail;
+
+    // Support both string (legacy) and object format
+    if (typeof detail === "string") {
+      setInput(detail);
       inputRef?.focus();
+    } else if (detail && typeof detail === "object") {
+      setInput(detail.text);
+      inputRef?.focus();
+
+      // Auto-send if requested (e.g., from skill click)
+      if (detail.autoSend) {
+        // Use setTimeout to ensure input is set before sending
+        setTimeout(() => {
+          sendMessage();
+        }, 0);
+      }
     }
   };
   onMount(() => {
@@ -333,7 +349,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const clearHistory = async () => {
-    const confirmClear = window.confirm("Clear all agent chat history for this session?");
+    const confirmClear = window.confirm(
+      "Clear all agent chat history for this session?",
+    );
     if (!confirmClear) return;
 
     const session = acpStore.activeSession;
@@ -724,7 +742,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           <button
             type="button"
             class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
-            onClick={() => compactConversation(settingsStore.get("autoCompactPreserveMessages"))}
+            onClick={() =>
+              compactConversation(
+                settingsStore.get("autoCompactPreserveMessages"),
+              )
+            }
             title="Compact older messages"
           >
             Compact

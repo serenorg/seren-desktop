@@ -432,10 +432,26 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Event handler for setting chat input (e.g., from skill invocation)
   const handleSetChatInput = (event: Event) => {
-    const customEvent = event as CustomEvent<string>;
-    if (customEvent.detail) {
-      setInput(customEvent.detail);
+    const customEvent = event as CustomEvent<
+      string | { text: string; autoSend?: boolean }
+    >;
+    const detail = customEvent.detail;
+
+    // Support both string (legacy) and object format
+    if (typeof detail === "string") {
+      setInput(detail);
       inputRef?.focus();
+    } else if (detail && typeof detail === "object") {
+      setInput(detail.text);
+      inputRef?.focus();
+
+      // Auto-send if requested (e.g., from skill click)
+      if (detail.autoSend) {
+        // Use setTimeout to ensure input is set before sending
+        setTimeout(() => {
+          sendMessage();
+        }, 0);
+      }
     }
   };
 
@@ -1298,7 +1314,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 <Show when={conversationStore.isLoading}>
                   <ThinkingStatus />
                 </Show>
-                <Show when={!conversationStore.isLoading && conversationStore.messages.length > 0}>
+                <Show
+                  when={
+                    !conversationStore.isLoading &&
+                    conversationStore.messages.length > 0
+                  }
+                >
                   <span class="text-[10px] text-muted-foreground">
                     {settingsStore.get("chatEnterToSend")
                       ? "Enter to send"
