@@ -190,7 +190,17 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 const defaultMcpSettings: McpSettings = {
-  servers: [],
+  servers: [
+    {
+      name: "playwright",
+      type: "local",
+      enabled: true,
+      autoConnect: true,
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-playwright"],
+      env: {},
+    },
+  ],
   defaultTimeout: 30000,
 };
 
