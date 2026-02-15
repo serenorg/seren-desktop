@@ -107,7 +107,7 @@ jobs:
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: pnpm tauri build --bundles deb,appimage --config src-tauri/tauri.ci.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: seren-desktop-${{ matrix.os }}
           path: |
