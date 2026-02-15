@@ -197,7 +197,7 @@ const defaultMcpSettings: McpSettings = {
       enabled: true,
       autoConnect: true,
       command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-playwright"],
+      args: ["-y", "@playwright/mcp"],
       env: {},
     },
   ],
