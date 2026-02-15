@@ -8,6 +8,7 @@ import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
 import { storeAssistantResponse } from "@/services/memory";
 import { acpStore } from "@/stores/acp.store";
+import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
@@ -516,6 +517,10 @@ function handleReroute(event: {
   // Reset streaming state for the new model attempt
   activeMessageId = crypto.randomUUID();
   streamStartTime = Date.now();
+
+  // Update UI to reflect the actual model being used after automatic fallback
+  providerStore.setActiveModel(event.to_model);
+  chatStore.setModel(event.to_model);
 
   // Add a reroute announcement message to the conversation
   const rerouteMessage: UnifiedMessage = {

@@ -1298,7 +1298,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 <Show when={conversationStore.isLoading}>
                   <ThinkingStatus />
                 </Show>
-                <Show when={!conversationStore.isLoading && conversationStore.messages.length > 0}>
+                <Show
+                  when={
+                    !conversationStore.isLoading &&
+                    conversationStore.messages.length > 0
+                  }
+                >
                   <span class="text-[10px] text-muted-foreground">
                     {settingsStore.get("chatEnterToSend")
                       ? "Enter to send"

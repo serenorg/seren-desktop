@@ -333,7 +333,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const clearHistory = async () => {
-    const confirmClear = window.confirm("Clear all agent chat history for this session?");
+    const confirmClear = window.confirm(
+      "Clear all agent chat history for this session?",
+    );
     if (!confirmClear) return;
 
     const session = acpStore.activeSession;
@@ -724,7 +726,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           <button
             type="button"
             class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
-            onClick={() => compactConversation(settingsStore.get("autoCompactPreserveMessages"))}
+            onClick={() =>
+              compactConversation(
+                settingsStore.get("autoCompactPreserveMessages"),
+              )
+            }
             title="Compact older messages"
           >
             Compact
