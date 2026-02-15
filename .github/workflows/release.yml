@@ -73,7 +73,7 @@ jobs:
 
       - name: Check for existing release
         id: check_release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const tagName = '${{ github.ref_name }}';
@@ -579,7 +579,7 @@ jobs:
 
       # Step 1: Upload assets to GitHub release and publish (undraft) it
       - name: Publish release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
@@ -707,7 +707,7 @@ jobs:
           done
 
       - name: Generate latest.json for updater (R2)
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
