@@ -685,7 +685,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         <Show when={isActive && !isSearching}>
                           <button
                             type="button"
-                            class="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-destructive/10 text-destructive opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/20"
+                            class="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-muted text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted-foreground/20"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleSkillThread(skill);
