@@ -79,19 +79,15 @@ let authRetryAttempted = false;
 async function refreshBalance(): Promise<void> {
   // Skip if already loading
   if (walletState.isLoading) {
-    console.log("[Wallet Store] Skipping refresh - already loading");
     return;
   }
 
-  console.log("[Wallet Store] refreshBalance called");
-  console.log("[Wallet Store] Setting isLoading = true");
   setWalletState("isLoading", true);
   setWalletState("error", null);
 
   try {
     const data: WalletBalance = await fetchBalance();
     consecutiveFailures = 0;
-    console.log("[Wallet Store] Balance refresh succeeded");
     setWalletState({
       balance: data.balance_atomic / 1_000_000,
       balance_atomic: data.balance_atomic,
@@ -139,7 +135,6 @@ async function refreshBalance(): Promise<void> {
     }
 
     authRetryAttempted = false;
-    console.log("[Wallet Store] Setting isLoading = false (error)");
     setWalletState({
       isLoading: false,
       error: message,
@@ -153,24 +148,19 @@ async function refreshBalance(): Promise<void> {
 function startAutoRefresh(): void {
   // Check store flag instead of module-level variable (HMR-resistant)
   if (walletState.autoRefreshActive) {
-    console.log("[Wallet Store] Auto-refresh already active, skipping");
     return;
   }
 
-  console.log("[Wallet Store] Starting auto-refresh");
   setWalletState("autoRefreshActive", true);
   consecutiveFailures = 0;
 
   // Fetch immediately (but only if not already loading)
   if (!walletState.isLoading) {
-    console.log("[Wallet Store] Triggering initial balance fetch");
     refreshBalance();
   }
 
   // Then refresh periodically
-  console.log(`[Wallet Store] Setting up ${REFRESH_INTERVAL}ms interval`);
   const timerId = setInterval(() => {
-    console.log("[Wallet Store] Interval timer fired");
     refreshBalance();
   }, REFRESH_INTERVAL);
 
@@ -184,7 +174,6 @@ function startAutoRefresh(): void {
 function stopAutoRefresh(): void {
   const timerId = walletState.refreshTimerId;
   if (timerId) {
-    console.log("[Wallet Store] Stopping auto-refresh, clearing interval");
     clearInterval(timerId);
   }
   setWalletState({
@@ -308,7 +297,6 @@ function resetWalletState(): void {
  */
 function updateBalanceFromError(availableBalanceAtomic: number): void {
   const balanceUsd = `$${(availableBalanceAtomic / 1_000_000).toFixed(2)}`;
-  console.log("[Wallet Store] Updating balance from 402 error");
   setWalletState({
     balance: availableBalanceAtomic / 1_000_000,
     balance_atomic: availableBalanceAtomic,
