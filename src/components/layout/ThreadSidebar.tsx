@@ -135,6 +135,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         "for thread",
         activeThread.id,
       );
+
+      // Clear search to show active skills (provides visual feedback)
+      setLauncherQuery("");
     } finally {
       setSpawning(false);
     }
