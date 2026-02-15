@@ -54,7 +54,7 @@
     "highlight.js": "^11.11.1",
     "marked": "^17.0.2",
     "monaco-editor": "^0.55.1",
-    "pdfjs-dist": "^5.4.530",
+    "pdfjs-dist": "^5.4.624",
     "solid-js": "^1.9.3",
     "tailwind-merge": "^3.4.1",
     "tailwindcss": "4",
