@@ -184,7 +184,7 @@ pub fn mcp_connect(
     cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::null()); // Discard stderr to prevent blocking
 
     // Inject the embedded runtime PATH so child processes can find bundled node/git
     let embedded_path = embedded_runtime::get_embedded_path();
