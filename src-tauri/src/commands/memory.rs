@@ -13,20 +13,40 @@ use seren_memory_sdk::client::MemoryClient;
 use seren_memory_sdk::models::CachedMemory;
 use seren_memory_sdk::sync::SyncEngine;
 
+const AUTH_STORE: &str = "auth.json";
+const TOKEN_KEY: &str = "token";
+
 /// Managed state for memory operations.
 pub struct MemoryState {
-    client: MemoryClient,
+    base_url: String,
     cache_path: PathBuf,
     cache: Mutex<Option<LocalCache>>,
 }
 
 impl MemoryState {
-    pub fn new(base_url: String, api_key: String, cache_path: PathBuf) -> Self {
+    pub fn new(base_url: String, cache_path: PathBuf) -> Self {
         Self {
-            client: MemoryClient::new(base_url, api_key),
+            base_url,
             cache_path,
             cache: Mutex::new(None),
         }
+    }
+
+    /// Create a MemoryClient using the current token from the Tauri store.
+    fn client(&self, app: &tauri::AppHandle) -> Result<MemoryClient, String> {
+        use tauri_plugin_store::StoreExt;
+        let token = app
+            .store(AUTH_STORE)
+            .map_err(|e| e.to_string())?
+            .get(TOKEN_KEY)
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_default();
+
+        if token.is_empty() {
+            return Err("unauthorized".to_string());
+        }
+
+        Ok(MemoryClient::new(self.base_url.clone(), token))
     }
 
     /// Get or initialize the local cache (lazy init).
@@ -70,6 +90,7 @@ pub struct SyncOutput {
 /// Assemble project memory context for system prompt injection.
 #[tauri::command]
 pub async fn memory_bootstrap(
+    app: tauri::AppHandle,
     state: State<'_, MemoryState>,
     project_id: Option<String>,
 ) -> Result<Option<String>, String> {
@@ -82,8 +103,9 @@ pub async fn memory_bootstrap(
     // LocalCache (rusqlite::Connection) is not Send, so run on a blocking thread
     // and use Handle::block_on() for async operations within it.
     let cache_path = state.cache_path.clone();
-    let base_url = state.client.base_url().to_string();
-    let api_key = state.client.api_key().to_string();
+    let base_url = state.base_url.clone();
+    let client = state.client(&app)?;
+    let api_key = client.api_key().to_string();
 
     let handle = tokio::runtime::Handle::current();
     let ctx = tokio::task::spawn_blocking(move || {
@@ -107,6 +129,7 @@ pub async fn memory_bootstrap(
 /// Store a memory via the cloud MCP remember tool.
 #[tauri::command]
 pub async fn memory_remember(
+    app: tauri::AppHandle,
     state: State<'_, MemoryState>,
     content: String,
     memory_type: String,
@@ -116,8 +139,8 @@ pub async fn memory_remember(
         .as_deref()
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
 
-    let result = state
-        .client
+    let client = state.client(&app)?;
+    let result = client
         .remember(&content, &memory_type, project_uuid, None)
         .await
         .map_err(|e| e.to_string())?;
@@ -147,6 +170,7 @@ pub async fn memory_remember(
 /// Search memories via the cloud MCP recall tool.
 #[tauri::command]
 pub async fn memory_recall(
+    app: tauri::AppHandle,
     state: State<'_, MemoryState>,
     query: String,
     project_id: Option<String>,
@@ -156,7 +180,8 @@ pub async fn memory_recall(
         .as_deref()
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
 
-    match state.client.recall(&query, project_uuid, limit).await {
+    let client = state.client(&app)?;
+    match client.recall(&query, project_uuid, limit).await {
         Ok(results) => Ok(results
             .into_iter()
             .map(|r| RecallOutput {
@@ -193,6 +218,7 @@ pub async fn memory_recall(
 /// Sync local cache with cloud (push pending, pull new).
 #[tauri::command]
 pub async fn memory_sync(
+    app: tauri::AppHandle,
     state: State<'_, MemoryState>,
     user_id: Option<String>,
     project_id: Option<String>,
@@ -207,8 +233,9 @@ pub async fn memory_sync(
 
     // LocalCache (rusqlite::Connection) is not Send, so run on a blocking thread.
     let cache_path = state.cache_path.clone();
-    let base_url = state.client.base_url().to_string();
-    let api_key = state.client.api_key().to_string();
+    let client = state.client(&app)?;
+    let base_url = client.base_url().to_string();
+    let api_key = client.api_key().to_string();
 
     let handle = tokio::runtime::Handle::current();
     let result = tokio::task::spawn_blocking(move || {
