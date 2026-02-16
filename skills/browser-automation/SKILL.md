@@ -1,9 +1,9 @@
 ---
-name: browser-automation
-description: Automate web browsers using Playwright for screenshots, web scraping, form filling, and browser interactions
+name: playwright
+description: Automate web browsers using Playwright with stealth features for screenshots, web scraping, form filling, and browser interactions
 author: Seren AI
 version: 1.0.0
-tags: [browser, automation, playwright, web-scraping, testing, screenshots]
+tags: [browser, automation, playwright, web-scraping, testing, screenshots, stealth]
 ---
 
 # Browser Automation with Playwright

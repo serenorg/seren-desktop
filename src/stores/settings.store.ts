@@ -366,7 +366,29 @@ async function loadMcpSettings(): Promise<void> {
 
     if (stored) {
       const parsed = JSON.parse(stored) as McpSettings;
-      setSettingsState("mcp", parsed);
+
+      // Migration: Add Playwright stealth server if it doesn't exist
+      const hasPlaywrightServer = parsed.servers.some(
+        (server) => server.name === "playwright"
+      );
+
+      if (!hasPlaywrightServer) {
+        parsed.servers.push({
+          name: "playwright",
+          type: "local",
+          enabled: true,
+          autoConnect: true,
+          command: "node",
+          args: ["mcp-servers/playwright-stealth/dist/index.js"],
+          env: {},
+        });
+
+        // Save the migrated settings
+        setSettingsState("mcp", parsed);
+        await saveMcpSettings();
+      } else {
+        setSettingsState("mcp", parsed);
+      }
     }
   } catch {
     // Use defaults if loading fails
