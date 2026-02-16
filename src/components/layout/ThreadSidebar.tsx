@@ -4,6 +4,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
+  createMemo,
   createSignal,
   For,
   onCleanup,
@@ -608,17 +609,17 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               >
                 <For each={filteredSkills()}>
                   {(skill) => {
-                    const isActive = isSkillActiveInThread(skill);
+                    const isActive = createMemo(() => isSkillActiveInThread(skill));
                     const isSearching = launcherQuery().trim().length > 0;
 
                     const handleClick = () => {
                       console.log("[ThreadSidebar] handleClick:", {
                         skillName: skill.name,
-                        isActive,
+                        isActive: isActive(),
                         isSearching,
                       });
 
-                      if (isActive) {
+                      if (isActive()) {
                         // Active skill (in thread) = Invoke the skill
                         const skillSlug = "slug" in skill ? skill.slug : "";
                         console.log(
@@ -649,14 +650,14 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           class="flex items-start gap-2 w-full px-2.5 py-2 mb-1 border rounded-md cursor-pointer text-left transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed"
                           classList={{
                             "bg-primary/5 border-primary/20 hover:bg-primary/10":
-                              isActive,
+                              isActive(),
                             "bg-transparent border-transparent hover:bg-surface-2 hover:border-border":
-                              !isActive,
+                              !isActive(),
                           }}
                           disabled={!threadStore.activeThread}
                           onClick={handleClick}
                           title={
-                            isActive
+                            isActive()
                               ? "Click to invoke skill in chat"
                               : "Click to add to thread"
                           }
@@ -665,18 +666,18 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           <span
                             class="w-5 h-5 flex items-center justify-center rounded shrink-0 mt-0.5 transition-colors"
                             classList={{
-                              "bg-primary/15 text-primary": isActive,
-                              "bg-surface-2 text-muted-foreground": !isActive,
+                              "bg-primary/15 text-primary": isActive(),
+                              "bg-surface-2 text-muted-foreground": !isActive(),
                             }}
                           >
                             <svg
                               width="11"
                               height="11"
                               viewBox="0 0 16 16"
-                              fill={isActive ? "currentColor" : "none"}
+                              fill={isActive() ? "currentColor" : "none"}
                               role="img"
                               aria-label={
-                                isActive ? "Active skill" : "Inactive skill"
+                                isActive() ? "Active skill" : "Inactive skill"
                               }
                             >
                               <path
@@ -691,7 +692,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           <div class="flex-1 min-w-0">
                             <div class="text-[13px] font-medium text-foreground">
                               {skill.name}
-                              {isActive && isSearching && (
+                              {isActive() && isSearching && (
                                 <span class="ml-1.5 text-[10px] text-primary font-semibold">
                                   ●
                                 </span>
@@ -706,7 +707,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         </button>
 
                         {/* X button for active skills */}
-                        <Show when={isActive}>
+                        <Show when={isActive()}>
                           <button
                             type="button"
                             class="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-muted text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted-foreground/20"
