@@ -1148,6 +1148,14 @@ impl Worker for ChatModelWorker {
 
                     // Execute each tool and build result messages
                     for tc in &tool_calls {
+                        // Check cancellation between tool executions
+                        if *self.cancelled.lock().await {
+                            log::info!(
+                                "[ChatModelWorker] Cancelled during tool execution, stopping"
+                            );
+                            return Ok(());
+                        }
+
                         log::info!(
                             "[ChatModelWorker] Executing tool: {} (id: {})",
                             tc.name,
