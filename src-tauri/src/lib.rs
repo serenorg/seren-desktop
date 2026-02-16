@@ -644,7 +644,7 @@ pub fn run() {
                     .unwrap_or_default();
 
                 app.manage(commands::memory::MemoryState::new(
-                    "https://api.serendb.com".to_string(),
+                    "https://memory.serendb.com".to_string(),
                     api_key,
                     cache_path,
                 ));
