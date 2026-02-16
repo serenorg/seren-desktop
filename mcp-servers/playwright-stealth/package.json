@@ -1,0 +1,34 @@
+{
+  "name": "@seren/mcp-playwright-stealth",
+  "version": "1.0.0",
+  "description": "Playwright MCP server with stealth features for anti-bot bypass",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "playwright-stealth-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "playwright",
+    "stealth",
+    "browser-automation",
+    "anti-bot"
+  ],
+  "author": "Seren AI",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "playwright": "^1.49.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
