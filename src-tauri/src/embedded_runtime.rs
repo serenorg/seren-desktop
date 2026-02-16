@@ -15,6 +15,7 @@ static EMBEDDED_PATH: OnceLock<String> = OnceLock::new();
 pub struct EmbeddedRuntimePaths {
     pub node_dir: Option<PathBuf>,
     pub git_dir: Option<PathBuf>,
+    pub bin_dir: Option<PathBuf>,
 }
 
 /// Returns the platform-specific subdirectory name (e.g., "darwin-arm64", "win32-x64").
@@ -77,6 +78,7 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
             return EmbeddedRuntimePaths {
                 node_dir: None,
                 git_dir: None,
+                bin_dir: None,
             };
         }
     };
@@ -132,7 +134,20 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
         }
     }
 
-    EmbeddedRuntimePaths { node_dir, git_dir }
+    // Check for sidecar binaries in bin/ directory (all platforms)
+    // This is where seren-acp-claude, seren-acp-codex, and seren-mcp are located
+    let bin_dir = runtime_dir.join("bin");
+    let bin_dir = if bin_dir.exists() {
+        Some(bin_dir)
+    } else {
+        None
+    };
+
+    EmbeddedRuntimePaths {
+        node_dir,
+        git_dir,
+        bin_dir,
+    }
 }
 
 /// Configures the embedded runtime paths.
@@ -147,6 +162,9 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     }
     if let Some(ref git_dir) = paths.git_dir {
         paths_to_add.push(git_dir.to_string_lossy().to_string());
+    }
+    if let Some(ref bin_dir) = paths.bin_dir {
+        paths_to_add.push(bin_dir.to_string_lossy().to_string());
     }
 
     // Compute the new PATH but store it instead of modifying global env
