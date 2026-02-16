@@ -1028,8 +1028,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               : `${agentName} hit its rate limit`;
           const description =
             reason === "prompt_too_long"
-              ? `The conversation is too long for the agent to continue. You can pick up in Chat mode with ${modelName} via Seren.`
-              : `Your conversation history will be preserved. You can continue in Chat mode with ${modelName} via Seren.`;
+              ? `Automatically switching to Chat mode with ${modelName}. Your conversation history will be preserved.`
+              : `Automatically switching to Chat mode with ${modelName}. Your conversation history will be preserved.`;
           return (
             <div class="mx-4 mb-2 px-3 py-3 border rounded-md text-sm bg-primary/10 border-primary/40 text-primary">
               <div class="flex items-start gap-3">
@@ -1048,26 +1048,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 </svg>
                 <div class="flex-1">
                   <p class="m-0 mb-2 font-medium text-foreground">{title}</p>
-                  <p class="m-0 mb-3 text-xs text-muted-foreground">
-                    {description}
-                  </p>
-                  <div class="flex items-center gap-2">
-                    <button
-                      type="button"
-                      class="px-3 py-1.5 text-xs font-medium bg-success text-white rounded-md hover:brightness-110 transition-colors"
-                      onClick={() => acpStore.acceptRateLimitFallback()}
-                    >
-                      Continue in Chat
-                    </button>
-                    <button
-                      type="button"
-                      class="px-3 py-1.5 text-xs font-medium bg-transparent text-muted-foreground border border-surface-3 rounded-md hover:text-foreground hover:border-muted-foreground transition-colors"
-                      onClick={() => acpStore.dismissRateLimitPrompt()}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
+                  <p class="m-0 text-xs text-muted-foreground">{description}</p>
                 </div>
+                <button
+                  type="button"
+                  class="px-2 py-1 text-xs font-medium bg-transparent text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                  onClick={() => acpStore.dismissRateLimitPrompt()}
+                  title="Dismiss"
+                >
+                  ✕
+                </button>
               </div>
             </div>
           );

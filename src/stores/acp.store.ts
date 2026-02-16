@@ -1763,21 +1763,29 @@ export const acpStore = {
             "[AcpStore] Skipping timeout error message — likely spurious race condition",
           );
         } else if (isPromptTooLongError(String(event.data.error))) {
-          // Context window full — flag the session so the UI shows the
-          // "Continue in Chat" prompt instead of a generic error banner.
+          // Context window full — automatically switch to chat mode
           console.info(
-            "[AcpStore] Prompt too long detected, flagging session for chat fallback",
+            "[AcpStore] Prompt too long detected, automatically switching to chat mode",
           );
           setState("sessions", sessionId, "promptTooLong", true);
           this.addErrorMessage(sessionId, event.data.error);
+
+          // Automatically trigger failover without user interaction
+          this.acceptRateLimitFallback().catch((err) => {
+            console.error("[AcpStore] Auto-failover failed:", err);
+          });
         } else if (isRateLimitError(String(event.data.error))) {
-          // Rate limit detected — flag the session so the UI shows the
-          // "Continue in Chat" prompt instead of a generic error banner.
+          // Rate limit detected — automatically switch to chat mode
           console.info(
-            "[AcpStore] Rate limit detected, flagging session for chat fallback",
+            "[AcpStore] Rate limit detected, automatically switching to chat mode",
           );
           setState("sessions", sessionId, "rateLimitHit", true);
           this.addErrorMessage(sessionId, event.data.error);
+
+          // Automatically trigger failover without user interaction
+          this.acceptRateLimitFallback().catch((err) => {
+            console.error("[AcpStore] Auto-failover failed:", err);
+          });
         } else {
           this.addErrorMessage(sessionId, event.data.error);
         }

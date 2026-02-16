@@ -5,8 +5,6 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 [![CI](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **🐛 Report bugs and request features:** [serenorg/seren-desktop-issues](https://github.com/serenorg/seren-desktop-issues/issues)
-
 ## Features
 
 ### AI Chat
@@ -39,7 +37,30 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 - **GPG signing support** — Sandbox allows gpg-agent access for signed commits
 - **Cancel with cleanup** — Force-stop agents, clear tool spinners, flush queued messages
 - **Auth error detection** — Auto-launches `claude login` when authentication is needed
+- **Automatic failover** — Instantly switches to chat mode when agent hits rate limits or context limits
 - **Thinking animation** — Bouncing dot indicator with rotating status words
+- **Embedded runtimes** — Bundled Node.js, npm, and ACP binaries (no PATH conflicts)
+
+### Skills System
+
+- **AgentSkills.io standard** — Standards-compliant skill format with SKILL.md metadata
+- **Three-tier hierarchy** — Bundled skills, user-installed skills, and thread-level skills
+- **Skill discovery** — Browse 100+ available skills at skills.serendb.com
+- **One-click installation** — Install skills directly from the catalog
+- **Slash command invocation** — Activate skills with `/skill-name` in chat or agent threads
+- **Thread-level management** — Enable/disable skills per conversation
+- **Project-scoped skills** — Skills can be project-specific via `.seren/skills.json`
+- **Built-in skills** — Polymarket Bot, Skill Creator, Getting Started, Playwright, Apollo
+
+### Seren Memory
+
+- **Persistent semantic memory** — Stores conversation context across sessions
+- **Automatic recall** — AI retrieves relevant memories during conversations
+- **Project-scoped** — Memories organized by project for better context
+- **Hybrid retrieval** — Vector search + full-text search + graph relationships
+- **Cloud sync** — Syncs to memory.serendb.com for cross-device access
+- **Privacy controls** — Enable/disable in settings, stored encrypted locally
+- **Memory types** — Conversation, code patterns, error fixes, user preferences
 
 ### OpenClaw Messaging
 
@@ -113,6 +134,8 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 - **In-app updates** — Check for and install updates without leaving the app
 - **Download progress** — Progress bar with quips during update download
 - **Cross-platform** — Signed updates for macOS, Windows, and Linux
+- **Cloudflare R2** — Fast, reliable update distribution with zero egress fees
+- **Automatic signature verification** — Cryptographically signed updates
 
 ### Security
 
@@ -195,14 +218,16 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  │ Claude   │  │ 90+ Tools│  │ Payments │  │ Browser  │ │
 │  │ Codex    │  │ + OAuth  │  │ + Crypto │  │          │ │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐               │
-│  │Orchestr. │  │ Indexing │  │ Sandbox  │               │
-│  │ Router   │  │sqlite-vec│  │ Terminal │               │
-│  │ Classify │  │          │  │          │               │
-│  └──────────┘  └──────────┘  └──────────┘               │
-│                                                          │
-│  Backend: Rust/Tauri  │  Frontend: SolidJS/TypeScript    │
-│  Embedded: Node.js + Git (bundled per platform)          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
+│  │Orchestr. │  │ Indexing │  │ Sandbox  │  │  Skills  │ │
+│  │ Router   │  │sqlite-vec│  │ Terminal │  │ 100+ Bots│ │
+│  │ Classify │  │          │  │          │  │          │ │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
+│  ┌──────────┐                                            │
+│  │  Memory  │                                            │
+│  │Cross-sess│   Backend: Rust/Tauri                      │
+│  │  Vector  │   Frontend: SolidJS/TypeScript             │
+│  └──────────┘   Embedded: Node.js + npm + ACP + Git      │
 └─────────────────────────┬────────────────────────────────┘
                           │
                           ▼
@@ -211,11 +236,13 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  • api.serendb.com                                       │
 │  • Authentication & billing (SerenBucks)                 │
 │  • AI model routing (Claude, GPT, Gemini)                │
-│  • Publisher ecosystem (50+ services)                    │
-│  • MCP server hosting                                    │
+│  • Publisher ecosystem (100+ services)                   │
+│  • MCP server hosting (mcp.serendb.com)                  │
 │  • SerenDB serverless PostgreSQL                         │
 │  • SerenEmbed API (embeddings)                           │
 │  • SerenWhisper API (speech-to-text)                     │
+│  • SerenMemory API (memory.serendb.com)                  │
+│  • Skills marketplace (skills.serendb.com)               │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -235,7 +262,7 @@ seren-desktop/
 │   │   ├── settings/        # Providers, MCP servers, OpenClaw config
 │   │   ├── sidebar/         # File explorer, database panel, indexing
 │   │   └── wallet/          # Deposits, transactions, daily claim
-│   ├── services/            # API clients (chat, ACP, MCP, wallet, OAuth, ...)
+│   ├── services/            # API clients (chat, ACP, MCP, wallet, memory, skills)
 │   ├── stores/              # SolidJS stores (state management)
 │   └── lib/                 # Utilities (indexing, audio, commands, rendering)
 ├── src-tauri/               # Rust backend
@@ -246,12 +273,13 @@ seren-desktop/
 │   │   ├── terminal.rs      # Terminal process management
 │   │   ├── sandbox.rs       # macOS sandbox profiles (GPG-aware)
 │   │   ├── mcp.rs           # MCP server management
-│   │   ├── embedded_runtime.rs  # Bundled Node.js/Git runtime
+│   │   ├── embedded_runtime.rs  # Bundled Node.js/npm/ACP/Git runtime
 │   │   ├── oauth.rs         # OAuth callback server
-│   │   ├── commands/        # Tauri commands (chat, indexing, web)
+│   │   ├── commands/        # Tauri commands (chat, indexing, memory, skills, web)
 │   │   ├── services/        # Vector store, chunker, indexer
 │   │   └── wallet/          # x402 payments, Ethereum signing
 │   └── embedded-runtime/    # Bundled runtimes and OpenClaw
+├── skills/                  # Bundled skills (Polymarket, Apollo, etc.)
 ├── tests/                   # E2E tests (Playwright)
 ├── build/                   # Platform-specific build scripts
 └── .github/workflows/       # CI and release automation
@@ -265,11 +293,13 @@ seren-desktop/
 | Backend | Rust, Tauri 2.0 |
 | Editor | Monaco Editor 0.52+ |
 | Vector Store | sqlite-vec (semantic search) |
+| Memory | seren-memory-sdk (persistent context) |
 | State | SolidJS stores |
 | Styling | Plain CSS |
 | Storage | tauri-plugin-store (encrypted) |
 | Crypto | alloy-rs (Ethereum signing) |
 | ACP | agent-client-protocol |
+| MCP | rmcp (Model Context Protocol) |
 | Linting | Biome 2.3+ |
 | Testing | Vitest (unit), Playwright (e2e) |
 
@@ -297,7 +327,7 @@ We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ### Bug Reports & Feature Requests
 
-Report bugs and request features in our public issue tracker: **[seren-desktop-issues](https://github.com/serenorg/seren-desktop-issues/issues)**
+Report bugs and request features in our [GitHub Issues](https://github.com/serenorg/seren-desktop/issues).
 
 ### Development Workflow
 
@@ -314,7 +344,7 @@ Report bugs and request features in our public issue tracker: **[seren-desktop-i
 
 ### Good First Issues
 
-Look for issues labeled [`good first issue`](https://github.com/serenorg/seren-desktop-issues/labels/good%20first%20issue) in the issues repo.
+Look for issues labeled [`good first issue`](https://github.com/serenorg/seren-desktop/labels/good%20first%20issue).
 
 ## Documentation
 
