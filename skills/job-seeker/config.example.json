@@ -1,0 +1,30 @@
+{
+  "campaign_name": "ML_Engineer_AI_Startups_SF_2026",
+  "user_profile": {
+    "name": "Your Name",
+    "current_title": "Senior ML Engineer",
+    "years_experience": 8,
+    "skills": ["Python", "Rust", "PyTorch", "TensorFlow", "Distributed Training"],
+    "location_prefs": ["San Francisco", "New York", "Remote"],
+    "salary_min": 180000
+  },
+  "search_criteria": {
+    "role": "Senior ML Engineer",
+    "industries": ["Artificial Intelligence", "Machine Learning", "Deep Learning"],
+    "location": "San Francisco Bay Area",
+    "company_size": "50-200",
+    "funding_stage": ["Series A", "Series B", "Series C"]
+  },
+  "strategy": {
+    "companies_to_discover": 50,
+    "companies_to_research": 20,
+    "companies_for_contacts": 10,
+    "outreach_emails_to_generate": 3,
+    "auto_apply": true,
+    "max_applications": 12
+  },
+  "budget": {
+    "max_cost_per_phase": 20.0,
+    "max_total_cost": 60.0
+  }
+}
