@@ -24,6 +24,8 @@ import { pickAndReadAttachments } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import type { ToolCallEvent } from "@/services/acp";
+import { API_BASE } from "@/lib/config";
+import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -679,19 +681,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   const downloadChatHistory = async () => {
     const messages = conversationStore.messages;
-    if (messages.length === 0) {
-      alert("No chat history to download");
-      return;
-    }
+    if (messages.length === 0) return;
 
-    // Check authentication
-    if (!authStore.isAuthenticated) {
-      setShowSignInPrompt(true);
-      return;
-    }
+    const dateStr = new Date().toISOString().split("T")[0];
+    const title = `Chat History - ${dateStr}`;
 
-    // Format messages as markdown
     let markdown = "# Chat History\n\n";
+    markdown += `*Exported ${new Date().toLocaleString()}*\n\n---\n\n`;
     for (const msg of messages) {
       if (msg.role === "user") {
         markdown += `**You:** ${msg.content}\n\n`;
@@ -700,52 +696,50 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       }
     }
 
+    // Save to Seren Notes via Gateway publisher proxy
     try {
-      // Save to Seren Notes
-      const title = `Chat History - ${new Date().toLocaleDateString()}`;
-      const apiKey = await getToken();
-      const response = await fetch(
-        "https://api.serendb.com/publishers/seren-notes/notes",
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+
+      const response = await appFetch(
+        `${API_BASE}/publishers/seren-notes/notes`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
+            Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({
-            title,
-            content: markdown,
-            format: "markdown",
-          }),
+          body: JSON.stringify({ title, content: markdown, format: "markdown" }),
         },
       );
 
-      if (response.ok) {
-        const data = await response.json();
-        const noteId = data.data?.id || data.id;
-
-        // Open Seren Notes web UI with API key for auto-login
-        const notesUrl = `https://notes.serendb.com?api_key=${apiKey}${noteId ? `#note-${noteId}` : ""}`;
-        await openExternalLink(notesUrl);
-
-        alert("Chat history saved to Seren Notes! Opening notes page...");
-      } else {
-        throw new Error(`Failed to save: ${response.statusText}`);
+      if (!response.ok) {
+        throw new Error(`Notes API returned ${response.status}`);
       }
-    } catch (error) {
-      console.error("Failed to save to Seren Notes:", error);
-      alert("Failed to save to Seren Notes. Downloading locally instead...");
 
-      // Fallback: download as local markdown file
-      const blob = new Blob([markdown], { type: "text/markdown" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `chat-history-${new Date().toISOString().split("T")[0]}.md`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const result = await response.json();
+      const noteId = result?.data?.id;
+      if (noteId) {
+        openExternalLink(`https://notes.serendb.com/_authed/notes/${noteId}`);
+      }
+      return;
+    } catch (error) {
+      console.error("[ChatContent] Failed to save to Seren Notes:", error);
+    }
+
+    // Fallback: save locally via Tauri file dialog
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const filePath = await save({
+        title: "Save Chat History",
+        defaultPath: `${title}.md`,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (!filePath) return;
+      await writeTextFile(filePath, markdown);
+    } catch (fallbackError) {
+      console.error("[ChatContent] Failed to save chat history:", fallbackError);
     }
   };
 

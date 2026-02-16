@@ -123,6 +123,8 @@ class ShortcutManager {
     shortcut: ShortcutDefinition,
   ): boolean {
     // Key match (case-insensitive for letters)
+    // e.key can be undefined on Windows for dead keys / IME composition
+    if (!e.key) return false;
     const keyMatch =
       e.key.toLowerCase() === shortcut.key.toLowerCase() ||
       e.key === shortcut.key;
