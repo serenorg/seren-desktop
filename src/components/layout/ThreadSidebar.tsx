@@ -173,7 +173,16 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     const skillPath = installedSkill.path;
 
     const activeSkills = skillsStore.getThreadSkills(cwd, thread.id);
-    return activeSkills.some((s) => s.path === skillPath);
+    const isActive = activeSkills.some((s) => s.path === skillPath);
+
+    console.log("[ThreadSidebar] isSkillActiveInThread:", {
+      skillName: skill.name,
+      skillPath,
+      activeSkillsCount: activeSkills.length,
+      isActive,
+    });
+
+    return isActive;
   };
 
   const filteredSkills = () => {
@@ -603,9 +612,19 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     const isSearching = launcherQuery().trim().length > 0;
 
                     const handleClick = () => {
+                      console.log("[ThreadSidebar] handleClick:", {
+                        skillName: skill.name,
+                        isActive,
+                        isSearching,
+                      });
+
                       if (isActive) {
                         // Active skill (in thread) = Invoke the skill
                         const skillSlug = "slug" in skill ? skill.slug : "";
+                        console.log(
+                          "[ThreadSidebar] Invoking skill:",
+                          skillSlug,
+                        );
                         if (skillSlug) {
                           window.dispatchEvent(
                             new CustomEvent("seren:set-chat-input", {
@@ -618,6 +637,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         }
                       } else {
                         // Inactive skill (not in thread) = Add to thread
+                        console.log("[ThreadSidebar] Adding skill to thread");
                         handleSkillThread(skill);
                       }
                     };
@@ -691,6 +711,10 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                             type="button"
                             class="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-muted text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted-foreground/20"
                             onClick={(e) => {
+                              console.log(
+                                "[ThreadSidebar] X button clicked:",
+                                skill.name,
+                              );
                               e.stopPropagation();
                               handleSkillThread(skill);
                             }}
