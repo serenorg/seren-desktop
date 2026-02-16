@@ -1,3 +1,9 @@
+---
+name: Getting Started Skill
+description: Learn how to use skills, add them to threads, invoke them, and create custom skills with Skill Creator
+tags: [tutorial, getting-started, skills, guide]
+---
+
 # Getting Started with Skills
 
 ## Overview

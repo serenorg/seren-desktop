@@ -1,5 +1,5 @@
 ---
-name: skill-creator
+name: Skill Creator
 description: Guides users through creating new skills following the AgentSkills.io standard. Use when the user wants to create a custom skill.
 ---
 

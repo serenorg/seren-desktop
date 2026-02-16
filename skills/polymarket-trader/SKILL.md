@@ -1,5 +1,5 @@
 ---
-name: polymarket-bot
+name: Polymarket Bot
 description: Autonomous trading agent for Polymarket prediction markets using Seren ecosystem
 author: Seren AI
 version: 1.0.0
