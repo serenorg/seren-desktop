@@ -722,7 +722,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       }
 
       const result = await response.json();
-      const noteId = result?.data?.id;
+      const noteId = result?.body?.data?.id ?? result?.data?.id;
       if (noteId) {
         openExternalLink(`https://notes.serendb.com/_authed/notes/${noteId}`);
       }
