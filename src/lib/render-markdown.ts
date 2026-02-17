@@ -57,8 +57,20 @@ marked.setOptions({
   renderer,
 });
 
+/**
+ * Ensure ATX headings (## heading) and fenced code blocks (```) are preceded
+ * by a blank line. With `breaks: true`, marked can fail to interrupt an
+ * in-progress paragraph at these block-level elements when no blank line
+ * separates them — common in Codex/agent output that omits blank lines.
+ */
+function normalizeAgentMarkdown(markdown: string): string {
+  let result = markdown.replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2");
+  result = result.replace(/([^\n])\n(`{3,}|~{3,})/g, "$1\n\n$2");
+  return result;
+}
+
 export function renderMarkdown(markdown: string): string {
-  const result = marked.parse(markdown);
+  const result = marked.parse(normalizeAgentMarkdown(markdown));
   return typeof result === "string" ? result : "";
 }
 
