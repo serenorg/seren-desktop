@@ -639,12 +639,19 @@ export const acpStore = {
       );
       const timeoutSecs = hasLongRunningSkill ? undefined : 300;
 
+      // Codex defaults to "on-failure" (auto-approve safe ops) regardless of
+      // the global agentApprovalPolicy setting, which applies to Claude Code.
+      const approvalPolicy =
+        resolvedAgentType === "codex"
+          ? "on-failure"
+          : settingsStore.settings.agentApprovalPolicy;
+
       const info = await acpService.spawnAgent(
         resolvedAgentType,
         cwd,
         settingsStore.settings.agentSandboxMode,
         apiKey ?? undefined,
-        settingsStore.settings.agentApprovalPolicy,
+        approvalPolicy,
         settingsStore.settings.agentSearchEnabled,
         settingsStore.settings.agentNetworkEnabled,
         localSessionId,

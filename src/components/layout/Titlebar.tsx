@@ -167,7 +167,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
             type="button"
             class="px-3 py-1 rounded-md bg-destructive hover:bg-destructive/90 text-white text-xs font-medium flex items-center gap-1.5 transition-colors"
             onClick={() => updaterStore.checkForUpdates()}
-            title={updaterStore.state.errorMessage || "Update failed"}
+            title={updaterStore.state.error || "Update failed"}
           >
             <span>⚠</span>
             <span>Update failed - Retry</span>
