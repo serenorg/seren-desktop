@@ -1634,6 +1634,19 @@ async fn run_session_worker(
         cmd.env("PATH", &combined);
     }
 
+    // Pass sandbox mode to seren-acp-codex via env var so it configures Codex internals.
+    // The -s CLI flag only controls seren-acp-codex's own behavior; the actual Codex
+    // app-server sandbox is set via SEREN_ACP_CODEX_SANDBOX.
+    if matches!(agent_type, AgentType::Codex) {
+        let sandbox_env = match sandbox_mode {
+            crate::sandbox::SandboxMode::ReadOnly => "read-only",
+            crate::sandbox::SandboxMode::WorkspaceWrite => "workspace-write",
+            crate::sandbox::SandboxMode::FullAccess => "danger-full-access",
+        };
+        cmd.env("SEREN_ACP_CODEX_SANDBOX", sandbox_env);
+        log::info!("[ACP] Set SEREN_ACP_CODEX_SANDBOX={}", sandbox_env);
+    }
+
     // Set CLAUDE_CLI_PATH so the SDK can find the Claude CLI directly without relying on PATH.
     // This is more reliable than PATH resolution, especially when the claude binary is a Node.js
     // script that requires finding Node.js via its shebang.
