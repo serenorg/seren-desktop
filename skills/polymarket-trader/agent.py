@@ -74,11 +74,18 @@ class TradingAgent:
         self.max_positions = int(self.config['max_positions'])
         self.stop_loss_bankroll = float(self.config.get('stop_loss_bankroll', 0.0))
 
+        # Scan pipeline limits (configurable, with backward-compatible defaults)
+        self.scan_limit = int(self.config.get('scan_limit', 100))
+        self.candidate_limit = int(self.config.get('candidate_limit', 20))
+        self.analyze_limit = int(self.config.get('analyze_limit', self.candidate_limit))
+        self.min_liquidity = float(self.config.get('min_liquidity', 100.0))
+
         print(f"✓ Agent initialized (Dry-run: {dry_run})")
         print(f"  Bankroll: ${self.bankroll:.2f}")
         print(f"  Mispricing threshold: {self.mispricing_threshold * 100:.1f}%")
         print(f"  Max Kelly fraction: {self.max_kelly_fraction * 100:.1f}%")
         print(f"  Max positions: {self.max_positions}")
+        print(f"  Scan pipeline: fetch={self.scan_limit} → candidates={self.candidate_limit} → analyze={self.analyze_limit}")
         print()
 
         # Sync positions on startup
@@ -125,7 +132,7 @@ class TradingAgent:
         Scan Polymarket for active markets
 
         Args:
-            limit: Max markets to return
+            limit: Max markets to fetch
 
         Returns:
             List of market dicts
@@ -139,6 +146,40 @@ class TradingAgent:
             print(f"  ⚠️  Market scanning failed: {e}")
             print(f"     This may indicate polymarket-data publisher is unavailable")
             return []
+
+    def rank_candidates(self, markets: List[Dict], limit: int) -> List[Dict]:
+        """
+        Cheap heuristic ranking to select the best candidates for LLM analysis.
+
+        No API calls. Ranks by a composite score of:
+        - Liquidity (higher = better)
+        - Price proximity to 50% (closer to 50% = more uncertain = more edge potential)
+        - Volume (if available)
+
+        Args:
+            markets: Full list of fetched markets
+            limit: Number of candidates to keep
+
+        Returns:
+            Top N markets by heuristic score
+        """
+        def score(m: Dict) -> float:
+            liquidity = float(m.get('liquidity', 0))
+            price = float(m.get('price', 0.5))
+            volume = float(m.get('volume', 0))
+            # Proximity to 50% — max uncertainty, most edge potential
+            uncertainty = 1.0 - abs(price - 0.5) * 2
+            # Normalise liquidity contribution (log scale to avoid domination)
+            import math
+            liq_score = math.log1p(liquidity)
+            vol_score = math.log1p(volume)
+            return liq_score + vol_score + uncertainty * 2
+
+        ranked = sorted(markets, key=score, reverse=True)
+        selected = ranked[:limit]
+        dropped = len(markets) - len(selected)
+        print(f"  Ranked {len(markets)} markets → kept top {len(selected)} candidates (dropped {dropped})")
+        return selected
 
     def research_opportunity(self, market_question: str) -> str:
         """
@@ -385,17 +426,15 @@ class TradingAgent:
         if balances['serenbucks'] < 5.0:
             self.logger.notify_low_balance('serenbucks', balances['serenbucks'], 20.0)
 
-        # Scan markets
+        # Stage 1: Broad fetch
         print("Scanning markets...")
-        markets = self.scan_markets(limit=100)
-        print(f"  Found {len(markets)} markets")
+        markets = self.scan_markets(limit=self.scan_limit)
+        print(f"  Fetched: {len(markets)} markets")
         print()
 
         if not markets:
             print("⚠️  No markets found - check polymarket-data publisher availability")
             print()
-
-            # Log scan result
             self.logger.log_scan_result(
                 dry_run=self.dry_run,
                 markets_scanned=0,
@@ -409,19 +448,24 @@ class TradingAgent:
             )
             return
 
-        # Evaluate opportunities
+        # Stage 2: Cheap heuristic ranking — no LLM
+        print("Ranking candidates (no LLM)...")
+        candidates = self.rank_candidates(markets, limit=self.candidate_limit)
+        analyze_batch = candidates[:self.analyze_limit]
+        print(f"  Candidates: {len(candidates)}, will analyze: {len(analyze_batch)}")
+        print()
+
+        # Stage 3: Deep LLM analysis
         opportunities = []
-        for market in markets[:20]:  # Limit to top 20 to control API costs
+        for market in analyze_batch:
             print(f"Evaluating: \"{market['question']}\"")
             print(f"  Current price: {market['price'] * 100:.1f}%")
             print(f"  Liquidity: ${market['liquidity']:.2f}")
 
-            # Research
             research = self.research_opportunity(market['question'])
             if not research:
                 continue
 
-            # Estimate fair value
             fair_value, confidence = self.estimate_fair_value(
                 market['question'],
                 market['price'],
@@ -430,7 +474,6 @@ class TradingAgent:
             if not fair_value:
                 continue
 
-            # Evaluate opportunity
             opp = self.evaluate_opportunity(market, research, fair_value, confidence)
             if opp:
                 opportunities.append(opp)
@@ -449,9 +492,7 @@ class TradingAgent:
                 trades_executed += 1
                 capital_deployed += opp['position_size']
 
-        # Log scan result
-        # Estimate API cost (rough approximation)
-        api_cost = len(markets[:20]) * 0.05  # ~$0.05 per market (research + estimate)
+        api_cost = len(analyze_batch) * 0.05  # ~$0.05 per market (research + estimate)
         self.logger.log_scan_result(
             dry_run=self.dry_run,
             markets_scanned=len(markets),
@@ -465,8 +506,9 @@ class TradingAgent:
 
         print("=" * 60)
         print("Scan complete!")
-        print(f"  Markets scanned: {len(markets)}")
-        print(f"  Markets analyzed: {min(20, len(markets))}")
+        print(f"  Fetched:    {len(markets)} markets")
+        print(f"  Candidates: {len(candidates)} (after heuristic ranking)")
+        print(f"  Analyzed:   {len(analyze_batch)} (LLM research + fair value)")
         print(f"  Opportunities: {len(opportunities)}")
         print(f"  Trades executed: {trades_executed}")
         print(f"  Capital deployed: ${capital_deployed:.2f}")
