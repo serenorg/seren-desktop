@@ -42,7 +42,7 @@ class KrakenGridTrader:
 
         # Load config
         self.config = self._load_config(config_path)
-        self.dry_run = dry_run
+        self.is_dry_run = dry_run
 
         # Initialize clients
         api_key = os.getenv('SEREN_API_KEY')
@@ -107,10 +107,30 @@ class KrakenGridTrader:
 
         # Get current price
         print("\nFetching current market data...")
-        ticker = self.seren.get_ticker(pair)
-        current_price = float(ticker['result'][pair]['c'][0])  # Last trade price
+        current_price = self.seren.get_current_price(pair)  # Last trade price
 
         print(f"Current Price:   ${current_price:,.2f}")
+
+        # Validate price range
+        min_price = strategy['price_range']['min']
+        max_price = strategy['price_range']['max']
+        price_range_width = max_price - min_price
+        tolerance_pct = 0.05  # 5% tolerance outside range
+
+        if current_price < min_price * (1 - tolerance_pct):
+            print(f"\n⚠️  WARNING: Current price (${current_price:,.2f}) is significantly BELOW configured range")
+            print(f"   Configured range: ${min_price:,.0f} - ${max_price:,.0f}")
+            print(f"   This will result in ONE-SIDED GRID behavior (all sell orders, no buys).")
+            print(f"   Consider updating config.json price_range to include current price.\n")
+        elif current_price > max_price * (1 + tolerance_pct):
+            print(f"\n⚠️  WARNING: Current price (${current_price:,.2f}) is significantly ABOVE configured range")
+            print(f"   Configured range: ${min_price:,.0f} - ${max_price:,.0f}")
+            print(f"   This will result in ONE-SIDED GRID behavior (all buy orders, no sells).")
+            print(f"   Consider updating config.json price_range to include current price.\n")
+        elif current_price < min_price or current_price > max_price:
+            print(f"\n⚠️  NOTE: Current price (${current_price:,.2f}) is slightly outside configured range")
+            print(f"   Configured range: ${min_price:,.0f} - ${max_price:,.0f}")
+            print(f"   Grid will still work but may have asymmetric buy/sell distribution.\n")
 
         # Calculate expected profits
         expected = self.grid.calculate_expected_profit(fills_per_day=15)
@@ -157,8 +177,7 @@ class KrakenGridTrader:
             print(f"--- Cycle {cycle + 1}/{cycles} ---")
 
             # Get current price
-            ticker = self.seren.get_ticker(pair)
-            current_price = float(ticker['result'][pair]['c'][0])
+            current_price = self.seren.get_current_price(pair)
             print(f"Current Price: ${current_price:,.2f}")
 
             # Get required orders
@@ -222,8 +241,7 @@ class KrakenGridTrader:
 
         try:
             # 1. Get current price
-            ticker = self.seren.get_ticker(pair)
-            current_price = float(ticker['result'][pair]['c'][0])
+            current_price = self.seren.get_current_price(pair)
 
             # 2. Update balances
             balance = self.seren.get_balance()
@@ -317,7 +335,7 @@ class KrakenGridTrader:
     def _place_order(self, pair: str, side: str, price: float, volume: float):
         """Place a single limit order"""
         try:
-            if self.dry_run:
+            if self.is_dry_run:
                 print(f"[DRY RUN] Would place {side} order: {volume:.8f} BTC @ ${price:,.2f}")
                 return
 
@@ -408,8 +426,7 @@ class KrakenGridTrader:
         pair = self.config['trading_pair']
 
         # Get current price
-        ticker = self.seren.get_ticker(pair)
-        current_price = float(ticker['result'][pair]['c'][0])
+        current_price = self.seren.get_current_price(pair)
 
         # Print position summary
         print(self.tracker.get_position_summary(current_price))
@@ -420,7 +437,7 @@ class KrakenGridTrader:
 
         self.running = False
 
-        if not self.dry_run:
+        if not self.is_dry_run:
             try:
                 # Cancel all open orders
                 print("Cancelling all open orders...")
@@ -433,8 +450,7 @@ class KrakenGridTrader:
         # Print final status
         if self.tracker:
             pair = self.config['trading_pair']
-            ticker = self.seren.get_ticker(pair)
-            current_price = float(ticker['result'][pair]['c'][0])
+            current_price = self.seren.get_current_price(pair)
             print(self.tracker.get_position_summary(current_price))
 
             # Export fills to CSV

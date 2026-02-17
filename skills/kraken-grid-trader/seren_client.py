@@ -61,7 +61,12 @@ class SerenClient:
             timeout=30
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+
+        # Unwrap Seren Gateway envelope - response is wrapped in 'body' field
+        if isinstance(data, dict) and 'body' in data:
+            return data['body']
+        return data
 
     # ========== Kraken Market Data ==========
 
@@ -76,11 +81,44 @@ class SerenClient:
             Ticker data with current price, volume, etc.
         """
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='GET',
-            path='/0/public/Ticker',
+            path='/public/Ticker',
             params={'pair': pair}
         )
+
+    def get_current_price(self, pair: str) -> float:
+        """
+        Get current price for a trading pair, handling Kraken's pair alias mismatch.
+
+        Kraken returns pair names with aliases (e.g., 'XXBTZUSD' instead of 'XBTUSD').
+        This method handles that transparently.
+
+        Args:
+            pair: Trading pair (e.g., 'XBTUSD')
+
+        Returns:
+            Current price as float
+
+        Raises:
+            KeyError: If ticker data is invalid or missing
+        """
+        ticker = self.get_ticker(pair)
+
+        # Kraken returns result dict with aliased pair name as key
+        # Example: request 'XBTUSD', get back {'result': {'XXBTZUSD': {...}}}
+        result = ticker.get('result', {})
+
+        # Try exact match first
+        if pair in result:
+            return float(result[pair]['c'][0])
+
+        # Fall back to first pair in result (handles alias mismatch)
+        if result:
+            first_pair_key = list(result.keys())[0]
+            return float(result[first_pair_key]['c'][0])
+
+        raise KeyError(f"No ticker data found for pair {pair}")
 
     def get_asset_pairs(self, pair: str) -> Dict[str, Any]:
         """
@@ -93,9 +131,9 @@ class SerenClient:
             Pair info (fees, min order size, etc.)
         """
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='GET',
-            path='/0/public/AssetPairs',
+            path='/public/AssetPairs',
             params={'pair': pair}
         )
 
@@ -109,9 +147,9 @@ class SerenClient:
             Dict of asset balances (e.g., {'XXBT': 0.5, 'ZUSD': 1000})
         """
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='POST',
-            path='/0/private/Balance',
+            path='/private/Balance',
             body={}
         )
 
@@ -123,9 +161,9 @@ class SerenClient:
             Dict of open orders by order ID
         """
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='POST',
-            path='/0/private/OpenOrders',
+            path='/private/OpenOrders',
             body={}
         )
 
@@ -140,9 +178,9 @@ class SerenClient:
             Trade balance info
         """
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='POST',
-            path='/0/private/TradeBalance',
+            path='/private/TradeBalance',
             body={'asset': asset}
         )
 
@@ -185,9 +223,9 @@ class SerenClient:
             body['validate'] = 'true'
 
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='POST',
-            path='/0/private/AddOrder',
+            path='/private/AddOrder',
             body=body
         )
 
@@ -202,9 +240,9 @@ class SerenClient:
             Cancellation response
         """
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='POST',
-            path='/0/private/CancelOrder',
+            path='/private/CancelOrder',
             body={'txid': order_id}
         )
 
@@ -216,9 +254,9 @@ class SerenClient:
             Cancellation response with count
         """
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='POST',
-            path='/0/private/CancelAll',
+            path='/private/CancelAll',
             body={}
         )
 
@@ -244,9 +282,9 @@ class SerenClient:
             body['start'] = start
 
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='POST',
-            path='/0/private/ClosedOrders',
+            path='/private/ClosedOrders',
             body=body
         )
 
@@ -272,8 +310,8 @@ class SerenClient:
             body['start'] = start
 
         return self._call_publisher(
-            publisher='kraken',
+            publisher='kraken-spot-trading',
             method='POST',
-            path='/0/private/TradesHistory',
+            path='/private/TradesHistory',
             body=body
         )
