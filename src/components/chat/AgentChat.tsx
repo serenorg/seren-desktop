@@ -359,9 +359,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       }
 
       const result = await response.json();
-      const noteId = result?.data?.id;
+      console.log("[AgentChat] Seren Notes response:", JSON.stringify(result));
+      const noteId = result?.data?.id ?? result?.id;
       if (noteId) {
         openExternalLink(`https://notes.serendb.com/_authed/notes/${noteId}`);
+      } else {
+        console.error("[AgentChat] No noteId in response:", result);
+        alert("Note saved but could not open it. Check console for details.");
       }
     } catch (error) {
       console.error("[AgentChat] Failed to save to Seren Notes:", error);
