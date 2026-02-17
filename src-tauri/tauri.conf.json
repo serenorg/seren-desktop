@@ -70,10 +70,10 @@
     },
     "windows": {
       "certificateThumbprint": null,
-      "timestampUrl": "https://timestamp.digicert.com"
-    },
-    "nsis": {
-      "installerHooks": "nsis/installer-hooks.nsh"
+      "timestampUrl": "https://timestamp.digicert.com",
+      "nsis": {
+        "installerHooks": "nsis/installer-hooks.nsh"
+      }
     }
   }
 }
