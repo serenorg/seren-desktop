@@ -19,7 +19,9 @@ import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
+import { API_BASE } from "@/lib/config";
 import { openExternalLink } from "@/lib/external-link";
+import { appFetch } from "@/lib/fetch";
 import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
@@ -29,6 +31,7 @@ import {
 } from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
+import { getToken } from "@/services/auth";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
@@ -316,13 +319,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const downloadChatHistory = async () => {
     const messages = threadMessages();
-    if (messages.length === 0) {
-      alert("No chat history to download");
-      return;
-    }
+    if (messages.length === 0) return;
 
-    // Format messages as markdown
+    const dateStr = new Date().toISOString().split("T")[0];
+    const title = `Agent Chat History - ${dateStr}`;
+
     let markdown = "# Agent Chat History\n\n";
+    markdown += `*Exported ${new Date().toLocaleString()}*\n\n---\n\n`;
     for (const msg of messages) {
       if (msg.type === "user") {
         markdown += `**You:** ${msg.content}\n\n`;
@@ -332,19 +335,37 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
 
     try {
-      const dateStr = new Date().toISOString().split("T")[0];
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-      const filePath = await save({
-        title: "Save Agent Chat History",
-        defaultPath: `agent-chat-${dateStr}.md`,
-        filters: [{ name: "Markdown", extensions: ["md"] }],
-      });
-      if (!filePath) return;
-      await writeTextFile(filePath, markdown);
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+
+      const response = await appFetch(
+        `${API_BASE}/publishers/seren-notes/notes`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            title,
+            content: markdown,
+            format: "markdown",
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Notes API returned ${response.status}`);
+      }
+
+      const result = await response.json();
+      const noteId = result?.data?.id;
+      if (noteId) {
+        openExternalLink(`https://notes.serendb.com/_authed/notes/${noteId}`);
+      }
     } catch (error) {
-      console.error("Failed to download:", error);
-      alert("Failed to download chat history");
+      console.error("[AgentChat] Failed to save to Seren Notes:", error);
+      alert("Failed to save to Seren Notes. Are you logged in?");
     }
   };
 
