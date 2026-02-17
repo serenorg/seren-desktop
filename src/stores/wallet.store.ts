@@ -10,6 +10,7 @@ import {
   fetchDailyEligibility,
 } from "@/services/dailyClaim";
 import { fetchBalance, type WalletBalance } from "@/services/wallet";
+import { promptLogin } from "@/stores/auth.store";
 
 /**
  * Wallet state interface.
@@ -121,8 +122,10 @@ async function refreshBalance(): Promise<void> {
           return refreshBalance();
         }
         console.warn("[Wallet Store] Token refresh failed, stopping poller");
+        promptLogin();
       } catch (refreshErr) {
         console.error("[Wallet Store] Token refresh threw:", refreshErr);
+        promptLogin();
       }
       stopAutoRefresh();
     } else if (isAuthError || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
