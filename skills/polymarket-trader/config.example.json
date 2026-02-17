@@ -5,6 +5,10 @@
   "scan_interval_minutes": 10,
   "max_positions": 10,
   "stop_loss_bankroll": 0.0,
+  "scan_limit": 300,
+  "candidate_limit": 80,
+  "analyze_limit": 30,
+  "min_liquidity": 100.0,
   "created_at": "2026-02-12T00:00:00Z",
   "last_updated": "2026-02-12T00:00:00Z"
 }

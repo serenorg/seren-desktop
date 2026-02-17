@@ -113,6 +113,42 @@ class SerenClient:
         response.raise_for_status()
         return response.json()
 
+    def _extract_text(self, response: Dict[str, Any]) -> str:
+        """
+        Extract text content from a model response.
+
+        Handles multiple gateway response envelopes:
+        - OpenAI-style choices[].message.content (string or content-block array)
+        - Responses-API-style output[].content[].text
+        - Plain top-level text field
+        """
+        data = response.get('body', response)
+
+        # OpenAI-style: choices[].message.content
+        if 'choices' in data:
+            content = data['choices'][0]['message']['content']
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                for block in content:
+                    if block.get('type') == 'text':
+                        return block['text']
+
+        # Responses-API-style: output[].content[].text
+        if 'output' in data:
+            for item in data.get('output', []):
+                for block in item.get('content', []):
+                    if block.get('type') == 'text':
+                        return block['text']
+
+        # Plain text field fallback
+        if 'text' in data:
+            return data['text']
+
+        raise ValueError(
+            f"Unsupported model response shape. Top-level keys: {list(data.keys())}"
+        )
+
     def estimate_fair_value(
         self,
         market_question: str,
@@ -171,10 +207,7 @@ Be calibrated and honest about uncertainty."""
             }
         )
 
-        # Parse response - handle wrapped response format
-        # Publisher response may be wrapped in 'body' field
-        response_data = response.get('body', response)
-        content = response_data['choices'][0]['message']['content']
+        content = self._extract_text(response)
 
         # Extract probability and confidence
         probability = None
@@ -241,10 +274,7 @@ Provide a concise summary (200-300 words) with citations."""
             }
         )
 
-        # Parse response - handle wrapped response format
-        # Publisher response may be wrapped in 'body' field
-        response_data = response.get('body', response)
-        return response_data['choices'][0]['message']['content']
+        return self._extract_text(response)
 
     def create_cron_job(
         self,
