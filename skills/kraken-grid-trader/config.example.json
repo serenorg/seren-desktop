@@ -1,6 +1,10 @@
 {
-  "campaign_name": "BTC_Grid_2026",
-  "trading_pair": "XBTUSD",
+  "campaign_name": "Grid_2026",
+
+  "_comment_pair": "Use 'trading_pair' for a fixed pair, or 'pairs' to let the bot auto-select the best one.",
+  "pairs": ["XBTUSD", "ETHUSD", "SOLUSD", "ADAUSD", "DOTUSD"],
+
+  "_comment_price_range": "price_range should bracket the expected trading range for the selected pair.",
   "strategy": {
     "bankroll": 1000.0,
     "grid_levels": 20,
