@@ -24,6 +24,7 @@ from seren_client import SerenClient
 from grid_manager import GridManager
 from position_tracker import PositionTracker
 from logger import GridTraderLogger
+import pair_selector
 
 
 class KrakenGridTrader:
@@ -63,19 +64,55 @@ class KrakenGridTrader:
         with open(config_path, 'r') as f:
             config = json.load(f)
 
-        # Validate required fields
-        required = ['campaign_name', 'trading_pair', 'strategy', 'risk_management']
+        # Validate required fields.
+        # 'trading_pair' is optional when 'pairs' (list) is provided — pair selection
+        # happens at setup() time once the live Seren client is available.
+        required = ['campaign_name', 'strategy', 'risk_management']
         for field in required:
             if field not in config:
                 raise ValueError(f"Missing required config field: {field}")
 
+        if 'trading_pair' not in config and 'pairs' not in config:
+            raise ValueError("Config must contain either 'trading_pair' or 'pairs'")
+
         return config
+
+    def _select_trading_pair(self):
+        """
+        Score all configured candidate pairs and pick the best one for grid trading.
+        Updates self.config['trading_pair'] with the winner.
+        """
+        candidates = self.config.get('pairs', [])
+        if not candidates:
+            return  # single-pair mode — nothing to do
+
+        print("\nScanning candidate pairs for best grid opportunity...")
+        best_pair, best_score, all_scores = pair_selector.select_best_pair(self.seren, candidates)
+
+        print(f"\n{'Pair':<12} {'Score':>6}  {'ATR%':>6}  {'Vol $24h':>12}  {'Spread%':>8}  {'Price':>10}")
+        print("-" * 62)
+        for s in all_scores:
+            if s['error']:
+                print(f"{s['pair']:<12}  ERROR: {s['error']}")
+            else:
+                marker = " ◀ selected" if s['pair'] == best_pair else ""
+                print(
+                    f"{s['pair']:<12} {s['score']:>6.3f}  {s['atr_pct']:>5.1f}%  "
+                    f"${s['volume_usd_24h']:>11,.0f}  {s['spread_pct']:>7.4f}%  "
+                    f"${s['current_price']:>9,.2f}{marker}"
+                )
+
+        self.config['trading_pair'] = best_pair
+        print(f"\n✓ Selected pair: {best_pair} (score: {best_score['score']:.3f})\n")
 
     def setup(self):
         """Phase 1: Setup and validate configuration"""
         print("\n============================================================")
         print("KRAKEN GRID TRADER - SETUP")
         print("============================================================\n")
+
+        # Auto-select the best pair from the candidate list (if configured)
+        self._select_trading_pair()
 
         campaign = self.config['campaign_name']
         pair = self.config['trading_pair']
@@ -245,9 +282,12 @@ class KrakenGridTrader:
 
             # 2. Update balances
             balance = self.seren.get_balance()
-            btc_balance = float(balance['result'].get('XXBT', 0))
+            balance_key = pair_selector.get_balance_key(
+                pair, self.config.get('base_balance_key')
+            )
+            base_balance = float(balance['result'].get(balance_key, 0))
             usd_balance = float(balance['result'].get('ZUSD', 0))
-            self.tracker.update_balances(btc_balance, usd_balance)
+            self.tracker.update_balances(base_balance, usd_balance)
 
             # 3. Check stop loss
             if self.tracker.should_stop_loss(current_price, stop_loss):
@@ -278,7 +318,7 @@ class KrakenGridTrader:
             # 9. Log position update
             self.logger.log_position_update(
                 pair=pair,
-                btc_balance=btc_balance,
+                btc_balance=base_balance,
                 usd_balance=usd_balance,
                 total_value_usd=self.tracker.get_current_value(current_price),
                 unrealized_pnl=self.tracker.get_unrealized_pnl(current_price),
@@ -334,9 +374,10 @@ class KrakenGridTrader:
 
     def _place_order(self, pair: str, side: str, price: float, volume: float):
         """Place a single limit order"""
+        base = pair_selector.get_base_symbol(pair)
         try:
             if self.is_dry_run:
-                print(f"[DRY RUN] Would place {side} order: {volume:.8f} BTC @ ${price:,.2f}")
+                print(f"[DRY RUN] Would place {side} order: {volume:.8f} {base} @ ${price:,.2f}")
                 return
 
             response = self.seren.add_order(
@@ -367,7 +408,7 @@ class KrakenGridTrader:
                     volume=volume,
                     status='placed'
                 )
-                print(f"✓ Placed {side} order: {volume:.8f} BTC @ ${price:,.2f} (ID: {order_id})")
+                print(f"✓ Placed {side} order: {volume:.8f} {base} @ ${price:,.2f} (ID: {order_id})")
 
         except Exception as e:
             error_msg = str(e)
@@ -415,7 +456,8 @@ class KrakenGridTrader:
         # Remove from active orders
         del self.active_orders[order_id]
 
-        print(f"✓ FILLED {side.upper()}: {volume:.8f} BTC @ ${price:,.2f} (Fee: ${fee:.2f})")
+        base = pair_selector.get_base_symbol(self.config['trading_pair'])
+        print(f"✓ FILLED {side.upper()}: {volume:.8f} {base} @ ${price:,.2f} (Fee: ${fee:.2f})")
 
     def status(self):
         """Show current trading status"""
