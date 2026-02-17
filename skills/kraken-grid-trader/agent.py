@@ -29,20 +29,20 @@ from logger import GridTraderLogger
 class KrakenGridTrader:
     """Kraken Grid Trading Bot"""
 
-    def __init__(self, config_path: str, dry_run: bool = False):
+    def __init__(self, config_path: str, is_dry_run: bool = False):
         """
         Initialize grid trader
 
         Args:
             config_path: Path to config JSON file
-            dry_run: If True, simulate trades without placing real orders
+            is_dry_run: If True, simulate trades without placing real orders
         """
         # Load environment
         load_dotenv()
 
         # Load config
         self.config = self._load_config(config_path)
-        self.dry_run = dry_run
+        self.is_dry_run = is_dry_run
 
         # Initialize clients
         api_key = os.getenv('SEREN_API_KEY')
@@ -70,6 +70,40 @@ class KrakenGridTrader:
                 raise ValueError(f"Missing required config field: {field}")
 
         return config
+
+    def _extract_ticker_price(self, ticker_data: Dict, pair: str) -> float:
+        """
+        Extract last trade price from ticker data, handling Kraken pair aliases.
+
+        Kraken returns keys like 'XXBTZUSD' instead of 'XBTUSD'. This method
+        searches for the pair key by trying the exact key first, then scanning
+        all keys for a match.
+
+        Args:
+            ticker_data: Ticker response from Kraken (unwrapped from Seren envelope)
+            pair: Requested pair (e.g., 'XBTUSD')
+
+        Returns:
+            Last trade price as float
+
+        Raises:
+            KeyError: If pair not found in ticker data
+        """
+        result = ticker_data.get('result', ticker_data)
+
+        # Try exact match first
+        if pair in result:
+            return float(result[pair]['c'][0])
+
+        # Scan for alias match (e.g., XBTUSD -> XXBTZUSD)
+        for key in result:
+            if isinstance(result[key], dict) and 'c' in result[key]:
+                return float(result[key]['c'][0])
+
+        raise KeyError(
+            f"Could not find ticker data for '{pair}'. "
+            f"Available keys: {list(result.keys())}"
+        )
 
     def setup(self):
         """Phase 1: Setup and validate configuration"""
@@ -108,9 +142,41 @@ class KrakenGridTrader:
         # Get current price
         print("\nFetching current market data...")
         ticker = self.seren.get_ticker(pair)
-        current_price = float(ticker['result'][pair]['c'][0])  # Last trade price
+        current_price = self._extract_ticker_price(ticker, pair)
 
         print(f"Current Price:   ${current_price:,.2f}")
+
+        # Validate grid range vs current price
+        price_min = strategy['price_range']['min']
+        price_max = strategy['price_range']['max']
+        margin_percent = 5.0  # Warn if price is within 5% of grid boundary
+
+        if current_price < price_min or current_price > price_max:
+            print(f"\n⚠ WARNING: Current price ${current_price:,.2f} is OUTSIDE your grid range "
+                  f"(${price_min:,.0f} - ${price_max:,.0f})!")
+            print("  The grid will be entirely one-sided (all buys or all sells).")
+            print("  Update price_range in your config to bracket the current price.")
+            print("  Recommended range: ${:,.0f} - ${:,.0f}".format(
+                current_price * 0.85, current_price * 1.15))
+
+            self.logger.log_error(
+                operation='setup',
+                error_type='ConfigWarning',
+                error_message=f"Current price ${current_price:,.2f} outside grid range "
+                              f"${price_min:,.0f}-${price_max:,.0f}"
+            )
+            raise ValueError(
+                f"Current price ${current_price:,.2f} is outside grid range "
+                f"(${price_min:,.0f} - ${price_max:,.0f}). "
+                f"Update price_range in config.json to bracket the current price."
+            )
+
+        elif current_price < price_min * (1 + margin_percent / 100):
+            print(f"\n⚠ WARNING: Current price is near the bottom of your grid range.")
+            print("  Most orders will be sell orders. Consider lowering price_range.min.")
+        elif current_price > price_max * (1 - margin_percent / 100):
+            print(f"\n⚠ WARNING: Current price is near the top of your grid range.")
+            print("  Most orders will be buy orders. Consider raising price_range.max.")
 
         # Calculate expected profits
         expected = self.grid.calculate_expected_profit(fills_per_day=15)
@@ -158,7 +224,7 @@ class KrakenGridTrader:
 
             # Get current price
             ticker = self.seren.get_ticker(pair)
-            current_price = float(ticker['result'][pair]['c'][0])
+            current_price = self._extract_ticker_price(ticker, pair)
             print(f"Current Price: ${current_price:,.2f}")
 
             # Get required orders
@@ -223,12 +289,13 @@ class KrakenGridTrader:
         try:
             # 1. Get current price
             ticker = self.seren.get_ticker(pair)
-            current_price = float(ticker['result'][pair]['c'][0])
+            current_price = self._extract_ticker_price(ticker, pair)
 
             # 2. Update balances
             balance = self.seren.get_balance()
-            btc_balance = float(balance['result'].get('XXBT', 0))
-            usd_balance = float(balance['result'].get('ZUSD', 0))
+            balance_data = balance.get('result', balance)
+            btc_balance = float(balance_data.get('XXBT', balance_data.get('XBT', 0)))
+            usd_balance = float(balance_data.get('ZUSD', balance_data.get('USD', 0)))
             self.tracker.update_balances(btc_balance, usd_balance)
 
             # 3. Check stop loss
@@ -239,7 +306,8 @@ class KrakenGridTrader:
 
             # 4. Get open orders from Kraken
             open_orders_response = self.seren.get_open_orders()
-            current_open_orders = open_orders_response['result']['open']
+            open_result = open_orders_response.get('result', open_orders_response)
+            current_open_orders = open_result.get('open', {})
 
             # 5. Find filled orders
             filled_order_ids = self.grid.find_filled_orders(
@@ -317,7 +385,7 @@ class KrakenGridTrader:
     def _place_order(self, pair: str, side: str, price: float, volume: float):
         """Place a single limit order"""
         try:
-            if self.dry_run:
+            if self.is_dry_run:
                 print(f"[DRY RUN] Would place {side} order: {volume:.8f} BTC @ ${price:,.2f}")
                 return
 
@@ -329,8 +397,9 @@ class KrakenGridTrader:
                 price=price
             )
 
-            if 'result' in response and 'txid' in response['result']:
-                order_id = response['result']['txid'][0]
+            result = response.get('result', response)
+            if 'txid' in result:
+                order_id = result['txid'][0]
                 self.active_orders[order_id] = {
                     'side': side,
                     'price': price,
@@ -409,7 +478,7 @@ class KrakenGridTrader:
 
         # Get current price
         ticker = self.seren.get_ticker(pair)
-        current_price = float(ticker['result'][pair]['c'][0])
+        current_price = self._extract_ticker_price(ticker, pair)
 
         # Print position summary
         print(self.tracker.get_position_summary(current_price))
@@ -420,7 +489,7 @@ class KrakenGridTrader:
 
         self.running = False
 
-        if not self.dry_run:
+        if not self.is_dry_run:
             try:
                 # Cancel all open orders
                 print("Cancelling all open orders...")
@@ -434,7 +503,7 @@ class KrakenGridTrader:
         if self.tracker:
             pair = self.config['trading_pair']
             ticker = self.seren.get_ticker(pair)
-            current_price = float(ticker['result'][pair]['c'][0])
+            current_price = self._extract_ticker_price(ticker, pair)
             print(self.tracker.get_position_summary(current_price))
 
             # Export fills to CSV
@@ -481,8 +550,8 @@ def main():
         sys.exit(1)
 
     # Initialize agent
-    dry_run = (args.command == 'dry-run')
-    agent = KrakenGridTrader(config_path=args.config, dry_run=dry_run)
+    is_dry_run = (args.command == 'dry-run')
+    agent = KrakenGridTrader(config_path=args.config, is_dry_run=is_dry_run)
 
     # Execute command
     if args.command == 'setup':

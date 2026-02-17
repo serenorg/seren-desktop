@@ -640,22 +640,25 @@ logs/                           # Created at runtime
 
 ### API Integration
 
-All Kraken API calls go through Seren Gateway:
+All Kraken API calls go through Seren Gateway using the `kraken-spot-trading` publisher.
+Seren wraps responses in a `body` envelope which the client unwraps automatically.
 
 ```python
 # Example: Get ticker
+# Publisher: kraken-spot-trading
+# Endpoint: /public/Ticker (NOT /0/public/Ticker)
 response = seren_client._call_publisher(
-    publisher='kraken',
     method='GET',
-    path='/0/public/Ticker',
+    path='/public/Ticker',
     params={'pair': 'XBTUSD'}
 )
+# Note: Kraken returns pair aliases (e.g., 'XXBTZUSD' instead of 'XBTUSD')
+# Use _extract_ticker_price() to handle this transparently
 
 # Example: Place order
 response = seren_client._call_publisher(
-    publisher='kraken',
     method='POST',
-    path='/0/private/AddOrder',
+    path='/private/AddOrder',
     body={
         'pair': 'XBTUSD',
         'type': 'buy',

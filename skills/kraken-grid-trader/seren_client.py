@@ -1,11 +1,13 @@
 """
 Seren Gateway API Client - Routes Kraken calls through Seren Gateway
 
-All Kraken API calls go through api.serendb.com/publishers/kraken
+All Kraken API calls go through api.serendb.com/publishers/kraken-spot-trading
 """
 
 import requests
 from typing import Dict, Any, Optional, List
+
+PUBLISHER_SLUG = 'kraken-spot-trading'
 
 
 class SerenClient:
@@ -24,29 +26,27 @@ class SerenClient:
 
     def _call_publisher(
         self,
-        publisher: str,
         method: str,
         path: str,
         body: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Generic Gateway API caller with error handling
+        Call Kraken publisher via Seren Gateway and unwrap response envelope
 
         Args:
-            publisher: Publisher name (e.g., 'kraken')
             method: HTTP method ('GET', 'POST', 'DELETE')
-            path: API path (e.g., '/0/private/AddOrder')
+            path: API path (e.g., '/private/AddOrder')
             body: Request body (for POST)
             params: Query parameters (for GET)
 
         Returns:
-            API response as dict
+            Unwrapped Kraken API response (the 'body' field from Seren envelope)
 
         Raises:
             requests.HTTPError: On API errors
         """
-        url = f"{self.base_url}/publishers/{publisher}{path}"
+        url = f"{self.base_url}/publishers/{PUBLISHER_SLUG}{path}"
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
@@ -61,7 +61,12 @@ class SerenClient:
             timeout=30
         )
         response.raise_for_status()
-        return response.json()
+
+        # Seren Gateway wraps Kraken responses in a 'body' envelope
+        envelope = response.json()
+        if 'body' in envelope:
+            return envelope['body']
+        return envelope
 
     # ========== Kraken Market Data ==========
 
@@ -76,9 +81,8 @@ class SerenClient:
             Ticker data with current price, volume, etc.
         """
         return self._call_publisher(
-            publisher='kraken',
             method='GET',
-            path='/0/public/Ticker',
+            path='/public/Ticker',
             params={'pair': pair}
         )
 
@@ -93,9 +97,8 @@ class SerenClient:
             Pair info (fees, min order size, etc.)
         """
         return self._call_publisher(
-            publisher='kraken',
             method='GET',
-            path='/0/public/AssetPairs',
+            path='/public/AssetPairs',
             params={'pair': pair}
         )
 
@@ -109,9 +112,8 @@ class SerenClient:
             Dict of asset balances (e.g., {'XXBT': 0.5, 'ZUSD': 1000})
         """
         return self._call_publisher(
-            publisher='kraken',
             method='POST',
-            path='/0/private/Balance',
+            path='/private/Balance',
             body={}
         )
 
@@ -123,9 +125,8 @@ class SerenClient:
             Dict of open orders by order ID
         """
         return self._call_publisher(
-            publisher='kraken',
             method='POST',
-            path='/0/private/OpenOrders',
+            path='/private/OpenOrders',
             body={}
         )
 
@@ -140,9 +141,8 @@ class SerenClient:
             Trade balance info
         """
         return self._call_publisher(
-            publisher='kraken',
             method='POST',
-            path='/0/private/TradeBalance',
+            path='/private/TradeBalance',
             body={'asset': asset}
         )
 
@@ -185,9 +185,8 @@ class SerenClient:
             body['validate'] = 'true'
 
         return self._call_publisher(
-            publisher='kraken',
             method='POST',
-            path='/0/private/AddOrder',
+            path='/private/AddOrder',
             body=body
         )
 
@@ -202,9 +201,8 @@ class SerenClient:
             Cancellation response
         """
         return self._call_publisher(
-            publisher='kraken',
             method='POST',
-            path='/0/private/CancelOrder',
+            path='/private/CancelOrder',
             body={'txid': order_id}
         )
 
@@ -216,9 +214,8 @@ class SerenClient:
             Cancellation response with count
         """
         return self._call_publisher(
-            publisher='kraken',
             method='POST',
-            path='/0/private/CancelAll',
+            path='/private/CancelAll',
             body={}
         )
 
@@ -244,9 +241,8 @@ class SerenClient:
             body['start'] = start
 
         return self._call_publisher(
-            publisher='kraken',
             method='POST',
-            path='/0/private/ClosedOrders',
+            path='/private/ClosedOrders',
             body=body
         )
 
@@ -272,8 +268,7 @@ class SerenClient:
             body['start'] = start
 
         return self._call_publisher(
-            publisher='kraken',
             method='POST',
-            path='/0/private/TradesHistory',
+            path='/private/TradesHistory',
             body=body
         )
