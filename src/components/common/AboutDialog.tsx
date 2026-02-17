@@ -89,6 +89,7 @@ export function AboutDialog() {
   }
 
   function installUpdate() {
+    close();
     updaterStore.installAvailableUpdate();
   }
 

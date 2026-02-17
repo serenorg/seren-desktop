@@ -35,6 +35,8 @@ const [state, setState] = createStore<UpdaterState>({
 
 let initialized = false;
 
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
 async function initUpdater(): Promise<void> {
   if (initialized) return;
   initialized = true;
@@ -45,6 +47,13 @@ async function initUpdater(): Promise<void> {
   }
 
   await checkForUpdates();
+
+  // Re-check hourly so the badge appears without requiring a restart
+  setInterval(() => {
+    if (state.status !== "downloading" && state.status !== "installing") {
+      checkForUpdates();
+    }
+  }, UPDATE_CHECK_INTERVAL_MS);
 }
 
 // Store the update object for later installation
