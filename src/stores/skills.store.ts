@@ -569,22 +569,6 @@ export const skillsStore = {
   },
 
   /**
-   * Install bundled skills from app resources to ~/.config/seren/skills.
-   * Only installs skills that don't already exist.
-   * Called once on app startup to ensure default skills are available.
-   */
-  async installBundledSkills(): Promise<void> {
-    try {
-      const installedSlugs = await skills.installBundledSkills();
-      if (installedSlugs.length > 0) {
-        log.info("[SkillsStore] Installed bundled skills:", installedSlugs);
-      }
-    } catch (error) {
-      log.error("[SkillsStore] Failed to install bundled skills:", error);
-    }
-  },
-
-  /**
    * Install a skill.
    */
   async install(

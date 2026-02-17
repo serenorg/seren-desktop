@@ -554,9 +554,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                 // Find Skill Creator in installed or available skills
                 const skillCreator =
                   skillsStore.installed.find(
-                    (s) => s.slug === "skill-creator",
+                    (s) => s.slug === "seren-skill-creator",
                   ) ||
-                  skillsStore.available.find((s) => s.slug === "skill-creator");
+                  skillsStore.available.find(
+                    (s) => s.slug === "seren-skill-creator",
+                  );
 
                 if (skillCreator) {
                   // Activate skill-creator for the current thread
@@ -609,7 +611,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               >
                 <For each={filteredSkills()}>
                   {(skill) => {
-                    const isActive = createMemo(() => isSkillActiveInThread(skill));
+                    const isActive = createMemo(() =>
+                      isSkillActiveInThread(skill),
+                    );
                     const isSearching = launcherQuery().trim().length > 0;
 
                     const handleClick = () => {

@@ -18,14 +18,14 @@ import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
+import { API_BASE } from "@/lib/config";
 import { openExternalLink } from "@/lib/external-link";
+import { appFetch } from "@/lib/fetch";
 import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import type { ToolCallEvent } from "@/services/acp";
-import { API_BASE } from "@/lib/config";
-import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -709,7 +709,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ title, content: markdown, format: "markdown" }),
+          body: JSON.stringify({
+            title,
+            content: markdown,
+            format: "markdown",
+          }),
         },
       );
 
@@ -739,7 +743,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       if (!filePath) return;
       await writeTextFile(filePath, markdown);
     } catch (fallbackError) {
-      console.error("[ChatContent] Failed to save chat history:", fallbackError);
+      console.error(
+        "[ChatContent] Failed to save chat history:",
+        fallbackError,
+      );
     }
   };
 

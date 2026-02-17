@@ -369,7 +369,7 @@ async function loadMcpSettings(): Promise<void> {
 
       // Migration: Add Playwright stealth server if it doesn't exist
       const hasPlaywrightServer = parsed.servers.some(
-        (server) => server.name === "playwright"
+        (server) => server.name === "playwright",
       );
 
       if (!hasPlaywrightServer) {

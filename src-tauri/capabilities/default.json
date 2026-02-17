@@ -28,7 +28,8 @@
         { "url": "https://api.openai.com/**" },
         { "url": "https://generativelanguage.googleapis.com/**" },
         { "url": "https://oauth2.googleapis.com/**" },
-        { "url": "https://skills.serendb.com/**" }
+        { "url": "https://api.github.com/**" },
+        { "url": "https://raw.githubusercontent.com/**" }
       ]
     }
   ]

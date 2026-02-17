@@ -16,9 +16,9 @@ import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
 
-const SKILL_CREATOR_SLUG = "skill-creator";
+const SKILL_CREATOR_SLUG = "seren-skill-creator";
 const SKILL_CREATOR_SOURCE_URL =
-  "https://raw.githubusercontent.com/anthropics/skills/main/skills/skill-creator/SKILL.md";
+  "https://raw.githubusercontent.com/serenorg/skills/main/seren/skill-creator/SKILL.md";
 
 export const SkillsSelector: Component = () => {
   const [isOpen, setIsOpen] = createSignal(false);
@@ -92,15 +92,15 @@ export const SkillsSelector: Component = () => {
     if (!alreadyInstalled) {
       try {
         const skill: Skill = {
-          id: `anthropic:${SKILL_CREATOR_SLUG}`,
+          id: `serenorg:${SKILL_CREATOR_SLUG}`,
           slug: SKILL_CREATOR_SLUG,
           name: "Skill Creator",
           description:
             "Guide for creating effective skills. Use when users want to create or update a skill that extends capabilities with specialized knowledge, workflows, or tool integrations.",
-          source: "anthropic",
+          source: "serenorg",
           sourceUrl: SKILL_CREATOR_SOURCE_URL,
           tags: ["meta", "creation"],
-          author: "Anthropic",
+          author: "SerenAI",
         };
         const content = await skillsService.fetchContent(skill);
         if (content) {

@@ -9,7 +9,8 @@ export type SkillSource =
   | "anthropic"
   | "openai"
   | "community"
-  | "local";
+  | "local"
+  | "serenorg";
 
 /**
  * Skill metadata parsed from SKILL.md frontmatter.
@@ -59,6 +60,8 @@ export type SkillScope = "seren" | "claude" | "project";
 export interface InstalledSkill extends Skill {
   /** Where the skill is installed (user or project scope) */
   scope: SkillScope;
+  /** Root skills directory for this installation scope */
+  skillsDir: string;
   /** Full path to the SKILL.md file */
   path: string;
   /** Timestamp when the skill was installed */
@@ -84,7 +87,7 @@ export interface SkillIndexEntry {
 }
 
 /**
- * Aggregated skills index response from skills.serendb.com.
+ * Aggregated skills index response from the skills catalog.
  */
 export interface SkillsIndex {
   version: string;

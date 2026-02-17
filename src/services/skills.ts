@@ -14,15 +14,27 @@ import {
   type SkillIndexEntry,
   type SkillScope,
   type SkillSource,
-  type SkillsIndex,
 } from "@/lib/skills";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { catalog, type Publisher } from "./catalog";
 
-const SKILLS_INDEX_URL = "https://skills.serendb.com/index.json";
+const SKILLS_REPO_OWNER = "serenorg";
+const SKILLS_REPO_NAME = "skills";
+const SKILLS_REPO_BRANCH = "main";
+const SKILLS_INDEX_URL = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/git/trees/${SKILLS_REPO_BRANCH}?recursive=1`;
+const SKILLS_RAW_URL = `https://raw.githubusercontent.com/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/${SKILLS_REPO_BRANCH}`;
 const INDEX_CACHE_KEY = "seren:skills_index";
 const PUBLISHER_SKILLS_CACHE_KEY = "seren:publisher_skills";
 const INDEX_CACHE_DURATION = 1000 * 60 * 60; // 1 hour
+
+interface GitHubTreeNode {
+  path?: string;
+  type?: string;
+}
+
+interface GitHubTreeResponse {
+  tree?: GitHubTreeNode[];
+}
 
 export interface ProjectSkillsConfig {
   version: number;
@@ -46,6 +58,108 @@ function indexEntryToSkill(entry: SkillIndexEntry): Skill {
     author: entry.author,
     version: entry.version,
   };
+}
+
+/**
+ * Serialize a skill for index cache.
+ */
+function skillToIndexEntry(skill: Skill): SkillIndexEntry {
+  return {
+    slug: skill.slug,
+    name: skill.name,
+    description: skill.description,
+    source: skill.source,
+    sourceUrl: skill.sourceUrl ?? "",
+    tags: skill.tags,
+    author: skill.author,
+    version: skill.version,
+  };
+}
+
+/**
+ * Convert a repo file path to org/skill-name.
+ */
+function parseRepoSkillPath(path: string): {
+  org: string;
+  skill: string;
+} | null {
+  const match = path.match(/^([^/]+)\/([^/]+)\/SKILL\.md$/);
+  if (!match) return null;
+  return { org: match[1], skill: match[2] };
+}
+
+/**
+ * Fetch and parse a single remote SKILL.md from the skills repo.
+ */
+async function fetchSkillFromRepo(path: string): Promise<Skill | null> {
+  const segments = path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment));
+  const sourceUrl = `${SKILLS_RAW_URL}/${segments.join("/")}`;
+  const parsedPath = parseRepoSkillPath(path);
+  if (!parsedPath) return null;
+
+  const response = await appFetch(sourceUrl);
+  if (!response.ok) {
+    log.warn("[Skills] Failed to fetch repo skill", sourceUrl, response.status);
+    return null;
+  }
+
+  const content = await response.text();
+  const parsed = parseSkillMd(content);
+
+  const slug = `${parsedPath.org}-${parsedPath.skill}`.toLowerCase();
+  const fallbackName = `${parsedPath.org} ${parsedPath.skill}`
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+  return {
+    id: `serenorg:${slug}`,
+    slug,
+    name: parsed.metadata.name || fallbackName,
+    description: parsed.metadata.description || "Install this skill to add it.",
+    source: "serenorg" as SkillSource,
+    sourceUrl,
+    tags: parsed.metadata.tags || [],
+    author: parsed.metadata.author,
+    version: parsed.metadata.version,
+  };
+}
+
+/**
+ * Fetch all available skills from GitHub repository tree.
+ */
+async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
+  const response = await appFetch(SKILLS_INDEX_URL, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch skills index: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as GitHubTreeResponse;
+  const skillFiles = (payload.tree ?? []).filter(
+    (node) =>
+      node.type === "blob" &&
+      typeof node.path === "string" &&
+      parseRepoSkillPath(node.path),
+  );
+
+  const settled = await Promise.allSettled(
+    skillFiles.map((entry) => {
+      if (!entry.path) return Promise.resolve(null);
+      return fetchSkillFromRepo(entry.path);
+    }),
+  );
+
+  return settled
+    .map((result) => (result.status === "fulfilled" ? result.value : null))
+    .filter((skill): skill is Skill => skill !== null)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -94,25 +208,19 @@ export const skills = {
       }
 
       log.info("[Skills] Fetching skills index from", SKILLS_INDEX_URL);
-      const response = await appFetch(SKILLS_INDEX_URL);
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch skills index: ${response.status}`);
-      }
-
-      const index: SkillsIndex = await response.json();
+      const skills = await fetchSkillsFromRepoIndex();
 
       // Cache the result
       localStorage.setItem(
         INDEX_CACHE_KEY,
         JSON.stringify({
           timestamp: Date.now(),
-          data: index.skills,
+          data: skills.map(skillToIndexEntry),
         }),
       );
 
-      log.info("[Skills] Fetched", index.skills.length, "skills from index");
-      return index.skills.map(indexEntryToSkill);
+      log.info("[Skills] Fetched", skills.length, "skills from repo");
+      return skills;
     } catch (error) {
       log.error("[Skills] Error fetching index:", error);
       // Return cached data if available, even if expired
@@ -348,10 +456,16 @@ export const skills = {
       const installed: InstalledSkill[] = [];
 
       for (const slug of slugs) {
-        const content = await invoke<string | null>("read_skill_content", {
-          skillsDir,
-          slug,
-        });
+        const [content, resolvedPath] = await Promise.all([
+          invoke<string | null>("read_skill_content", {
+            skillsDir,
+            slug,
+          }),
+          invoke<string | null>("resolve_skill_path", {
+            skillsDir,
+            slug,
+          }),
+        ]);
 
         if (content) {
           const parsed = parseSkillMd(content);
@@ -367,7 +481,8 @@ export const skills = {
             author: parsed.metadata.author,
             version: parsed.metadata.version,
             scope,
-            path: getSkillPath(skillsDir, slug),
+            skillsDir,
+            path: resolvedPath || getSkillPath(skillsDir, slug),
             installedAt: Date.now(), // We don't track this yet
             enabled: true, // All installed skills are enabled by default
             contentHash: hash,
@@ -467,6 +582,7 @@ export const skills = {
       id: `local:${skill.slug}`,
       source: "local",
       scope,
+      skillsDir,
       path,
       installedAt: Date.now(),
       enabled: true,
@@ -488,9 +604,8 @@ export const skills = {
       throw new Error("Skills can only be removed in the desktop app");
     }
 
-    // skill.path = ".../skills/my-skill/SKILL.md"
-    // Strip "/my-skill/SKILL.md" to get the skills directory
-    const skillsDir = skill.path.replace(/[/\\][^/\\]+[/\\]SKILL\.md$/, "");
+    const skillsDir =
+      skill.skillsDir || skill.path.replace(/[/\\][^/\\]+[/\\]SKILL\.md$/, "");
 
     await invoke("remove_skill", {
       skillsDir,
@@ -508,10 +623,8 @@ export const skills = {
       return null;
     }
 
-    const parentDir = skill.path.replace(/[/\\][^/\\]+[/\\]SKILL\.md$/, "");
-
     return invoke<string | null>("read_skill_content", {
-      skillsDir: parentDir,
+      skillsDir: skill.skillsDir,
       slug: skill.slug,
     });
   },
@@ -599,15 +712,5 @@ export const skills = {
       }
     }
     return Array.from(tagSet).sort();
-  },
-
-  /**
-   * Install bundled skills from app resources to ~/.config/seren/skills.
-   * Only installs skills that don't already exist.
-   * Returns the list of skill slugs that were installed.
-   */
-  async installBundledSkills(): Promise<string[]> {
-    if (!isTauriRuntime()) return [];
-    return invoke<string[]>("install_bundled_skills");
   },
 };

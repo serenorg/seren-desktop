@@ -820,8 +820,8 @@ pub fn run() {
             skills::install_skill,
             skills::remove_skill,
             skills::read_skill_content,
+            skills::resolve_skill_path,
             skills::create_skill_folder,
-            skills::install_bundled_skills,
             // Orchestrator commands
             commands::orchestrator::orchestrate,
             commands::orchestrator::cancel_orchestration,

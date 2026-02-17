@@ -631,9 +631,9 @@ export const acpStore = {
       const apiKey = await getSerenApiKey();
 
       // Determine timeout based on enabled skills:
-      // - Long-running skills (polymarket-trader, polymarket-data) get unlimited timeout
+      // - Long-running skills (polymarket-trader) get unlimited timeout
       // - Other sessions get default 300s timeout
-      const longRunningSkills = ["polymarket-trader", "polymarket-data"];
+      const longRunningSkills = ["polymarket-trader"];
       const hasLongRunningSkill = skillsStore.installed.some(
         (skill) => skill.enabled && longRunningSkills.includes(skill.slug),
       );

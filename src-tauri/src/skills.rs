@@ -4,7 +4,7 @@
 use rusqlite::{OptionalExtension, params};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::services::database::init_db;
 
@@ -103,8 +103,7 @@ pub fn get_claude_skills_dir() -> Result<String, String> {
     Ok(skills_dir.to_string_lossy().to_string())
 }
 
-/// Get the project-scope skills directory (skills/).
-/// Returns the canonical skills/ path for unified skills directory support.
+/// Get the project-scope skills directory (`project/skills`).
 /// The project root is determined by the frontend based on the open folder.
 #[tauri::command]
 pub fn get_project_skills_dir(project_root: Option<String>) -> Result<Option<String>, String> {
@@ -115,15 +114,52 @@ pub fn get_project_skills_dir(project_root: Option<String>) -> Result<Option<Str
                 return Ok(None);
             }
 
-            // Use skills/ as the canonical location (AgentSkills.io standard)
-            let skills_dir = root_path.join("skills");
-            Ok(Some(skills_dir.to_string_lossy().to_string()))
+            let local_skills_dir = root_path.join("skills");
+            if local_skills_dir.is_dir() {
+                return Ok(Some(local_skills_dir.to_string_lossy().to_string()));
+            }
+
+            Ok(None)
         }
         None => Ok(None),
     }
 }
 
-/// Create symlink from .claude/skills to ../skills for Claude Code compatibility.
+fn resolve_skill_file_path(dir_path: &PathBuf, slug: &str) -> Option<PathBuf> {
+    // Try flat layout first: skills_dir/slug/SKILL.md
+    let flat_path = dir_path.join(slug).join("SKILL.md");
+    if flat_path.exists() {
+        return Some(flat_path);
+    }
+
+    // Try nested layout by splitting on every hyphen:
+    // e.g. "coinbase-grid-trader" -> "coinbase/grid-trader"
+    // and "my-org-skill-name" -> "my/org-skill-name" then "my-org/skill-name".
+    for (idx, ch) in slug.char_indices() {
+        if ch != '-' {
+            continue;
+        }
+        let org = &slug[..idx];
+        let skill = &slug[idx + 1..];
+        if org.is_empty() || skill.is_empty() {
+            continue;
+        }
+
+        let nested_path = dir_path.join(org).join(skill).join("SKILL.md");
+        if nested_path.exists() {
+            return Some(nested_path);
+        }
+    }
+
+    None
+}
+
+fn resolve_skill_dir_path(dir_path: &PathBuf, slug: &str) -> Option<PathBuf> {
+    resolve_skill_file_path(dir_path, slug)
+        .and_then(|skill_file| skill_file.parent().map(|parent| parent.to_path_buf()))
+}
+
+/// Create symlink from .claude/skills to the active skills directory for Claude Code compatibility.
 /// This allows both Claude Code (via symlink) and OpenAI Codex (via direct path) to use the same skills.
 #[tauri::command]
 pub fn create_skills_symlink(project_root: String) -> Result<(), String> {
@@ -132,7 +168,6 @@ pub fn create_skills_symlink(project_root: String) -> Result<(), String> {
         return Err("Project root is not a directory".to_string());
     }
 
-    let skills_dir = root_path.join("skills");
     let claude_dir = root_path.join(".claude");
     let symlink_path = claude_dir.join("skills");
 
@@ -142,18 +177,21 @@ pub fn create_skills_symlink(project_root: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to create .claude directory: {}", e))?;
     }
 
-    // Create skills directory if it doesn't exist
+    let skills_target = PathBuf::from("..").join("skills");
+    let skills_dir = root_path.join("skills");
+
     if !skills_dir.exists() {
-        fs::create_dir_all(&skills_dir)
-            .map_err(|e| format!("Failed to create skills directory: {}", e))?;
+        return Err(format!(
+            "Could not find a skills directory. Expected {}/skills",
+            root_path.display()
+        ));
     }
 
-    // Remove existing symlink/directory if it exists
-    if symlink_path.exists() {
-        #[cfg(unix)]
-        {
-            let metadata = fs::symlink_metadata(&symlink_path)
-                .map_err(|e| format!("Failed to read symlink metadata: {}", e))?;
+    // Remove existing symlink/directory if it exists.
+    // Use symlink_metadata so broken symlinks are detected too.
+    #[cfg(unix)]
+    {
+        if let Ok(metadata) = fs::symlink_metadata(&symlink_path) {
             if metadata.is_symlink() {
                 fs::remove_file(&symlink_path)
                     .map_err(|e| format!("Failed to remove existing symlink: {}", e))?;
@@ -164,8 +202,10 @@ pub fn create_skills_symlink(project_root: String) -> Result<(), String> {
                 );
             }
         }
-        #[cfg(windows)]
-        {
+    }
+    #[cfg(windows)]
+    {
+        if fs::symlink_metadata(&symlink_path).is_ok() {
             if symlink_path.is_dir() {
                 fs::remove_dir_all(&symlink_path)
                     .map_err(|e| format!("Failed to remove existing directory: {}", e))?;
@@ -180,14 +220,14 @@ pub fn create_skills_symlink(project_root: String) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
-        symlink("../skills", &symlink_path)
+        symlink(&skills_target, &symlink_path)
             .map_err(|e| format!("Failed to create symlink: {}", e))?;
     }
 
     #[cfg(windows)]
     {
         use std::os::windows::fs::symlink_dir;
-        symlink_dir("..\\skills", &symlink_path)
+        symlink_dir(&skills_target, &symlink_path)
             .map_err(|e| format!("Failed to create symlink: {}", e))?;
     }
 
@@ -390,7 +430,8 @@ pub fn clear_thread_skills(
 }
 
 /// List all skill directories in a given skills directory.
-/// Returns a list of skill slugs (directory names).
+/// Returns a list of skill slugs.
+/// Supports both flat layout (slug/SKILL.md) and nested layout (org/skill/SKILL.md).
 #[tauri::command]
 pub fn list_skill_dirs(skills_dir: String) -> Result<Vec<String>, String> {
     let dir_path = PathBuf::from(&skills_dir);
@@ -405,17 +446,44 @@ pub fn list_skill_dirs(skills_dir: String) -> Result<Vec<String>, String> {
     let mut slugs = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            // Check if SKILL.md exists in this directory
-            let skill_file = path.join("SKILL.md");
-            if skill_file.exists() {
-                if let Some(name) = path.file_name() {
-                    slugs.push(name.to_string_lossy().to_string());
+        if !path.is_dir() {
+            continue;
+        }
+
+        // Skip hidden directories
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+
+        // Flat layout: slug/SKILL.md
+        let skill_file = path.join("SKILL.md");
+        if skill_file.exists() {
+            if let Some(name) = path.file_name() {
+                slugs.push(name.to_string_lossy().to_string());
+            }
+            continue;
+        }
+
+        // Nested layout: org/skill/SKILL.md
+        let org_name = match path.file_name() {
+            Some(name) => name.to_string_lossy().to_string(),
+            None => continue,
+        };
+
+        if let Ok(sub_entries) = fs::read_dir(&path) {
+            for sub_entry in sub_entries.flatten() {
+                let sub_path = sub_entry.path();
+                if sub_path.is_dir() && sub_path.join("SKILL.md").exists() {
+                    if let Some(skill_name) = sub_path.file_name() {
+                        slugs.push(format!("{}-{}", org_name, skill_name.to_string_lossy()));
+                    }
                 }
             }
         }
     }
 
+    slugs.sort();
+    slugs.dedup();
     Ok(slugs)
 }
 
@@ -440,7 +508,10 @@ pub fn install_skill(skills_dir: String, slug: String, content: String) -> Resul
 #[tauri::command]
 pub fn remove_skill(skills_dir: String, slug: String) -> Result<(), String> {
     let dir_path = PathBuf::from(&skills_dir);
-    let skill_dir = dir_path.join(&slug);
+    let skill_dir = match resolve_skill_dir_path(&dir_path, &slug) {
+        Some(path) => path,
+        None => return Ok(()),
+    };
 
     if !skill_dir.exists() {
         return Ok(());
@@ -513,108 +584,28 @@ pub fn create_skill_folder(
 }
 
 /// Read a skill's SKILL.md content.
+/// Supports both flat layout (slug/SKILL.md) and nested layout (org/skill/SKILL.md).
 #[tauri::command]
 pub fn read_skill_content(skills_dir: String, slug: String) -> Result<Option<String>, String> {
     let dir_path = PathBuf::from(&skills_dir);
-    let skill_file = dir_path.join(&slug).join("SKILL.md");
 
-    if !skill_file.exists() {
-        return Ok(None);
-    }
+    let skill_file = match resolve_skill_file_path(&dir_path, &slug) {
+        Some(path) => path,
+        None => return Ok(None),
+    };
 
     let content =
         fs::read_to_string(&skill_file).map_err(|e| format!("Failed to read SKILL.md: {}", e))?;
-
     Ok(Some(content))
 }
 
-/// Install bundled skills from the app resources to the Seren skills directory.
-/// Only installs skills that don't already exist.
-/// Returns the list of skill slugs that were installed.
+/// Resolve the full SKILL.md file path for a slug in a skills directory.
+/// Supports both flat layout (slug/SKILL.md) and nested layout (org/skill/SKILL.md).
 #[tauri::command]
-pub fn install_bundled_skills(app: AppHandle) -> Result<Vec<String>, String> {
-    let seren_skills_dir = get_seren_skills_dir()?;
-    let seren_path = PathBuf::from(&seren_skills_dir);
-
-    // Get bundled skills directory from app resources
-    // In dev: skills/ from project root
-    // In prod: skills/ from resources directory in app bundle
-    let bundled_skills_path = if cfg!(dev) {
-        // In development, use skills/ from project root
-        let current_exe = std::env::current_exe()
-            .map_err(|e| format!("Failed to get current exe path: {}", e))?;
-        current_exe
-            .parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .ok_or("Failed to get project root")?
-            .join("skills")
-    } else {
-        // In production, use resource dir
-        app.path()
-            .resource_dir()
-            .map_err(|e| format!("Failed to get resource dir: {}", e))?
-            .join("skills")
-    };
-
-    if !bundled_skills_path.exists() {
-        return Ok(vec![]);
+pub fn resolve_skill_path(skills_dir: String, slug: String) -> Result<Option<String>, String> {
+    let dir_path = PathBuf::from(&skills_dir);
+    if let Some(path) = resolve_skill_file_path(&dir_path, &slug) {
+        return Ok(Some(path.to_string_lossy().to_string()));
     }
-
-    let mut installed_slugs = Vec::new();
-
-    // Read bundled skills directory
-    let entries = fs::read_dir(&bundled_skills_path)
-        .map_err(|e| format!("Failed to read bundled skills directory: {}", e))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let skill_file = path.join("SKILL.md");
-        if !skill_file.exists() {
-            continue;
-        }
-
-        let slug = match path.file_name() {
-            Some(name) => name.to_string_lossy().to_string(),
-            None => continue,
-        };
-
-        // Check if skill already exists in Seren skills directory
-        let target_dir = seren_path.join(&slug);
-        if target_dir.exists() {
-            continue;
-        }
-
-        // Copy the entire skill directory
-        copy_dir_recursive(&path, &target_dir)
-            .map_err(|e| format!("Failed to copy bundled skill '{}': {}", slug, e))?;
-
-        installed_slugs.push(slug);
-    }
-
-    Ok(installed_slugs)
-}
-
-/// Recursively copy a directory and its contents.
-fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
-    fs::create_dir_all(dst)?;
-
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            fs::copy(&src_path, &dst_path)?;
-        }
-    }
-
-    Ok(())
+    Ok(None)
 }

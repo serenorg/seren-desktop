@@ -63,15 +63,3 @@ yarn.lock
 
 # Claude Code local settings (per-developer)
 .claude/settings.local.json
-
-# Skills directory - ignore user-installed skills but track default skills
-# Default skills ship with seren-desktop and should be committed
-skills/*
-!skills/skill-creator/
-!skills/polymarket-trader/
-!skills/getting-started-with-skills/
-!skills/browser-automation/
-!skills/apollo/
-!skills/job-seeker/
-!skills/kraken-grid-trader/
-!skills/coinbase-grid-trader/

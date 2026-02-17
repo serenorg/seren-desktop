@@ -44,13 +44,14 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 ### Skills System
 
 - **AgentSkills.io standard** — Standards-compliant skill format with SKILL.md metadata
-- **Three-tier hierarchy** — Bundled skills, user-installed skills, and thread-level skills
-- **Skill discovery** — Browse 100+ available skills at skills.serendb.com
+- **Three-tier hierarchy** — Global defaults, project defaults, and thread-level overrides
+- **Skill discovery** — Browse available skills from `https://github.com/serenorg/skills`
 - **One-click installation** — Install skills directly from the catalog
 - **Slash command invocation** — Activate skills with `/skill-name` in chat or agent threads
 - **Thread-level management** — Enable/disable skills per conversation
 - **Project-scoped skills** — Skills can be project-specific via `.seren/skills.json`
 - **Built-in skills** — Polymarket Bot, Skill Creator, Getting Started, Playwright, Apollo
+- **Skill source** — Built-in skills are provided by the public repo at `https://github.com/serenorg/skills`.
 
 ### Seren Memory
 
@@ -167,6 +168,10 @@ pnpm install
 pnpm tauri dev
 ```
 
+## Skills source
+
+- Runtime source: remote public repo at `https://github.com/serenorg/skills`
+
 ### Testing
 
 ```bash
@@ -242,7 +247,7 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  • SerenEmbed API (embeddings)                           │
 │  • SerenWhisper API (speech-to-text)                     │
 │  • SerenMemory API (memory.serendb.com)                  │
-│  • Skills marketplace (skills.serendb.com)               │
+│  • Skills marketplace (github.com/serenorg/skills)       │
 └──────────────────────────────────────────────────────────┘
 ```
 
