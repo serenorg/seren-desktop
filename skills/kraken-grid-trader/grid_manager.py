@@ -221,36 +221,56 @@ class GridManager:
         sell_levels = [level for level in self.levels if level > current_price]
         return min(sell_levels) if sell_levels else None
 
-    def calculate_expected_profit(self, fills_per_day: int = 15) -> Dict:
+    def calculate_expected_profit(
+        self,
+        fills_per_day: int = 15,
+        bankroll: Optional[float] = None
+    ) -> Dict:
         """
-        Calculate expected profit metrics
+        Calculate expected profit metrics for one complete grid cycle.
+
+        A cycle = buy Q units at avg_buy_price, sell Q units one level higher.
 
         Args:
-            fills_per_day: Expected number of fills per day
+            fills_per_day: Expected number of round-trip fills per day
+            bankroll: Total bankroll in USD (used for return % if provided)
 
         Returns:
             Dict with profit projections
         """
-        # Average spacing between levels
+        fee_rate = 0.0016  # 0.16% Kraken maker fee
+
+        # Average spacing and mid-price across the grid
         avg_spacing = (self.max_price - self.min_price) / (self.grid_levels - 1)
         avg_price = (self.min_price + self.max_price) / 2
 
-        # Profit per grid cycle (buy at N, sell at N+1)
-        gross_profit_per_cycle = avg_spacing
-        fees_per_cycle = (self.order_size_usd * 0.0016) * 2  # 0.16% maker fee x 2 trades
+        # Quantity bought per order at the average price
+        buy_qty = self.order_size_usd / avg_price
+
+        # Gross profit: sell the same qty one grid level higher
+        gross_profit_per_cycle = buy_qty * avg_spacing
+
+        # Fees: buy notional + sell notional (sell is slightly higher)
+        buy_notional = self.order_size_usd
+        sell_notional = buy_qty * (avg_price + avg_spacing)
+        fees_per_cycle = (buy_notional + sell_notional) * fee_rate
+
         net_profit_per_cycle = gross_profit_per_cycle - fees_per_cycle
 
         # Daily/monthly projections
         daily_profit = net_profit_per_cycle * fills_per_day
         monthly_profit = daily_profit * 30
 
+        # Return % against bankroll (if provided) or total capital deployed
+        capital = bankroll if bankroll is not None else self.order_size_usd * self.grid_levels
+
         return {
             'avg_spacing_usd': round(avg_spacing, 2),
-            'gross_profit_per_cycle': round(gross_profit_per_cycle, 2),
-            'fees_per_cycle': round(fees_per_cycle, 2),
-            'net_profit_per_cycle': round(net_profit_per_cycle, 2),
+            'gross_profit_per_cycle': round(gross_profit_per_cycle, 4),
+            'fees_per_cycle': round(fees_per_cycle, 4),
+            'net_profit_per_cycle': round(net_profit_per_cycle, 4),
             'daily_profit': round(daily_profit, 2),
             'monthly_profit': round(monthly_profit, 2),
-            'daily_return_percent': round(daily_profit / self.order_size_usd * 100, 2),
-            'monthly_return_percent': round(monthly_profit / self.order_size_usd * 100, 2)
+            'daily_return_percent': round(daily_profit / capital * 100, 4),
+            'monthly_return_percent': round(monthly_profit / capital * 100, 2)
         }

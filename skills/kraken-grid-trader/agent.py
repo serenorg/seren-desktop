@@ -169,8 +169,11 @@ class KrakenGridTrader:
             print(f"   Configured range: ${min_price:,.0f} - ${max_price:,.0f}")
             print(f"   Grid will still work but may have asymmetric buy/sell distribution.\n")
 
-        # Calculate expected profits
-        expected = self.grid.calculate_expected_profit(fills_per_day=15)
+        # Calculate expected profits (pass bankroll for accurate return %)
+        expected = self.grid.calculate_expected_profit(
+            fills_per_day=15,
+            bankroll=strategy['bankroll']
+        )
         print(f"\nExpected Performance (15 fills/day):")
         print(f"  Gross Profit/Cycle:  ${expected['gross_profit_per_cycle']:.2f}")
         print(f"  Fees/Cycle:          ${expected['fees_per_cycle']:.2f}")
