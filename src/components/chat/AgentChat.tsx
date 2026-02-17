@@ -332,16 +332,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
 
     try {
-      // Create a blob and download it
-      const blob = new Blob([markdown], { type: "text/markdown" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `agent-chat-${new Date().toISOString().split("T")[0]}.md`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const dateStr = new Date().toISOString().split("T")[0];
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const filePath = await save({
+        title: "Save Agent Chat History",
+        defaultPath: `agent-chat-${dateStr}.md`,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (!filePath) return;
+      await writeTextFile(filePath, markdown);
     } catch (error) {
       console.error("Failed to download:", error);
       alert("Failed to download chat history");
