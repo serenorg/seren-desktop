@@ -56,7 +56,7 @@ python3 agent.py --config config.json --dry-run
 ```
 
 This will:
-- ✅ Scan markets (when implemented)
+- ✅ Scan live markets from Polymarket
 - ✅ Research opportunities using Perplexity
 - ✅ Estimate fair values using Claude
 - ✅ Calculate position sizes
@@ -169,15 +169,12 @@ polymarket-trader/
 
 **This bot is provided "as is" without warranty. Use at your own risk.**
 
-## TODO / Not Yet Implemented
+## Known Limitations
 
-- [ ] Market scanning (currently placeholder)
-- [ ] Actual Polymarket balance checking (currently placeholder)
-- [ ] Order signing with EIP-712 (currently simplified)
-- [ ] Position closing logic
-- [ ] Email/webhook notifications
-- [ ] Backtesting on historical data
-- [ ] Web dashboard for monitoring
+- **Position closing**: Detects API-closed positions but does not actively execute stop-loss or take-profit exits
+- **Notifications**: Events are logged to `notifications.jsonl` but no email or webhook delivery is implemented
+- **Backtesting**: No historical replay engine; `performance.py` analyses past live results only
+- **Web dashboard**: No monitoring UI; all data lives in JSONL files and SerenDB tables
 
 ## Contributing
 
