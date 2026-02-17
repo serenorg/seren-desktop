@@ -624,7 +624,8 @@ pub fn run() {
                 });
             }
 
-            // Initialize memory state for cloud + local cache operations
+            // Initialize memory state for cloud + local cache operations.
+            // Token is read fresh from the auth store on each request.
             {
                 let data_dir = app
                     .path()
@@ -632,20 +633,8 @@ pub fn run() {
                     .expect("failed to get app data dir");
                 let cache_path = data_dir.join("memory_cache.db");
 
-                let api_key = app
-                    .handle()
-                    .store(AUTH_STORE)
-                    .ok()
-                    .and_then(|store| {
-                        store
-                            .get(TOKEN_KEY)
-                            .and_then(|v| v.as_str().map(|s| s.to_string()))
-                    })
-                    .unwrap_or_default();
-
                 app.manage(commands::memory::MemoryState::new(
                     "https://memory.serendb.com".to_string(),
-                    api_key,
                     cache_path,
                 ));
             }
