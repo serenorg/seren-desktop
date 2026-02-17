@@ -1129,6 +1129,31 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
+                  checked={settingsState.app.agentNetworkEnabled}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "agentNetworkEnabled",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="mt-1 w-4 h-4 accent-[var(--color-primary,#6366f1)]"
+                />
+                <div class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Enable Network Access
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Allow the agent to make network requests (disabling
+                    restricts to workspace-write sandbox)
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
                   checked={settingsState.app.agentAutoApproveReads}
                   onChange={(e) =>
                     handleBooleanChange(
