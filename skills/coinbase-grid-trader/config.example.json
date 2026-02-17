@@ -1,0 +1,19 @@
+{
+  "campaign_name": "BTC_Grid_2026",
+  "trading_pair": "BTC-USD",
+  "strategy": {
+    "bankroll": 1000.0,
+    "grid_levels": 20,
+    "grid_spacing_percent": 2.0,
+    "order_size_percent": 5.0,
+    "price_range": {
+      "min": 90000,
+      "max": 110000
+    },
+    "scan_interval_seconds": 60
+  },
+  "risk_management": {
+    "stop_loss_bankroll": 800.0,
+    "max_open_orders": 40
+  }
+}
