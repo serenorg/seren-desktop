@@ -1451,10 +1451,19 @@ export const acpStore = {
         `[AcpStore] Permission ${requestId} response delivered to backend`,
       );
     } catch (error) {
-      console.error(
-        `[AcpStore] Failed to respond to permission ${requestId}:`,
-        error,
-      );
+      const errorMsg = String(error);
+      if (errorMsg.includes("not found") || errorMsg.includes("timed out")) {
+        // Permission already timed out or was cleaned up on backend
+        console.warn(
+          `[AcpStore] Permission ${requestId} no longer valid (likely timed out)`,
+        );
+        // User was already notified by the timeout error handler above
+      } else {
+        console.error(
+          `[AcpStore] Failed to respond to permission ${requestId}:`,
+          error,
+        );
+      }
     }
 
     setState(
@@ -1754,13 +1763,46 @@ export const acpStore = {
           console.info(
             "[AcpStore] Skipping error message for unresponsive agent — sendPrompt handles recovery",
           );
+        } else if (
+          String(event.data.error).includes("Permission request timed out")
+        ) {
+          // Permission timeout: clean up stale permission dialogs and notify user
+          console.warn(
+            "[AcpStore] Permission request timed out for session:",
+            sessionId,
+          );
+
+          // Remove all pending permissions for this session (they've timed out on backend)
+          const timedOutPermissions = state.pendingPermissions.filter(
+            (p) => p.sessionId === sessionId,
+          );
+          setState(
+            "pendingPermissions",
+            state.pendingPermissions.filter((p) => p.sessionId !== sessionId),
+          );
+
+          // Add error message to notify user
+          if (timedOutPermissions.length > 0) {
+            const timeoutMsg: AgentMessage = {
+              id: crypto.randomUUID(),
+              type: "error",
+              content:
+                "Permission request timed out after 5 minutes. " +
+                "Please try your request again.",
+              timestamp: Date.now(),
+            };
+            setState("sessions", sessionId, "messages", (msgs) => [
+              ...msgs,
+              timeoutMsg,
+            ]);
+          }
         } else if (isTimeoutError(String(event.data.error))) {
-          // Timeout errors are often spurious race conditions where the error
+          // Other timeout errors are often spurious race conditions where the error
           // event is emitted but the operation completes successfully. Skip
           // displaying these errors to avoid confusing the user with false
           // error messages when their request actually succeeded.
           console.info(
-            "[AcpStore] Skipping timeout error message — likely spurious race condition",
+            "[AcpStore] Skipping non-permission timeout error — likely spurious race condition",
           );
         } else if (isPromptTooLongError(String(event.data.error))) {
           // Context window full — automatically switch to chat mode
