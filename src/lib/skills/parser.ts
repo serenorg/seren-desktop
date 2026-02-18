@@ -1,5 +1,5 @@
 // ABOUTME: Parser for SKILL.md files with YAML frontmatter.
-// ABOUTME: Extracts metadata and content from skill definition files.
+// ABOUTME: Extracts name and description per the Agent Skills spec.
 
 import type { SkillMetadata } from "./types";
 
@@ -11,6 +11,8 @@ export interface ParsedSkill {
   content: string;
   rawContent: string;
 }
+
+const SKILL_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
  * Parse YAML frontmatter from a SKILL.md file.
@@ -47,7 +49,7 @@ export function parseSkillMd(rawContent: string): ParsedSkill {
 
   // If no name in frontmatter, try to extract from content heading
   if (!metadata.name) {
-    const nameFromContent = extractNameFromContent(content);
+    const nameFromContent = extractSkillHeading(content);
     if (nameFromContent) {
       metadata.name = nameFromContent;
     }
@@ -62,93 +64,35 @@ export function parseSkillMd(rawContent: string): ParsedSkill {
 
 /**
  * Parse YAML-like frontmatter into metadata.
- * Simple parser that handles common YAML patterns.
+ * Extracts only spec-required fields: name and description.
+ * Other fields (version, author, tags) come from the skills catalog API.
  */
 function parseYamlFrontmatter(yaml: string): SkillMetadata {
   const metadata: SkillMetadata = {
     name: "",
     description: "",
-    tags: [],
   };
 
   const lines = yaml.split("\n");
-  let currentKey: string | null = null;
-  let inArray = false;
 
   for (const line of lines) {
     const trimmedLine = line.trim();
 
-    // Skip empty lines and comments
-    if (!trimmedLine || trimmedLine.startsWith("#")) {
+    // Skip empty lines, comments, and indented lines (metadata sub-keys)
+    if (!trimmedLine || trimmedLine.startsWith("#") || line.startsWith(" ")) {
       continue;
     }
 
-    // Check for array item
-    if (trimmedLine.startsWith("- ") && currentKey && inArray) {
-      const value = trimmedLine
-        .slice(2)
-        .trim()
-        .replace(/^["']|["']$/g, "");
-      if (
-        currentKey === "tags" ||
-        currentKey === "globs" ||
-        currentKey === "alwaysAllow"
-      ) {
-        (metadata[currentKey] as string[]).push(value);
-      }
-      continue;
-    }
-
-    // Check for key-value pair
     const colonIndex = trimmedLine.indexOf(":");
     if (colonIndex > 0) {
       const key = trimmedLine.slice(0, colonIndex).trim();
-      const value = trimmedLine.slice(colonIndex + 1).trim();
+      const value = trimmedLine
+        .slice(colonIndex + 1)
+        .trim()
+        .replace(/^["']|["']$/g, "");
 
-      currentKey = key;
-
-      // Check if this is the start of an array (empty value or explicit array)
-      if (!value || value === "[]") {
-        inArray = true;
-        if (key === "tags") metadata.tags = [];
-        if (key === "globs") metadata.globs = [];
-        if (key === "alwaysAllow") metadata.alwaysAllow = [];
-        continue;
-      }
-
-      inArray = false;
-
-      // Handle inline arrays [item1, item2]
-      if (value.startsWith("[") && value.endsWith("]")) {
-        const items = value
-          .slice(1, -1)
-          .split(",")
-          .map((s) => s.trim().replace(/^["']|["']$/g, ""))
-          .filter(Boolean);
-
-        if (key === "tags") metadata.tags = items;
-        if (key === "globs") metadata.globs = items;
-        if (key === "alwaysAllow") metadata.alwaysAllow = items;
-        continue;
-      }
-
-      // Handle scalar values
-      const cleanValue = value.replace(/^["']|["']$/g, "");
-
-      switch (key) {
-        case "name":
-          metadata.name = cleanValue;
-          break;
-        case "description":
-          metadata.description = cleanValue;
-          break;
-        case "version":
-          metadata.version = cleanValue;
-          break;
-        case "author":
-          metadata.author = cleanValue;
-          break;
-      }
+      if (key === "name") metadata.name = value;
+      if (key === "description") metadata.description = value;
     }
   }
 
@@ -160,22 +104,54 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
  * Uses the first heading as name and first paragraph as description.
  */
 function extractMetadataFromContent(content: string): SkillMetadata {
-  const name = extractNameFromContent(content) || "Unnamed Skill";
+  const name = extractSkillHeading(content) || "Unnamed Skill";
   const description = extractDescriptionFromContent(content) || "";
 
   return {
     name,
     description,
-    tags: [],
   };
 }
 
 /**
  * Extract the skill name from the first markdown heading.
  */
-function extractNameFromContent(content: string): string | null {
+export function extractSkillHeading(content: string): string | null {
   const headingMatch = content.match(/^#\s+(.+)$/m);
   return headingMatch ? headingMatch[1].trim() : null;
+}
+
+function humanizeSlug(value: string): string {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+/**
+ * Resolve a human-friendly skill name.
+ * Prefers Markdown H1, then metadata name, then fallback slug.
+ */
+export function resolveSkillDisplayName(
+  parsed: ParsedSkill,
+  fallbackSlug?: string,
+): string {
+  const heading = extractSkillHeading(parsed.content);
+  if (heading) {
+    return heading;
+  }
+
+  const metadataName = parsed.metadata.name?.trim();
+  if (metadataName) {
+    return SKILL_SLUG_PATTERN.test(metadataName)
+      ? humanizeSlug(metadataName)
+      : metadataName;
+  }
+
+  if (fallbackSlug) {
+    return humanizeSlug(fallbackSlug);
+  }
+
+  return "Unnamed Skill";
 }
 
 /**

@@ -13,7 +13,7 @@ import {
 import { appFetch } from "@/lib/fetch";
 import { openFileInTab } from "@/lib/files/service";
 import type { InstalledSkill, Skill, SkillScope } from "@/lib/skills";
-import { parseSkillMd } from "@/lib/skills";
+import { parseSkillMd, resolveSkillDisplayName } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
 import { skillsStore } from "@/stores/skills.store";
 
@@ -27,6 +27,15 @@ type Tab = "installed" | "browse";
 const SKILL_CREATOR_SLUG = "seren-skill-creator";
 const SKILL_CREATOR_SOURCE_URL =
   "https://raw.githubusercontent.com/serenorg/skills/main/seren/skill-creator/SKILL.md";
+
+function normalizeSkillSlug(raw: string): string {
+  const normalized = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return normalized || "skill";
+}
 
 export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   const [activeTab, setActiveTab] = createSignal<Tab>("installed");
@@ -224,20 +233,18 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         .replace(/\s+/g, "-");
 
       const parsed = parseSkillMd(content);
+      const parsedSlug = parsed.metadata.name?.trim();
+      const slug = normalizeSkillSlug(parsedSlug || rawSlug);
 
       const skill: Skill = {
-        id: `url:${rawSlug}`,
-        slug: parsed.metadata.name
-          ? parsed.metadata.name.toLowerCase().replace(/\s+/g, "-")
-          : rawSlug,
-        name: parsed.metadata.name || rawSlug,
+        id: `url:${slug}`,
+        slug,
+        name: resolveSkillDisplayName(parsed, slug),
         description:
           (parsed.metadata.description as string) || "Installed from URL",
         source: "local",
         sourceUrl: url,
-        tags: (parsed.metadata.tags as string[]) || [],
-        author: parsed.metadata.author as string | undefined,
-        version: parsed.metadata.version as string | undefined,
+        tags: [],
       };
 
       await skillsStore.install(skill, content, "seren");

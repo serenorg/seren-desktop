@@ -14,15 +14,11 @@ export type SkillSource =
 
 /**
  * Skill metadata parsed from SKILL.md frontmatter.
+ * Per Agent Skills spec, only name and description are required.
  */
 export interface SkillMetadata {
   name: string;
   description: string;
-  version?: string;
-  author?: string;
-  tags: string[];
-  globs?: string[];
-  alwaysAllow?: string[];
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   getSkillPath,
   type InstalledSkill,
   parseSkillMd,
+  resolveSkillDisplayName,
   type Skill,
   type SkillIndexEntry,
   type SkillScope,
@@ -109,20 +110,15 @@ async function fetchSkillFromRepo(path: string): Promise<Skill | null> {
   const parsed = parseSkillMd(content);
 
   const slug = `${parsedPath.org}-${parsedPath.skill}`.toLowerCase();
-  const fallbackName = `${parsedPath.org} ${parsedPath.skill}`
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
 
   return {
     id: `serenorg:${slug}`,
     slug,
-    name: parsed.metadata.name || fallbackName,
+    name: resolveSkillDisplayName(parsed, slug),
     description: parsed.metadata.description || "Install this skill to add it.",
     source: "serenorg" as SkillSource,
     sourceUrl,
-    tags: parsed.metadata.tags || [],
-    author: parsed.metadata.author,
-    version: parsed.metadata.version,
+    tags: [],
   };
 }
 
@@ -474,12 +470,11 @@ export const skills = {
           installed.push({
             id: `local:${slug}`,
             slug,
-            name: parsed.metadata.name || slug,
+            name: resolveSkillDisplayName(parsed, slug),
             description: parsed.metadata.description || "",
             source: "local" as SkillSource,
-            tags: parsed.metadata.tags || [],
-            author: parsed.metadata.author,
-            version: parsed.metadata.version,
+            tags: [],
+
             scope,
             skillsDir,
             path: resolvedPath || getSkillPath(skillsDir, slug),
@@ -588,11 +583,11 @@ export const skills = {
       enabled: true,
       contentHash: hash,
       // Override with parsed metadata in case it differs
-      name: parsed.metadata.name || skill.name,
+      name: resolveSkillDisplayName(parsed, skill.slug),
       description: parsed.metadata.description || skill.description,
-      tags: parsed.metadata.tags || skill.tags,
-      author: parsed.metadata.author || skill.author,
-      version: parsed.metadata.version || skill.version,
+      tags: skill.tags,
+      author: skill.author,
+      version: skill.version,
     };
   },
 
