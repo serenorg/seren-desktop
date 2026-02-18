@@ -1,5 +1,5 @@
 import { relaunch } from "@tauri-apps/plugin-process";
-import { check } from "@tauri-apps/plugin-updater";
+import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import { createStore } from "solid-js/store";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { telemetry } from "@/services/telemetry";
@@ -123,28 +123,29 @@ async function installAvailableUpdate(): Promise<void> {
   });
 
   try {
-    await pendingUpdate.downloadAndInstall(
-      (progress: {
-        event: string;
-        data: { contentLength?: number; chunkLength?: number };
-      }) => {
-        if (progress.event === "Started" && progress.data.contentLength) {
-          const total = progress.data.contentLength;
+    await pendingUpdate.downloadAndInstall((progress: DownloadEvent) => {
+      if (progress.event === "Started") {
+        const total = progress.data.contentLength ?? 0;
+        if (total > 0) {
           console.log(`[Updater] Download started, size: ${total} bytes`);
           setState({ totalBytes: total });
-        } else if (progress.event === "Progress" && progress.data.chunkLength) {
-          downloaded += progress.data.chunkLength;
-          const percent =
-            state.totalBytes > 0
-              ? Math.min(Math.round((downloaded / state.totalBytes) * 100), 100)
-              : 0;
-          setState({ downloadedBytes: downloaded, progressPercent: percent });
-        } else if (progress.event === "Finished") {
-          console.log("[Updater] Download finished, installing...");
-          setState({ status: "installing", progressPercent: 100 });
         }
-      },
-    );
+        return;
+      }
+
+      if (progress.event === "Progress") {
+        downloaded += progress.data.chunkLength;
+        const percent =
+          state.totalBytes > 0
+            ? Math.min(Math.round((downloaded / state.totalBytes) * 100), 100)
+            : 0;
+        setState({ downloadedBytes: downloaded, progressPercent: percent });
+        return;
+      }
+
+      console.log("[Updater] Download finished, installing...");
+      setState({ status: "installing", progressPercent: 100 });
+    });
     console.log("[Updater] Install complete, relaunching...");
     await relaunch();
   } catch (error) {

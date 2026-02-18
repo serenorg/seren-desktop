@@ -29,7 +29,12 @@ import {
 } from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
-import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
+import {
+  type AgentType,
+  type DiffEvent,
+  type ToolCallEvent,
+  launchLogin,
+} from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";

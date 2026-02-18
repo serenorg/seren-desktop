@@ -2,7 +2,7 @@
 // ABOUTME: Presents chats and agent sessions as a single sorted thread list filtered by project.
 
 import { createStore } from "solid-js/store";
-import type { InstalledSkill } from "@/lib/skills";
+import { parseSkillMd, type InstalledSkill } from "@/lib/skills";
 import { archiveAgentConversation } from "@/lib/tauri-bridge";
 import type { AgentType, SessionStatus } from "@/services/acp";
 import { skills as skillsService } from "@/services/skills";
@@ -40,6 +40,13 @@ interface ThreadState {
   activeThreadKind: "chat" | "agent" | null;
   /** When true, new threads prefer Seren Chat over any available agent. */
   preferChat: boolean;
+}
+
+export type SkillLaunchMode = "replace" | "add";
+
+export interface SkillLaunchOptions {
+  mode?: SkillLaunchMode;
+  includeDependencies?: boolean;
 }
 
 // ============================================================================
@@ -102,6 +109,21 @@ function getBestAgent():
   if (codex) return { kind: "agent", agentType: "codex" };
 
   return { kind: "chat" };
+}
+
+function skillRef(skill: Pick<InstalledSkill, "scope" | "slug">): string {
+  return `${skill.scope}:${skill.slug}`;
+}
+
+function uniqRefs(refs: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const ref of refs) {
+    if (!ref || seen.has(ref)) continue;
+    seen.add(ref);
+    out.push(ref);
+  }
+  return out;
 }
 
 // ============================================================================
@@ -338,24 +360,76 @@ export const threadStore = {
    * Sets a thread-level skill override so only the chosen skill is active.
    */
   async createSkillThread(skill: InstalledSkill): Promise<string | null> {
+    return this.createSkillThreadWithSkills([skill], { mode: "replace" });
+  },
+
+  /**
+   * Create a thread pre-configured with one or more skills.
+   * - `replace`: thread uses only selected skills (+required dependencies).
+   * - `add`: thread uses current context skills plus selected skills (+deps).
+   */
+  async createSkillThreadWithSkills(
+    selectedSkills: InstalledSkill[],
+    options: SkillLaunchOptions = {},
+  ): Promise<string | null> {
+    if (selectedSkills.length === 0) return null;
+
+    const mode = options.mode ?? "replace";
+    const includeDependencies = options.includeDependencies ?? true;
     const best = getBestAgent();
     const cwd = fileTreeState.rootPath;
-    const skillRef = `${skill.scope}:${skill.slug}`;
+    const installedBySlug = new Map(
+      skillsStore.installed.map((installed) => [installed.slug, installed]),
+    );
+
+    const selectedByRef = new Map<string, InstalledSkill>();
+    const queue = [...selectedSkills];
+    for (const skill of selectedSkills) {
+      selectedByRef.set(skillRef(skill), skill);
+    }
+
+    while (includeDependencies && queue.length > 0) {
+      const current = queue.shift() as InstalledSkill;
+      const content = await skillsService.readContent(current);
+      if (!content) continue;
+
+      const parsed = parseSkillMd(content);
+      const requires = parsed.metadata.requires ?? [];
+      for (const requiredSlug of requires) {
+        const dep = installedBySlug.get(requiredSlug);
+        if (!dep) continue;
+        const depRef = skillRef(dep);
+        if (selectedByRef.has(depRef)) continue;
+        selectedByRef.set(depRef, dep);
+        queue.push(dep);
+      }
+    }
+
+    const selectedRefs = [...selectedByRef.keys()];
+    const baseRefs =
+      mode === "add" && cwd
+        ? skillsStore
+            .getThreadSkills(cwd, state.activeThreadId)
+            .map((activeSkill) => skillRef(activeSkill))
+        : [];
+
+    const targetRefs = uniqRefs([...baseRefs, ...selectedRefs]);
 
     if (best.kind === "agent" && cwd) {
       const threadId = await this.createAgentThread(best.agentType, cwd);
       if (threadId) {
-        await skillsService.setThreadSkills(cwd, threadId, [skillRef]);
+        await skillsService.setThreadSkills(cwd, threadId, targetRefs);
         await skillsStore.loadThreadSkills(cwd, threadId, true);
       }
       return threadId;
     }
 
     // Fallback to chat
-    const threadId = await this.createChatThread(skill.name);
+    const first = selectedSkills[0];
+    const threadId = await this.createChatThread(first?.name || "Skill");
     const projectRoot = cwd || undefined;
     if (projectRoot) {
-      await skillsService.setThreadSkills(projectRoot, threadId, [skillRef]);
+      await skillsService.setThreadSkills(projectRoot, threadId, targetRefs);
       await skillsStore.loadThreadSkills(projectRoot, threadId, true);
     }
     return threadId;

@@ -74,6 +74,8 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
   };
 
   const lines = yaml.split("\n");
+  let currentKey: string | null = null;
+  let inArray = false;
 
   for (const line of lines) {
     const trimmedLine = line.trim();
@@ -83,16 +85,78 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
       continue;
     }
 
+    // Check for array item
+    if (trimmedLine.startsWith("- ") && currentKey && inArray) {
+      const value = trimmedLine
+        .slice(2)
+        .trim()
+        .replace(/^["']|["']$/g, "");
+      if (currentKey === "tags") {
+        metadata.tags = [...(metadata.tags ?? []), value];
+      }
+      if (currentKey === "requires") {
+        metadata.requires = [...(metadata.requires ?? []), value];
+      }
+      if (currentKey === "globs") {
+        metadata.globs = [...(metadata.globs ?? []), value];
+      }
+      if (currentKey === "alwaysAllow") {
+        metadata.alwaysAllow = [...(metadata.alwaysAllow ?? []), value];
+      }
+      continue;
+    }
+
+    // Check for key-value pair
     const colonIndex = trimmedLine.indexOf(":");
     if (colonIndex > 0) {
       const key = trimmedLine.slice(0, colonIndex).trim();
-      const value = trimmedLine
-        .slice(colonIndex + 1)
-        .trim()
-        .replace(/^["']|["']$/g, "");
+      const value = trimmedLine.slice(colonIndex + 1).trim();
+      currentKey = key;
 
-      if (key === "name") metadata.name = value;
-      if (key === "description") metadata.description = value;
+      // Check if this is the start of an array (empty value or explicit array)
+      if (!value || value === "[]") {
+        inArray = true;
+        if (key === "tags") metadata.tags = [];
+        if (key === "requires") metadata.requires = [];
+        if (key === "globs") metadata.globs = [];
+        if (key === "alwaysAllow") metadata.alwaysAllow = [];
+        continue;
+      }
+
+      inArray = false;
+
+      // Handle inline arrays [item1, item2]
+      if (value.startsWith("[") && value.endsWith("]")) {
+        const items = value
+          .slice(1, -1)
+          .split(",")
+          .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+          .filter(Boolean);
+
+        if (key === "tags") metadata.tags = items;
+        if (key === "requires") metadata.requires = items;
+        if (key === "globs") metadata.globs = items;
+        if (key === "alwaysAllow") metadata.alwaysAllow = items;
+        continue;
+      }
+
+      // Handle scalar values
+      const cleanValue = value.replace(/^["']|["']$/g, "");
+
+      switch (key) {
+        case "name":
+          metadata.name = cleanValue;
+          break;
+        case "description":
+          metadata.description = cleanValue;
+          break;
+        case "version":
+          metadata.version = cleanValue;
+          break;
+        case "author":
+          metadata.author = cleanValue;
+          break;
+      }
     }
   }
 

@@ -19,6 +19,12 @@ export type SkillSource =
 export interface SkillMetadata {
   name: string;
   description: string;
+  version?: string;
+  author?: string;
+  tags?: string[];
+  requires?: string[];
+  globs?: string[];
+  alwaysAllow?: string[];
 }
 
 /**

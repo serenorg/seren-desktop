@@ -47,11 +47,11 @@ export function IndexingStatus() {
     }
   };
 
-  const formatNumber = (num: number) => {
-    return num.toLocaleString();
+  const formatNumber = (num?: number) => {
+    return (num ?? 0).toLocaleString();
   };
 
-  const formatDate = (timestamp: number | null) => {
+  const formatDate = (timestamp?: number | null) => {
     if (!timestamp) return "Never";
     const date = new Date(timestamp);
     const now = new Date();
