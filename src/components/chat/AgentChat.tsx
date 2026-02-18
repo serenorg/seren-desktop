@@ -27,7 +27,11 @@ import {
   getModelDisplayName,
   mapAgentModelToChat,
 } from "@/lib/rate-limit-fallback";
-import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
+import {
+  escapeHtmlWithLinks,
+  renderMarkdown,
+  renderMarkdownStreaming,
+} from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
@@ -85,6 +89,29 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const thread = activeAgentThread();
     if (!thread) return "";
     return acpStore.getStreamingContentForConversation(thread.id);
+  });
+
+  // Throttled streaming markdown: renders at most every 80 ms to avoid
+  // saturating the main thread with O(n) marked.parse calls on every chunk.
+  const [streamingMarkdown, setStreamingMarkdown] = createSignal("");
+  let streamingThrottle: ReturnType<typeof setTimeout> | null = null;
+  createEffect(() => {
+    const content = threadStreamingContent();
+    if (streamingThrottle !== null) clearTimeout(streamingThrottle);
+    if (!content) {
+      setStreamingMarkdown("");
+      return;
+    }
+    streamingThrottle = setTimeout(() => {
+      streamingThrottle = null;
+      setStreamingMarkdown(renderMarkdownStreaming(content));
+    }, 80);
+    onCleanup(() => {
+      if (streamingThrottle !== null) {
+        clearTimeout(streamingThrottle);
+        streamingThrottle = null;
+      }
+    });
   });
 
   // Get streaming thinking for THIS thread's conversation ID
@@ -199,17 +226,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   // Auto-scroll when messages change or permission dialogs appear
   createEffect(() => {
-    const messages = threadMessages();
-    const streaming = threadStreamingContent();
-    const permissions = acpStore.pendingPermissions;
-    const diffProposals = acpStore.pendingDiffProposals;
-    console.log("[AgentChat] Effect triggered:", {
-      messagesCount: messages.length,
-      streamingLength: streaming.length,
-      streamingPreview: streaming.slice(0, 100),
-      pendingPermissions: permissions.length,
-      pendingDiffProposals: diffProposals.length,
-    });
+    threadMessages();
+    threadStreamingContent();
+    acpStore.pendingPermissions;
+    acpStore.pendingDiffProposals;
     requestAnimationFrame(scrollToBottom);
   });
 
@@ -974,7 +994,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <article class="px-5 py-4 border-b border-surface-2">
                 <div
                   class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
-                  innerHTML={renderMarkdown(threadStreamingContent())}
+                  innerHTML={streamingMarkdown()}
                 />
                 <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
               </article>
