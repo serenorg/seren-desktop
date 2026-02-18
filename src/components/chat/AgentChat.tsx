@@ -361,7 +361,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       const result = await response.json();
       const noteId = result?.body?.data?.id ?? result?.data?.id;
       if (noteId) {
-        openExternalLink(`https://notes.serendb.com/_authed/notes/${noteId}`);
+        openExternalLink(`https://notes.serendb.com/notes/${noteId}`);
       } else {
         throw new Error("Note created but ID missing from response");
       }
