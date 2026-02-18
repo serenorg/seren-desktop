@@ -1941,12 +1941,6 @@ export const acpStore = {
     isThought?: boolean,
     timestamp?: number,
   ) {
-    console.log("[AcpStore] handleMessageChunk:", {
-      sessionId,
-      text: `${text.slice(0, 50)}...`,
-      isThought,
-    });
-
     const session = state.sessions[sessionId];
     if (!session) return;
 
