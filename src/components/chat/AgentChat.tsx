@@ -27,11 +27,7 @@ import {
   getModelDisplayName,
   mapAgentModelToChat,
 } from "@/lib/rate-limit-fallback";
-import {
-  escapeHtmlWithLinks,
-  renderMarkdown,
-  renderMarkdownStreaming,
-} from "@/lib/render-markdown";
+import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import { type AgentType, type DiffEvent, launchLogin } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
@@ -104,7 +100,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
     streamingThrottle = setTimeout(() => {
       streamingThrottle = null;
-      setStreamingMarkdown(renderMarkdownStreaming(content));
+      setStreamingMarkdown(renderMarkdown(content));
     }, 80);
     onCleanup(() => {
       if (streamingThrottle !== null) {
