@@ -29,7 +29,6 @@ import { catalog, type Publisher } from "@/services/catalog";
 import {
   CHAT_MAX_RETRIES,
   type ChatContext,
-  type Message,
   sendMessageWithRetry,
 } from "@/services/chat";
 import {
@@ -43,8 +42,7 @@ import { conversationStore } from "@/stores/conversation.store";
 import { editorStore } from "@/stores/editor.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
-import type { ToolCallData } from "@/types/conversation";
-import { toUnifiedMessage } from "@/types/conversation";
+import type { ToolCallData, UnifiedMessage } from "@/types/conversation";
 import { CompactedMessage } from "./CompactedMessage";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
@@ -85,13 +83,17 @@ function toToolCallEvent(data: ToolCallData): ToolCallEvent {
 }
 
 type GroupedMessage =
-  | { type: "single"; message: Message }
-  | { type: "tool_group"; messages: Message[]; toolCalls: ToolCallEvent[] };
+  | { type: "single"; message: UnifiedMessage }
+  | {
+      type: "tool_group";
+      messages: UnifiedMessage[];
+      toolCalls: ToolCallEvent[];
+    };
 
 /** Group consecutive tool_call messages into collapsed groups */
-function groupConsecutiveToolCalls(messages: Message[]): GroupedMessage[] {
+function groupConsecutiveToolCalls(messages: UnifiedMessage[]): GroupedMessage[] {
   const grouped: GroupedMessage[] = [];
-  let currentGroup: Message[] = [];
+  let currentGroup: UnifiedMessage[] = [];
 
   for (const message of messages) {
     if (message.type === "tool_call" && message.toolCall) {
@@ -534,18 +536,19 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     const conversationId = conversationStore.activeConversationId;
     if (!conversationId) return;
 
-    const userMessage: Message = {
+    const userMessage: UnifiedMessage = {
       id: crypto.randomUUID(),
+      type: "user",
       role: "user",
       content: messageContent,
       images,
       timestamp: Date.now(),
-      model: chatStore.selectedModel,
+      modelId: chatStore.selectedModel,
       status: "complete",
     };
 
-    conversationStore.addMessage(toUnifiedMessage(userMessage));
-    await conversationStore.persistMessage(toUnifiedMessage(userMessage));
+    conversationStore.addMessage(userMessage);
+    await conversationStore.persistMessage(userMessage);
 
     conversationStore.setError(null);
     setInput("");
@@ -584,7 +587,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
   };
 
-  const attemptRetry = async (message: Message, isManual: boolean) => {
+  const attemptRetry = async (message: UnifiedMessage, isManual: boolean) => {
     if (!message.request) return;
 
     chatStore.setRetrying(message.id);
@@ -606,7 +609,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
       const content = await sendMessageWithRetry(
         message.request.prompt,
-        message.model ?? chatStore.selectedModel,
+        message.modelId ?? chatStore.selectedModel,
         message.request.context,
         (attempt) => {
           conversationStore.updateMessage(message.id, {
@@ -626,7 +629,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       };
 
       conversationStore.updateMessage(message.id, updated);
-      await conversationStore.persistMessage(toUnifiedMessage(updated));
+      await conversationStore.persistMessage(updated);
     } catch (error) {
       const messageError = (error as Error).message;
       conversationStore.updateMessage(message.id, {
@@ -641,7 +644,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
   };
 
-  const handleManualRetry = async (message: Message) => {
+  const handleManualRetry = async (message: UnifiedMessage) => {
     await attemptRetry(message, true);
   };
 
