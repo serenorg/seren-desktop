@@ -18,15 +18,13 @@ import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
-import { API_BASE } from "@/lib/config";
 import { openExternalLink } from "@/lib/external-link";
-import { appFetch } from "@/lib/fetch";
 import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
+import { saveToSerenNotes } from "@/lib/save-to-notes";
 import type { ToolCallEvent } from "@/services/acp";
-import { getToken } from "@/services/auth";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
   CHAT_MAX_RETRIES,
@@ -679,7 +677,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
   };
 
+  const [isSaving, setIsSaving] = createSignal(false);
+
   const downloadChatHistory = async () => {
+    if (isSaving()) return;
     const messages = conversationStore.messages;
     if (messages.length === 0) return;
 
@@ -696,41 +697,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       }
     }
 
-    // Save to Seren Notes via Gateway publisher proxy
+    setIsSaving(true);
     try {
-      const token = await getToken();
-      if (!token) throw new Error("Not authenticated");
-
-      const response = await appFetch(
-        `${API_BASE}/publishers/seren-notes/notes`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            title,
-            content: markdown,
-            format: "markdown",
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`Notes API returned ${response.status}`);
-      }
-
-      const result = await response.json();
-      const noteId = result?.body?.data?.id ?? result?.data?.id;
-      if (noteId) {
-        openExternalLink(`https://notes.serendb.com/notes/${noteId}`);
-      } else {
-        throw new Error("Note created but ID missing from response");
-      }
+      await saveToSerenNotes(title, markdown);
     } catch (error) {
       console.error("[ChatContent] Failed to save to Seren Notes:", error);
       alert("Failed to save to Seren Notes. Are you logged in?");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -832,8 +806,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               </button>
               <button
                 type="button"
-                class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
+                class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={downloadChatHistory}
+                disabled={isSaving()}
                 title="Download chat history"
               >
                 <svg
