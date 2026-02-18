@@ -111,6 +111,13 @@ export const SkillsSelector: Component = () => {
       }
     }
 
+    const skillCreator = skillsStore.installed.find(
+      (s) => s.slug === SKILL_CREATOR_SLUG,
+    );
+    if (skillCreator) {
+      await threadStore.createSkillThread(skillCreator);
+    }
+
     // Set the chat input to the skill creation prompt
     window.dispatchEvent(
       new CustomEvent("seren:set-chat-input", {
