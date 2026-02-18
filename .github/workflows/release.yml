@@ -96,12 +96,10 @@ jobs:
       - name: Create Release
         id: create_release
         if: fromJSON(steps.check_release.outputs.result).exists == false
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          release_name: Seren Desktop ${{ github.ref_name }}
+          name: Seren Desktop ${{ github.ref_name }}
           body_path: release_notes.md
           draft: true
           prerelease: false
