@@ -64,6 +64,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   );
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
+  let userHasScrolledUp = false;
 
   // Get the active agent thread (must be defined before thread-specific memos)
   const activeAgentThread = createMemo(() => {
@@ -184,9 +185,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   );
 
   const scrollToBottom = () => {
-    if (messagesRef) {
+    if (messagesRef && !userHasScrolledUp) {
       messagesRef.scrollTop = messagesRef.scrollHeight;
     }
+  };
+
+  const handleMessagesScroll = () => {
+    if (!messagesRef) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesRef;
+    // Consider "near bottom" within 80px
+    userHasScrolledUp = scrollHeight - scrollTop - clientHeight > 80;
   };
 
   // Auto-scroll when messages change or permission dialogs appear
@@ -444,6 +452,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     setAttachedImages([]);
     setHistoryIndex(-1);
     setSavedInput("");
+    userHasScrolledUp = false;
     await acpStore.sendPrompt(trimmed, context);
   };
 
@@ -809,6 +818,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       {/* Messages Area */}
       <div
         ref={messagesRef}
+        onScroll={handleMessagesScroll}
         class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-surface-3 [&::-webkit-scrollbar-thumb]:rounded"
         onClick={(e) => {
           const target = e.target as HTMLElement;
