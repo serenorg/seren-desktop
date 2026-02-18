@@ -195,20 +195,6 @@ export function renderMarkdown(markdown: string): string {
   return typeof result === "string" ? result : "";
 }
 
-// Fast path for streaming: skip wrapCodeIslands (expensive O(n) scan per chunk).
-// Called on every throttle tick during active streaming; wrapCodeIslands runs
-// once when the final message is committed to threadMessages.
-function normalizeStreaming(markdown: string): string {
-  let result = markdown.replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2");
-  result = result.replace(/([^\n])\n(`{3,}|~{3,})/g, "$1\n\n$2");
-  return result;
-}
-
-export function renderMarkdownStreaming(markdown: string): string {
-  const result = marked.parse(normalizeStreaming(markdown));
-  return typeof result === "string" ? result : "";
-}
-
 const URL_REGEX = /https?:\/\/[^\s<>"'`)\]]+/g;
 
 /**
