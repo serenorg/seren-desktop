@@ -336,6 +336,26 @@ async function main(): Promise<void> {
         if (removed > 0) {
           console.log(`[build-openclaw] Removed ${removed} non-native package(s) for AppImage compatibility.`);
         }
+
+        // Remove non-Linux koffi platform binaries.
+        // koffi nests per-platform builds at node_modules/koffi/build/koffi/<platform>/koffi.node.
+        // Non-Linux variants (openbsd_ia32, win32_x64, musl_arm64, etc.) link against system
+        // libraries absent on Linux (e.g. libc++.so.9.0), causing linuxdeploy to abort with:
+        //   ERROR: Could not find dependency: libc++.so.9.0
+        const koffiBuildDir = path.join(nmDir, "koffi", "build", "koffi");
+        if (existsSync(koffiBuildDir)) {
+          let koffiRemoved = 0;
+          for (const platform of readdirSync(koffiBuildDir)) {
+            if (!platform.startsWith("linux_")) {
+              rmSync(path.join(koffiBuildDir, platform), { recursive: true, force: true });
+              koffiRemoved++;
+              console.log(`[build-openclaw] Removed non-Linux koffi platform: ${platform}`);
+            }
+          }
+          if (koffiRemoved > 0) {
+            console.log(`[build-openclaw] Removed ${koffiRemoved} non-Linux koffi platform(s) for AppImage compatibility.`);
+          }
+        }
       }
     }
 
