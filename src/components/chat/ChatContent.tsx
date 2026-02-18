@@ -722,31 +722,15 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       }
 
       const result = await response.json();
-      const noteId = result?.data?.id;
+      const noteId = result?.body?.data?.id ?? result?.data?.id;
       if (noteId) {
-        openExternalLink(`https://notes.serendb.com/_authed/notes/${noteId}`);
+        openExternalLink(`https://notes.serendb.com/notes/${noteId}`);
+      } else {
+        throw new Error("Note created but ID missing from response");
       }
-      return;
     } catch (error) {
       console.error("[ChatContent] Failed to save to Seren Notes:", error);
-    }
-
-    // Fallback: save locally via Tauri file dialog
-    try {
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-      const filePath = await save({
-        title: "Save Chat History",
-        defaultPath: `${title}.md`,
-        filters: [{ name: "Markdown", extensions: ["md"] }],
-      });
-      if (!filePath) return;
-      await writeTextFile(filePath, markdown);
-    } catch (fallbackError) {
-      console.error(
-        "[ChatContent] Failed to save chat history:",
-        fallbackError,
-      );
+      alert("Failed to save to Seren Notes. Are you logged in?");
     }
   };
 
