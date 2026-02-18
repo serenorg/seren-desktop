@@ -1,3 +1,5 @@
+// ABOUTME: Converts markdown text to HTML for display in agent chat messages.
+// ABOUTME: Handles code highlighting, link safety, and Codex unfenced-code normalization.
 import hljs from "highlight.js";
 import { marked, type Tokens } from "marked";
 import { escapeHtml } from "@/lib/escape-html";
@@ -58,15 +60,134 @@ marked.setOptions({
 });
 
 /**
+ * Returns true when a line (already trimmed) looks like TypeScript/JavaScript
+ * code rather than prose. Used by wrapCodeIslands to detect unfenced code.
+ */
+export function isCodeLine(trimmed: string, inCComment: boolean): boolean {
+  if (!trimmed) return false;
+
+  // C-style comment openers (/** or /*)
+  if (/^\/\*\*?/.test(trimmed)) return true;
+
+  // C-style comment closers and continuations – only inside an open comment
+  if (inCComment && /^(\*\/|\*\s)/.test(trimmed)) return true;
+
+  // TypeScript/JS typed declarations
+  if (/^(export\s+)?(type|interface)\s+\w/.test(trimmed)) return true;
+  if (/^(export\s+)?(abstract\s+)?class\s+\w/.test(trimmed)) return true;
+  if (/^(export\s+)?(async\s+)?function\s+\w/.test(trimmed)) return true;
+  if (/^(export\s+)?(const|let|var)\s+[\w_$]/.test(trimmed)) return true;
+  if (/^(export\s+)?enum\s+\w/.test(trimmed)) return true;
+  if (/^import\s+(type\s+)?(\{|\*|[\w_$])/.test(trimmed)) return true;
+
+  // Lines ending with ; — strong code signal. Exclude obvious prose sentences
+  // (capital letter followed by a lowercase word, e.g. "This returns a value;")
+  if (/;\s*$/.test(trimmed) && !/^[A-Z][a-z]+\s+[a-z]/.test(trimmed))
+    return true;
+
+  // Closing brace/bracket lines common in TypeScript
+  if (/^\}[;,]?\s*$/.test(trimmed)) return true;
+
+  // HTTP/OpenAPI status-code type entries: `404: unknown;`
+  if (/^\d{3,4}:\s+\w/.test(trimmed)) return true;
+
+  return false;
+}
+
+/**
+ * Wrap consecutive "code island" lines outside existing fences in a
+ * ```typescript fence. Codex frequently outputs TypeScript type definitions
+ * and JSDoc comments as plain text without code fences, causing * lines to
+ * render as markdown bullets and declarations to appear as unstyled paragraphs.
+ *
+ * A run of 2+ consecutive code-like lines is wrapped. Single isolated lines
+ * are left alone to avoid false positives.
+ */
+export function wrapCodeIslands(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let inFence = false;
+  let inCComment = false;
+  const codeBuf: string[] = [];
+  const blankBuf: string[] = [];
+
+  const flush = () => {
+    if (codeBuf.length >= 2) {
+      // Trim trailing blank lines out of the code block into blankBuf
+      while (codeBuf.length > 0 && !codeBuf[codeBuf.length - 1].trim()) {
+        blankBuf.unshift(codeBuf.pop() as string);
+      }
+      if (codeBuf.length >= 2) {
+        out.push("```typescript", ...codeBuf, "```");
+        codeBuf.length = 0;
+        return;
+      }
+    }
+    out.push(...codeBuf);
+    codeBuf.length = 0;
+  };
+
+  for (const line of lines) {
+    const t = line.trim();
+
+    // Toggle existing fence state
+    if (/^(`{3,}|~{3,})/.test(t)) {
+      if (!inFence) {
+        flush();
+        out.push(...blankBuf);
+        blankBuf.length = 0;
+      }
+      inFence = !inFence;
+      out.push(line);
+      continue;
+    }
+
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+
+    if (!t) {
+      blankBuf.push(line);
+      continue;
+    }
+
+    // Track C-style comment blocks outside fences.
+    // Open BEFORE isCodeLine so /** lines are seen as inCComment=true.
+    // Close AFTER isCodeLine so */ lines are still seen as inCComment=true.
+    if (/\/\*\*?/.test(t)) inCComment = true;
+
+    if (isCodeLine(t, inCComment)) {
+      codeBuf.push(...blankBuf, line);
+      blankBuf.length = 0;
+    } else {
+      flush();
+      out.push(...blankBuf, line);
+      blankBuf.length = 0;
+    }
+
+    if (/\*\//.test(t)) inCComment = false;
+  }
+
+  flush();
+  out.push(...blankBuf);
+  return out.join("\n");
+}
+
+/**
  * Ensure ATX headings (## heading) and fenced code blocks (```) are preceded
  * by a blank line. With `breaks: true`, marked can fail to interrupt an
  * in-progress paragraph at these block-level elements when no blank line
  * separates them — common in Codex/agent output that omits blank lines.
+ *
+ * Also detects unfenced TypeScript/JSDoc "code islands" and wraps them in
+ * fenced code blocks so they render with syntax highlighting rather than
+ * as markdown bullets and plain paragraphs.
  */
 function normalizeAgentMarkdown(markdown: string): string {
   let result = markdown.replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2");
   result = result.replace(/([^\n])\n(`{3,}|~{3,})/g, "$1\n\n$2");
-  return result;
+  return wrapCodeIslands(result);
 }
 
 export function renderMarkdown(markdown: string): string {
