@@ -71,31 +71,8 @@ jobs:
           echo "Generated release notes:"
           cat release_notes.md
 
-      - name: Check for existing release
-        id: check_release
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const tagName = '${{ github.ref_name }}';
-            try {
-              const release = await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag: tagName
-              });
-              console.log(`Found existing release: ${release.data.id} (draft: ${release.data.draft})`);
-              return { exists: true, id: release.data.id, draft: release.data.draft };
-            } catch (error) {
-              if (error.status === 404) {
-                console.log('No existing release found');
-                return { exists: false };
-              }
-              throw error;
-            }
-
-      - name: Create Release
+      - name: Create or Update Release
         id: create_release
-        if: fromJSON(steps.check_release.outputs.result).exists == false
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -106,12 +83,7 @@ jobs:
 
       - name: Set release ID output
         id: set_release_id
-        run: |
-          if [ "${{ fromJSON(steps.check_release.outputs.result).exists }}" == "true" ]; then
-            echo "id=${{ fromJSON(steps.check_release.outputs.result).id }}" >> $GITHUB_OUTPUT
-          else
-            echo "id=${{ steps.create_release.outputs.id }}" >> $GITHUB_OUTPUT
-          fi
+        run: echo "id=${{ steps.create_release.outputs.id }}" >> $GITHUB_OUTPUT
 
   build:
     needs: create-release
