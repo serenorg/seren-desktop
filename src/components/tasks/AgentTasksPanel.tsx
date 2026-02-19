@@ -26,6 +26,8 @@ interface AgentTasksPanelProps {
 }
 
 export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
+  type RunMode = "cloud" | "local";
+  const [runMode, setRunMode] = createSignal<RunMode>("cloud");
   const [publisherSlug, setPublisherSlug] = createSignal("");
   const [messageText, setMessageText] = createSignal("");
   const [isSubmitting, setIsSubmitting] = createSignal(false);
@@ -148,6 +150,29 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
         class="px-4 py-3 border-b border-border/50 bg-surface-0"
         onSubmit={handleRunAgent}
       >
+        {/* Backend Mode Toggle */}
+        <div class="flex items-center gap-1 mb-2">
+          <button
+            type="button"
+            class={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors ${
+              runMode() === "cloud"
+                ? "bg-primary/20 text-primary"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setRunMode("cloud")}
+          >
+            Cloud
+          </button>
+          <button
+            type="button"
+            class="px-2 py-0.5 text-[11px] font-medium rounded text-muted-foreground/40 cursor-not-allowed"
+            disabled
+            title="Local runner coming soon"
+          >
+            Local
+          </button>
+        </div>
+
         <div class="flex gap-2 mb-2">
           <input
             type="text"
