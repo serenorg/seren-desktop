@@ -1,14 +1,22 @@
 // ABOUTME: Compact row component for a single agent task in the task list.
 // ABOUTME: Shows status, publisher, timing, cost, and expandable output.
 
-import { type Component, createSignal, Show } from "solid-js";
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
 import type { AgentTask } from "@/services/agent-tasks";
 import { isTerminalStatus } from "@/services/agent-tasks";
+import type { StreamEvent } from "@/stores/agent-tasks.store";
 import { TaskStatusBadge } from "./TaskStatusBadge";
 
 interface AgentTaskItemProps {
   task: AgentTask;
   isActive: boolean;
+  events: StreamEvent[];
   onSelect: (taskId: string) => void;
   onCancel: (taskId: string) => void;
 }
@@ -42,10 +50,43 @@ function duration(start?: string, end?: string): string {
   return `${secs}s`;
 }
 
+function eventLabel(eventType: string): string {
+  const map: Record<string, string> = {
+    "task.created": "Created",
+    "task.submitted": "Submitted",
+    "task.working": "Working",
+    "task.completed": "Completed",
+    "task.failed": "Failed",
+    "task.canceled": "Canceled",
+    "task.input_required": "Input Required",
+    "task.progress": "Progress",
+    "task.artifact": "Artifact",
+  };
+  return map[eventType] ?? eventType;
+}
+
+function eventSummary(data: Record<string, unknown>): string {
+  if (typeof data.message === "string") return data.message;
+  if (typeof data.text === "string") return data.text;
+  if (data.status) return `Status → ${data.status}`;
+  return JSON.stringify(data).slice(0, 120);
+}
+
 export const AgentTaskItem: Component<AgentTaskItemProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false);
+  let logRef: HTMLDivElement | undefined;
 
   const isTerminal = () => isTerminalStatus(props.task.status);
+
+  // Auto-scroll event log when new events arrive
+  createEffect(() => {
+    const count = props.events.length;
+    if (count > 0 && logRef) {
+      requestAnimationFrame(() => {
+        if (logRef) logRef.scrollTop = logRef.scrollHeight;
+      });
+    }
+  });
 
   return (
     <div
@@ -132,6 +173,38 @@ export const AgentTaskItem: Component<AgentTaskItemProps> = (props) => {
       {/* Expanded Detail */}
       <Show when={expanded()}>
         <div class="px-3 pb-3 pt-0 border-t border-border/30">
+          {/* Live Event Log */}
+          <Show when={props.events.length > 0}>
+            <div class="mt-2">
+              <div class="text-[11px] text-muted-foreground mb-1 font-medium uppercase tracking-wider flex items-center gap-1.5">
+                Events
+                <Show when={!isTerminal()}>
+                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                </Show>
+                <span class="text-[10px] font-normal normal-case text-muted-foreground/60 ml-auto">
+                  {props.events.length}
+                </span>
+              </div>
+              <div
+                ref={logRef}
+                class="bg-surface-0 border border-border/50 rounded max-h-[160px] overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-surface-3 [&::-webkit-scrollbar-thumb]:rounded"
+              >
+                <For each={props.events}>
+                  {(evt) => (
+                    <div class="flex items-start gap-2 px-2 py-1 border-b border-border/20 last:border-b-0 text-[11px]">
+                      <span class="shrink-0 font-mono text-primary/70 min-w-[70px]">
+                        {eventLabel(evt.eventType)}
+                      </span>
+                      <span class="text-foreground/70 break-all leading-relaxed">
+                        {eventSummary(evt.data)}
+                      </span>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </div>
+          </Show>
+
           {/* Cost Breakdown */}
           <Show
             when={

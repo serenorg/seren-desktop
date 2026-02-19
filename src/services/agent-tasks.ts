@@ -2,6 +2,7 @@
 // ABOUTME: Provides API calls for task lifecycle and SSE streaming.
 
 import { API_BASE } from "@/lib/config";
+import { getTauriFetch } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -165,10 +166,13 @@ export function streamTask(
   const url = `${API_BASE}/organizations/${orgId}/agents/tasks/${taskId}/stream`;
   let aborted = false;
 
+  const TERMINAL_EVENTS = ["task.completed", "task.failed", "task.canceled"];
+
   (async () => {
     try {
       const headers = await authHeaders();
-      const resp = await fetch(url, {
+      const fetchFn = await getTauriFetch();
+      const resp = await fetchFn(url, {
         headers: { ...headers, Accept: "text/event-stream" },
       });
 
@@ -208,7 +212,7 @@ export function streamTask(
             const parsed = JSON.parse(data);
             callbacks.onEvent(eventType, parsed);
 
-            if (eventType === "task.completed") {
+            if (TERMINAL_EVENTS.includes(eventType)) {
               callbacks.onComplete(parsed);
               return;
             }

@@ -13,9 +13,18 @@ import {
   streamTask,
 } from "@/services/agent-tasks";
 
+/** A streaming event received via SSE for display in the live log. */
+export interface StreamEvent {
+  eventType: string;
+  data: Record<string, unknown>;
+  receivedAt: number;
+}
+
 interface AgentTasksState {
   tasks: AgentTask[];
   activeTaskId: string | null;
+  /** Per-task accumulated streaming events, keyed by task ID. */
+  taskEvents: Record<string, StreamEvent[]>;
   isLoading: boolean;
   error: string | null;
   total: number;
@@ -26,6 +35,7 @@ interface AgentTasksState {
 const initialState: AgentTasksState = {
   tasks: [],
   activeTaskId: null,
+  taskEvents: {},
   isLoading: false,
   error: null,
   total: 0,
@@ -81,8 +91,16 @@ function followTask(orgId: string, taskId: string): void {
 
   setState("activeTaskId", taskId);
 
+  // Initialize event log for this task
+  setState("taskEvents", taskId, []);
+
   activeStream = streamTask(orgId, taskId, {
-    onEvent: (_eventType, data) => {
+    onEvent: (eventType, data) => {
+      // Accumulate event for live log display
+      setState("taskEvents", taskId, (prev) => [
+        ...(prev ?? []),
+        { eventType, data, receivedAt: Date.now() },
+      ]);
       // Update the task in the list if we get status info
       if (data.status) {
         updateTaskInList(taskId, {
@@ -165,6 +183,13 @@ function getActiveTask(): AgentTask | undefined {
 }
 
 /**
+ * Get accumulated streaming events for a task.
+ */
+function getEventsForTask(taskId: string): StreamEvent[] {
+  return state.taskEvents[taskId] ?? [];
+}
+
+/**
  * Reset store state (e.g., on logout).
  */
 function resetAgentTasksState(): void {
@@ -181,6 +206,7 @@ export {
   refreshTask,
   cancelTask,
   getActiveTask,
+  getEventsForTask,
   resetAgentTasksState,
   isTerminalStatus,
 };

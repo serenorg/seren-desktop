@@ -14,6 +14,7 @@ import {
   agentTasksState,
   cancelTask,
   followTask,
+  getEventsForTask,
   loadTasks,
   runAgent,
   stopFollowing,
@@ -252,6 +253,7 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
               <AgentTaskItem
                 task={task}
                 isActive={agentTasksState.activeTaskId === task.id}
+                events={getEventsForTask(task.id)}
                 onSelect={handleSelectTask}
                 onCancel={handleCancelTask}
               />
@@ -271,6 +273,7 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
               <AgentTaskItem
                 task={task}
                 isActive={agentTasksState.activeTaskId === task.id}
+                events={getEventsForTask(task.id)}
                 onSelect={handleSelectTask}
                 onCancel={handleCancelTask}
               />
