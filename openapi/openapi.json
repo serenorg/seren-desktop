@@ -1011,6 +1011,77 @@
         ]
       }
     },
+    "/eval/matrix": {
+      "get": {
+        "tags": [
+          "Eval"
+        ],
+        "summary": "Get the global eval routing matrix.",
+        "operationId": "get_matrix",
+        "responses": {
+          "200": {
+            "description": "Eval matrix",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalMatrixResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/eval/signals": {
+      "post": {
+        "tags": [
+          "Eval"
+        ],
+        "summary": "Ingest eval signals from Seren Desktop clients.",
+        "operationId": "post_signals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalSignalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Signals accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalSignalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/federation": {
       "get": {
         "tags": [
@@ -1719,6 +1790,237 @@
             "bearer_auth": []
           }
         ]
+      }
+    },
+    "/organizations/{organization_id}/agents/tasks": {
+      "get": {
+        "tags": [
+          "Agent Tasks"
+        ],
+        "summary": "GET /organizations/{organization_id}/agents/tasks",
+        "operationId": "list_tasks",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tasks retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTasksDataResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not authorized"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_id}/agents/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "Agent Tasks"
+        ],
+        "summary": "GET /organizations/{organization_id}/agents/tasks/{task_id}",
+        "operationId": "get_task",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "description": "Task ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskDataResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_id}/agents/tasks/{task_id}/cancel": {
+      "post": {
+        "tags": [
+          "Agent Tasks"
+        ],
+        "summary": "POST /organizations/{organization_id}/agents/tasks/{task_id}/cancel",
+        "operationId": "cancel_task",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "description": "Task ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task canceled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskDataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Already terminal"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_id}/agents/tasks/{task_id}/events": {
+      "get": {
+        "tags": [
+          "Agent Tasks"
+        ],
+        "summary": "GET /organizations/{organization_id}/agents/tasks/{task_id}/events",
+        "operationId": "list_task_events",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "description": "Task ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskEventsDataResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/organizations/{organization_id}/agents/tasks/{task_id}/stream": {
+      "get": {
+        "tags": [
+          "Agent Tasks"
+        ],
+        "summary": "GET /organizations/{organization_id}/agents/tasks/{task_id}/stream",
+        "operationId": "stream_task",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "description": "Task ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE event stream"
+          }
+        }
       }
     },
     "/organizations/{organization_id}/api-keys": {
@@ -9695,7 +9997,7 @@
           "publishers"
         ],
         "summary": "Handle requests to the publisher root.",
-        "description": "For database publishers, this executes a query from the request body.\nFor API publishers, this proxies to the root endpoint.\nFor MCP publishers, this returns an error (use specific tool/resource endpoints).",
+        "description": "For database publishers, this executes a query from the request body.\nFor API publishers, this proxies to the root endpoint.\nFor agent publishers (compute_type=agent), this creates a task and returns 202 Accepted.\nFor MCP publishers, this returns an error (use specific tool/resource endpoints).",
         "operationId": "publisher_root_handler",
         "parameters": [
           {
@@ -9720,10 +10022,20 @@
         },
         "responses": {
           "200": {
-            "description": "Request processed successfully",
+            "description": "Request processed successfully (database/API)",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "202": {
+            "description": "Agent task accepted (async)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskDataResponse"
+                }
               }
             }
           },
@@ -9869,6 +10181,16 @@
           "402": {
             "description": "Payment required"
           },
+          "403": {
+            "description": "Publisher is geo-restricted and routing is not enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoRestrictedError"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Publisher or endpoint not found"
           },
@@ -9925,6 +10247,16 @@
           },
           "402": {
             "description": "Payment required"
+          },
+          "403": {
+            "description": "Publisher is geo-restricted and routing is not enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoRestrictedError"
+                }
+              }
+            }
           },
           "404": {
             "description": "Publisher or endpoint not found"
@@ -10106,7 +10438,7 @@
           {
             "name": "language",
             "in": "query",
-            "description": "Filter by language (python, typescript, rust)",
+            "description": "Filter by language (python, typescript, javascript)",
             "required": false,
             "schema": {
               "type": "string",
@@ -10934,7 +11266,6 @@
         "type": "object",
         "description": "Admin grant request\n\nEither `user_id` or `agent_wallet` must be provided:\n- `user_id`: Grant to user's virtual wallet (recommended for admin UI)\n- `agent_wallet`: Grant to specific wallet address (for advanced use cases)",
         "required": [
-          "asset_id",
           "amount_atomic"
         ],
         "properties": {
@@ -10950,7 +11281,9 @@
           },
           "asset_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Asset ID for the grant. If not provided, resolved from agent_marketplace_settings.",
+            "nullable": true
           },
           "description": {
             "type": "string",
@@ -11409,6 +11742,222 @@
           }
         }
       },
+      "AgentTask": {
+        "type": "object",
+        "description": "An agent task — tracks a single agent invocation lifecycle.",
+        "required": [
+          "id",
+          "organization_id",
+          "publisher_id",
+          "user_id",
+          "status",
+          "trigger_type",
+          "input_message",
+          "cost_compute_atomic",
+          "cost_tool_atomic",
+          "cost_llm_atomic",
+          "cost_total_atomic",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "a2a_context_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "a2a_task_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "cost_cap_atomic": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "cost_compute_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cost_llm_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cost_tool_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cost_total_atomic": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error_message": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "input_message": {},
+          "metadata": {
+            "nullable": true
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "output": {
+            "nullable": true
+          },
+          "payment_request_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "publisher_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentTaskStatus"
+          },
+          "trigger_type": {
+            "$ref": "#/components/schemas/AgentTriggerType"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "AgentTaskDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/crate.models.agent_task.AgentTask"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "AgentTaskEvent": {
+        "type": "object",
+        "description": "An event in the agent task lifecycle (for SSE streaming).",
+        "required": [
+          "id",
+          "task_id",
+          "event_type",
+          "payload",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "payload": {},
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "AgentTaskEventsDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/crate.models.agent_task.AgentTaskEvent"
+            },
+            "description": "The actual response data (can be a single object or a collection)"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "AgentTaskStatus": {
+        "type": "string",
+        "description": "Agent task execution status, mirroring A2A TaskState with Seren additions.",
+        "enum": [
+          "pending",
+          "submitted",
+          "working",
+          "input_required",
+          "completed",
+          "failed",
+          "canceled"
+        ]
+      },
+      "AgentTasksDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/crate.models.agent_task.AgentTask"
+            },
+            "description": "The actual response data (can be a single object or a collection)"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
       "AgentTemplate": {
         "type": "object",
         "description": "Agent template - executable code that runs in compute backends (Daytona, Modal, etc.)",
@@ -11571,6 +12120,19 @@
             "format": "int64"
           }
         }
+      },
+      "AgentTriggerType": {
+        "type": "string",
+        "description": "How the agent task was triggered.",
+        "enum": [
+          "manual",
+          "api",
+          "mcp",
+          "cli",
+          "desktop",
+          "scheduled",
+          "webhook"
+        ]
       },
       "AnalyticsQueryParams": {
         "type": "object",
@@ -11989,8 +12551,7 @@
         ],
         "properties": {
           "balance": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           }
         }
       },
@@ -12706,7 +13267,8 @@
         "enum": [
           "template",
           "workflow",
-          "function"
+          "function",
+          "agent"
         ]
       },
       "ComputeUsageEventDebugRecord": {
@@ -12931,7 +13493,7 @@
       },
       "CostBreakdown": {
         "type": "object",
-        "description": "Cost breakdown when a service fee is charged (pre-authorization).",
+        "description": "Cost breakdown when a service fee is charged (e.g., pre-authorization or geo-proxy routing).",
         "required": [
           "target",
           "service_fee",
@@ -13287,6 +13849,9 @@
             "type": "string",
             "description": "Client secret (will be encrypted)"
           },
+          "custom_auth_params": {
+            "description": "Custom provider-specific authorization URL parameters (e.g., {\"access_type\": \"offline\"} for Google)"
+          },
           "description": {
             "type": "string",
             "nullable": true
@@ -13315,7 +13880,7 @@
             "type": "string"
           },
           "token_endpoint_auth_method": {
-            "type": "string"
+            "$ref": "#/components/schemas/TokenEndpointAuthMethod"
           },
           "token_url": {
             "type": "string"
@@ -13553,6 +14118,11 @@
           "publisher_category"
         ],
         "properties": {
+          "a2a_endpoint_url": {
+            "type": "string",
+            "description": "A2A endpoint base URL (required for compute_type = agent)",
+            "nullable": true
+          },
           "accepted_asset_ids": {
             "type": "array",
             "items": {
@@ -13840,6 +14410,14 @@
             "type": "string",
             "nullable": true
           },
+          "routing": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GeoRoutingConfig"
+              }
+            ],
+            "nullable": true
+          },
           "slug": {
             "type": "string"
           },
@@ -13992,8 +14570,7 @@
             "nullable": true
           },
           "language": {
-            "type": "string",
-            "description": "Programming language (python, typescript, rust)"
+            "$ref": "#/components/schemas/TemplateLanguage"
           },
           "llmConfig": {
             "allOf": [
@@ -14611,7 +15188,7 @@
       },
       "DatabaseConfig": {
         "type": "object",
-        "description": "Database configuration for external providers\n\nBoth Neon and Supabase use connection string authentication.",
+        "description": "Database configuration for external providers\n\nNeon and Supabase use connection string authentication.",
         "properties": {
           "auth_method": {
             "$ref": "#/components/schemas/DatabaseAuthMethod"
@@ -14705,7 +15282,7 @@
           },
           "query": {
             "type": "string",
-            "description": "SQL query to execute"
+            "description": "Query payload to execute.\n\n- SQL publishers (serendb/neon/supabase): SQL string\n- MongoDB publishers: JSON string matching `MongoDbQuery`"
           }
         }
       },
@@ -14933,8 +15510,7 @@
         ],
         "properties": {
           "amount": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "endpoint_id": {
             "type": "string"
@@ -14961,13 +15537,19 @@
         ],
         "properties": {
           "new_balance": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "transaction_id": {
             "type": "string"
           }
         }
+      },
+      "DelegationType": {
+        "type": "string",
+        "enum": [
+          "in_loop",
+          "full_handoff"
+        ]
       },
       "DepositDataResponse": {
         "type": "object",
@@ -15195,6 +15777,19 @@
               }
             ],
             "nullable": true
+          }
+        }
+      },
+      "EnableGeoRoutingRequest": {
+        "type": "object",
+        "description": "Request to enable geographic routing for a publisher",
+        "required": [
+          "region"
+        ],
+        "properties": {
+          "region": {
+            "type": "string",
+            "description": "The proxy region to route through (e.g., \"EU\")"
           }
         }
       },
@@ -15698,7 +16293,7 @@
           },
           "query": {
             "type": "string",
-            "description": "SQL query to estimate"
+            "description": "Query payload to estimate.\n\n- SQL publishers (serendb/neon/supabase): SQL string\n- MongoDB publishers: JSON string matching `MongoDbQuery`"
           }
         }
       },
@@ -15739,6 +16334,129 @@
           "publisher_slug": {
             "type": "string",
             "description": "Publisher slug"
+          }
+        }
+      },
+      "EvalMatrixEntry": {
+        "type": "object",
+        "required": [
+          "score",
+          "signal_count"
+        ],
+        "properties": {
+          "score": {
+            "type": "number",
+            "format": "double"
+          },
+          "signal_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "EvalMatrixResponse": {
+        "type": "object",
+        "required": [
+          "matrix",
+          "generated_at",
+          "total_signals"
+        ],
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "matrix": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/EvalMatrixEntry"
+              }
+            }
+          },
+          "total_signals": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "EvalSignalItem": {
+        "type": "object",
+        "required": [
+          "task_type",
+          "model_id",
+          "satisfaction"
+        ],
+        "properties": {
+          "delegation_type": {
+            "$ref": "#/components/schemas/DelegationType"
+          },
+          "had_tool_errors": {
+            "type": "boolean"
+          },
+          "latency_ms": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LatencyMs"
+              }
+            ],
+            "nullable": true
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "satisfaction": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "task_type": {
+            "$ref": "#/components/schemas/TaskType"
+          },
+          "token_count": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TokenCount"
+              }
+            ],
+            "nullable": true
+          },
+          "tool_ids_used": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "EvalSignalRequest": {
+        "type": "object",
+        "required": [
+          "signals"
+        ],
+        "properties": {
+          "signals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvalSignalItem"
+            }
+          }
+        }
+      },
+      "EvalSignalResponse": {
+        "type": "object",
+        "required": [
+          "accepted",
+          "rejected"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rejected": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -16253,6 +16971,49 @@
           }
         }
       },
+      "GeoRestrictedError": {
+        "type": "object",
+        "description": "Error response when a publisher uses opt_in routing and the user has not opted in",
+        "required": [
+          "error",
+          "message",
+          "publisher",
+          "proxy_region",
+          "opt_in_endpoint"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "opt_in_endpoint": {
+            "type": "string"
+          },
+          "proxy_region": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
+          }
+        }
+      },
+      "GeoRoutingConfig": {
+        "type": "object",
+        "required": [
+          "proxy_region"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/GeoRoutingMode"
+          },
+          "proxy_region": {
+            "type": "string",
+            "description": "Proxy region to route through (e.g., \"EU\")"
+          }
+        }
+      },
       "GrantCreditsRequest": {
         "type": "object",
         "description": "Request to grant credits to an organization (admin)",
@@ -16711,16 +17472,13 @@
             "type": "string"
           },
           "subtotal_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "tax_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "total_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           }
         }
       },
@@ -16736,8 +17494,7 @@
         ],
         "properties": {
           "amount_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "description": {
             "type": "string"
@@ -16746,12 +17503,10 @@
             "type": "string"
           },
           "quantity": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "unit_price": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           }
         }
       },
@@ -16958,6 +17713,21 @@
                 "$ref": "#/components/schemas/PaginationMeta"
               }
             ],
+            "nullable": true
+          }
+        }
+      },
+      "LatencyMs": {
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32",
             "nullable": true
           }
         }
@@ -17562,6 +18332,139 @@
           "name": {
             "type": "string",
             "description": "Tool name"
+          }
+        }
+      },
+      "MongoDbOperation": {
+        "type": "string",
+        "description": "MongoDB operations supported via the Data API",
+        "enum": [
+          "find",
+          "findOne",
+          "aggregate",
+          "countDocuments",
+          "distinct",
+          "insertOne",
+          "insertMany",
+          "updateOne",
+          "updateMany",
+          "replaceOne",
+          "deleteOne",
+          "deleteMany"
+        ]
+      },
+      "MongoDbProviderConfig": {
+        "type": "object",
+        "description": "Optional MongoDB Atlas publisher policy and guardrails.\n\nThis config is stored in `agent_publishers.database_config` for `database_type = mongodb`.",
+        "properties": {
+          "default_data_source": {
+            "type": "string",
+            "description": "Default Atlas data source (cluster name).\nIf omitted, defaults to \"Cluster0\".",
+            "nullable": true
+          },
+          "max_limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum allowed `limit` value for read operations that support it.\nAlso used as default limit for `find` queries that omit a limit."
+          },
+          "max_pipeline_stages": {
+            "type": "integer",
+            "description": "Maximum allowed number of aggregation pipeline stages.",
+            "minimum": 0
+          },
+          "read_only": {
+            "type": "boolean",
+            "description": "If true, write operations are blocked."
+          },
+          "require_filter_for_write_ops": {
+            "type": "boolean",
+            "description": "If true, write operations must include a non-empty filter object."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MongoDbQuery": {
+        "type": "object",
+        "description": "MongoDB Atlas Data API query request\n\nUsed when executing queries against MongoDB Atlas publishers.\nThe query is submitted as a JSON string in the `query` field of execute_paid_query.",
+        "required": [
+          "collection",
+          "operation"
+        ],
+        "properties": {
+          "collection": {
+            "type": "string",
+            "description": "Collection name to query"
+          },
+          "dataSource": {
+            "type": "string",
+            "description": "Atlas Data API data source / cluster name (maps to `dataSource`)\n\nIf omitted, the server defaults to \"Cluster0\".",
+            "nullable": true
+          },
+          "database": {
+            "type": "string",
+            "description": "Database name (optional, uses publisher's database_name if not specified)",
+            "nullable": true
+          },
+          "document": {
+            "description": "Document for insertOne operation",
+            "nullable": true
+          },
+          "documents": {
+            "type": "array",
+            "items": {},
+            "description": "Documents for insertMany operation",
+            "nullable": true
+          },
+          "fieldName": {
+            "type": "string",
+            "description": "Field name for distinct operation",
+            "nullable": true
+          },
+          "filter": {
+            "description": "Filter document (for find, findOne operations)",
+            "nullable": true
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Limit number of results",
+            "nullable": true
+          },
+          "operation": {
+            "$ref": "#/components/schemas/MongoDbOperation"
+          },
+          "pipeline": {
+            "type": "array",
+            "items": {},
+            "description": "Aggregation pipeline (for aggregate operation)",
+            "nullable": true
+          },
+          "projection": {
+            "description": "Projection (fields to include/exclude)",
+            "nullable": true
+          },
+          "replacement": {
+            "description": "Replacement document for replaceOne operation",
+            "nullable": true
+          },
+          "skip": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Skip results (for pagination)",
+            "nullable": true
+          },
+          "sort": {
+            "description": "Sort specification",
+            "nullable": true
+          },
+          "update": {
+            "description": "Update document for updateOne/updateMany operations",
+            "nullable": true
+          },
+          "upsert": {
+            "type": "boolean",
+            "description": "Upsert flag for update/replace operations",
+            "nullable": true
           }
         }
       },
@@ -18684,13 +19587,19 @@
         "required": [
           "payment_intent_id",
           "client_secret",
+          "amount_cents",
           "amount_usd",
           "currency"
         ],
         "properties": {
+          "amount_cents": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Amount to be charged, in cents."
+          },
           "amount_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string",
+            "description": "Amount to be charged, in USD."
           },
           "client_secret": {
             "type": "string"
@@ -18838,8 +19747,7 @@
         ],
         "properties": {
           "amount_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "attempted_at": {
             "type": "string"
@@ -20720,8 +21628,7 @@
             "format": "int64"
           },
           "total_revenue_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "total_templates": {
             "type": "integer",
@@ -21003,6 +21910,9 @@
             "type": "string",
             "format": "date-time"
           },
+          "custom_auth_params": {
+            "description": "Custom provider-specific authorization URL parameters"
+          },
           "description": {
             "type": "string",
             "nullable": true
@@ -21217,6 +22127,20 @@
           "requires_user_oauth"
         ],
         "properties": {
+          "a2a_agent_card": {
+            "description": "Cached A2A agent card",
+            "nullable": true
+          },
+          "a2a_endpoint_url": {
+            "type": "string",
+            "description": "A2A endpoint base URL (for compute_type = agent)",
+            "nullable": true
+          },
+          "a2a_health_status": {
+            "type": "string",
+            "description": "A2A health status: unknown, healthy, unhealthy, unreachable",
+            "nullable": true
+          },
           "accepted_assets": {
             "type": "array",
             "items": {
@@ -21405,6 +22329,14 @@
           },
           "resource_name": {
             "type": "string",
+            "nullable": true
+          },
+          "routing": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GeoRoutingConfig"
+              }
+            ],
             "nullable": true
           },
           "slug": {
@@ -22002,8 +22934,7 @@
         ],
         "properties": {
           "amount": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "endpoint_id": {
             "type": "string"
@@ -22033,8 +22964,7 @@
         ],
         "properties": {
           "new_balance": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "refund_id": {
             "type": "string"
@@ -23112,6 +24042,16 @@
           }
         }
       },
+      "TaskType": {
+        "type": "string",
+        "enum": [
+          "code_generation",
+          "file_operations",
+          "research",
+          "document_generation",
+          "general_chat"
+        ]
+      },
       "TemplateAnalytics": {
         "type": "object",
         "description": "Analytics data for a single template",
@@ -23164,8 +24104,7 @@
             "format": "int64"
           },
           "total_revenue_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "unique_agents_served": {
             "type": "integer",
@@ -23195,11 +24134,10 @@
       },
       "TemplateLanguage": {
         "type": "string",
-        "description": "Programming language for agent templates",
         "enum": [
           "python",
           "typescript",
-          "rust"
+          "javascript"
         ]
       },
       "TemplateListResponse": {
@@ -23281,6 +24219,28 @@
             "nullable": true
           }
         }
+      },
+      "TokenCount": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "output": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        }
+      },
+      "TokenEndpointAuthMethod": {
+        "type": "string",
+        "enum": [
+          "client_secret_post",
+          "client_secret_basic"
+        ]
       },
       "TopAgent": {
         "type": "object",
@@ -23454,7 +24414,8 @@
           "refund",
           "withdrawal",
           "settlement",
-          "service_fee"
+          "service_fee",
+          "agent_task"
         ]
       },
       "TransactionsDataResponse": {
@@ -23638,6 +24599,10 @@
             "description": "Optional new client secret (will be re-encrypted). If omitted, keep existing.",
             "nullable": true
           },
+          "custom_auth_params": {
+            "description": "Custom provider-specific authorization URL parameters. If omitted, leave unchanged.",
+            "nullable": true
+          },
           "description": {
             "type": "string",
             "description": "If omitted, leave unchanged. If null, clear.",
@@ -23683,7 +24648,11 @@
             "nullable": true
           },
           "token_endpoint_auth_method": {
-            "type": "string",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TokenEndpointAuthMethod"
+              }
+            ],
             "nullable": true
           },
           "token_url": {
@@ -23939,6 +24908,11 @@
         "type": "object",
         "description": "Request to update a publisher",
         "properties": {
+          "a2a_endpoint_url": {
+            "type": "string",
+            "description": "A2A endpoint base URL (for compute_type = agent)",
+            "nullable": true
+          },
           "add_asset_ids": {
             "type": "array",
             "items": {
@@ -24243,6 +25217,14 @@
             "type": "string",
             "nullable": true
           },
+          "routing": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GeoRoutingConfig"
+              }
+            ],
+            "nullable": true
+          },
           "token_cache_ttl_seconds": {
             "type": "integer",
             "format": "int32",
@@ -24396,6 +25378,11 @@
             "description": "Optional database ID where the resource data lives",
             "nullable": true
           },
+          "publisher_slug": {
+            "type": "string",
+            "description": "Optional publisher slug for disambiguation when an organization owns multiple publishers",
+            "nullable": true
+          },
           "resource_type": {
             "type": "string",
             "description": "Type of resource being registered"
@@ -24515,8 +25502,7 @@
         ],
         "properties": {
           "compute_cost_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "compute_hours_large": {
             "type": "number",
@@ -24561,16 +25547,14 @@
             "description": "Cloud region for the project (e.g., aws-us-east-1)."
           },
           "storage_cost_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "storage_gb_avg": {
             "type": "number",
             "format": "double"
           },
           "total_cost_usd": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           }
         }
       },
@@ -24733,6 +25717,112 @@
           }
         }
       },
+      "UserPublisherRouting": {
+        "type": "object",
+        "description": "A user's opt-in to route requests through a geographic proxy for a specific publisher.",
+        "required": [
+          "id",
+          "user_id",
+          "publisher_id",
+          "enabled_region",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enabled_region": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publisher_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UserRoutingOptIn": {
+        "type": "object",
+        "description": "Response for user routing opt-in status",
+        "required": [
+          "publisher_slug",
+          "publisher_name",
+          "enabled_region",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enabled_region": {
+            "type": "string"
+          },
+          "publisher_name": {
+            "type": "string"
+          },
+          "publisher_slug": {
+            "type": "string"
+          }
+        }
+      },
+      "UserRoutingOptInDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/UserRoutingOptIn"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "UserRoutingOptInsDataResponse": {
+        "type": "object",
+        "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n\"data\": T,\n\"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet project = Project {\nid: \"123\".to_string(),\nname: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\nid: String,\nname: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\ntotal: 0,\ncount: 0,\nlimit: 20,\noffset: 0,\nhas_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserRoutingOptIn"
+            },
+            "description": "The actual response data (can be a single object or a collection)"
+          },
+          "pagination": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaginationMeta"
+              }
+            ],
+            "nullable": true
+          }
+        }
+      },
       "UserStatus": {
         "type": "string",
         "description": "User status enum matching PostgreSQL enum",
@@ -24769,8 +25859,7 @@
         ],
         "properties": {
           "balance": {
-            "type": "number",
-            "format": "double"
+            "type": "string"
           },
           "endpoint_id": {
             "type": "string"
@@ -25335,6 +26424,10 @@
       "description": "PostgreSQL role/user management endpoints"
     },
     {
+      "name": "Geographic Routing",
+      "description": "User opt-in for geographic proxy routing"
+    },
+    {
       "name": "Auth",
       "description": "Authentication and user management endpoints"
     },
@@ -25421,6 +26514,10 @@
     {
       "name": "skill",
       "description": "Endpoints included in skill.md for AI agent discovery"
+    },
+    {
+      "name": "Eval",
+      "description": "Eval signal ingestion and routing matrix"
     },
     {
       "name": "federation",
