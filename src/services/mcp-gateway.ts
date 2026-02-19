@@ -304,7 +304,7 @@ export async function callGatewayTool(
     };
   } catch (error) {
     const executionTime = Date.now() - startTime;
-    console.error("[MCP Gateway] Tool call failed:", error);
+    console.error(`[MCP Gateway] Tool call failed: ${error instanceof Error ? error.message : String(error)}`);
 
     return {
       result: error instanceof Error ? error.message : String(error),
