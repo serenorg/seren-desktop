@@ -45,7 +45,7 @@ const initialState: AgentTasksState = {
 
 const [state, setState] = createStore<AgentTasksState>(initialState);
 
-// Active stream handle for cleanup
+// Active stream handle for cleanup.
 let activeStream: { close: () => void } | null = null;
 
 /**
@@ -57,6 +57,7 @@ async function loadTasks(orgId: string): Promise<void> {
   try {
     const tasks = await listAgentTasks(orgId, state.limit, state.offset);
     setState("tasks", tasks);
+    setState("total", tasks.length);
   } catch (err) {
     setState("error", err instanceof Error ? err.message : String(err));
   } finally {
@@ -76,7 +77,7 @@ async function runAgent(
   const task = await runAgentCloud(publisherSlug, message);
   // Prepend to task list
   setState("tasks", (prev) => [task, ...prev]);
-  setState("activeTaskId", task.id);
+  setState("total", (prev) => prev + 1);
   // Start streaming updates
   followTask(orgId, task.id);
   return task;
@@ -91,37 +92,55 @@ function followTask(orgId: string, taskId: string): void {
 
   setState("activeTaskId", taskId);
 
-  // Initialize event log for this task
-  setState("taskEvents", taskId, []);
+  // Keep prior event history if this task was already followed.
+  if (!state.taskEvents[taskId]) {
+    setState("taskEvents", taskId, []);
+  }
 
   activeStream = streamTask(orgId, taskId, {
     onEvent: (eventType, data) => {
-      // Accumulate event for live log display
+      if (state.activeTaskId !== taskId) return;
+
+      // Accumulate event for live log display.
       setState("taskEvents", taskId, (prev) => [
         ...(prev ?? []),
         { eventType, data, receivedAt: Date.now() },
       ]);
-      // Update the task in the list if we get status info
-      if (data.status) {
+
+      // Update the task in the list if we get status info.
+      if (typeof data.status === "string") {
         updateTaskInList(taskId, {
           status: data.status as AgentTaskStatus,
         });
       }
     },
     onComplete: (taskData) => {
-      updateTaskInList(taskId, {
+      if (state.activeTaskId !== taskId) return;
+
+      const updates: Partial<AgentTask> = {
         status: (taskData.status as AgentTaskStatus) ?? "completed",
-        output: taskData.output as Record<string, unknown> | undefined,
-        error_message: taskData.error_message as string | undefined,
-        cost_total_atomic: taskData.cost_total_atomic as number | undefined,
-      });
+      };
+
+      if (taskData.output !== undefined) {
+        updates.output = taskData.output as Record<string, unknown>;
+      }
+      if (taskData.error_message !== undefined) {
+        updates.error_message = taskData.error_message as string;
+      }
+      if (typeof taskData.cost_total_atomic === "number") {
+        updates.cost_total_atomic = taskData.cost_total_atomic;
+      }
+
+      updateTaskInList(taskId, updates);
       activeStream = null;
     },
     onError: (error) => {
+      if (state.activeTaskId !== taskId) return;
+
       console.error("[AgentTasks] Stream error:", error);
       activeStream = null;
-      // Fallback: poll the task once
-      refreshTask(orgId, taskId);
+      // Fallback: poll the task once.
+      void refreshTask(orgId, taskId);
     },
   });
 }
@@ -155,7 +174,7 @@ async function cancelTask(orgId: string, taskId: string): Promise<void> {
   try {
     const task = await cancelAgentTask(orgId, taskId);
     updateTaskInList(taskId, task);
-    if (state.activeTaskId === taskId) {
+    if (state.activeTaskId === taskId && isTerminalStatus(task.status)) {
       stopFollowing();
     }
   } catch (err) {

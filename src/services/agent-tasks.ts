@@ -48,17 +48,26 @@ export interface AgentTaskEvent {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function authHeaders(): Promise<HeadersInit> {
+async function authHeaders(
+  includeJsonContentType = false,
+): Promise<HeadersInit> {
   const token = await getToken();
   if (!token) throw new Error("Not authenticated");
-  return {
+
+  const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
   };
+
+  if (includeJsonContentType) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  return headers;
 }
 
 async function apiGet<T>(path: string): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const fetchFn = await getTauriFetch();
+  const resp = await fetchFn(`${API_BASE}${path}`, {
     headers: await authHeaders(),
   });
   if (!resp.ok) {
@@ -73,9 +82,10 @@ async function apiPost<T>(
   path: string,
   body?: unknown,
 ): Promise<{ data: T; status: number }> {
-  const resp = await fetch(`${API_BASE}${path}`, {
+  const fetchFn = await getTauriFetch();
+  const resp = await fetchFn(`${API_BASE}${path}`, {
     method: "POST",
-    headers: await authHeaders(),
+    headers: await authHeaders(true),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!resp.ok && resp.status !== 202) {
@@ -162,11 +172,29 @@ export function streamTask(
     onComplete: (task: Partial<AgentTask>) => void;
     onError: (error: string) => void;
   },
+  opts?: { afterEventId?: string },
 ): { close: () => void } {
-  const url = `${API_BASE}/organizations/${orgId}/agents/tasks/${taskId}/stream`;
-  let aborted = false;
+  const baseUrl = `${API_BASE}/organizations/${orgId}/agents/tasks/${taskId}/stream`;
+  const url = opts?.afterEventId
+    ? `${baseUrl}?after=${encodeURIComponent(opts.afterEventId)}`
+    : baseUrl;
 
-  const TERMINAL_EVENTS = ["task.completed", "task.failed", "task.canceled"];
+  let aborted = false;
+  const abortController = new AbortController();
+  let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  const TERMINAL_EVENTS = new Set([
+    "task.completed",
+    "task.failed",
+    "task.canceled",
+    "task.cancelled",
+  ]);
+  const TERMINAL_STATUSES = new Set([
+    "completed",
+    "failed",
+    "canceled",
+    "cancelled",
+  ]);
 
   (async () => {
     try {
@@ -174,6 +202,7 @@ export function streamTask(
       const fetchFn = await getTauriFetch();
       const resp = await fetchFn(url, {
         headers: { ...headers, Accept: "text/event-stream" },
+        signal: abortController.signal,
       });
 
       if (!resp.ok || !resp.body) {
@@ -182,6 +211,7 @@ export function streamTask(
       }
 
       const reader = resp.body.getReader();
+      activeReader = reader;
       const decoder = new TextDecoder();
       let buffer = "";
 
@@ -189,7 +219,10 @@ export function streamTask(
         const { done, value } = await reader.read();
         if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        // Normalize CRLF/LF boundaries to simplify SSE block parsing.
+        buffer += decoder
+          .decode(value, { stream: true })
+          .replaceAll("\r\n", "\n");
 
         while (buffer.includes("\n\n")) {
           const end = buffer.indexOf("\n\n");
@@ -197,23 +230,35 @@ export function streamTask(
           buffer = buffer.slice(end + 2);
 
           let eventType = "";
-          let data = "";
+          const dataLines: string[] = [];
+
           for (const line of block.split("\n")) {
             if (line.startsWith("event:")) {
               eventType = line.slice(6).trim();
             } else if (line.startsWith("data:")) {
-              data = line.slice(5).trim();
+              dataLines.push(line.slice(5).trim());
             }
           }
 
+          const data = dataLines.join("\n");
           if (!data) continue;
 
           try {
             const parsed = JSON.parse(data);
-            callbacks.onEvent(eventType, parsed);
+            const eventData =
+              parsed && typeof parsed === "object"
+                ? (parsed as Record<string, unknown>)
+                : ({ value: parsed } as Record<string, unknown>);
 
-            if (TERMINAL_EVENTS.includes(eventType)) {
-              callbacks.onComplete(parsed);
+            callbacks.onEvent(eventType, eventData);
+
+            const status = eventData.status;
+            const terminalByStatus =
+              typeof status === "string" && TERMINAL_STATUSES.has(status);
+            const terminalByEvent = TERMINAL_EVENTS.has(eventType);
+
+            if (terminalByEvent || terminalByStatus) {
+              callbacks.onComplete(eventData);
               return;
             }
           } catch {
@@ -222,15 +267,20 @@ export function streamTask(
         }
       }
     } catch (err) {
-      if (!aborted) {
+      if (!aborted && !abortController.signal.aborted) {
         callbacks.onError(err instanceof Error ? err.message : String(err));
       }
+    } finally {
+      activeReader = null;
     }
   })();
 
   return {
     close: () => {
       aborted = true;
+      abortController.abort();
+      void activeReader?.cancel().catch(() => {});
+      activeReader = null;
     },
   };
 }
