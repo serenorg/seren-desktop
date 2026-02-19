@@ -19,9 +19,9 @@ const {
     activeProject: { id: "project-1" },
   },
   memoryEnabledState: {
-    enabled: true,
+    enabled: true as boolean,
   },
-  settingsGetMock: vi.fn((key: string) =>
+  settingsGetMock: vi.fn((key: string): boolean | undefined =>
     key === "memoryEnabled" ? true : undefined,
   ),
 }));

@@ -12,7 +12,6 @@ import {
   Show,
 } from "solid-js";
 import type { InstalledSkill, Skill } from "@/lib/skills";
-import type { AgentType } from "@/services/acp";
 import { skills as skillsService } from "@/services/skills";
 import { acpStore } from "@/stores/acp.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
@@ -49,7 +48,6 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     ) {
       setShowLauncher(false);
       setLauncherQuery("");
-      setShowAgentPicker(false);
     }
   };
 
@@ -143,18 +141,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       setSpawning(false);
     }
   };
-
-  const _openSkillsManager = () => {
-    // Open Settings page with Skills tab selected
-    window.dispatchEvent(
-      new CustomEvent("seren:open-settings", { detail: { tab: "skills" } }),
-    );
-  };
-
   const toggleLauncher = () => {
     const opening = !showLauncher();
     setShowLauncher(opening);
-    setShowAgentPicker(false);
     if (opening) {
       setLauncherQuery("");
       requestAnimationFrame(() => searchInputRef?.focus());
@@ -216,46 +205,6 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         (s.description ?? "").toLowerCase().includes(q) ||
         s.tags.some((t) => t.toLowerCase().includes(q)),
     );
-  };
-
-  const _showJustChat = () => {
-    const q = launcherQuery().toLowerCase().trim();
-    if (!q) return true;
-    return "just chat".includes(q) || "chat".includes(q);
-  };
-
-  const [_showAgentPicker, setShowAgentPicker] = createSignal(false);
-
-  const currentAgentLabel = () => {
-    if (threadStore.preferChat) return "Seren Agent";
-    const agents = acpStore.availableAgents;
-    const selected = agents.find(
-      (a) => a.type === acpStore.selectedAgentType && a.available,
-    );
-    if (selected)
-      return selected.type === "codex" ? "Codex Agent" : "Claude Agent";
-
-    const claude = agents.find((a) => a.type === "claude-code" && a.available);
-    if (claude) return "Claude Agent";
-    const codex = agents.find((a) => a.type === "codex" && a.available);
-    if (codex) return "Codex Agent";
-    return "Seren Agent";
-  };
-
-  const _currentAgentIcon = () => {
-    const label = currentAgentLabel();
-    if (label === "Codex Agent") return "\u26A1";
-    if (label === "Claude Agent") return "\u{1F916}";
-    return "\u{1F4AC}";
-  };
-
-  const _availableAgentOptions = () =>
-    acpStore.availableAgents.filter((a) => a.available);
-
-  const _selectPreferredAgent = (agentType: AgentType) => {
-    threadStore.setPreferChat(false);
-    acpStore.setSelectedAgentType(agentType);
-    setShowAgentPicker(false);
   };
 
   const handleSelectThread = (thread: Thread) => {

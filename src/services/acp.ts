@@ -154,7 +154,11 @@ export interface SessionStatusEvent {
   };
   models?: {
     currentModelId: string;
-    availableModels: Array<{ modelId: string; name: string }>;
+    availableModels: Array<{
+      modelId: string;
+      name: string;
+      description?: string;
+    }>;
   };
   modes?: {
     currentModeId: string;

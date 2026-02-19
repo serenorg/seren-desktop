@@ -36,8 +36,8 @@ import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
   type AgentType,
   type DiffEvent,
-  type ToolCallEvent,
   launchLogin,
+  type ToolCallEvent,
 } from "@/services/acp";
 import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";

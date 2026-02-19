@@ -2,7 +2,7 @@
 // ABOUTME: Presents chats and agent sessions as a single sorted thread list filtered by project.
 
 import { createStore } from "solid-js/store";
-import { parseSkillMd, type InstalledSkill } from "@/lib/skills";
+import { type InstalledSkill, parseSkillMd } from "@/lib/skills";
 import { archiveAgentConversation } from "@/lib/tauri-bridge";
 import type { AgentType, SessionStatus } from "@/services/acp";
 import { skills as skillsService } from "@/services/skills";

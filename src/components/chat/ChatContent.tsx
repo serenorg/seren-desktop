@@ -91,7 +91,9 @@ type GroupedMessage =
     };
 
 /** Group consecutive tool_call messages into collapsed groups */
-function groupConsecutiveToolCalls(messages: UnifiedMessage[]): GroupedMessage[] {
+function groupConsecutiveToolCalls(
+  messages: UnifiedMessage[],
+): GroupedMessage[] {
   const grouped: GroupedMessage[] = [];
   let currentGroup: UnifiedMessage[] = [];
 

@@ -67,6 +67,7 @@ export interface AgentMessage {
 export interface AgentModelInfo {
   modelId: string;
   name: string;
+  description?: string;
 }
 
 export interface AgentModeInfo {
