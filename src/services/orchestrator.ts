@@ -8,10 +8,13 @@ import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
 import { storeAssistantResponse } from "@/services/memory";
 import { acpStore } from "@/stores/acp.store";
+import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { projectStore } from "@/stores/project.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
+import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 import type { UnifiedMessage } from "@/types/conversation";
 
@@ -132,7 +135,22 @@ export async function orchestrate(
 
   // 1. Build history from conversation store
   const messages = conversationStore.getMessagesFor(conversationId);
-  const history = serializeHistory(messages);
+  let history = serializeHistory(messages);
+
+  // Inject memory context for the default orchestrator path.
+  if (settingsStore.get("memoryEnabled") && authStore.isAuthenticated) {
+    try {
+      const projectId = projectStore.activeProject?.id ?? null;
+      const memoryContext = await invoke<string | null>("memory_bootstrap", {
+        projectId,
+      });
+      if (memoryContext) {
+        history = [{ role: "system", content: memoryContext }, ...history];
+      }
+    } catch (error) {
+      console.warn("[orchestrator] Failed to retrieve memory context:", error);
+    }
+  }
 
   // 2. Build capabilities (thread-aware skills: thread -> project -> global)
   await skillsStore.ensureContextLoaded(fileTreeState.rootPath, conversationId);

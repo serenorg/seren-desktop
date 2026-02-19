@@ -38,7 +38,7 @@ function getProjectId(): string | null {
  */
 export async function rememberMemory(
   content: string,
-  memoryType: string = "conversation",
+  memoryType: string = "semantic",
 ): Promise<string> {
   if (!isMemoryAvailable()) {
     throw new Error("Memory feature not available - enable it in settings");
@@ -140,7 +140,7 @@ export async function storeConversationTurn(
   const metadata = context ? `\n\nModel: ${context.model || "unknown"}` : "";
 
   try {
-    await rememberMemory(`${combinedContent}${metadata}`, "conversation");
+    await rememberMemory(`${combinedContent}${metadata}`, "semantic");
   } catch (error) {
     console.error("[Memory] Failed to store conversation turn:", error);
   }
@@ -157,6 +157,10 @@ export async function storeAssistantResponse(
     return;
   }
 
+  if (!response.trim()) {
+    return;
+  }
+
   const content = context?.userQuery
     ? `User: ${context.userQuery}\n\nAssistant: ${response}`
     : `Assistant: ${response}`;
@@ -164,7 +168,7 @@ export async function storeAssistantResponse(
   const metadata = context?.model ? `\n\nModel: ${context.model}` : "";
 
   try {
-    await rememberMemory(`${content}${metadata}`, "conversation");
+    await rememberMemory(`${content}${metadata}`, "semantic");
   } catch (error) {
     console.error("[Memory] Failed to store assistant response:", error);
   }

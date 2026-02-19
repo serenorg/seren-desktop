@@ -145,6 +145,16 @@ pub async fn memory_remember(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Best-effort parse of returned memory ID for local/cloud correlation.
+    let cloud_id = serde_json::from_str::<serde_json::Value>(&result)
+        .ok()
+        .and_then(|v| {
+            v.get("memory_id")
+                .and_then(|id| id.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        })
+        .or_else(|| uuid::Uuid::parse_str(&result).ok());
+
     // Also cache locally (with zero embedding — cloud has the real one).
     state.ensure_cache()?;
     let cached = CachedMemory {
@@ -156,7 +166,7 @@ pub async fn memory_remember(
         relevance_score: 1.0,
         created_at: seren_memory_sdk::chrono::Utc::now(),
         synced: true,
-        cloud_id: None,
+        cloud_id,
     };
 
     let guard = state.cache.lock().map_err(|e| e.to_string())?;
