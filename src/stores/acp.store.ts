@@ -377,6 +377,18 @@ export const acpStore = {
   },
 
   /**
+   * Get the active session for a specific conversation ID.
+   * Returns null if no session is running for that conversation.
+   */
+  getSessionForConversation(conversationId: string): ActiveSession | null {
+    return (
+      Object.values(state.sessions).find(
+        (s) => s.conversationId === conversationId,
+      ) ?? null
+    );
+  },
+
+  /**
    * Get plan entries for the active session.
    */
   get plan(): PlanEntry[] {

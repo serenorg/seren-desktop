@@ -169,16 +169,31 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     window.removeEventListener("seren:set-chat-input", onSetChatInput);
   });
 
-  const hasSession = () => acpStore.activeSession !== null;
-  const isReady = () => acpStore.activeSession?.info.status === "ready";
-  const isPrompting = () => acpStore.activeSession?.info.status === "prompting";
-  const sessionError = () => acpStore.error;
+  // Resolve the session for the currently-viewed thread, not the global
+  // active session. This prevents a running Claude session from bleeding into
+  // the Codex thread's controls, ready-state, and send behaviour.
+  const threadSession = createMemo(() => {
+    const thread = activeAgentThread();
+    if (!thread) return acpStore.activeSession;
+    return acpStore.getSessionForConversation(thread.id);
+  });
+
+  const hasSession = () => threadSession() !== null;
+  const isReady = () => threadSession()?.info.status === "ready";
+  const isPrompting = () => threadSession()?.info.status === "prompting";
+  const sessionError = () => threadSession()?.error ?? acpStore.error;
   const lockedAgentType = createMemo<AgentType>(() => {
-    const sessionAgent = acpStore.activeSession?.info.agentType;
+    // Thread's declared agent type takes priority so the controls always
+    // reflect the selected thread, not a session from a different thread.
+    const threadType = activeAgentThread()?.agentType;
+    if (threadType === "codex" || threadType === "claude-code") {
+      return threadType;
+    }
+    const sessionAgent = threadSession()?.info.agentType;
     if (sessionAgent === "codex" || sessionAgent === "claude-code") {
       return sessionAgent;
     }
-    return activeAgentThread()?.agentType === "codex" ? "codex" : "claude-code";
+    return "claude-code";
   });
   const lockedAgentName = () =>
     lockedAgentType() === "codex" ? "Codex" : "Claude Code";
