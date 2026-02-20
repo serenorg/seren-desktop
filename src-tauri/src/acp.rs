@@ -3517,7 +3517,7 @@ pub async fn acp_ensure_codex_cli(app: AppHandle) -> Result<String, String> {
     };
 
     // Minimum required Codex CLI version for app-server protocol compatibility
-    const MIN_CODEX_CLI_VERSION: &str = "0.98.0";
+    const MIN_CODEX_CLI_VERSION: &str = "0.104.0";
 
     // Already installed locally? Check version and upgrade if needed.
     if codex_bin.exists() {
