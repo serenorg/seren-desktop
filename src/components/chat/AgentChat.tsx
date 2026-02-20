@@ -12,6 +12,8 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { createStore } from "solid-js/store";
+import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
 import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
@@ -27,7 +29,8 @@ import {
   getModelDisplayName,
   mapAgentModelToChat,
 } from "@/lib/rate-limit-fallback";
-import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
+import { escapeHtml } from "@/lib/escape-html";
+import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
   type AgentType,
@@ -71,6 +74,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   let messagesRef: HTMLDivElement | undefined;
   let userHasScrolledUp = false;
 
+  // Off-thread markdown rendering: finalized assistant messages are sent to a
+  // Web Worker so renderMarkdown (marked + hljs) never blocks the main thread.
+  const markdownWorker = new RenderMarkdownWorker();
+  const [htmlCache, setHtmlCache] = createStore<Record<string, string>>({});
+  markdownWorker.onmessage = (e: MessageEvent<{ id: string; html: string }>) => {
+    setHtmlCache(e.data.id, e.data.html);
+  };
+  onCleanup(() => markdownWorker.terminate());
+
   // Get the active agent thread (must be defined before thread-specific memos)
   const activeAgentThread = createMemo(() => {
     const thread = threadStore.activeThread;
@@ -92,6 +104,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     return acpStore.getStreamingContentForConversation(thread.id);
   });
 
+  // Enqueue finalized assistant messages to the render worker.
+  // The worker returns HTML via onmessage → setHtmlCache → reactive DOM update.
+  createEffect(() => {
+    for (const msg of threadMessages()) {
+      if (msg.type === "assistant" && htmlCache[msg.id] === undefined) {
+        markdownWorker.postMessage({ id: msg.id, markdown: msg.content });
+      }
+    }
+  });
 
   // Get streaming thinking for THIS thread's conversation ID
   const threadStreamingThinking = createMemo(() => {
@@ -649,7 +670,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           <article class="px-5 py-4 border-b border-surface-2">
             <div
               class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
-              innerHTML={renderMarkdown(message.content)}
+              innerHTML={htmlCache[message.id] ?? escapeHtml(message.content)}
             />
             <Show when={message.duration}>
               {(() => {

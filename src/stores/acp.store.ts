@@ -170,6 +170,40 @@ const [state, setState] = createStore<AcpState>({
 let globalUnsubscribe: UnlistenFn | null = null;
 const pendingSessionEvents = new Map<string, AcpEvent[]>();
 const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
+
+// Chunk accumulation buffers — plain JS, not reactive.
+// Flushed to the SolidJS store at CHUNK_FLUSH_MS intervals to reduce
+// per-chunk setState calls during high-velocity streaming bursts.
+const CHUNK_FLUSH_MS = 50;
+const chunkBufs = new Map<string, { content: string; thinking: string }>();
+const chunkFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function flushChunkBuf(sessionId: string): void {
+  const timer = chunkFlushTimers.get(sessionId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    chunkFlushTimers.delete(sessionId);
+  }
+  const buf = chunkBufs.get(sessionId);
+  if (!buf) return;
+  if (buf.content) {
+    setState("sessions", sessionId, "streamingContent", (c) => c + buf.content);
+    buf.content = "";
+  }
+  if (buf.thinking) {
+    setState("sessions", sessionId, "streamingThinking", (c) => c + buf.thinking);
+    buf.thinking = "";
+  }
+}
+
+function clearChunkBuf(sessionId: string): void {
+  const timer = chunkFlushTimers.get(sessionId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    chunkFlushTimers.delete(sessionId);
+  }
+  chunkBufs.delete(sessionId);
+}
 const PENDING_SESSION_EVENT_LIMIT = 500;
 const CLAUDE_INIT_RETRY_DELAY_MS = 350;
 const MAX_CLAUDE_INIT_RETRIES = 3;
@@ -1199,6 +1233,8 @@ export const acpStore = {
       ...msgs,
       userMessage,
     ]);
+    // Discard any buffered chunks from the previous response
+    clearChunkBuf(sessionId);
     setState("sessions", sessionId, "streamingContent", "");
     setState("sessions", sessionId, "streamingContentTimestamp", undefined);
     setState("sessions", sessionId, "streamingThinking", "");
@@ -1944,8 +1980,15 @@ export const acpStore = {
     const session = state.sessions[sessionId];
     if (!session) return;
 
+    let buf = chunkBufs.get(sessionId);
+    if (!buf) {
+      buf = { content: "", thinking: "" };
+      chunkBufs.set(sessionId, buf);
+    }
+
     if (isThought) {
-      if (!session.streamingThinking) {
+      // Set timestamp on the very first thinking chunk (cheap — fires once)
+      if (!session.streamingThinking && !buf.thinking) {
         setState(
           "sessions",
           sessionId,
@@ -1953,15 +1996,10 @@ export const acpStore = {
           timestamp ?? Date.now(),
         );
       }
-      // Append to streaming thinking content
-      setState(
-        "sessions",
-        sessionId,
-        "streamingThinking",
-        (current) => current + text,
-      );
+      buf.thinking += text;
     } else {
-      if (!session.streamingContent) {
+      // Set timestamp on the very first content chunk (cheap — fires once)
+      if (!session.streamingContent && !buf.content) {
         setState(
           "sessions",
           sessionId,
@@ -1969,12 +2007,17 @@ export const acpStore = {
           timestamp ?? Date.now(),
         );
       }
-      // Append to streaming assistant content
-      setState(
-        "sessions",
+      buf.content += text;
+    }
+
+    // Schedule a flush if one isn't already pending
+    if (!chunkFlushTimers.has(sessionId)) {
+      chunkFlushTimers.set(
         sessionId,
-        "streamingContent",
-        (current) => current + text,
+        setTimeout(() => {
+          chunkFlushTimers.delete(sessionId);
+          flushChunkBuf(sessionId);
+        }, CHUNK_FLUSH_MS),
       );
     }
   },
@@ -1983,8 +2026,9 @@ export const acpStore = {
     const session = state.sessions[sessionId];
     if (!session) return;
 
-    // Flush accumulated streaming content so tool cards appear in correct
-    // chronological order relative to assistant text.
+    // Flush buffered chunks before reading streamingContent so tool cards
+    // appear in correct chronological order relative to assistant text.
+    flushChunkBuf(sessionId);
     if (session.streamingThinking) {
       const thinkingMsg: AgentMessage = {
         id: crypto.randomUUID(),
@@ -2205,6 +2249,9 @@ export const acpStore = {
   },
 
   finalizeStreamingContent(sessionId: string) {
+    // Flush any buffered chunks before reading store state
+    flushChunkBuf(sessionId);
+
     const session = state.sessions[sessionId];
     if (!session) return;
 
