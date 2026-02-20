@@ -11,6 +11,7 @@ import {
   onCleanup,
   onMount,
   Show,
+  untrack,
 } from "solid-js";
 import { createStore } from "solid-js/store";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
@@ -108,7 +109,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // The worker returns HTML via onmessage → setHtmlCache → reactive DOM update.
   createEffect(() => {
     for (const msg of threadMessages()) {
-      if (msg.type === "assistant" && htmlCache[msg.id] === undefined) {
+      if (msg.type === "assistant" && untrack(() => htmlCache[msg.id]) === undefined) {
         markdownWorker.postMessage({ id: msg.id, markdown: msg.content });
       }
     }
