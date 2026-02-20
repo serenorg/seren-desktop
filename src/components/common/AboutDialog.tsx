@@ -27,13 +27,13 @@ export function AboutDialog() {
 
   onMount(() => {
     const unlisten = listen("open-about", async () => {
+      setIsOpen(true);
       try {
         const buildInfo = await invoke<BuildInfo>("get_build_info");
         setInfo(buildInfo);
       } catch (e) {
         console.error("[AboutDialog] Failed to get build info:", e);
       }
-      setIsOpen(true);
     });
 
     onCleanup(() => {
