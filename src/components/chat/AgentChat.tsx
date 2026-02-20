@@ -1103,13 +1103,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               : "bg-destructive/10 border-destructive/40 text-destructive"
           }`}
         >
-          <div class="flex items-center justify-between">
-            <span class="flex-1">
+          <div class="flex items-start justify-between gap-2">
+            <span class="flex-1 max-h-28 overflow-y-auto break-words">
               {isAuthError(sessionError())
                 ? "Authentication expired. Please log in again to continue."
                 : sessionError()}
             </span>
-            <div class="flex items-center gap-2 ml-2">
+            <div class="flex items-center gap-2 shrink-0">
               <Show when={isAuthError(sessionError())}>
                 <button
                   type="button"

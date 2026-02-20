@@ -2193,6 +2193,9 @@ export const acpStore = {
     }
 
     if (status === "ready") {
+      // Clear stale error banner when session recovers — a ready session has
+      // no persistent error to surface. Error messages in chat history remain.
+      setState("sessions", sessionId, "error", null);
       const entry = sessionReadyPromises.get(sessionId);
       if (entry) {
         entry.resolve();
