@@ -159,7 +159,7 @@ registry.register({
 
 registry.register({
   name: "login",
-  description: "Sign in to your account",
+  description: "Sign in to Seren",
   panels: ["chat", "agent"],
   execute: (ctx) => {
     promptLogin();

@@ -192,7 +192,12 @@ function flushChunkBuf(sessionId: string): void {
     buf.content = "";
   }
   if (buf.thinking) {
-    setState("sessions", sessionId, "streamingThinking", (c) => c + buf.thinking);
+    setState(
+      "sessions",
+      sessionId,
+      "streamingThinking",
+      (c) => c + buf.thinking,
+    );
     buf.thinking = "";
   }
 }
@@ -941,6 +946,15 @@ export const acpStore = {
     }
 
     setState("error", null);
+
+    // Pre-emptively clean up any stale backend session with this conversation id.
+    // If the frontend lost track of a session (e.g. after a crash or auth error),
+    // the backend may still hold it, causing "Session already exists" on re-spawn.
+    try {
+      await acpService.terminateSession(conversationId);
+    } catch {
+      // Ignore — session likely doesn't exist in the backend
+    }
 
     let convo: DbAgentConversation | null = null;
     try {

@@ -22,11 +22,12 @@ const AUTH_ERROR_PATTERNS = [
 ];
 
 /**
- * Max length of a genuine auth error message. Real auth errors from CLI tools
- * are short (< 500 chars). Longer messages are normal assistant responses that
- * happen to contain auth-related phrases in tool output or code discussion.
+ * Max length of a genuine auth error message. CLI tools sometimes wrap the
+ * underlying error in JSON (e.g. Claude Code's "Failed to authenticate. API
+ * Error: 401 {...}") which can exceed 500 chars. 2000 is still well below a
+ * typical assistant response, so false-positives remain unlikely.
  */
-const AUTH_ERROR_MAX_LENGTH = 500;
+const AUTH_ERROR_MAX_LENGTH = 2000;
 
 /**
  * Check if an error message indicates an authentication/session failure.
