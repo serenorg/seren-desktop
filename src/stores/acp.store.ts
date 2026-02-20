@@ -441,13 +441,6 @@ export const acpStore = {
     setState("remoteSessionsLoading", true);
     setState("remoteSessionsError", null);
     try {
-      // Ensure the underlying CLI is available before listing remote sessions.
-      const ensureFn =
-        resolvedAgentType === "claude-code"
-          ? acpService.ensureClaudeCli
-          : acpService.ensureCodexCli;
-      await ensureFn();
-
       const [page, localRows] = await Promise.all([
         acpService.listRemoteSessions(resolvedAgentType, cwd),
         getAgentConversations(200, cwd),
