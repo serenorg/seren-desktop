@@ -20,7 +20,7 @@ import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { catalog, type Publisher } from "./catalog";
 
 const SKILLS_REPO_OWNER = "serenorg";
-const SKILLS_REPO_NAME = "skills";
+const SKILLS_REPO_NAME = "seren-skills";
 const SKILLS_REPO_BRANCH = "main";
 const SKILLS_INDEX_URL = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/git/trees/${SKILLS_REPO_BRANCH}?recursive=1`;
 const SKILLS_RAW_URL = `https://raw.githubusercontent.com/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/${SKILLS_REPO_BRANCH}`;

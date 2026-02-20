@@ -45,13 +45,13 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 
 - **AgentSkills.io standard** — Standards-compliant skill format with SKILL.md metadata
 - **Three-tier hierarchy** — Global defaults, project defaults, and thread-level overrides
-- **Skill discovery** — Browse available skills from `https://github.com/serenorg/skills`
+- **Skill discovery** — Browse available skills from `https://github.com/serenorg/seren-skills`
 - **One-click installation** — Install skills directly from the catalog
 - **Slash command invocation** — Activate skills with `/skill-name` in chat or agent threads
 - **Thread-level management** — Enable/disable skills per conversation
 - **Project-scoped skills** — Skills can be project-specific via `.seren/skills.json`
 - **Built-in skills** — Polymarket Bot, Skill Creator, Getting Started, Playwright, Apollo
-- **Skill source** — Built-in skills are provided by the public repo at `https://github.com/serenorg/skills`.
+- **Skill source** — Built-in skills are provided by the public repo at `https://github.com/serenorg/seren-skills`.
 
 ### Seren Memory
 
@@ -170,7 +170,7 @@ pnpm tauri dev
 
 ## Skills source
 
-- Runtime source: remote public repo at `https://github.com/serenorg/skills`
+- Runtime source: remote public repo at `https://github.com/serenorg/seren-skills`
 
 ### Testing
 
@@ -247,7 +247,7 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  • SerenEmbed API (embeddings)                           │
 │  • SerenWhisper API (speech-to-text)                     │
 │  • SerenMemory API (memory.serendb.com)                  │
-│  • Skills marketplace (github.com/serenorg/skills)       │
+│  • Skills marketplace (github.com/serenorg/seren-skills)       │
 └──────────────────────────────────────────────────────────┘
 ```
 
