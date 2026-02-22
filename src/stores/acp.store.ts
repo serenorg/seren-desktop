@@ -21,11 +21,15 @@ import {
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
 import {
+  clearConversationHistory,
   createAgentConversation,
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
   getAgentConversations,
+  getMessages,
   getSerenApiKey,
+  type StoredMessage,
+  saveMessage,
   setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
 } from "@/lib/tauri-bridge";
@@ -119,6 +123,76 @@ export interface ActiveSession {
   /** Set when the agent's context window is full — triggers the fallback-to-chat prompt. */
   promptTooLong?: boolean;
 }
+
+// ============================================================================
+// Agent message persistence helpers
+// ============================================================================
+
+/** Serialize an AgentMessage to the shape expected by the save_message Tauri command. */
+function agentMessageToStored(
+  conversationId: string,
+  msg: AgentMessage,
+): {
+  id: string;
+  conversationId: string;
+  role: string;
+  content: string;
+  model: string | null;
+  timestamp: number;
+  metadata: string | null;
+} {
+  const meta: Record<string, unknown> = { agentMsgType: msg.type };
+  if (msg.toolCallId) meta.toolCallId = msg.toolCallId;
+  if (msg.toolCall) meta.toolCall = msg.toolCall;
+  if (msg.diff) meta.diff = msg.diff;
+  if (msg.cost != null) meta.cost = msg.cost;
+  if (msg.duration != null) meta.duration = msg.duration;
+  return {
+    id: msg.id,
+    conversationId,
+    role: msg.type,
+    content: msg.content,
+    model: null,
+    timestamp: msg.timestamp,
+    metadata: JSON.stringify(meta),
+  };
+}
+
+/** Deserialize a StoredMessage from SQLite back into an AgentMessage. */
+function storedToAgentMessage(stored: StoredMessage): AgentMessage {
+  const meta = stored.metadata ? JSON.parse(stored.metadata) : {};
+  return {
+    id: stored.id,
+    type: (meta.agentMsgType ?? stored.role) as AgentMessage["type"],
+    content: stored.content,
+    timestamp: stored.timestamp,
+    toolCallId: meta.toolCallId,
+    toolCall: meta.toolCall,
+    diff: meta.diff,
+    cost: meta.cost,
+    duration: meta.duration,
+  };
+}
+
+/** Fire-and-forget persist of a single agent message to SQLite. */
+function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
+  const s = agentMessageToStored(conversationId, msg);
+  saveMessage(
+    s.id,
+    s.conversationId,
+    s.role,
+    s.content,
+    s.model,
+    s.timestamp,
+    s.metadata,
+  ).catch((err) =>
+    console.error("[AcpStore] Failed to persist agent message:", err),
+  );
+}
+
+// ============================================================================
+// State
+// ============================================================================
 
 interface AcpState {
   /** Available agents and their status */
@@ -544,6 +618,7 @@ export const acpStore = {
       conversationTitle?: string;
       initRetryAttempt?: number;
       reclaimedIdleClaude?: boolean;
+      restoredMessages?: AgentMessage[];
     },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
@@ -722,7 +797,7 @@ export const acpStore = {
       // Create session state
       const session: ActiveSession = {
         info,
-        messages: [],
+        messages: opts?.restoredMessages ?? [],
         plan: [],
         pendingToolCalls: new Map(),
         streamingContent: "",
@@ -983,6 +1058,21 @@ export const acpStore = {
         ? (convo.agent_type as AgentType)
         : state.selectedAgentType;
 
+    // Load persisted messages from SQLite so the user sees full history immediately.
+    let restoredMessages: AgentMessage[] = [];
+    try {
+      const stored = await getMessages(conversationId, 1000);
+      restoredMessages = stored.map(storedToAgentMessage);
+      if (restoredMessages.length > 0) {
+        console.log(
+          `[AcpStore] Restored ${restoredMessages.length} persisted messages for conversation`,
+          conversationId,
+        );
+      }
+    } catch (err) {
+      console.warn("[AcpStore] Failed to load persisted agent messages:", err);
+    }
+
     const remoteSessionId = convo.agent_session_id?.trim();
     if (!remoteSessionId) {
       console.warn(
@@ -1002,6 +1092,7 @@ export const acpStore = {
       const freshSessionId = await this.spawnSession(freshCwd, agentType, {
         localSessionId: conversationId,
         conversationTitle: convo.title,
+        restoredMessages,
       });
       if (freshSessionId) {
         void this.refreshRecentAgentConversations(200).catch(() => {});
@@ -1034,6 +1125,7 @@ export const acpStore = {
       localSessionId: conversationId,
       resumeAgentSessionId: remoteSessionId,
       conversationTitle: convo.title,
+      restoredMessages,
     });
 
     // Legacy Claude conversations can reference session IDs that no longer
@@ -1048,6 +1140,7 @@ export const acpStore = {
       const fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
         localSessionId: conversationId,
         conversationTitle: convo.title,
+        restoredMessages,
       });
       if (fallbackSessionId) {
         void this.refreshRecentAgentConversations(200).catch(() => {});
@@ -1157,6 +1250,9 @@ export const acpStore = {
     if (!session) return;
 
     setState("sessions", sessionId, "messages", []);
+    clearConversationHistory(session.conversationId).catch((err) =>
+      console.error("[AcpStore] Failed to clear persisted messages:", err),
+    );
   },
 
   /**
@@ -1253,6 +1349,8 @@ export const acpStore = {
       ...msgs,
       userMessage,
     ]);
+    const convoId = state.sessions[sessionId]?.conversationId;
+    if (convoId) persistAgentMessage(convoId, userMessage);
     // Discard any buffered chunks from the previous response
     clearChunkBuf(sessionId);
     setState("sessions", sessionId, "streamingContent", "");
@@ -1361,6 +1459,11 @@ export const acpStore = {
             recoveryMsg,
             userMessage,
           ]);
+          const newConvoId = state.sessions[newSessionId]?.conversationId;
+          if (newConvoId) {
+            persistAgentMessage(newConvoId, recoveryMsg);
+            persistAgentMessage(newConvoId, userMessage);
+          }
 
           // Retry the prompt on the new session
           console.info(
@@ -1818,6 +1921,8 @@ export const acpStore = {
             ...msgs,
             cancelMsg,
           ]);
+          const cancelConvoId = state.sessions[sessionId]?.conversationId;
+          if (cancelConvoId) persistAgentMessage(cancelConvoId, cancelMsg);
         } else if (String(event.data.error).includes("unresponsive")) {
           // "Agent unresponsive" errors are handled by the sendPrompt catch
           // block which spawns a fresh session and retries. Adding the error
@@ -1858,6 +1963,8 @@ export const acpStore = {
               ...msgs,
               timeoutMsg,
             ]);
+            const toConvoId = state.sessions[sessionId]?.conversationId;
+            if (toConvoId) persistAgentMessage(toConvoId, timeoutMsg);
           }
         } else if (isTimeoutError(String(event.data.error))) {
           // Other timeout errors are often spurious race conditions where the error
@@ -1939,6 +2046,8 @@ export const acpStore = {
       timestamp: session.pendingUserMessageTimestamp ?? Date.now(),
     };
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, userMsg]);
+    if (session.conversationId)
+      persistAgentMessage(session.conversationId, userMsg);
     setState("sessions", sessionId, "pendingUserMessage", "");
     setState("sessions", sessionId, "pendingUserMessageId", undefined);
     setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
@@ -2060,6 +2169,8 @@ export const acpStore = {
         ...msgs,
         thinkingMsg,
       ]);
+      if (session.conversationId)
+        persistAgentMessage(session.conversationId, thinkingMsg);
       setState("sessions", sessionId, "streamingThinking", "");
       setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     }
@@ -2074,6 +2185,8 @@ export const acpStore = {
         ...msgs,
         contentMsg,
       ]);
+      if (session.conversationId)
+        persistAgentMessage(session.conversationId, contentMsg);
       setState("sessions", sessionId, "streamingContent", "");
       setState("sessions", sessionId, "streamingContentTimestamp", undefined);
     }
@@ -2097,6 +2210,8 @@ export const acpStore = {
     };
 
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
+    if (session.conversationId)
+      persistAgentMessage(session.conversationId, message);
   },
 
   handleToolResult(
@@ -2126,6 +2241,13 @@ export const acpStore = {
         return msg;
       }),
     );
+    // Persist the updated tool message
+    const updatedToolMsg = state.sessions[sessionId]?.messages.find(
+      (m: AgentMessage) => m.toolCallId === toolCallId,
+    );
+    if (updatedToolMsg && session.conversationId) {
+      persistAgentMessage(session.conversationId, updatedToolMsg);
+    }
 
     // Remove from pending
     session.pendingToolCalls.delete(toolCallId);
@@ -2162,12 +2284,32 @@ export const acpStore = {
         return msg;
       }),
     );
+    // Persist all completed tool messages
+    if (session.conversationId) {
+      for (const msg of state.sessions[sessionId]?.messages ?? []) {
+        if (msg.toolCall && msg.toolCall.status === "completed") {
+          persistAgentMessage(session.conversationId, msg);
+        }
+      }
+    }
 
     // Clear pending map
     session.pendingToolCalls.clear();
   },
 
   handleDiff(sessionId: string, diff: DiffEvent) {
+    const session = state.sessions[sessionId];
+    if (!session) return;
+
+    const nextMessage: AgentMessage = {
+      id: crypto.randomUUID(),
+      type: "diff",
+      content: `Modified: ${diff.path}`,
+      timestamp: Date.now(),
+      toolCallId: diff.toolCallId,
+      diff,
+    };
+
     setState("sessions", sessionId, "messages", (msgs) => {
       // If we already have a diff message for this tool call + path, update it in place
       // so streaming diff updates don't spam the timeline.
@@ -2177,15 +2319,6 @@ export const acpStore = {
           m.toolCallId === diff.toolCallId &&
           m.diff?.path === diff.path,
       );
-
-      const nextMessage: AgentMessage = {
-        id: crypto.randomUUID(),
-        type: "diff",
-        content: `Modified: ${diff.path}`,
-        timestamp: Date.now(),
-        toolCallId: diff.toolCallId,
-        diff,
-      };
 
       if (existingIndex >= 0) {
         const next = msgs.slice();
@@ -2202,6 +2335,16 @@ export const acpStore = {
 
       return [...msgs, nextMessage];
     });
+    // Persist the diff message (find the actual stored version which may have an existing id)
+    const storedDiff = state.sessions[sessionId]?.messages.find(
+      (m: AgentMessage) =>
+        m.type === "diff" &&
+        m.toolCallId === diff.toolCallId &&
+        m.diff?.path === diff.path,
+    );
+    if (storedDiff && session.conversationId) {
+      persistAgentMessage(session.conversationId, storedDiff);
+    }
   },
 
   handleStatusChange(
@@ -2287,6 +2430,8 @@ export const acpStore = {
         ...msgs,
         thinkingMessage,
       ]);
+      if (session.conversationId)
+        persistAgentMessage(session.conversationId, thinkingMessage);
       setState("sessions", sessionId, "streamingThinking", "");
       setState("sessions", sessionId, "streamingThinkingTimestamp", undefined);
     }
@@ -2335,6 +2480,8 @@ export const acpStore = {
         session.streamingContent.slice(0, 50),
       );
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
+      if (session.conversationId)
+        persistAgentMessage(session.conversationId, message);
 
       // If the agent streamed a short auth error as text, surface it as a session error
       // so the error banner with the Login button appears. Long messages are skipped
@@ -2368,6 +2515,8 @@ export const acpStore = {
     };
 
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
+    const errConvoId = state.sessions[sessionId]?.conversationId;
+    if (errConvoId) persistAgentMessage(errConvoId, message);
     // Set session-specific error instead of global error
     setState("sessions", sessionId, "error", error);
   },
