@@ -26,7 +26,7 @@ const SKILLS_INDEX_URL = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SK
 const SKILLS_RAW_URL = `https://raw.githubusercontent.com/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/${SKILLS_REPO_BRANCH}`;
 const INDEX_CACHE_KEY = "seren:skills_index";
 const PUBLISHER_SKILLS_CACHE_KEY = "seren:publisher_skills";
-const INDEX_CACHE_DURATION = 1000 * 60 * 60; // 1 hour
+const INDEX_CACHE_DURATION = 1000 * 60 * 5; // 5 minutes
 
 interface GitHubTreeNode {
   path?: string;
