@@ -35,11 +35,21 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 - **Permission system** — User approval for sensitive operations with risk levels
 - **Sandbox modes** — ReadOnly, WorkspaceWrite, or FullAccess execution tiers
 - **GPG signing support** — Sandbox allows gpg-agent access for signed commits
+- **Prompt queue** — Sequential message queuing during active agent prompts
 - **Cancel with cleanup** — Force-stop agents, clear tool spinners, flush queued messages
 - **Auth error detection** — Auto-launches `claude login` when authentication is needed
 - **Automatic failover** — Instantly switches to chat mode when agent hits rate limits or context limits
+- **Agent tasks** — Background task monitoring panel for agent operations
+- **CLI auto-installer** — Automatic installation of Claude Code and Codex CLI tools
 - **Thinking animation** — Bouncing dot indicator with rotating status words
 - **Embedded runtimes** — Bundled Node.js, npm, and ACP binaries (no PATH conflicts)
+
+### Thread Management
+
+- **Threaded conversations** — Sidebar with persistent chat and agent threads
+- **Folder grouping** — Threads grouped by project directory
+- **Running indicators** — Pulsing green dot for active agents across folder groups
+- **Thread persistence** — Active threads persist across folder switches
 
 ### Skills System
 
@@ -168,10 +178,6 @@ pnpm install
 pnpm tauri dev
 ```
 
-## Skills source
-
-- Runtime source: remote public repo at `https://github.com/serenorg/seren-skills`
-
 ### Testing
 
 ```bash
@@ -225,14 +231,14 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
 │  │Orchestr. │  │ Indexing │  │ Sandbox  │  │  Skills  │ │
-│  │ Router   │  │sqlite-vec│  │ Terminal │  │ 100+ Bots│ │
+│  │ Router   │  │sqlite-vec│  │ Terminal │  │AgntSkills│ │
 │  │ Classify │  │          │  │          │  │          │ │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐                                            │
-│  │  Memory  │                                            │
-│  │Cross-sess│   Backend: Rust/Tauri                      │
-│  │  Vector  │   Frontend: SolidJS/TypeScript             │
-│  └──────────┘   Embedded: Node.js + npm + ACP + Git      │
+│  ┌──────────┐  ┌──────────┐                              │
+│  │  Memory  │  │  Tasks   │                              │
+│  │Cross-sess│  │ Agent Ops│  Backend: Rust/Tauri         │
+│  │  Vector  │  │          │  Frontend: SolidJS/TypeScript │
+│  └──────────┘  └──────────┘  Embedded: Node.js + npm + ACP│
 └─────────────────────────┬────────────────────────────────┘
                           │
                           ▼
@@ -247,7 +253,7 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  • SerenEmbed API (embeddings)                           │
 │  • SerenWhisper API (speech-to-text)                     │
 │  • SerenMemory API (memory.serendb.com)                  │
-│  • Skills marketplace (github.com/serenorg/seren-skills)       │
+│  • Skills repo (github.com/serenorg/seren-skills)        │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -259,29 +265,37 @@ seren-desktop/
 │   ├── components/
 │   │   ├── acp/             # Permission dialog, diff proposals
 │   │   ├── auth/            # SignIn
-│   │   ├── catalog/         # Publisher catalog, connection status
 │   │   ├── chat/            # Chat, agents, voice input, thinking display
-│   │   ├── common/          # Header, sidebar, status bar, about dialog
+│   │   ├── common/          # Header, status bar, about dialog
 │   │   ├── editor/          # Monaco, file tabs, inline edit, viewers
+│   │   ├── gateway/         # Gateway tool approval
+│   │   ├── layout/          # AppShell, thread sidebar, titlebar, tab bar
 │   │   ├── mcp/             # MCP tools, resources, OAuth, x402 approval
 │   │   ├── settings/        # Providers, MCP servers, OpenClaw config
-│   │   ├── sidebar/         # File explorer, database panel, indexing
+│   │   ├── shell/           # Shell command approval
+│   │   ├── sidebar/         # File explorer, database panel, indexing, skills
+│   │   ├── tasks/           # Agent tasks panel, task items, status badges
 │   │   └── wallet/          # Deposits, transactions, daily claim
-│   ├── services/            # API clients (chat, ACP, MCP, wallet, memory, skills)
+│   ├── services/            # API clients (chat, ACP, MCP, wallet, memory, skills, tasks)
 │   ├── stores/              # SolidJS stores (state management)
 │   └── lib/                 # Utilities (indexing, audio, commands, rendering)
 ├── src-tauri/               # Rust backend
 │   ├── src/
 │   │   ├── acp.rs           # Agent Client Protocol
+│   │   ├── auth.rs          # Authentication and token management
 │   │   ├── orchestrator/    # Task classifier, model router, workers
 │   │   ├── openclaw.rs      # OpenClaw messaging integration
+│   │   ├── skills.rs        # Skills system management
 │   │   ├── terminal.rs      # Terminal process management
 │   │   ├── sandbox.rs       # macOS sandbox profiles (GPG-aware)
+│   │   ├── shell.rs         # Shell command execution
 │   │   ├── mcp.rs           # MCP server management
-│   │   ├── embedded_runtime.rs  # Bundled Node.js/npm/ACP/Git runtime
+│   │   ├── embedded_runtime.rs  # Bundled Node.js/npm/ACP runtime
 │   │   ├── oauth.rs         # OAuth callback server
-│   │   ├── commands/        # Tauri commands (chat, indexing, memory, skills, web)
-│   │   ├── services/        # Vector store, chunker, indexer
+│   │   ├── files.rs         # File system operations
+│   │   ├── sync.rs          # Data synchronization
+│   │   ├── commands/        # Tauri commands (chat, indexing, memory, skills, web, CLI installer)
+│   │   ├── services/        # Vector store, chunker, indexer, database
 │   │   └── wallet/          # x402 payments, Ethereum signing
 │   └── embedded-runtime/    # Bundled runtimes and OpenClaw
 ├── skills/                  # Bundled skills (Polymarket, Apollo, etc.)
@@ -299,6 +313,7 @@ seren-desktop/
 | Editor | Monaco Editor 0.52+ |
 | Vector Store | sqlite-vec (semantic search) |
 | Memory | seren-memory-sdk (persistent context) |
+| Skills | AgentSkills.io standard |
 | State | SolidJS stores |
 | Styling | Plain CSS |
 | Storage | tauri-plugin-store (encrypted) |
@@ -353,10 +368,10 @@ Look for issues labeled [`good first issue`](https://github.com/serenorg/seren-d
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Development Setup](docs/DEVELOPMENT.md)
+- [Contributing Guide](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
-- [API Reference](docs/API.md)
+- [Seren Documentation](https://docs.serendb.com)
+- [Skills Repository](https://github.com/serenorg/seren-skills)
 
 ## License
 
