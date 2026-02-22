@@ -407,11 +407,15 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       {/* Skills section */}
       <div class="shrink-0 border-b border-border/40">
         {/* Skills header */}
-        <button
-          type="button"
-          class="flex items-center gap-2 w-full px-3 py-2 bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={() => setSkillsExpanded((v) => !v)}
-          disabled={!threadStore.activeThread}
+        <div
+          class="flex items-center gap-2 w-full px-3 py-2 transition-colors duration-100 hover:bg-surface-2"
+          classList={{
+            "opacity-50 cursor-not-allowed": !threadStore.activeThread,
+            "cursor-pointer": !!threadStore.activeThread,
+          }}
+          onClick={() => {
+            if (threadStore.activeThread) setSkillsExpanded((v) => !v);
+          }}
           title={
             !threadStore.activeThread
               ? "Select a thread to manage skills"
@@ -467,7 +471,33 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               </span>
             </Show>
           </div>
-        </button>
+          {/* Refresh skills catalog */}
+          <button
+            type="button"
+            class="shrink-0 p-1 rounded hover:bg-surface-3 text-muted-foreground/60 hover:text-muted-foreground transition-colors duration-100"
+            title="Refresh skills catalog"
+            onClick={(e) => {
+              e.stopPropagation();
+              void skillsStore.clearCacheAndRefresh();
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              role="img"
+              aria-label="Refresh"
+            >
+              <path d="M1 1v5h5" />
+              <path d="M3.5 10a5 5 0 1 0 1-7.5L1 6" />
+            </svg>
+          </button>
+        </div>
 
         {/* Skills content (search + list) */}
         <Show when={skillsExpanded()}>
