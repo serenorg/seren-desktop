@@ -165,13 +165,6 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     const activeSkills = skillsStore.getThreadSkills(cwd, thread.id);
     const isActive = activeSkills.some((s) => s.path === skillPath);
 
-    console.log("[ThreadSidebar] isSkillActiveInThread:", {
-      skillName: skill.name,
-      skillPath,
-      activeSkillsCount: activeSkills.length,
-      isActive,
-    });
-
     return isActive;
   };
 
@@ -750,6 +743,14 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     <span class="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left">
                       {group.folderName}
                     </span>
+                    <Show
+                      when={group.threads.some((t) => t.status === "running")}
+                    >
+                      <span
+                        class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"
+                        title="Running agent"
+                      />
+                    </Show>
                     <span class="text-[10px] font-medium text-muted-foreground opacity-60">
                       {group.threads.length}
                     </span>
