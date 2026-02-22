@@ -491,19 +491,38 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     await acpStore.sendPrompt(trimmed, context);
   };
 
-  // Process queued messages when agent becomes ready
-  // Use on() to only fire when isReady transitions from false→true
-  // This prevents the effect from firing multiple times for multiple queued messages
+  // Guard flag prevents concurrent queue processing
+  let queueDraining = false;
+
+  const processNextQueuedMessage = async () => {
+    if (queueDraining) return;
+    const queue = messageQueue();
+    if (queue.length === 0 || !isReady()) return;
+
+    queueDraining = true;
+    const [nextMessage, ...remaining] = queue;
+    setMessageQueue(remaining);
+    console.log("[AgentChat] Processing queued message:", nextMessage);
+
+    try {
+      await acpStore.sendPrompt(nextMessage);
+    } catch (error) {
+      console.error("[AgentChat] Queued message failed:", error);
+    }
+
+    queueDraining = false;
+    // After the prompt completes, promptComplete has already set status
+    // back to "ready" — check if there are more messages to process.
+    processNextQueuedMessage();
+  };
+
+  // Trigger queue drain when agent becomes ready
   createEffect(
     on(
       isReady,
       (ready) => {
         if (ready && messageQueue().length > 0) {
-          const [nextMessage, ...remaining] = messageQueue();
-          setMessageQueue(remaining);
-          console.log("[AgentChat] Processing queued message:", nextMessage);
-          // Send without delay - the on() guard ensures this only fires once per ready transition
-          acpStore.sendPrompt(nextMessage);
+          processNextQueuedMessage();
         }
       },
       { defer: true },
