@@ -20,6 +20,7 @@ import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { openExternalLink } from "@/lib/external-link";
+import { openFileInTab } from "@/lib/files/service";
 import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
@@ -41,6 +42,7 @@ import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { editorStore } from "@/stores/editor.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import type { ToolCallData, UnifiedMessage } from "@/types/conversation";
@@ -196,7 +198,26 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       event.preventDefault();
       const url = externalLink.dataset.externalUrl;
       if (url) {
-        openExternalLink(url);
+        // Detect local file paths and open them in the editor
+        const isFilePath =
+          url.startsWith("/") ||
+          url.startsWith("./") ||
+          url.startsWith("../") ||
+          url.startsWith("~");
+        if (isFilePath && !url.startsWith("//")) {
+          const root = fileTreeState.rootPath;
+          const resolved =
+            url.startsWith("/") || url.startsWith("~")
+              ? url
+              : root
+                ? `${root.replace(/\/$/, "")}/${url}`
+                : url;
+          openFileInTab(resolved).catch((err) =>
+            console.warn("[ChatContent] Failed to open file:", resolved, err),
+          );
+        } else {
+          openExternalLink(url);
+        }
       }
       return;
     }
