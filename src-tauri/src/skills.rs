@@ -487,9 +487,15 @@ pub fn list_skill_dirs(skills_dir: String) -> Result<Vec<String>, String> {
     Ok(slugs)
 }
 
-/// Create a skill directory and write SKILL.md content.
+/// Create a skill directory and write SKILL.md content along with optional payload files.
+/// `extra_files` is a JSON-encoded array of `{ "path": "relative/path", "content": "..." }` objects.
 #[tauri::command]
-pub fn install_skill(skills_dir: String, slug: String, content: String) -> Result<String, String> {
+pub fn install_skill(
+    skills_dir: String,
+    slug: String,
+    content: String,
+    extra_files: Option<String>,
+) -> Result<String, String> {
     let dir_path = PathBuf::from(&skills_dir);
     let skill_dir = dir_path.join(&slug);
     let skill_file = skill_dir.join("SKILL.md");
@@ -499,9 +505,124 @@ pub fn install_skill(skills_dir: String, slug: String, content: String) -> Resul
         .map_err(|e| format!("Failed to create skill directory: {}", e))?;
 
     // Write SKILL.md content
-    fs::write(&skill_file, content).map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
+    fs::write(&skill_file, &content).map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
+
+    // Write additional payload files if provided
+    if let Some(files_json) = extra_files {
+        let files: Vec<ExtraFile> = serde_json::from_str(&files_json)
+            .map_err(|e| format!("Failed to parse extra_files JSON: {}", e))?;
+
+        for file in &files {
+            // Prevent path traversal
+            let relative = PathBuf::from(&file.path);
+            if relative.is_absolute()
+                || relative
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err(format!(
+                    "Invalid file path (must be relative, no ..): {}",
+                    file.path
+                ));
+            }
+
+            let target = skill_dir.join(&relative);
+
+            // Create parent directories
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    format!(
+                        "Failed to create directory for {}: {}",
+                        file.path, e
+                    )
+                })?;
+            }
+
+            fs::write(&target, &file.content).map_err(|e| {
+                format!("Failed to write {}: {}", file.path, e)
+            })?;
+
+            // Make scripts executable on Unix
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if file.path.ends_with(".sh") || file.path.ends_with(".py") {
+                    let perms = fs::Permissions::from_mode(0o755);
+                    let _ = fs::set_permissions(&target, perms);
+                }
+            }
+        }
+    }
 
     Ok(skill_file.to_string_lossy().to_string())
+}
+
+/// Validate that a skill directory contains all files referenced in SKILL.md.
+/// Returns a list of missing file paths (empty if all present).
+#[tauri::command]
+pub fn validate_skill_payload(skills_dir: String, slug: String) -> Result<Vec<String>, String> {
+    let dir_path = PathBuf::from(&skills_dir);
+    let skill_dir = match resolve_skill_dir_path(&dir_path, &slug) {
+        Some(path) => path,
+        None => return Err(format!("Skill directory not found for slug: {}", slug)),
+    };
+
+    let skill_file = skill_dir.join("SKILL.md");
+    if !skill_file.exists() {
+        return Err("SKILL.md not found".to_string());
+    }
+
+    let content =
+        fs::read_to_string(&skill_file).map_err(|e| format!("Failed to read SKILL.md: {}", e))?;
+
+    let referenced = extract_referenced_files(&content);
+    let mut missing = Vec::new();
+
+    for path in referenced {
+        let full_path = skill_dir.join(&path);
+        if !full_path.exists() {
+            missing.push(path);
+        }
+    }
+
+    Ok(missing)
+}
+
+#[derive(serde::Deserialize)]
+struct ExtraFile {
+    path: String,
+    content: String,
+}
+
+/// Extract file paths referenced in SKILL.md content.
+/// Looks for markdown links, code references, and common file patterns.
+fn extract_referenced_files(content: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // Match markdown links: [text](path) — only relative paths
+    let link_re = regex::Regex::new(r"\[(?:[^\]]*)\]\(([^)]+)\)").unwrap();
+    for cap in link_re.captures_iter(content) {
+        let path = cap[1].trim();
+        if !path.starts_with("http") && !path.starts_with('#') && !path.starts_with("mailto:") {
+            let clean = path.split('#').next().unwrap_or(path).trim();
+            if !clean.is_empty() && seen.insert(clean.to_string()) {
+                files.push(clean.to_string());
+            }
+        }
+    }
+
+    // Match backtick code references to common payload files
+    let code_re =
+        regex::Regex::new(r"`([a-zA-Z0-9_./-]+\.(py|sh|json|txt|toml|yaml|yml|js|ts))`").unwrap();
+    for cap in code_re.captures_iter(content) {
+        let path = cap[1].trim();
+        if !path.contains(' ') && seen.insert(path.to_string()) {
+            files.push(path.to_string());
+        }
+    }
+
+    files
 }
 
 /// Remove a skill directory.
@@ -608,4 +729,174 @@ pub fn resolve_skill_path(skills_dir: String, slug: String) -> Result<Option<Str
         return Ok(Some(path.to_string_lossy().to_string()));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn extract_referenced_files_finds_markdown_links() {
+        let content = r#"# My Skill
+
+See [agent script](scripts/agent.py) and [config](config.example.json).
+Also check [external](https://example.com) which should be ignored.
+"#;
+        let files = extract_referenced_files(content);
+        assert!(files.contains(&"scripts/agent.py".to_string()));
+        assert!(files.contains(&"config.example.json".to_string()));
+        assert!(!files.iter().any(|f| f.contains("example.com")));
+    }
+
+    #[test]
+    fn extract_referenced_files_finds_backtick_refs() {
+        let content = r#"# My Skill
+
+Run `scripts/agent.py` with config from `requirements.txt`.
+"#;
+        let files = extract_referenced_files(content);
+        assert!(files.contains(&"scripts/agent.py".to_string()));
+        assert!(files.contains(&"requirements.txt".to_string()));
+    }
+
+    #[test]
+    fn extract_referenced_files_deduplicates() {
+        let content = r#"
+Use [agent](scripts/agent.py) and also `scripts/agent.py` for running.
+"#;
+        let files = extract_referenced_files(content);
+        let count = files.iter().filter(|f| *f == "scripts/agent.py").count();
+        assert_eq!(count, 1, "should not duplicate");
+    }
+
+    #[test]
+    fn extract_referenced_files_ignores_anchors_and_mailto() {
+        let content = r#"
+See [section](#overview) and [email](mailto:test@example.com).
+"#;
+        let files = extract_referenced_files(content);
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn install_skill_writes_manifest_only_when_no_extras() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let result = install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test Skill\nHello".to_string(),
+            None,
+        );
+        assert!(result.is_ok());
+
+        let skill_md = tmp.path().join("test-skill").join("SKILL.md");
+        assert!(skill_md.exists());
+        assert_eq!(fs::read_to_string(&skill_md).unwrap(), "# Test Skill\nHello");
+    }
+
+    #[test]
+    fn install_skill_writes_extra_files() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let extras = serde_json::json!([
+            {"path": "scripts/agent.py", "content": "print('hello')"},
+            {"path": "requirements.txt", "content": "requests==2.31.0"},
+        ]);
+
+        let result = install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test\n".to_string(),
+            Some(extras.to_string()),
+        );
+        assert!(result.is_ok());
+
+        let skill_dir = tmp.path().join("test-skill");
+        assert!(skill_dir.join("SKILL.md").exists());
+        assert!(skill_dir.join("scripts").join("agent.py").exists());
+        assert!(skill_dir.join("requirements.txt").exists());
+        assert_eq!(
+            fs::read_to_string(skill_dir.join("scripts/agent.py")).unwrap(),
+            "print('hello')"
+        );
+    }
+
+    #[test]
+    fn install_skill_rejects_path_traversal() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let extras = serde_json::json!([
+            {"path": "../evil.txt", "content": "malicious"},
+        ]);
+
+        let result = install_skill(
+            skills_dir,
+            "test-skill".to_string(),
+            "# Test\n".to_string(),
+            Some(extras.to_string()),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must be relative, no .."));
+    }
+
+    #[test]
+    fn validate_skill_payload_detects_missing_files() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        // Install skill with manifest referencing files that don't exist
+        let content = r#"---
+name: test-skill
+description: Test
+---
+
+# Test Skill
+
+Run [agent](scripts/agent.py) with config `config.example.json`.
+See `requirements.txt` for dependencies.
+"#;
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            content.to_string(),
+            None,
+        )
+        .unwrap();
+
+        let missing = validate_skill_payload(skills_dir.clone(), "test-skill".to_string()).unwrap();
+        assert!(missing.contains(&"scripts/agent.py".to_string()));
+        assert!(missing.contains(&"config.example.json".to_string()));
+        assert!(missing.contains(&"requirements.txt".to_string()));
+    }
+
+    #[test]
+    fn validate_skill_payload_passes_when_files_present() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        let content = r#"# Test
+Run [agent](scripts/agent.py) with `requirements.txt`.
+"#;
+        let extras = serde_json::json!([
+            {"path": "scripts/agent.py", "content": "print('ok')"},
+            {"path": "requirements.txt", "content": "requests"},
+        ]);
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            content.to_string(),
+            Some(extras.to_string()),
+        )
+        .unwrap();
+
+        let missing = validate_skill_payload(skills_dir, "test-skill".to_string()).unwrap();
+        assert!(missing.is_empty(), "all referenced files should be present");
+    }
 }

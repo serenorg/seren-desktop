@@ -37,6 +37,16 @@ interface GitHubTreeResponse {
   tree?: GitHubTreeNode[];
 }
 
+interface ExtraFile {
+  path: string;
+  content: string;
+}
+
+export interface InstallResult {
+  installed: InstalledSkill;
+  missingFiles: string[];
+}
+
 export interface ProjectSkillsConfig {
   version: number;
   skills: {
@@ -123,6 +133,12 @@ async function fetchSkillFromRepo(path: string): Promise<Skill | null> {
 }
 
 /**
+ * Cached GitHub tree from the most recent index fetch.
+ * Used to discover sibling files when installing a skill.
+ */
+let cachedRepoTree: GitHubTreeNode[] | null = null;
+
+/**
  * Fetch all available skills from GitHub repository tree.
  */
 async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
@@ -138,7 +154,9 @@ async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
   }
 
   const payload = (await response.json()) as GitHubTreeResponse;
-  const skillFiles = (payload.tree ?? []).filter(
+  cachedRepoTree = payload.tree ?? [];
+
+  const skillFiles = cachedRepoTree.filter(
     (node) =>
       node.type === "blob" &&
       typeof node.path === "string" &&
@@ -156,6 +174,98 @@ async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
     .map((result) => (result.status === "fulfilled" ? result.value : null))
     .filter((skill): skill is Skill => skill !== null)
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Derive the GitHub skill directory prefix from a sourceUrl.
+ * e.g. "https://raw.githubusercontent.com/.../curve/curve-gauge-yield-trader/SKILL.md"
+ *   -> "curve/curve-gauge-yield-trader/"
+ */
+function deriveRepoDirPrefix(sourceUrl: string): string | null {
+  const base = `${SKILLS_RAW_URL}/`;
+  if (!sourceUrl.startsWith(base)) return null;
+  const relative = sourceUrl.slice(base.length);
+  const lastSlash = relative.lastIndexOf("/");
+  if (lastSlash <= 0) return null;
+  return relative.slice(0, lastSlash + 1);
+}
+
+/**
+ * Fetch all payload files (excluding SKILL.md) from a skill's GitHub directory.
+ * Uses the cached repo tree to discover files, then fetches their raw content.
+ */
+async function fetchRepoSkillPayloadFiles(
+  sourceUrl: string,
+): Promise<ExtraFile[]> {
+  const dirPrefix = deriveRepoDirPrefix(sourceUrl);
+  if (!dirPrefix) return [];
+
+  // Re-fetch tree if not cached
+  if (!cachedRepoTree) {
+    try {
+      const response = await appFetch(SKILLS_INDEX_URL, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      });
+      if (response.ok) {
+        const payload = (await response.json()) as GitHubTreeResponse;
+        cachedRepoTree = payload.tree ?? [];
+      }
+    } catch {
+      log.warn("[Skills] Failed to fetch repo tree for payload files");
+      return [];
+    }
+  }
+
+  if (!cachedRepoTree) return [];
+
+  // Find all blob files under the skill directory (excluding SKILL.md itself)
+  const siblingFiles = cachedRepoTree.filter(
+    (node) =>
+      node.type === "blob" &&
+      typeof node.path === "string" &&
+      node.path.startsWith(dirPrefix) &&
+      !node.path.endsWith("/SKILL.md"),
+  );
+
+  if (siblingFiles.length === 0) return [];
+
+  log.info(
+    "[Skills] Fetching",
+    siblingFiles.length,
+    "payload files for",
+    dirPrefix,
+  );
+
+  const results = await Promise.allSettled(
+    siblingFiles.map(async (node): Promise<ExtraFile | null> => {
+      const filePath = node.path!;
+      const relativePath = filePath.slice(dirPrefix.length);
+      const segments = filePath
+        .split("/")
+        .map((s) => encodeURIComponent(s));
+      const rawUrl = `${SKILLS_RAW_URL}/${segments.join("/")}`;
+
+      try {
+        const resp = await appFetch(rawUrl);
+        if (!resp.ok) {
+          log.warn("[Skills] Failed to fetch payload file", rawUrl, resp.status);
+          return null;
+        }
+        const content = await resp.text();
+        return { path: relativePath, content };
+      } catch (error) {
+        log.warn("[Skills] Error fetching payload file", rawUrl, error);
+        return null;
+      }
+    }),
+  );
+
+  return results
+    .map((r) => (r.status === "fulfilled" ? r.value : null))
+    .filter((f): f is ExtraFile => f !== null);
 }
 
 /**
@@ -537,6 +647,8 @@ export const skills = {
 
   /**
    * Install a skill to the specified scope.
+   * For serenorg skills, fetches payload files (scripts, configs) alongside SKILL.md.
+   * Returns the installed skill along with any missing file warnings.
    */
   async install(
     skill: Skill,
@@ -561,16 +673,54 @@ export const skills = {
       throw new Error("No skills directory available for project scope");
     }
 
+    // Fetch payload files for serenorg skills from the GitHub repo
+    let extraFilesJson: string | undefined;
+    if (skill.source === "serenorg" && skill.sourceUrl) {
+      try {
+        const extraFiles = await fetchRepoSkillPayloadFiles(skill.sourceUrl);
+        if (extraFiles.length > 0) {
+          extraFilesJson = JSON.stringify(extraFiles);
+          log.info(
+            "[Skills] Fetched",
+            extraFiles.length,
+            "payload files for",
+            skill.slug,
+          );
+        }
+      } catch (error) {
+        log.warn("[Skills] Failed to fetch payload files:", error);
+      }
+    }
+
     const path = await invoke<string>("install_skill", {
       skillsDir,
       slug: skill.slug,
       content,
+      extraFiles: extraFilesJson ?? null,
     });
 
     const hash = await computeContentHash(content);
     const parsed = parseSkillMd(content);
 
     log.info("[Skills] Installed skill:", skill.slug, "to", scope, "scope");
+
+    // Validate payload after install
+    try {
+      const missingFiles = await invoke<string[]>("validate_skill_payload", {
+        skillsDir,
+        slug: skill.slug,
+      });
+      if (missingFiles.length > 0) {
+        log.warn(
+          "[Skills] Skill",
+          skill.slug,
+          "is missing referenced files:",
+          missingFiles,
+        );
+      }
+    } catch (error) {
+      log.warn("[Skills] Payload validation failed:", error);
+    }
 
     return {
       ...skill,
@@ -589,6 +739,26 @@ export const skills = {
       author: skill.author,
       version: skill.version,
     };
+  },
+
+  /**
+   * Validate an installed skill's payload files.
+   * Returns a list of file paths referenced in SKILL.md but missing from disk.
+   */
+  async validatePayload(
+    skillsDir: string,
+    slug: string,
+  ): Promise<string[]> {
+    if (!isTauriRuntime()) return [];
+    try {
+      return await invoke<string[]>("validate_skill_payload", {
+        skillsDir,
+        slug,
+      });
+    } catch (error) {
+      log.warn("[Skills] Payload validation error:", error);
+      return [];
+    }
   },
 
   /**
