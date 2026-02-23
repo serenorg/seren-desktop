@@ -3,14 +3,18 @@
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { acpStore } from "@/stores/acp.store";
+import { type ActiveSession, acpStore } from "@/stores/acp.store";
 
-export const AgentModeSelector: Component = () => {
+interface Props {
+  session: ActiveSession | null;
+}
+
+export const AgentModeSelector: Component<Props> = (props) => {
   const [isOpen, setIsOpen] = createSignal(false);
   let dropdownRef: HTMLDivElement | undefined;
 
-  const availableModes = () => acpStore.activeSession?.availableModes ?? [];
-  const currentModeId = () => acpStore.activeSession?.currentModeId;
+  const availableModes = () => props.session?.availableModes ?? [];
+  const currentModeId = () => props.session?.currentModeId;
 
   const currentModeName = () => {
     const id = currentModeId();
@@ -34,7 +38,7 @@ export const AgentModeSelector: Component = () => {
   });
 
   const selectMode = (modeId: string) => {
-    acpStore.setPermissionMode(modeId);
+    acpStore.setPermissionMode(modeId, props.session?.info.id);
     setIsOpen(false);
   };
 

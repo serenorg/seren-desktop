@@ -1319,9 +1319,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <span class="px-2 py-1 bg-surface-2 border border-surface-3 rounded-md text-xs text-foreground font-medium">
                   {lockedAgentName()}
                 </span>
-                <AgentModelSelector />
-                <AgentModeSelector />
-                <AgentEffortSelector />
+                <AgentModelSelector session={threadSession()} />
+                <AgentModeSelector session={threadSession()} />
+                <AgentEffortSelector session={threadSession()} />
                 <Show when={isPrompting()}>
                   <ThinkingStatus />
                 </Show>

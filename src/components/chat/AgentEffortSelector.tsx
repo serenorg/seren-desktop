@@ -3,14 +3,18 @@
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { acpStore } from "@/stores/acp.store";
+import { type ActiveSession, acpStore } from "@/stores/acp.store";
 
-export const AgentEffortSelector: Component = () => {
+interface Props {
+  session: ActiveSession | null;
+}
+
+export const AgentEffortSelector: Component<Props> = (props) => {
   const [isOpen, setIsOpen] = createSignal(false);
   let dropdownRef: HTMLDivElement | undefined;
 
   const option = () =>
-    acpStore.activeSession?.configOptions?.find(
+    props.session?.configOptions?.find(
       (o) => o.id === "reasoning_effort" && o.type === "select",
     ) ?? null;
 
@@ -36,7 +40,11 @@ export const AgentEffortSelector: Component = () => {
   });
 
   const selectValue = (valueId: string) => {
-    acpStore.setConfigOption("reasoning_effort", valueId);
+    acpStore.setConfigOption(
+      "reasoning_effort",
+      valueId,
+      props.session?.info.id,
+    );
     setIsOpen(false);
   };
 
