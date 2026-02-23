@@ -3,14 +3,18 @@
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { acpStore } from "@/stores/acp.store";
+import { type ActiveSession, acpStore } from "@/stores/acp.store";
 
-export const AgentModelSelector: Component = () => {
+interface Props {
+  session: ActiveSession | null;
+}
+
+export const AgentModelSelector: Component<Props> = (props) => {
   const [isOpen, setIsOpen] = createSignal(false);
   let dropdownRef: HTMLDivElement | undefined;
 
-  const availableModels = () => acpStore.activeSession?.availableModels ?? [];
-  const currentModelId = () => acpStore.activeSession?.currentModelId;
+  const availableModels = () => props.session?.availableModels ?? [];
+  const currentModelId = () => props.session?.currentModelId;
 
   const currentModelName = () => {
     const id = currentModelId();
@@ -34,7 +38,7 @@ export const AgentModelSelector: Component = () => {
   });
 
   const selectModel = (modelId: string) => {
-    acpStore.setModel(modelId);
+    acpStore.setModel(modelId, props.session?.info.id);
     setIsOpen(false);
   };
 

@@ -1527,8 +1527,8 @@ export const acpStore = {
   /**
    * Set permission mode for the active session.
    */
-  async setPermissionMode(modeId: string) {
-    const sessionId = state.activeSessionId;
+  async setPermissionMode(modeId: string, forSessionId?: string) {
+    const sessionId = forSessionId ?? state.activeSessionId;
     if (!sessionId) return;
 
     try {
@@ -1547,8 +1547,8 @@ export const acpStore = {
   /**
    * Set the AI model for the active session.
    */
-  async setModel(modelId: string) {
-    const sessionId = state.activeSessionId;
+  async setModel(modelId: string, forSessionId?: string) {
+    const sessionId = forSessionId ?? state.activeSessionId;
     if (!sessionId) return;
 
     try {
@@ -1571,8 +1571,12 @@ export const acpStore = {
   /**
    * Set a session configuration option (e.g., reasoning effort).
    */
-  async setConfigOption(configId: string, valueId: string) {
-    const sessionId = state.activeSessionId;
+  async setConfigOption(
+    configId: string,
+    valueId: string,
+    forSessionId?: string,
+  ) {
+    const sessionId = forSessionId ?? state.activeSessionId;
     if (!sessionId) return;
 
     try {
