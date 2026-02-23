@@ -139,7 +139,7 @@ fn find_available_port() -> Result<u16, String> {
 
 /// Generate a cryptographically random 32-byte hex hook token
 fn generate_hook_token() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
     let bytes: [u8; 32] = rng.random();
     hex::encode(bytes)
