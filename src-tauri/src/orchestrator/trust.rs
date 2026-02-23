@@ -1,7 +1,7 @@
 // ABOUTME: Trust graduation and satisfaction-driven model ranking.
 // ABOUTME: Thompson sampling selects models based on user feedback with cost weighting.
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 use rand_distr::Beta;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
