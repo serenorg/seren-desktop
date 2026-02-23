@@ -368,8 +368,8 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           <button
             type="button"
             class="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
-            onClick={() => skillsStore.refresh()}
-            title="Refresh skills"
+            onClick={() => skillsStore.refresh(true)}
+            title="Refresh skills (bypass cache)"
           >
             <svg
               width="14"
