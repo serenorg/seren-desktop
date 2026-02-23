@@ -122,6 +122,10 @@ export interface ActiveSession {
   rateLimitHit?: boolean;
   /** Set when the agent's context window is full — triggers the fallback-to-chat prompt. */
   promptTooLong?: boolean;
+  /** When true, skip appending/persisting messages during history replay.
+   *  Set when the session was spawned with restored messages from SQLite,
+   *  cleared when the replay phase ends (promptComplete with historyReplay). */
+  skipHistoryReplay?: boolean;
 }
 
 // ============================================================================
@@ -795,6 +799,8 @@ export const acpStore = {
       }
 
       // Create session state
+      const hasRestoredMessages =
+        opts?.restoredMessages && opts.restoredMessages.length > 0;
       const session: ActiveSession = {
         info,
         messages: opts?.restoredMessages ?? [],
@@ -805,6 +811,11 @@ export const acpStore = {
         pendingUserMessage: "",
         cwd,
         conversationId: info.id,
+        // When we already have persisted messages from SQLite, skip the
+        // backend's history replay to avoid duplicates and skill-content
+        // pollution (the backend replays the full context including injected
+        // skill text as user messages).
+        skipHistoryReplay: hasRestoredMessages ? true : undefined,
       };
 
       setState("sessions", info.id, session);
@@ -1878,6 +1889,10 @@ export const acpStore = {
         const isHistoryReplay =
           event.data.historyReplay === true ||
           event.data.stopReason === "HistoryReplay";
+        // End the replay-skip window so subsequent real messages are processed.
+        if (isHistoryReplay) {
+          setState("sessions", sessionId, "skipHistoryReplay", undefined);
+        }
         this.flushPendingUserMessage(sessionId);
         this.finalizeStreamingContent(sessionId);
         if (!isHistoryReplay) {
@@ -2043,6 +2058,15 @@ export const acpStore = {
     const session = state.sessions[sessionId];
     if (!session || !session.pendingUserMessage) return;
 
+    // During history replay skip mode, discard the buffered replay text
+    // instead of appending it (restored SQLite messages are authoritative).
+    if (session.skipHistoryReplay) {
+      setState("sessions", sessionId, "pendingUserMessage", "");
+      setState("sessions", sessionId, "pendingUserMessageId", undefined);
+      setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
+      return;
+    }
+
     const userMsg: AgentMessage = {
       id: crypto.randomUUID(),
       type: "user",
@@ -2065,6 +2089,9 @@ export const acpStore = {
   ) {
     const session = state.sessions[sessionId];
     if (!session) return;
+
+    // Skip replay user chunks when we have restored messages from SQLite.
+    if (session.skipHistoryReplay) return;
 
     // Keep assistant/thought replay chunks and user chunks in strict order.
     this.finalizeStreamingContent(sessionId);
@@ -2113,6 +2140,9 @@ export const acpStore = {
     const session = state.sessions[sessionId];
     if (!session) return;
 
+    // Skip replay assistant/thought chunks when we have restored messages.
+    if (session.skipHistoryReplay) return;
+
     let buf = chunkBufs.get(sessionId);
     if (!buf) {
       buf = { content: "", thinking: "" };
@@ -2158,6 +2188,9 @@ export const acpStore = {
   handleToolCall(sessionId: string, toolCall: ToolCallEvent) {
     const session = state.sessions[sessionId];
     if (!session) return;
+
+    // Skip replayed tool calls when we have restored messages.
+    if (session.skipHistoryReplay) return;
 
     // Flush buffered chunks before reading streamingContent so tool cards
     // appear in correct chronological order relative to assistant text.
@@ -2227,6 +2260,9 @@ export const acpStore = {
   ) {
     const session = state.sessions[sessionId];
     if (!session) return;
+
+    // Skip replayed tool results when we have restored messages.
+    if (session.skipHistoryReplay) return;
 
     // Update the tool message status
     setState("sessions", sessionId, "messages", (msgs) =>
@@ -2305,6 +2341,9 @@ export const acpStore = {
     const session = state.sessions[sessionId];
     if (!session) return;
 
+    // Skip replayed diffs when we have restored messages.
+    if (session.skipHistoryReplay) return;
+
     const nextMessage: AgentMessage = {
       id: crypto.randomUUID(),
       type: "diff",
@@ -2357,6 +2396,12 @@ export const acpStore = {
     data?: SessionStatusEvent,
   ) {
     setState("sessions", sessionId, "info", "status", status);
+
+    // Safety net: clear the replay-skip flag when the session becomes ready,
+    // in case no promptComplete(historyReplay) was emitted.
+    if (status === "ready") {
+      setState("sessions", sessionId, "skipHistoryReplay", undefined);
+    }
 
     if (data?.agentSessionId) {
       setState("sessions", sessionId, "agentSessionId", data.agentSessionId);
