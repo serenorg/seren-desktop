@@ -124,6 +124,16 @@ pub fn generate_seatbelt_profile(config: &SandboxConfig) -> String {
     lines.push("(allow iokit-open)".to_string());
     lines.push(String::new());
 
+    // DNS and system service access (required for DNS resolution via mDNSResponder).
+    // macOS resolves DNS through XPC/Mach IPC to mDNSResponder, which needs
+    // system-socket for resolver socket creation, POSIX shared memory for the
+    // resolver cache, and user-preference-read for network/proxy configuration.
+    lines.push(";; DNS and system service access".to_string());
+    lines.push("(allow system-socket)".to_string());
+    lines.push("(allow ipc-posix-shm*)".to_string());
+    lines.push("(allow user-preference-read)".to_string());
+    lines.push(String::new());
+
     // Pseudo-terminal access (required for terminal emulation)
     lines.push(";; Pseudo-terminal access".to_string());
     lines.push("(allow file-read* file-write* file-ioctl (regex #\"^/dev/pty\"))".to_string());
@@ -281,6 +291,18 @@ mod tests {
         assert!(
             profile.contains("(allow network*)"),
             "workspace-write should allow network for git/npm/etc."
+        );
+        assert!(
+            profile.contains("(allow system-socket)"),
+            "profile should allow system-socket for DNS resolver"
+        );
+        assert!(
+            profile.contains("(allow ipc-posix-shm*)"),
+            "profile should allow POSIX shared memory for DNS resolver cache"
+        );
+        assert!(
+            profile.contains("(allow user-preference-read)"),
+            "profile should allow reading network/proxy preferences"
         );
     }
 
