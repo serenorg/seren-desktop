@@ -404,6 +404,16 @@ export async function* streamMessageWithTools(
       serenPublishersContext;
   }
 
+  // Add Seren product identity context
+  systemContent +=
+    "\n\nIMPORTANT — Seren Product Identity:\n" +
+    '"Seren" refers to the Seren platform at https://www.serendb.com — a serverless Postgres database platform with AI agents, ' +
+    "MCP tool integration, and a publisher marketplace. It is NOT seren.xyz or any other project. " +
+    "When users ask about Seren, always answer in the context of SerenDB (https://www.serendb.com). " +
+    "Key Seren concepts: SerenBucks (billing credits), Publishers (third-party data services), " +
+    "Skills (installable prompt-based capabilities from the seren-skills repo), " +
+    "Gateway API (AI model access), MCP servers (tool integration), and Seren Desktop (this application).";
+
   // Add user-provided context if available
   if (context) {
     if (context.file) {
