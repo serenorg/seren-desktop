@@ -54,6 +54,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     null,
   );
   const [overflowMenuId, setOverflowMenuId] = createSignal<string | null>(null);
+  const [installWarning, setInstallWarning] = createSignal<{
+    slug: string;
+    missingFiles: string[];
+  } | null>(null);
 
   // ── Derived values ──────────────────────────────
 
@@ -160,10 +164,20 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
 
   const handleInstall = async (skill: Skill, scope: SkillScope = "seren") => {
     setActionInProgress(skill.id);
+    setInstallWarning(null);
     try {
       const content = await skillsService.fetchContent(skill);
       if (content) {
-        await skillsStore.install(skill, content, scope);
+        const installed = await skillsStore.install(skill, content, scope);
+
+        // Validate payload after install
+        const missingFiles = await skillsService.validatePayload(
+          installed.skillsDir,
+          installed.slug,
+        );
+        if (missingFiles.length > 0) {
+          setInstallWarning({ slug: installed.slug, missingFiles });
+        }
       }
     } catch (err) {
       console.error("[SkillsExplorer] Failed to install:", err);
@@ -490,6 +504,40 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           Browse ({skillsStore.available.length})
         </button>
       </div>
+
+      {/* Install warning banner */}
+      <Show when={installWarning()}>
+        {(warning) => (
+          <div class="mx-4 my-2 px-3 py-2 bg-warning/10 border border-warning/30 rounded-md text-[12px]">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <span class="font-medium text-warning">
+                  Incomplete install: {warning().slug}
+                </span>
+                <p class="m-0 mt-1 text-muted-foreground">
+                  Missing files referenced in SKILL.md:
+                </p>
+                <ul class="m-0 mt-1 pl-4 text-muted-foreground">
+                  <For each={warning().missingFiles.slice(0, 5)}>
+                    {(file) => <li>{file}</li>}
+                  </For>
+                  <Show when={warning().missingFiles.length > 5}>
+                    <li>...and {warning().missingFiles.length - 5} more</li>
+                  </Show>
+                </ul>
+              </div>
+              <button
+                type="button"
+                class="shrink-0 text-muted-foreground hover:text-foreground bg-transparent border-none cursor-pointer text-[14px] leading-none"
+                onClick={() => setInstallWarning(null)}
+                aria-label="Dismiss warning"
+              >
+                x
+              </button>
+            </div>
+          </div>
+        )}
+      </Show>
 
       {/* Content area */}
       <div class="flex-1 overflow-y-auto">
