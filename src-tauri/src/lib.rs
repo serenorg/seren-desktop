@@ -724,6 +724,9 @@ pub fn run() {
             polymarket::commands::subscribe_polymarket_market,
             polymarket::commands::subscribe_polymarket_user,
             embedded_runtime::get_embedded_runtime_info,
+            // CLI installer commands
+            commands::cli_installer::check_cli_installed,
+            commands::cli_installer::install_cli_tool,
             store_oauth_credentials,
             get_oauth_credentials,
             clear_oauth_credentials,

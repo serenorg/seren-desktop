@@ -317,7 +317,14 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
     // Add embedded runtime to PATH
     let embedded_path = crate::embedded_runtime::get_embedded_path();
     if !embedded_path.is_empty() {
-        cmd.env("PATH", embedded_path);
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let combined = if system_path.is_empty() {
+            embedded_path.to_string()
+        } else {
+            format!("{}{}{}", embedded_path, sep, system_path)
+        };
+        cmd.env("PATH", &combined);
     }
 
     let child = cmd.spawn().map_err(|e| {
@@ -738,7 +745,14 @@ async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
         .stderr(std::process::Stdio::piped());
 
     if !embedded_path.is_empty() {
-        cmd.env("PATH", &embedded_path);
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let combined = if system_path.is_empty() {
+            embedded_path.to_string()
+        } else {
+            format!("{}{}{}", embedded_path, sep, system_path)
+        };
+        cmd.env("PATH", &combined);
     }
 
     let output = cmd
@@ -1276,7 +1290,14 @@ pub async fn openclaw_disconnect_channel(
         .stderr(std::process::Stdio::piped());
 
     if !embedded_path.is_empty() {
-        cmd.env("PATH", &embedded_path);
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let combined = if system_path.is_empty() {
+            embedded_path.to_string()
+        } else {
+            format!("{}{}{}", embedded_path, sep, system_path)
+        };
+        cmd.env("PATH", &combined);
     }
 
     let output = cmd
