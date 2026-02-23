@@ -1,6 +1,7 @@
 // ABOUTME: Chat interface for agent mode, displaying agent messages, tool calls, and diffs.
 // ABOUTME: Handles agent session lifecycle and message streaming.
 
+import { confirm } from "@tauri-apps/plugin-dialog";
 import type { Component } from "solid-js";
 import {
   createEffect,
@@ -14,7 +15,6 @@ import {
   untrack,
 } from "solid-js";
 import { createStore } from "solid-js/store";
-import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
 import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
@@ -22,6 +22,7 @@ import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
+import { escapeHtml } from "@/lib/escape-html";
 import { openExternalLink } from "@/lib/external-link";
 import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
@@ -30,7 +31,6 @@ import {
   getModelDisplayName,
   mapAgentModelToChat,
 } from "@/lib/rate-limit-fallback";
-import { escapeHtml } from "@/lib/escape-html";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import {
@@ -43,6 +43,7 @@ import { type AgentMessage, acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
 import { threadStore } from "@/stores/thread.store";
+import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AgentEffortSelector } from "./AgentEffortSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
 import { AgentModeSelector } from "./AgentModeSelector";
@@ -79,7 +80,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // Web Worker so renderMarkdown (marked + hljs) never blocks the main thread.
   const markdownWorker = new RenderMarkdownWorker();
   const [htmlCache, setHtmlCache] = createStore<Record<string, string>>({});
-  markdownWorker.onmessage = (e: MessageEvent<{ id: string; html: string }>) => {
+  markdownWorker.onmessage = (
+    e: MessageEvent<{ id: string; html: string }>,
+  ) => {
     setHtmlCache(e.data.id, e.data.html);
   };
   onCleanup(() => markdownWorker.terminate());
@@ -109,7 +112,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // The worker returns HTML via onmessage → setHtmlCache → reactive DOM update.
   createEffect(() => {
     for (const msg of threadMessages()) {
-      if (msg.type === "assistant" && untrack(() => htmlCache[msg.id]) === undefined) {
+      if (
+        msg.type === "assistant" &&
+        untrack(() => htmlCache[msg.id]) === undefined
+      ) {
         markdownWorker.postMessage({ id: msg.id, markdown: msg.content });
       }
     }
@@ -390,8 +396,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const clearHistory = async () => {
-    const confirmClear = window.confirm(
+    const confirmClear = await confirm(
       "Clear all agent chat history for this session?",
+      { title: "Clear Agent Chat", kind: "warning" },
     );
     if (!confirmClear) return;
 
@@ -409,8 +416,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
 
-    const confirmCompact = window.confirm(
+    const confirmCompact = await confirm(
       `Compact older messages, preserving the most recent ${preserveCount}?`,
+      { title: "Compact Conversation", kind: "warning" },
     );
     if (!confirmCompact) return;
 

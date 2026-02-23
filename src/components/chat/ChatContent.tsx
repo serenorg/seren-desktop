@@ -1,6 +1,7 @@
 // ABOUTME: Chat content panel without file tree for resizable layout.
 // ABOUTME: Shows chat messages, input, and model selector.
 
+import { confirm } from "@tauri-apps/plugin-dialog";
 /* eslint-disable solid/no-innerhtml */
 import type { Component } from "solid-js";
 import {
@@ -651,7 +652,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   const clearHistory = async () => {
-    const confirmClear = window.confirm("Clear all chat history?");
+    const confirmClear = await confirm("Clear all chat history?", {
+      title: "Clear Chat",
+      kind: "warning",
+    });
     if (!confirmClear) return;
     await conversationStore.clearHistory();
   };
