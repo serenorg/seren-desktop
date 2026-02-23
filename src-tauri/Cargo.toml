@@ -51,7 +51,7 @@ alloy = { version = "1", default-features = false, features = ["signers", "signe
 hex = "0.4"
 hmac = "0.12"
 rand = "0.9"
-rand_distr = "0.5"
+rand_distr = "0.6"
 sha2 = "0.10"
 base64 = "0.22"
 libc = "0.2"
