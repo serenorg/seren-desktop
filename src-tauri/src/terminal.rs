@@ -104,15 +104,32 @@ impl TerminalManager {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
-        // Set PATH with embedded runtime prepended
+        // Apply additional env vars from the request first, then set PATH.
+        // This ordering ensures agent-supplied PATH values don't override our
+        // computed PATH that includes embedded runtime + system directories.
+        for (key, value) in env_vars {
+            if key == "PATH" {
+                log::warn!(
+                    "[TerminalManager] Agent tried to override PATH via env_vars, ignoring"
+                );
+                continue;
+            }
+            cmd.env(key, value);
+        }
+
+        // Set PATH with embedded runtime + system paths. Applied after env_vars
+        // so that the carefully constructed PATH always wins.
         if !env_path.is_empty() {
             cmd.env("PATH", env_path);
         }
 
-        // Apply additional env vars from the request
-        for (key, value) in env_vars {
-            cmd.env(key, value);
-        }
+        log::debug!(
+            "[TerminalManager] Spawning terminal: cmd={}, sandbox={:?}, network={}, cwd={}",
+            exec_cmd,
+            sandbox_config.mode,
+            sandbox_config.network_allowed,
+            cwd.display()
+        );
 
         let mut child = cmd
             .spawn()

@@ -669,6 +669,7 @@ pub fn run() {
             files::reveal_in_file_manager,
             // Shell command execution (requires frontend approval)
             shell::execute_shell_command,
+            shell::diagnose_shell_network,
             // Web fetch command
             commands::web::web_fetch,
             // Conversation commands
