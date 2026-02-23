@@ -512,13 +512,14 @@ export const skillsStore = {
 
   /**
    * Refresh available skills from the index and publishers.
+   * Pass skipCache=true to bypass the localStorage cache (e.g. user-triggered refresh).
    */
-  async refreshAvailable(): Promise<void> {
+  async refreshAvailable(skipCache = false): Promise<void> {
     setState("isLoading", true);
     setState("error", null);
 
     try {
-      const available = await skills.fetchAllSkills();
+      const available = await skills.fetchAllSkills(skipCache);
       setState("available", available);
       log.info("[SkillsStore] Loaded", available.length, "available skills");
     } catch (err) {
@@ -563,9 +564,10 @@ export const skillsStore = {
 
   /**
    * Refresh all skills (available and installed).
+   * Pass skipCache=true for user-triggered refreshes that should bypass cache.
    */
-  async refresh(): Promise<void> {
-    await Promise.all([this.refreshAvailable(), this.refreshInstalled()]);
+  async refresh(skipCache = false): Promise<void> {
+    await Promise.all([this.refreshAvailable(skipCache), this.refreshInstalled()]);
   },
 
   /**

@@ -128,7 +128,9 @@ async function fetchSkillFromRepo(path: string): Promise<Skill | null> {
     description: parsed.metadata.description || "Install this skill to add it.",
     source: "serenorg" as SkillSource,
     sourceUrl,
-    tags: [],
+    tags: parsed.metadata.tags ?? [],
+    author: parsed.metadata.author,
+    version: parsed.metadata.version,
   };
 }
 
@@ -299,17 +301,19 @@ function publisherToSkill(publisher: Publisher): Skill {
 export const skills = {
   /**
    * Fetch the skills index from the aggregated endpoint.
-   * Uses caching to reduce network requests.
+   * Uses caching to reduce network requests. Pass skipCache to force a fresh fetch.
    */
-  async fetchIndex(): Promise<Skill[]> {
+  async fetchIndex(skipCache = false): Promise<Skill[]> {
     try {
-      // Check cache first
-      const cached = localStorage.getItem(INDEX_CACHE_KEY);
-      if (cached) {
-        const { timestamp, data } = JSON.parse(cached);
-        if (Date.now() - timestamp < INDEX_CACHE_DURATION) {
-          log.info("[Skills] Using cached index");
-          return (data as SkillIndexEntry[]).map(indexEntryToSkill);
+      // Check cache first (unless explicitly bypassed)
+      if (!skipCache) {
+        const cached = localStorage.getItem(INDEX_CACHE_KEY);
+        if (cached) {
+          const { timestamp, data } = JSON.parse(cached);
+          if (Date.now() - timestamp < INDEX_CACHE_DURATION) {
+            log.info("[Skills] Using cached index");
+            return (data as SkillIndexEntry[]).map(indexEntryToSkill);
+          }
         }
       }
 
@@ -343,15 +347,17 @@ export const skills = {
    * Fetch skills from Seren publishers.
    * Each publisher has a skill.md available at /publishers/{slug}/skill.md
    */
-  async fetchPublisherSkills(): Promise<Skill[]> {
+  async fetchPublisherSkills(skipCache = false): Promise<Skill[]> {
     try {
-      // Check cache first
-      const cached = localStorage.getItem(PUBLISHER_SKILLS_CACHE_KEY);
-      if (cached) {
-        const { timestamp, data } = JSON.parse(cached);
-        if (Date.now() - timestamp < INDEX_CACHE_DURATION) {
-          log.info("[Skills] Using cached publisher skills");
-          return data as Skill[];
+      // Check cache first (unless explicitly bypassed)
+      if (!skipCache) {
+        const cached = localStorage.getItem(PUBLISHER_SKILLS_CACHE_KEY);
+        if (cached) {
+          const { timestamp, data } = JSON.parse(cached);
+          if (Date.now() - timestamp < INDEX_CACHE_DURATION) {
+            log.info("[Skills] Using cached publisher skills");
+            return data as Skill[];
+          }
         }
       }
 
@@ -389,10 +395,10 @@ export const skills = {
   /**
    * Fetch all available skills (from index + publishers).
    */
-  async fetchAllSkills(): Promise<Skill[]> {
+  async fetchAllSkills(skipCache = false): Promise<Skill[]> {
     const [indexSkills, publisherSkills] = await Promise.all([
-      this.fetchIndex(),
-      this.fetchPublisherSkills(),
+      this.fetchIndex(skipCache),
+      this.fetchPublisherSkills(skipCache),
     ]);
 
     // Merge skills, with publisher skills taking precedence for duplicates
@@ -841,6 +847,7 @@ export const skills = {
 
     return skills.filter(
       (skill) =>
+        skill.slug.toLowerCase().includes(q) ||
         skill.name.toLowerCase().includes(q) ||
         skill.description.toLowerCase().includes(q) ||
         skill.tags.some((tag) => tag.toLowerCase().includes(q)) ||
