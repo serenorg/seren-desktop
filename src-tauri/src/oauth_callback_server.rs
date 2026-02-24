@@ -1,26 +1,43 @@
 // ABOUTME: OAuth callback HTTP server for localhost OAuth redirects.
 // ABOUTME: Runs on all builds to support Windows (no deep links) and dev mode.
 
+use std::sync::Arc;
 use std::thread;
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Response, Server};
 
+/// Handle to the running OAuth server. Unblocks the listener on drop
+/// so the background thread exits cleanly when the app shuts down.
+pub struct OAuthServerHandle {
+    server: Arc<Server>,
+}
+
+impl Drop for OAuthServerHandle {
+    fn drop(&mut self) {
+        log::info!("[OAuth Server] Shutting down");
+        self.server.unblock();
+    }
+}
+
 /// Start the OAuth callback server.
 /// Listens on http://localhost:8787/oauth/callback
 /// Emits oauth-callback events to the frontend.
-pub fn start_oauth_callback_server(app_handle: AppHandle) {
-    thread::spawn(move || {
-        let server = match Server::http("127.0.0.1:8787") {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("[OAuth Server] Failed to start: {}", e);
-                return;
-            }
-        };
+/// Returns a handle that stops the server when dropped.
+pub fn start_oauth_callback_server(app_handle: AppHandle) -> Option<OAuthServerHandle> {
+    let server = match Server::http("127.0.0.1:8787") {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            log::error!("[OAuth Server] Failed to start: {}", e);
+            return None;
+        }
+    };
 
+    let thread_server = Arc::clone(&server);
+
+    thread::spawn(move || {
         log::info!("[OAuth Server] Listening on http://localhost:8787/oauth/callback");
 
-        for request in server.incoming_requests() {
+        for request in thread_server.incoming_requests() {
             let url = request.url();
 
             // Only handle /oauth/callback path
@@ -92,5 +109,9 @@ pub fn start_oauth_callback_server(app_handle: AppHandle) {
                 let _ = request.respond(response);
             }
         }
+
+        log::info!("[OAuth Server] Stopped");
     });
+
+    Some(OAuthServerHandle { server })
 }
