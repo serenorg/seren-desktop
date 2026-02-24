@@ -75,6 +75,11 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     let runtime_dir = match get_embedded_runtime_dir(app) {
         Some(dir) => dir,
         None => {
+            log::warn!(
+                "[EmbeddedRuntime] No runtime directory found for {}. \
+                 Child processes may fail to locate node/git.",
+                platform_subdir()
+            );
             return EmbeddedRuntimePaths {
                 node_dir: None,
                 git_dir: None,
