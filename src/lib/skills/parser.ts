@@ -147,6 +147,9 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
         case "name":
           metadata.name = cleanValue;
           break;
+        case "slug":
+          metadata.slug = cleanValue;
+          break;
         case "description":
           metadata.description = cleanValue;
           break;
@@ -216,6 +219,38 @@ export function resolveSkillDisplayName(
   }
 
   return "Unnamed Skill";
+}
+
+/**
+ * Derive a URL-friendly slug from a display name.
+ * "Polymarket Bot" → "polymarket-bot"
+ * Returns null if the name can't produce a valid slug.
+ */
+export function slugFromName(name: string): string | null {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return SKILL_SLUG_PATTERN.test(slug) ? slug : null;
+}
+
+/**
+ * Resolve the canonical slug for an installed skill.
+ * Priority: explicit slug field > name-derived slug > directory name.
+ */
+export function resolveSkillSlug(parsed: ParsedSkill, dirName: string): string {
+  if (parsed.metadata.slug && SKILL_SLUG_PATTERN.test(parsed.metadata.slug)) {
+    return parsed.metadata.slug;
+  }
+
+  const nameSlug = parsed.metadata.name
+    ? slugFromName(parsed.metadata.name)
+    : null;
+  if (nameSlug && nameSlug !== dirName) {
+    return nameSlug;
+  }
+
+  return dirName;
 }
 
 /**

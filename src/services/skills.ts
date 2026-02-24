@@ -11,6 +11,7 @@ import {
   type InstalledSkill,
   parseSkillMd,
   resolveSkillDisplayName,
+  resolveSkillSlug,
   type Skill,
   type SkillIndexEntry,
   type SkillScope,
@@ -567,21 +568,22 @@ export const skills = {
       const slugs = await invoke<string[]>("list_skill_dirs", { skillsDir });
       const installed: InstalledSkill[] = [];
 
-      for (const slug of slugs) {
+      for (const dirName of slugs) {
         const [content, resolvedPath] = await Promise.all([
           invoke<string | null>("read_skill_content", {
             skillsDir,
-            slug,
+            slug: dirName,
           }),
           invoke<string | null>("resolve_skill_path", {
             skillsDir,
-            slug,
+            slug: dirName,
           }),
         ]);
 
         if (content) {
           const parsed = parseSkillMd(content);
           const hash = await computeContentHash(content);
+          const slug = resolveSkillSlug(parsed, dirName);
 
           installed.push({
             id: `local:${slug}`,
@@ -593,7 +595,8 @@ export const skills = {
 
             scope,
             skillsDir,
-            path: resolvedPath || getSkillPath(skillsDir, slug),
+            dirName,
+            path: resolvedPath || getSkillPath(skillsDir, dirName),
             installedAt: Date.now(), // We don't track this yet
             enabled: true, // All installed skills are enabled by default
             contentHash: hash,
@@ -734,6 +737,7 @@ export const skills = {
       source: "local",
       scope,
       skillsDir,
+      dirName: skill.slug,
       path,
       installedAt: Date.now(),
       enabled: true,
@@ -780,7 +784,7 @@ export const skills = {
 
     await invoke("remove_skill", {
       skillsDir,
-      slug: skill.slug,
+      slug: skill.dirName,
     });
 
     log.info("[Skills] Removed skill:", skill.slug);
@@ -796,7 +800,7 @@ export const skills = {
 
     return invoke<string | null>("read_skill_content", {
       skillsDir: skill.skillsDir,
-      slug: skill.slug,
+      slug: skill.dirName,
     });
   },
 
