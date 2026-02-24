@@ -578,7 +578,9 @@ pub fn run() {
 
             // Start OAuth callback server in dev mode
             // Provides localhost:8787 redirect for OAuth without deep links
-            oauth_callback_server::start_oauth_callback_server(app.handle().clone());
+            if let Some(handle) = oauth_callback_server::start_oauth_callback_server(app.handle().clone()) {
+                app.manage(handle);
+            }
 
             // Register deep link handler for OAuth callbacks (production)
             // Note: Disabled on Windows due to WiX bundler ICE03 registry errors
