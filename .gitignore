@@ -30,7 +30,7 @@ coverage/
 test-results/
 
 # Installed skills (runtime data, not committed)
-skills/
+/skills/
 
 # Tauri
 src-tauri/WixTools/

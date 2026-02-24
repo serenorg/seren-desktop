@@ -19,6 +19,7 @@ export type SkillSource =
 export interface SkillMetadata {
   name: string;
   description: string;
+  slug?: string;
   version?: string;
   author?: string;
   tags?: string[];
@@ -64,6 +65,8 @@ export interface InstalledSkill extends Skill {
   scope: SkillScope;
   /** Root skills directory for this installation scope */
   skillsDir: string;
+  /** Filesystem directory name (may differ from slug after a rename) */
+  dirName: string;
   /** Full path to the SKILL.md file */
   path: string;
   /** Timestamp when the skill was installed */
