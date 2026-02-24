@@ -29,6 +29,9 @@ npm-debug.log*
 coverage/
 test-results/
 
+# Installed skills (runtime data, not committed)
+skills/
+
 # Tauri
 src-tauri/WixTools/
 src-tauri/gen/schemas/
