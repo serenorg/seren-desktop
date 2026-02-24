@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddIpToAllowListData, AddIpToAllowListErrors, AddIpToAllowListResponses, AddPaymentMethodData, AddPaymentMethodErrors, AddPaymentMethodResponses, AgentRegisterData, AgentRegisterErrors, AgentRegisterResponses, ApplyReferralCodeData, ApplyReferralCodeErrors, ApplyReferralCodeResponses, AssignProjectVpcEndpointByIdData, AssignProjectVpcEndpointByIdErrors, AssignProjectVpcEndpointByIdResponses, AssignProjectVpcEndpointData, AssignProjectVpcEndpointErrors, AssignProjectVpcEndpointResponses, AssignRoleData, AssignRoleErrors, AssignRoleResponses, ChangeOrganizationPlanData, ChangeOrganizationPlanErrors, ChangeOrganizationPlanResponses, CheckDailyEligibilityData, CheckDailyEligibilityErrors, CheckDailyEligibilityResponses, CheckPermissionData, CheckPermissionErrors, CheckPermissionResponses, ClaimDailyData, ClaimDailyErrors, ClaimDailyResponses, ClaimPaymentMethodBonusData, ClaimPaymentMethodBonusErrors, ClaimPaymentMethodBonusResponses, ClaimSignupBonusData, ClaimSignupBonusErrors, ClaimSignupBonusResponses, CreateBranchData, CreateBranchErrors, CreateBranchProtectionData, CreateBranchProtectionErrors, CreateBranchProtectionResponses, CreateBranchResponses, CreateBranchRoleData, CreateBranchRoleErrors, CreateBranchRoleResponses, CreateChargeData, CreateChargeErrors, CreateChargeResponses, CreateDatabaseData, CreateDatabaseErrors, CreateDatabaseResponses, CreateDefaultOrgApiKeyData, CreateDefaultOrgApiKeyErrors, CreateDefaultOrgApiKeyResponses, CreateDepositData, CreateDepositErrors, CreateDepositResponses, CreateEndpointData, CreateEndpointErrors, CreateEndpointResponses, CreateInviteData, CreateInviteErrors, CreateInviteResponses, CreateOrganizationRoleData, CreateOrganizationRoleErrors, CreateOrganizationRoleResponses, CreateOrgApiKeyData, CreateOrgApiKeyErrors, CreateOrgApiKeyResponses, CreateOrgOauthProviderData, CreateOrgOauthProviderErrors, CreateOrgOauthProviderResponses, CreateOrgPublisherPayoutData, CreateOrgPublisherPayoutErrors, CreateOrgPublisherPayoutResponses, CreateOrgVpcEndpointData, CreateOrgVpcEndpointErrors, CreateOrgVpcEndpointResponses, CreatePaymentIntentData, CreatePaymentIntentErrors, CreatePaymentIntentResponses, CreatePayoutData, CreatePayoutErrors, CreatePayoutResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreatePublicationData, CreatePublicationErrors, CreatePublicationResponses, CreatePublisherData, CreatePublisherErrors, CreatePublisherResponses, CreateReplicationSlotData, CreateReplicationSlotErrors, CreateReplicationSlotResponses, CreateWebhookData, CreateWebhookErrors, CreateWebhookResponses, DeleteBranchData, DeleteBranchErrors, DeleteBranchProtectionData, DeleteBranchProtectionErrors, DeleteBranchProtectionResponses, DeleteBranchResponses, DeleteBranchRoleData, DeleteBranchRoleErrors, DeleteBranchRoleResponses, DeleteDatabaseByNameData, DeleteDatabaseByNameErrors, DeleteDatabaseByNameResponses, DeleteDatabaseData, DeleteDatabaseErrors, DeleteDatabaseResponses, DeleteEndpointData, DeleteEndpointErrors, DeleteEndpointResponses, DeleteOrganizationRoleData, DeleteOrganizationRoleErrors, DeleteOrganizationRoleResponses, DeleteOrgOauthProviderData, DeleteOrgOauthProviderErrors, DeleteOrgOauthProviderResponses, DeleteOrgVpcEndpointByRegionData, DeleteOrgVpcEndpointByRegionErrors, DeleteOrgVpcEndpointByRegionResponses, DeleteOrgVpcEndpointData, DeleteOrgVpcEndpointErrors, DeleteOrgVpcEndpointResponses, DeletePaymentMethodData, DeletePaymentMethodErrors, DeletePaymentMethodResponses, DeleteProjectData, DeleteProjectEndpointData, DeleteProjectEndpointErrors, DeleteProjectEndpointResponses, DeleteProjectErrors, DeleteProjectResponses, DeletePublicationData, DeletePublicationErrors, DeletePublicationResponses, DeletePublisherData, DeletePublisherErrors, DeletePublisherResponses, DeleteReplicationSlotData, DeleteReplicationSlotErrors, DeleteReplicationSlotResponses, DeleteResourceData, DeleteResourceErrors, DeleteResourceResponses, DeleteRoleByNameData, DeleteRoleByNameErrors, DeleteRoleByNameResponses, DeleteWebhookData, DeleteWebhookErrors, DeleteWebhookResponses, EstimateQueryData, EstimateQueryErrors, EstimateQueryResponses, ForgotPasswordData, ForgotPasswordErrors, ForgotPasswordResponses, GenerateInvoicesData, GenerateInvoicesErrors, GenerateInvoicesResponses, GetAgentBalanceData, GetAgentBalanceErrors, GetAgentBalanceResponses, GetAuditLogData, GetAuditLogErrors, GetAuditLogResponses, GetBillingHealthData, GetBillingHealthErrors, GetBillingHealthResponses, GetBranchCountData, GetBranchCountErrors, GetBranchCountResponses, GetBranchData, GetBranchDetailsData, GetBranchDetailsErrors, GetBranchDetailsResponses, GetBranchErrors, GetBranchProtectionData, GetBranchProtectionErrors, GetBranchProtectionResponses, GetBranchResponses, GetChargeStatusData, GetChargeStatusErrors, GetChargeStatusResponses, GetConnectionStringData, GetConnectionStringErrors, GetConnectionStringResponses, GetCurrentUserData, GetCurrentUserErrors, GetCurrentUserResponses, GetDatabaseByNameData, GetDatabaseByNameErrors, GetDatabaseByNameResponses, GetDatabaseData, GetDatabaseErrors, GetDatabaseResponses, GetEndpointBillingEventsData, GetEndpointBillingEventsErrors, GetEndpointBillingEventsResponses, GetEndpointStatusData, GetEndpointStatusErrors, GetEndpointStatusResponses, GetInvoiceData, GetInvoiceErrors, GetInvoiceResponses, GetLsnByTimestampData, GetLsnByTimestampErrors, GetLsnByTimestampResponses, GetMyPermissionsData, GetMyPermissionsErrors, GetMyPermissionsResponses, GetOperationData, GetOperationErrors, GetOperationResponses, GetOrganizationConsumptionData, GetOrganizationConsumptionErrors, GetOrganizationConsumptionResponses, GetOrganizationPlanData, GetOrganizationPlanErrors, GetOrganizationPlanResponses, GetOrgOauthProviderData, GetOrgOauthProviderErrors, GetOrgOauthProviderResponses, GetOrgPublisherData, GetOrgPublisherEarningsData, GetOrgPublisherEarningsErrors, GetOrgPublisherEarningsResponses, GetOrgPublisherErrors, GetOrgPublisherResponses, GetOrgVpcEndpointByRegionData, GetOrgVpcEndpointByRegionErrors, GetOrgVpcEndpointByRegionResponses, GetOrgVpcEndpointData, GetOrgVpcEndpointErrors, GetOrgVpcEndpointResponses, GetPaymentHistoryData, GetPaymentHistoryErrors, GetPaymentHistoryResponses, GetPayoutStatusData, GetPayoutStatusErrors, GetPayoutStatusResponses, GetPlanData, GetPlanErrors, GetPlanResponses, GetProjectConnectionUriData, GetProjectConnectionUriErrors, GetProjectConnectionUriResponses, GetProjectConsumptionData, GetProjectConsumptionErrors, GetProjectConsumptionResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetProjectSizeData, GetProjectSizeErrors, GetProjectSizeResponses, GetPublisherTemplateAnalyticsData, GetPublisherTemplateAnalyticsErrors, GetPublisherTemplateAnalyticsResponses, GetQuotaUsageData, GetQuotaUsageErrors, GetQuotaUsageResponses, GetReferralInfoData, GetReferralInfoErrors, GetReferralInfoResponses, GetReplicationSettingsData, GetReplicationSettingsErrors, GetReplicationSettingsResponses, GetResourceData, GetResourceErrors, GetResourceResponses, GetRevenueByDayData, GetRevenueByDayErrors, GetRevenueByDayResponses, GetRevenueMetricsData, GetRevenueMetricsErrors, GetRevenueMetricsResponses, GetRoleByNameData, GetRoleByNameErrors, GetRoleByNameResponses, GetRoleData, GetRoleErrors, GetRoleResponses, GetStatsData, GetStatsErrors, GetStatsResponses, GetStorePublisherData, GetStorePublisherErrors, GetStorePublisherLogoData, GetStorePublisherLogoErrors, GetStorePublisherLogoResponses, GetStorePublisherResponses, GetSupportedData, GetSupportedErrors, GetSupportedResponses, GetTemplateData, GetTemplateErrors, GetTemplateResponses, GetTimestampByLsnData, GetTimestampByLsnErrors, GetTimestampByLsnResponses, GetTopAgentsData, GetTopAgentsErrors, GetTopAgentsResponses, GetTransactionsData, GetTransactionsErrors, GetTransactionsResponses, GetUsageSummaryData, GetUsageSummaryErrors, GetUsageSummaryResponses, GetWalletBalanceData, GetWalletBalanceErrors, GetWalletBalanceResponses, GetWebhookData, GetWebhookErrors, GetWebhookResponses, HandleStripeWebhookData, HandleStripeWebhookErrors, HandleStripeWebhookResponses, InitiateOauthByIdData, InitiateOauthByIdErrors, InitiateOauthData, InitiateOauthErrors, InvokeTemplateData, InvokeTemplateErrors, InvokeTemplateResponses, IssueInvoiceData, IssueInvoiceErrors, IssueInvoiceResponses, ListAllDatabasesData, ListAllDatabasesErrors, ListAllDatabasesResponses, ListAuditLogsData, ListAuditLogsErrors, ListAuditLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListBranchProtectionRulesData, ListBranchProtectionRulesErrors, ListBranchProtectionRulesResponses, ListBranchRolesData, ListBranchRolesErrors, ListBranchRolesResponses, ListConnectionsData, ListConnectionsResponses, ListDatabasesData, ListDatabasesErrors, ListDatabasesResponses, ListDefaultOrgApiKeysData, ListDefaultOrgApiKeysErrors, ListDefaultOrgApiKeysResponses, ListEndpointsData, ListEndpointsErrors, ListEndpointsResponses, ListEventTypesData, ListEventTypesErrors, ListEventTypesResponses, ListInvitesData, ListInvitesErrors, ListInvitesResponses, ListIpAllowListData, ListIpAllowListErrors, ListIpAllowListResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, ListOrganizationRolesData, ListOrganizationRolesErrors, ListOrganizationRolesResponses, ListOrganizationsData, ListOrganizationsErrors, ListOrganizationsResponses, ListOrgApiKeysData, ListOrgApiKeysErrors, ListOrgApiKeysResponses, ListOrgOauthProvidersData, ListOrgOauthProvidersErrors, ListOrgOauthProvidersResponses, ListOrgPublisherPayoutsData, ListOrgPublisherPayoutsErrors, ListOrgPublisherPayoutsResponses, ListOrgPublishersData, ListOrgPublishersErrors, ListOrgPublishersResponses, ListOrgVpcEndpointsAliasData, ListOrgVpcEndpointsAliasErrors, ListOrgVpcEndpointsAliasResponses, ListOrgVpcEndpointsByRegionData, ListOrgVpcEndpointsByRegionErrors, ListOrgVpcEndpointsByRegionResponses, ListOrgVpcEndpointsData, ListOrgVpcEndpointsErrors, ListOrgVpcEndpointsResponses, ListPaymentMethodsData, ListPaymentMethodsErrors, ListPaymentMethodsResponses, ListPermissionsData, ListPermissionsErrors, ListPermissionsResponses, ListPlansData, ListPlansErrors, ListPlansResponses, ListProjectDatabasesData, ListProjectDatabasesErrors, ListProjectDatabasesResponses, ListProjectEndpointsData, ListProjectEndpointsErrors, ListProjectEndpointsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListProjectVpcEndpointsAliasData, ListProjectVpcEndpointsAliasErrors, ListProjectVpcEndpointsAliasResponses, ListProjectVpcEndpointsData, ListProjectVpcEndpointsErrors, ListProjectVpcEndpointsResponses, ListProvidersData, ListProvidersResponses, ListPublicationsData, ListPublicationsErrors, ListPublicationsResponses, ListReplicationSlotsData, ListReplicationSlotsErrors, ListReplicationSlotsResponses, ListResourcesData, ListResourcesErrors, ListResourcesResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStorePublishersData, ListStorePublishersErrors, ListStorePublishersResponses, ListTemplatesData, ListTemplatesErrors, ListTemplatesResponses, ListWebhookDeliveriesData, ListWebhookDeliveriesErrors, ListWebhookDeliveriesResponses, ListWebhooksData, ListWebhooksErrors, ListWebhooksResponses, OauthCallbackByIdData, OauthCallbackByIdErrors, OauthCallbackData, OauthCallbackErrors, OnchainDepositData, OnchainDepositErrors, OnchainDepositResponses, ProxyToPublisherGetData, ProxyToPublisherGetErrors, ProxyToPublisherGetResponses, ProxyToPublisherPostData, ProxyToPublisherPostErrors, ProxyToPublisherPostResponses, PublisherRootHandlerData, PublisherRootHandlerErrors, PublisherRootHandlerResponses, PublishTemplateData, PublishTemplateErrors, PublishTemplateResponses, RefundChargeData, RefundChargeErrors, RefundChargeResponses, RemoveIpFromAllowListData, RemoveIpFromAllowListErrors, RemoveIpFromAllowListResponses, RemoveProjectVpcEndpointByVpcIdData, RemoveProjectVpcEndpointByVpcIdErrors, RemoveProjectVpcEndpointByVpcIdResponses, RemoveProjectVpcEndpointData, RemoveProjectVpcEndpointErrors, RemoveProjectVpcEndpointResponses, RenameBranchData, RenameBranchErrors, RenameBranchResponses, ResendVerificationEmailData, ResendVerificationEmailErrors, ResendVerificationEmailResponses, ResetBranchData, ResetBranchErrors, ResetBranchResponses, ResetIpAllowListData, ResetIpAllowListErrors, ResetIpAllowListResponses, ResetPasswordData, ResetPasswordErrors, ResetPasswordResponses, ResetRolePasswordByNameData, ResetRolePasswordByNameErrors, ResetRolePasswordByNameResponses, ResetRolePasswordData, ResetRolePasswordErrors, ResetRolePasswordResponses, RestartProjectEndpointData, RestartProjectEndpointErrors, RestartProjectEndpointResponses, RestoreBranchData, RestoreBranchErrors, RestoreBranchResponses, RevealRolePasswordData, RevealRolePasswordErrors, RevealRolePasswordResponses, RevokeAllSessionsData, RevokeAllSessionsErrors, RevokeAllSessionsResponses, RevokeConnectionByIdData, RevokeConnectionByIdErrors, RevokeConnectionByIdResponses, RevokeConnectionData, RevokeConnectionErrors, RevokeConnectionResponses, RevokeDefaultOrgApiKeyData, RevokeDefaultOrgApiKeyErrors, RevokeDefaultOrgApiKeyResponses, RevokeOrgApiKeyData, RevokeOrgApiKeyErrors, RevokeOrgApiKeyResponses, RevokeOtherSessionsData, RevokeOtherSessionsErrors, RevokeOtherSessionsResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, RotateWebhookSecretData, RotateWebhookSecretErrors, RotateWebhookSecretResponses, SetBranchArchivedData, SetBranchArchivedErrors, SetBranchArchivedResponses, SetBranchExpirationData, SetBranchExpirationErrors, SetBranchExpirationResponses, SetDefaultBranchAliasData, SetDefaultBranchAliasErrors, SetDefaultBranchAliasResponses, SetDefaultBranchData, SetDefaultBranchErrors, SetDefaultBranchResponses, SetRecoveryData, SetRecoveryErrors, SetRecoveryResponses, SlashChargeData, SlashChargeErrors, SlashChargeResponses, StartEndpointData, StartEndpointErrors, StartEndpointResponses, StartProjectEndpointData, StartProjectEndpointErrors, StartProjectEndpointResponses, StopEndpointData, StopEndpointErrors, StopEndpointResponses, SuggestPublishersData, SuggestPublishersErrors, SuggestPublishersResponses, SuspendProjectEndpointData, SuspendProjectEndpointErrors, SuspendProjectEndpointResponses, UpdateBranchProtectionData, UpdateBranchProtectionErrors, UpdateBranchProtectionResponses, UpdateDatabaseByNameData, UpdateDatabaseByNameErrors, UpdateDatabaseByNameResponses, UpdateDatabaseData, UpdateDatabaseErrors, UpdateDatabaseResponses, UpdateEndpointData, UpdateEndpointErrors, UpdateEndpointResponses, UpdateOrgOauthProviderData, UpdateOrgOauthProviderErrors, UpdateOrgOauthProviderResponses, UpdateProjectData, UpdateProjectEndpointData, UpdateProjectEndpointErrors, UpdateProjectEndpointResponses, UpdateProjectErrors, UpdateProjectResponses, UpdatePublicationData, UpdatePublicationErrors, UpdatePublicationResponses, UpdatePublisherData, UpdatePublisherErrors, UpdatePublisherPricingData, UpdatePublisherPricingErrors, UpdatePublisherPricingResponses, UpdatePublisherResponses, UpdateReplicationSettingsData, UpdateReplicationSettingsErrors, UpdateReplicationSettingsResponses, UpdateRoleData, UpdateRoleErrors, UpdateRoleResponses, UpdateWebhookData, UpdateWebhookErrors, UpdateWebhookResponses, UploadPublisherLogoData, UploadPublisherLogoErrors, UploadPublisherLogoResponses, UpsertResourceData, UpsertResourceErrors, UpsertResourceResponses, VerifyEmailData, VerifyEmailErrors, VerifyEmailResponses, WalletRecoverData, WalletRecoverErrors, WalletRecoverResponses } from './types.gen';
+import type { AddIpToAllowListData, AddIpToAllowListErrors, AddIpToAllowListResponses, AddPaymentMethodData, AddPaymentMethodErrors, AddPaymentMethodResponses, AgentRegisterData, AgentRegisterErrors, AgentRegisterResponses, AgentUpdateData, AgentUpdateErrors, AgentUpdateResponses, ApplyReferralCodeData, ApplyReferralCodeErrors, ApplyReferralCodeResponses, AssignProjectVpcEndpointByIdData, AssignProjectVpcEndpointByIdErrors, AssignProjectVpcEndpointByIdResponses, AssignProjectVpcEndpointData, AssignProjectVpcEndpointErrors, AssignProjectVpcEndpointResponses, AssignRoleData, AssignRoleErrors, AssignRoleResponses, CancelTaskData, CancelTaskErrors, CancelTaskResponses, ChangeOrganizationPlanData, ChangeOrganizationPlanErrors, ChangeOrganizationPlanResponses, CheckDailyEligibilityData, CheckDailyEligibilityErrors, CheckDailyEligibilityResponses, CheckPermissionData, CheckPermissionErrors, CheckPermissionResponses, ClaimDailyData, ClaimDailyErrors, ClaimDailyResponses, ClaimPaymentMethodBonusData, ClaimPaymentMethodBonusErrors, ClaimPaymentMethodBonusResponses, ClaimSignupBonusData, ClaimSignupBonusErrors, ClaimSignupBonusResponses, CreateBranchData, CreateBranchErrors, CreateBranchProtectionData, CreateBranchProtectionErrors, CreateBranchProtectionResponses, CreateBranchResponses, CreateBranchRoleData, CreateBranchRoleErrors, CreateBranchRoleResponses, CreateChargeData, CreateChargeErrors, CreateChargeResponses, CreateDatabaseData, CreateDatabaseErrors, CreateDatabaseResponses, CreateDefaultOrgApiKeyData, CreateDefaultOrgApiKeyErrors, CreateDefaultOrgApiKeyResponses, CreateDepositData, CreateDepositErrors, CreateDepositResponses, CreateEndpointData, CreateEndpointErrors, CreateEndpointResponses, CreateInviteData, CreateInviteErrors, CreateInviteResponses, CreateOrganizationRoleData, CreateOrganizationRoleErrors, CreateOrganizationRoleResponses, CreateOrgApiKeyData, CreateOrgApiKeyErrors, CreateOrgApiKeyResponses, CreateOrgOauthProviderData, CreateOrgOauthProviderErrors, CreateOrgOauthProviderResponses, CreateOrgPublisherPayoutData, CreateOrgPublisherPayoutErrors, CreateOrgPublisherPayoutResponses, CreateOrgVpcEndpointData, CreateOrgVpcEndpointErrors, CreateOrgVpcEndpointResponses, CreatePaymentIntentData, CreatePaymentIntentErrors, CreatePaymentIntentResponses, CreatePayoutData, CreatePayoutErrors, CreatePayoutResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreatePublicationData, CreatePublicationErrors, CreatePublicationResponses, CreatePublisherData, CreatePublisherErrors, CreatePublisherResponses, CreateReplicationSlotData, CreateReplicationSlotErrors, CreateReplicationSlotResponses, CreateWebhookData, CreateWebhookErrors, CreateWebhookResponses, DeleteBranchData, DeleteBranchErrors, DeleteBranchProtectionData, DeleteBranchProtectionErrors, DeleteBranchProtectionResponses, DeleteBranchResponses, DeleteBranchRoleData, DeleteBranchRoleErrors, DeleteBranchRoleResponses, DeleteDatabaseByNameData, DeleteDatabaseByNameErrors, DeleteDatabaseByNameResponses, DeleteDatabaseData, DeleteDatabaseErrors, DeleteDatabaseResponses, DeleteEndpointData, DeleteEndpointErrors, DeleteEndpointResponses, DeleteOrganizationRoleData, DeleteOrganizationRoleErrors, DeleteOrganizationRoleResponses, DeleteOrgOauthProviderData, DeleteOrgOauthProviderErrors, DeleteOrgOauthProviderResponses, DeleteOrgVpcEndpointByRegionData, DeleteOrgVpcEndpointByRegionErrors, DeleteOrgVpcEndpointByRegionResponses, DeleteOrgVpcEndpointData, DeleteOrgVpcEndpointErrors, DeleteOrgVpcEndpointResponses, DeletePaymentMethodData, DeletePaymentMethodErrors, DeletePaymentMethodResponses, DeleteProjectData, DeleteProjectEndpointData, DeleteProjectEndpointErrors, DeleteProjectEndpointResponses, DeleteProjectErrors, DeleteProjectResponses, DeletePublicationData, DeletePublicationErrors, DeletePublicationResponses, DeletePublisherData, DeletePublisherErrors, DeletePublisherResponses, DeleteReplicationSlotData, DeleteReplicationSlotErrors, DeleteReplicationSlotResponses, DeleteResourceData, DeleteResourceErrors, DeleteResourceResponses, DeleteRoleByNameData, DeleteRoleByNameErrors, DeleteRoleByNameResponses, DeleteWebhookData, DeleteWebhookErrors, DeleteWebhookResponses, EstimateQueryData, EstimateQueryErrors, EstimateQueryResponses, ForgotPasswordData, ForgotPasswordErrors, ForgotPasswordResponses, GenerateInvoicesData, GenerateInvoicesErrors, GenerateInvoicesResponses, GetAgentBalanceData, GetAgentBalanceErrors, GetAgentBalanceResponses, GetAuditLogData, GetAuditLogErrors, GetAuditLogResponses, GetBillingHealthData, GetBillingHealthErrors, GetBillingHealthResponses, GetBranchCountData, GetBranchCountErrors, GetBranchCountResponses, GetBranchData, GetBranchDetailsData, GetBranchDetailsErrors, GetBranchDetailsResponses, GetBranchErrors, GetBranchProtectionData, GetBranchProtectionErrors, GetBranchProtectionResponses, GetBranchResponses, GetChargeStatusData, GetChargeStatusErrors, GetChargeStatusResponses, GetConnectionStringData, GetConnectionStringErrors, GetConnectionStringResponses, GetCurrentUserData, GetCurrentUserErrors, GetCurrentUserResponses, GetDatabaseByNameData, GetDatabaseByNameErrors, GetDatabaseByNameResponses, GetDatabaseData, GetDatabaseErrors, GetDatabaseResponses, GetEndpointBillingEventsData, GetEndpointBillingEventsErrors, GetEndpointBillingEventsResponses, GetEndpointStatusData, GetEndpointStatusErrors, GetEndpointStatusResponses, GetHistoryStatsData, GetHistoryStatsErrors, GetHistoryStatsResponses, GetInvoiceData, GetInvoiceErrors, GetInvoiceResponses, GetLsnByTimestampData, GetLsnByTimestampErrors, GetLsnByTimestampResponses, GetMatrixData, GetMatrixErrors, GetMatrixResponses, GetMyPermissionsData, GetMyPermissionsErrors, GetMyPermissionsResponses, GetOperationData, GetOperationErrors, GetOperationResponses, GetOrganizationConsumptionData, GetOrganizationConsumptionErrors, GetOrganizationConsumptionResponses, GetOrganizationPlanData, GetOrganizationPlanErrors, GetOrganizationPlanResponses, GetOrgOauthProviderData, GetOrgOauthProviderErrors, GetOrgOauthProviderResponses, GetOrgPublisherData, GetOrgPublisherEarningsData, GetOrgPublisherEarningsErrors, GetOrgPublisherEarningsResponses, GetOrgPublisherErrors, GetOrgPublisherResponses, GetOrgVpcEndpointByRegionData, GetOrgVpcEndpointByRegionErrors, GetOrgVpcEndpointByRegionResponses, GetOrgVpcEndpointData, GetOrgVpcEndpointErrors, GetOrgVpcEndpointResponses, GetPaymentHistoryData, GetPaymentHistoryErrors, GetPaymentHistoryResponses, GetPayoutStatusData, GetPayoutStatusErrors, GetPayoutStatusResponses, GetPlanData, GetPlanErrors, GetPlanResponses, GetProjectConnectionUriData, GetProjectConnectionUriErrors, GetProjectConnectionUriResponses, GetProjectConsumptionData, GetProjectConsumptionErrors, GetProjectConsumptionResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetProjectSizeData, GetProjectSizeErrors, GetProjectSizeResponses, GetPublisherTemplateAnalyticsData, GetPublisherTemplateAnalyticsErrors, GetPublisherTemplateAnalyticsResponses, GetQuotaUsageData, GetQuotaUsageErrors, GetQuotaUsageResponses, GetReferralInfoData, GetReferralInfoErrors, GetReferralInfoResponses, GetReplicationSettingsData, GetReplicationSettingsErrors, GetReplicationSettingsResponses, GetResourceData, GetResourceErrors, GetResourceResponses, GetRevenueByDayData, GetRevenueByDayErrors, GetRevenueByDayResponses, GetRevenueMetricsData, GetRevenueMetricsErrors, GetRevenueMetricsResponses, GetRoleByNameData, GetRoleByNameErrors, GetRoleByNameResponses, GetRoleData, GetRoleErrors, GetRoleResponses, GetStatsData, GetStatsErrors, GetStatsResponses, GetStorePublisherData, GetStorePublisherErrors, GetStorePublisherLogoData, GetStorePublisherLogoErrors, GetStorePublisherLogoResponses, GetStorePublisherResponses, GetSupportedData, GetSupportedErrors, GetSupportedResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetTemplateData, GetTemplateErrors, GetTemplateResponses, GetTimestampByLsnData, GetTimestampByLsnErrors, GetTimestampByLsnResponses, GetTopAgentsData, GetTopAgentsErrors, GetTopAgentsResponses, GetTransactionsData, GetTransactionsErrors, GetTransactionsResponses, GetUsageSummaryData, GetUsageSummaryErrors, GetUsageSummaryResponses, GetWalletBalanceData, GetWalletBalanceErrors, GetWalletBalanceResponses, GetWebhookData, GetWebhookErrors, GetWebhookResponses, HandleStripeWebhookData, HandleStripeWebhookErrors, HandleStripeWebhookResponses, InitiateOauthByIdData, InitiateOauthByIdErrors, InitiateOauthData, InitiateOauthErrors, InvokeTemplateData, InvokeTemplateErrors, InvokeTemplateResponses, IssueInvoiceData, IssueInvoiceErrors, IssueInvoiceResponses, ListAllDatabasesData, ListAllDatabasesErrors, ListAllDatabasesResponses, ListAuditLogsData, ListAuditLogsErrors, ListAuditLogsResponses, ListBranchesData, ListBranchesErrors, ListBranchesResponses, ListBranchProtectionRulesData, ListBranchProtectionRulesErrors, ListBranchProtectionRulesResponses, ListBranchRolesData, ListBranchRolesErrors, ListBranchRolesResponses, ListConnectionsData, ListConnectionsResponses, ListDatabasesData, ListDatabasesErrors, ListDatabasesResponses, ListDefaultOrgApiKeysData, ListDefaultOrgApiKeysErrors, ListDefaultOrgApiKeysResponses, ListEndpointsData, ListEndpointsErrors, ListEndpointsResponses, ListEventTypesData, ListEventTypesErrors, ListEventTypesResponses, ListHistoryData, ListHistoryErrors, ListHistoryResponses, ListInvitesData, ListInvitesErrors, ListInvitesResponses, ListIpAllowListData, ListIpAllowListErrors, ListIpAllowListResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListOperationsData, ListOperationsErrors, ListOperationsResponses, ListOrganizationRolesData, ListOrganizationRolesErrors, ListOrganizationRolesResponses, ListOrganizationsData, ListOrganizationsErrors, ListOrganizationsResponses, ListOrgApiKeysData, ListOrgApiKeysErrors, ListOrgApiKeysResponses, ListOrgOauthProvidersData, ListOrgOauthProvidersErrors, ListOrgOauthProvidersResponses, ListOrgPublisherPayoutsData, ListOrgPublisherPayoutsErrors, ListOrgPublisherPayoutsResponses, ListOrgPublishersData, ListOrgPublishersErrors, ListOrgPublishersResponses, ListOrgVpcEndpointsAliasData, ListOrgVpcEndpointsAliasErrors, ListOrgVpcEndpointsAliasResponses, ListOrgVpcEndpointsByRegionData, ListOrgVpcEndpointsByRegionErrors, ListOrgVpcEndpointsByRegionResponses, ListOrgVpcEndpointsData, ListOrgVpcEndpointsErrors, ListOrgVpcEndpointsResponses, ListPaymentMethodsData, ListPaymentMethodsErrors, ListPaymentMethodsResponses, ListPermissionsData, ListPermissionsErrors, ListPermissionsResponses, ListPlansData, ListPlansErrors, ListPlansResponses, ListProjectDatabasesData, ListProjectDatabasesErrors, ListProjectDatabasesResponses, ListProjectEndpointsData, ListProjectEndpointsErrors, ListProjectEndpointsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListProjectVpcEndpointsAliasData, ListProjectVpcEndpointsAliasErrors, ListProjectVpcEndpointsAliasResponses, ListProjectVpcEndpointsData, ListProjectVpcEndpointsErrors, ListProjectVpcEndpointsResponses, ListProvidersData, ListProvidersResponses, ListPublicationsData, ListPublicationsErrors, ListPublicationsResponses, ListReplicationSlotsData, ListReplicationSlotsErrors, ListReplicationSlotsResponses, ListResourcesData, ListResourcesErrors, ListResourcesResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStorePublishersData, ListStorePublishersErrors, ListStorePublishersResponses, ListTaskEventsData, ListTaskEventsErrors, ListTaskEventsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTemplatesData, ListTemplatesErrors, ListTemplatesResponses, ListWebhookDeliveriesData, ListWebhookDeliveriesErrors, ListWebhookDeliveriesResponses, ListWebhooksData, ListWebhooksErrors, ListWebhooksResponses, OauthCallbackByIdData, OauthCallbackByIdErrors, OauthCallbackData, OauthCallbackErrors, OnchainDepositData, OnchainDepositErrors, OnchainDepositResponses, PostSignalsData, PostSignalsErrors, PostSignalsResponses, ProxyToPublisherGetData, ProxyToPublisherGetErrors, ProxyToPublisherGetResponses, ProxyToPublisherPostData, ProxyToPublisherPostErrors, ProxyToPublisherPostResponses, PublisherRootHandlerData, PublisherRootHandlerErrors, PublisherRootHandlerResponses, PublishTemplateData, PublishTemplateErrors, PublishTemplateResponses, RefundChargeData, RefundChargeErrors, RefundChargeResponses, RemoveIpFromAllowListData, RemoveIpFromAllowListErrors, RemoveIpFromAllowListResponses, RemoveProjectVpcEndpointByVpcIdData, RemoveProjectVpcEndpointByVpcIdErrors, RemoveProjectVpcEndpointByVpcIdResponses, RemoveProjectVpcEndpointData, RemoveProjectVpcEndpointErrors, RemoveProjectVpcEndpointResponses, RenameBranchData, RenameBranchErrors, RenameBranchResponses, ResendVerificationEmailData, ResendVerificationEmailErrors, ResendVerificationEmailResponses, ResetBranchData, ResetBranchErrors, ResetBranchResponses, ResetIpAllowListData, ResetIpAllowListErrors, ResetIpAllowListResponses, ResetPasswordData, ResetPasswordErrors, ResetPasswordResponses, ResetRolePasswordByNameData, ResetRolePasswordByNameErrors, ResetRolePasswordByNameResponses, ResetRolePasswordData, ResetRolePasswordErrors, ResetRolePasswordResponses, RestartProjectEndpointData, RestartProjectEndpointErrors, RestartProjectEndpointResponses, RestoreBranchData, RestoreBranchErrors, RestoreBranchResponses, RevealRolePasswordData, RevealRolePasswordErrors, RevealRolePasswordResponses, RevokeAllSessionsData, RevokeAllSessionsErrors, RevokeAllSessionsResponses, RevokeConnectionByIdData, RevokeConnectionByIdErrors, RevokeConnectionByIdResponses, RevokeConnectionData, RevokeConnectionErrors, RevokeConnectionResponses, RevokeDefaultOrgApiKeyData, RevokeDefaultOrgApiKeyErrors, RevokeDefaultOrgApiKeyResponses, RevokeOrgApiKeyData, RevokeOrgApiKeyErrors, RevokeOrgApiKeyResponses, RevokeOtherSessionsData, RevokeOtherSessionsErrors, RevokeOtherSessionsResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, RotateWebhookSecretData, RotateWebhookSecretErrors, RotateWebhookSecretResponses, SetBranchArchivedData, SetBranchArchivedErrors, SetBranchArchivedResponses, SetBranchExpirationData, SetBranchExpirationErrors, SetBranchExpirationResponses, SetDefaultBranchAliasData, SetDefaultBranchAliasErrors, SetDefaultBranchAliasResponses, SetDefaultBranchData, SetDefaultBranchErrors, SetDefaultBranchResponses, SetRecoveryData, SetRecoveryErrors, SetRecoveryResponses, SlashChargeData, SlashChargeErrors, SlashChargeResponses, StartEndpointData, StartEndpointErrors, StartEndpointResponses, StartProjectEndpointData, StartProjectEndpointErrors, StartProjectEndpointResponses, StopEndpointData, StopEndpointErrors, StopEndpointResponses, StreamTaskData, StreamTaskResponses, SuggestPublishersData, SuggestPublishersErrors, SuggestPublishersResponses, SuspendProjectEndpointData, SuspendProjectEndpointErrors, SuspendProjectEndpointResponses, UpdateBranchProtectionData, UpdateBranchProtectionErrors, UpdateBranchProtectionResponses, UpdateDatabaseByNameData, UpdateDatabaseByNameErrors, UpdateDatabaseByNameResponses, UpdateDatabaseData, UpdateDatabaseErrors, UpdateDatabaseResponses, UpdateEndpointData, UpdateEndpointErrors, UpdateEndpointResponses, UpdateOrgOauthProviderData, UpdateOrgOauthProviderErrors, UpdateOrgOauthProviderResponses, UpdateProjectData, UpdateProjectEndpointData, UpdateProjectEndpointErrors, UpdateProjectEndpointResponses, UpdateProjectErrors, UpdateProjectResponses, UpdatePublicationData, UpdatePublicationErrors, UpdatePublicationResponses, UpdatePublisherData, UpdatePublisherErrors, UpdatePublisherPricingData, UpdatePublisherPricingErrors, UpdatePublisherPricingResponses, UpdatePublisherResponses, UpdateReplicationSettingsData, UpdateReplicationSettingsErrors, UpdateReplicationSettingsResponses, UpdateRoleData, UpdateRoleErrors, UpdateRoleResponses, UpdateWebhookData, UpdateWebhookErrors, UpdateWebhookResponses, UploadPublisherLogoData, UploadPublisherLogoErrors, UploadPublisherLogoResponses, UpsertResourceData, UpsertResourceErrors, UpsertResourceResponses, VerifyEmailData, VerifyEmailErrors, VerifyEmailResponses, WalletRecoverData, WalletRecoverErrors, WalletRecoverResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -19,8 +19,24 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 };
 
 /**
- * POST /auth/agent
+ * Update an agent's profile (e.g. set a real email address).
  *
+ * When the email is changed, `email_verified` is set to `false` and a
+ * verification email is sent. The agent must then call
+ * `POST /auth/verify-email` with the token from the email.
+ * A verified email is required before making Stripe deposits.
+ */
+export const agentUpdate = <ThrowOnError extends boolean = false>(options: Options<AgentUpdateData, ThrowOnError>) => (options.client ?? client).patch<AgentUpdateResponses, AgentUpdateErrors, ThrowOnError>({
+    url: '/auth/agent',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * POST /auth/agent
  * Register a new AI agent account.
  *
  * This endpoint allows AI agents to self-register and receive an API key immediately.
@@ -42,7 +58,6 @@ export const agentRegister = <ThrowOnError extends boolean = false>(options: Opt
 
 /**
  * POST /auth/forgot-password
- *
  * Request a password reset email
  */
 export const forgotPassword = <ThrowOnError extends boolean = false>(options: Options<ForgotPasswordData, ThrowOnError>) => (options.client ?? client).post<ForgotPasswordResponses, ForgotPasswordErrors, ThrowOnError>({
@@ -56,14 +71,12 @@ export const forgotPassword = <ThrowOnError extends boolean = false>(options: Op
 
 /**
  * GET /auth/me
- *
  * Get current authenticated user information with default organization
  */
 export const getCurrentUser = <ThrowOnError extends boolean = false>(options?: Options<GetCurrentUserData, ThrowOnError>) => (options?.client ?? client).get<GetCurrentUserResponses, GetCurrentUserErrors, ThrowOnError>({ url: '/auth/me', ...options });
 
 /**
  * POST /auth/resend-verification
- *
  * Resend email verification link
  */
 export const resendVerificationEmail = <ThrowOnError extends boolean = false>(options: Options<ResendVerificationEmailData, ThrowOnError>) => (options.client ?? client).post<ResendVerificationEmailResponses, ResendVerificationEmailErrors, ThrowOnError>({
@@ -77,7 +90,6 @@ export const resendVerificationEmail = <ThrowOnError extends boolean = false>(op
 
 /**
  * POST /auth/reset-password
- *
  * Reset password using a valid token
  */
 export const resetPassword = <ThrowOnError extends boolean = false>(options: Options<ResetPasswordData, ThrowOnError>) => (options.client ?? client).post<ResetPasswordResponses, ResetPasswordErrors, ThrowOnError>({
@@ -91,7 +103,6 @@ export const resetPassword = <ThrowOnError extends boolean = false>(options: Opt
 
 /**
  * POST /auth/verify-email
- *
  * Verify email address using a token sent during signup
  * On success, automatically logs the user in and returns tokens
  */
@@ -106,14 +117,12 @@ export const verifyEmail = <ThrowOnError extends boolean = false>(options: Optio
 
 /**
  * GET /billing/health
- *
  * High-level billing and metering health summary for Seren Core
  */
 export const getBillingHealth = <ThrowOnError extends boolean = false>(options?: Options<GetBillingHealthData, ThrowOnError>) => (options?.client ?? client).get<GetBillingHealthResponses, GetBillingHealthErrors, ThrowOnError>({ url: '/billing/health', ...options });
 
 /**
  * POST /billing/invoices/generate
- *
  * Generate monthly invoices for all organizations
  */
 export const generateInvoices = <ThrowOnError extends boolean = false>(options: Options<GenerateInvoicesData, ThrowOnError>) => (options.client ?? client).post<GenerateInvoicesResponses, GenerateInvoicesErrors, ThrowOnError>({
@@ -127,42 +136,36 @@ export const generateInvoices = <ThrowOnError extends boolean = false>(options: 
 
 /**
  * GET /billing/invoices/:id
- *
  * Get invoice details with line items
  */
 export const getInvoice = <ThrowOnError extends boolean = false>(options: Options<GetInvoiceData, ThrowOnError>) => (options.client ?? client).get<GetInvoiceResponses, GetInvoiceErrors, ThrowOnError>({ url: '/billing/invoices/{id}', ...options });
 
 /**
  * POST /billing/invoices/:id/issue
- *
  * Issue a draft invoice
  */
 export const issueInvoice = <ThrowOnError extends boolean = false>(options: Options<IssueInvoiceData, ThrowOnError>) => (options.client ?? client).post<IssueInvoiceResponses, IssueInvoiceErrors, ThrowOnError>({ url: '/billing/invoices/{id}/issue', ...options });
 
 /**
  * POST /billing/invoices/:id/pay
- *
  * Create a payment intent for an invoice
  */
 export const createPaymentIntent = <ThrowOnError extends boolean = false>(options: Options<CreatePaymentIntentData, ThrowOnError>) => (options.client ?? client).post<CreatePaymentIntentResponses, CreatePaymentIntentErrors, ThrowOnError>({ url: '/billing/invoices/{id}/pay', ...options });
 
 /**
  * GET /billing/invoices/:id/payments
- *
  * Get payment history for an invoice
  */
 export const getPaymentHistory = <ThrowOnError extends boolean = false>(options: Options<GetPaymentHistoryData, ThrowOnError>) => (options.client ?? client).get<GetPaymentHistoryResponses, GetPaymentHistoryErrors, ThrowOnError>({ url: '/billing/invoices/{id}/payments', ...options });
 
 /**
  * GET /billing/payment-methods
- *
  * List payment methods for the organization
  */
 export const listPaymentMethods = <ThrowOnError extends boolean = false>(options?: Options<ListPaymentMethodsData, ThrowOnError>) => (options?.client ?? client).get<ListPaymentMethodsResponses, ListPaymentMethodsErrors, ThrowOnError>({ url: '/billing/payment-methods', ...options });
 
 /**
  * POST /billing/payment-methods
- *
  * Add a payment method for the organization
  */
 export const addPaymentMethod = <ThrowOnError extends boolean = false>(options: Options<AddPaymentMethodData, ThrowOnError>) => (options.client ?? client).post<AddPaymentMethodResponses, AddPaymentMethodErrors, ThrowOnError>({
@@ -176,7 +179,6 @@ export const addPaymentMethod = <ThrowOnError extends boolean = false>(options: 
 
 /**
  * DELETE /billing/payment-methods/{id}
- *
  * Remove a payment method from the organization
  */
 export const deletePaymentMethod = <ThrowOnError extends boolean = false>(options: Options<DeletePaymentMethodData, ThrowOnError>) => (options.client ?? client).delete<DeletePaymentMethodResponses, DeletePaymentMethodErrors, ThrowOnError>({ url: '/billing/payment-methods/{id}', ...options });
@@ -241,7 +243,6 @@ export const getPayoutStatus = <ThrowOnError extends boolean = false>(options: O
 
 /**
  * GET /billing/usage/:organization_id
- *
  * Get usage summary for an organization
  */
 export const getUsageSummary = <ThrowOnError extends boolean = false>(options: Options<GetUsageSummaryData, ThrowOnError>) => (options.client ?? client).get<GetUsageSummaryResponses, GetUsageSummaryErrors, ThrowOnError>({ url: '/billing/usage/{organization_id}', ...options });
@@ -255,8 +256,24 @@ export const getUsageSummary = <ThrowOnError extends boolean = false>(options: O
 export const listAllDatabases = <ThrowOnError extends boolean = false>(options?: Options<ListAllDatabasesData, ThrowOnError>) => (options?.client ?? client).get<ListAllDatabasesResponses, ListAllDatabasesErrors, ThrowOnError>({ url: '/databases', ...options });
 
 /**
+ * Get the global eval routing matrix.
+ */
+export const getMatrix = <ThrowOnError extends boolean = false>(options?: Options<GetMatrixData, ThrowOnError>) => (options?.client ?? client).get<GetMatrixResponses, GetMatrixErrors, ThrowOnError>({ url: '/eval/matrix', ...options });
+
+/**
+ * Ingest eval signals from Seren Desktop clients.
+ */
+export const postSignals = <ThrowOnError extends boolean = false>(options: Options<PostSignalsData, ThrowOnError>) => (options.client ?? client).post<PostSignalsResponses, PostSignalsErrors, ThrowOnError>({
+    url: '/eval/signals',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * GET /federation
- *
  * List federated resources with optional filtering.
  * Used for cross-publisher resource discovery.
  */
@@ -264,7 +281,6 @@ export const listResources = <ThrowOnError extends boolean = false>(options?: Op
 
 /**
  * POST /federation
- *
  * Upsert a federated resource for a publisher.
  * Publishers use this to register/update their resources for cross-publisher discovery.
  */
@@ -278,22 +294,31 @@ export const upsertResource = <ThrowOnError extends boolean = false>(options: Op
 });
 
 /**
+ * GET /federation/history
+ * List append-only federation history events.
+ */
+export const listHistory = <ThrowOnError extends boolean = false>(options?: Options<ListHistoryData, ThrowOnError>) => (options?.client ?? client).get<ListHistoryResponses, ListHistoryErrors, ThrowOnError>({ url: '/federation/history', ...options });
+
+/**
+ * GET /federation/history/stats
+ * Get aggregate statistics over federation history.
+ */
+export const getHistoryStats = <ThrowOnError extends boolean = false>(options?: Options<GetHistoryStatsData, ThrowOnError>) => (options?.client ?? client).get<GetHistoryStatsResponses, GetHistoryStatsErrors, ThrowOnError>({ url: '/federation/history/stats', ...options });
+
+/**
  * GET /federation/stats
- *
  * Get federation statistics, optionally filtered by publisher.
  */
 export const getStats = <ThrowOnError extends boolean = false>(options?: Options<GetStatsData, ThrowOnError>) => (options?.client ?? client).get<GetStatsResponses, GetStatsErrors, ThrowOnError>({ url: '/federation/stats', ...options });
 
 /**
  * GET /federation/{id}
- *
  * Get a specific federated resource by ID.
  */
 export const getResource = <ThrowOnError extends boolean = false>(options: Options<GetResourceData, ThrowOnError>) => (options.client ?? client).get<GetResourceResponses, GetResourceErrors, ThrowOnError>({ url: '/federation/{id}', ...options });
 
 /**
  * DELETE /federation/{resource_type}/{external_id}
- *
  * Delete a federated resource by type and external ID.
  * Only the owning publisher can delete their resources.
  */
@@ -354,7 +379,6 @@ export const oauthCallback = <ThrowOnError extends boolean = false>(options: Opt
 
 /**
  * GET /organizations
- *
  * List all organizations for the authenticated user
  */
 export const listOrganizations = <ThrowOnError extends boolean = false>(options?: Options<ListOrganizationsData, ThrowOnError>) => (options?.client ?? client).get<ListOrganizationsResponses, ListOrganizationsErrors, ThrowOnError>({ url: '/organizations', ...options });
@@ -383,6 +407,31 @@ export const createDefaultOrgApiKey = <ThrowOnError extends boolean = false>(opt
  * Revoke an API key from the user's default organization
  */
 export const revokeDefaultOrgApiKey = <ThrowOnError extends boolean = false>(options: Options<RevokeDefaultOrgApiKeyData, ThrowOnError>) => (options.client ?? client).delete<RevokeDefaultOrgApiKeyResponses, RevokeDefaultOrgApiKeyErrors, ThrowOnError>({ url: '/organizations/default/api-keys/{key_id}', ...options });
+
+/**
+ * GET /organizations/{organization_id}/agents/tasks
+ */
+export const listTasks = <ThrowOnError extends boolean = false>(options: Options<ListTasksData, ThrowOnError>) => (options.client ?? client).get<ListTasksResponses, ListTasksErrors, ThrowOnError>({ url: '/organizations/{organization_id}/agents/tasks', ...options });
+
+/**
+ * GET /organizations/{organization_id}/agents/tasks/{task_id}
+ */
+export const getTask = <ThrowOnError extends boolean = false>(options: Options<GetTaskData, ThrowOnError>) => (options.client ?? client).get<GetTaskResponses, GetTaskErrors, ThrowOnError>({ url: '/organizations/{organization_id}/agents/tasks/{task_id}', ...options });
+
+/**
+ * POST /organizations/{organization_id}/agents/tasks/{task_id}/cancel
+ */
+export const cancelTask = <ThrowOnError extends boolean = false>(options: Options<CancelTaskData, ThrowOnError>) => (options.client ?? client).post<CancelTaskResponses, CancelTaskErrors, ThrowOnError>({ url: '/organizations/{organization_id}/agents/tasks/{task_id}/cancel', ...options });
+
+/**
+ * GET /organizations/{organization_id}/agents/tasks/{task_id}/events
+ */
+export const listTaskEvents = <ThrowOnError extends boolean = false>(options: Options<ListTaskEventsData, ThrowOnError>) => (options.client ?? client).get<ListTaskEventsResponses, ListTaskEventsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/agents/tasks/{task_id}/events', ...options });
+
+/**
+ * GET /organizations/{organization_id}/agents/tasks/{task_id}/stream
+ */
+export const streamTask = <ThrowOnError extends boolean = false>(options: Options<StreamTaskData, ThrowOnError>) => (options.client ?? client).get<StreamTaskResponses, unknown, ThrowOnError>({ url: '/organizations/{organization_id}/agents/tasks/{task_id}/stream', ...options });
 
 /**
  * List API keys for a specific organization
@@ -418,28 +467,24 @@ export const getAuditLog = <ThrowOnError extends boolean = false>(options: Optio
 
 /**
  * GET /organizations/{organization_id}/billing/endpoints/{endpoint_id}/events
- *
  * Debug endpoint: show recent usage_events and compute_usage_events for an endpoint
  */
 export const getEndpointBillingEvents = <ThrowOnError extends boolean = false>(options: Options<GetEndpointBillingEventsData, ThrowOnError>) => (options.client ?? client).get<GetEndpointBillingEventsResponses, GetEndpointBillingEventsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/billing/endpoints/{endpoint_id}/events', ...options });
 
 /**
  * GET /organizations/{organization_id}/consumption
- *
  * Aggregated organization-level consumption over a billing window.
  */
 export const getOrganizationConsumption = <ThrowOnError extends boolean = false>(options: Options<GetOrganizationConsumptionData, ThrowOnError>) => (options.client ?? client).get<GetOrganizationConsumptionResponses, GetOrganizationConsumptionErrors, ThrowOnError>({ url: '/organizations/{organization_id}/consumption', ...options });
 
 /**
  * GET /organizations/{organization_id}/invites
- *
  * List pending and historical organization invites.
  */
 export const listInvites = <ThrowOnError extends boolean = false>(options: Options<ListInvitesData, ThrowOnError>) => (options.client ?? client).get<ListInvitesResponses, ListInvitesErrors, ThrowOnError>({ url: '/organizations/{organization_id}/invites', ...options });
 
 /**
  * POST /organizations/{organization_id}/invites
- *
  * Create a new organization invite and send an email via the configured mailer.
  */
 export const createInvite = <ThrowOnError extends boolean = false>(options: Options<CreateInviteData, ThrowOnError>) => (options.client ?? client).post<CreateInviteResponses, CreateInviteErrors, ThrowOnError>({
@@ -453,7 +498,6 @@ export const createInvite = <ThrowOnError extends boolean = false>(options: Opti
 
 /**
  * GET /organizations/{organization_id}/members
- *
  * List organization members with basic user details.
  */
 export const listMembers = <ThrowOnError extends boolean = false>(options: Options<ListMembersData, ThrowOnError>) => (options.client ?? client).get<ListMembersResponses, ListMembersErrors, ThrowOnError>({ url: '/organizations/{organization_id}/members', ...options });
@@ -531,14 +575,12 @@ export const getMyPermissions = <ThrowOnError extends boolean = false>(options: 
 
 /**
  * GET /organizations/:org_id/plan
- *
  * Get the current plan for an organization
  */
 export const getOrganizationPlan = <ThrowOnError extends boolean = false>(options: Options<GetOrganizationPlanData, ThrowOnError>) => (options.client ?? client).get<GetOrganizationPlanResponses, GetOrganizationPlanErrors, ThrowOnError>({ url: '/organizations/{organization_id}/plan', ...options });
 
 /**
  * POST /organizations/:org_id/plan
- *
  * Upgrade or downgrade an organization's plan
  */
 export const changeOrganizationPlan = <ThrowOnError extends boolean = false>(options: Options<ChangeOrganizationPlanData, ThrowOnError>) => (options.client ?? client).post<ChangeOrganizationPlanResponses, ChangeOrganizationPlanErrors, ThrowOnError>({
@@ -552,14 +594,12 @@ export const changeOrganizationPlan = <ThrowOnError extends boolean = false>(opt
 
 /**
  * GET /organizations/:org_id/publishers
- *
  * List publishers owned by an organization
  */
 export const listOrgPublishers = <ThrowOnError extends boolean = false>(options: Options<ListOrgPublishersData, ThrowOnError>) => (options.client ?? client).get<ListOrgPublishersResponses, ListOrgPublishersErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers', ...options });
 
 /**
  * POST /organizations/:org_id/publishers
- *
  * Create a new publisher
  */
 export const createPublisher = <ThrowOnError extends boolean = false>(options: Options<CreatePublisherData, ThrowOnError>) => (options.client ?? client).post<CreatePublisherResponses, CreatePublisherErrors, ThrowOnError>({
@@ -573,21 +613,18 @@ export const createPublisher = <ThrowOnError extends boolean = false>(options: O
 
 /**
  * DELETE /organizations/:org_id/publishers/:publisher_id
- *
  * Soft delete a publisher
  */
 export const deletePublisher = <ThrowOnError extends boolean = false>(options: Options<DeletePublisherData, ThrowOnError>) => (options.client ?? client).delete<DeletePublisherResponses, DeletePublisherErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}', ...options });
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id
- *
  * Get publisher details
  */
 export const getOrgPublisher = <ThrowOnError extends boolean = false>(options: Options<GetOrgPublisherData, ThrowOnError>) => (options.client ?? client).get<GetOrgPublisherResponses, GetOrgPublisherErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}', ...options });
 
 /**
  * PUT /organizations/:org_id/publishers/:publisher_id
- *
  * Update a publisher
  */
 export const updatePublisher = <ThrowOnError extends boolean = false>(options: Options<UpdatePublisherData, ThrowOnError>) => (options.client ?? client).put<UpdatePublisherResponses, UpdatePublisherErrors, ThrowOnError>({
@@ -601,35 +638,30 @@ export const updatePublisher = <ThrowOnError extends boolean = false>(options: O
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id/analytics/revenue
- *
  * Get revenue metrics with period-over-period comparison.
  */
 export const getRevenueMetrics = <ThrowOnError extends boolean = false>(options: Options<GetRevenueMetricsData, ThrowOnError>) => (options.client ?? client).get<GetRevenueMetricsResponses, GetRevenueMetricsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/revenue', ...options });
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id/analytics/revenue-by-day
- *
  * Get daily revenue breakdown.
  */
 export const getRevenueByDay = <ThrowOnError extends boolean = false>(options: Options<GetRevenueByDayData, ThrowOnError>) => (options.client ?? client).get<GetRevenueByDayResponses, GetRevenueByDayErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/revenue-by-day', ...options });
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id/analytics/top-agents
- *
  * Get top agents by spending.
  */
 export const getTopAgents = <ThrowOnError extends boolean = false>(options: Options<GetTopAgentsData, ThrowOnError>) => (options.client ?? client).get<GetTopAgentsResponses, GetTopAgentsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}/analytics/top-agents', ...options });
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id/earnings
- *
  * List earnings for a publisher (per asset).
  */
 export const getOrgPublisherEarnings = <ThrowOnError extends boolean = false>(options: Options<GetOrgPublisherEarningsData, ThrowOnError>) => (options.client ?? client).get<GetOrgPublisherEarningsResponses, GetOrgPublisherEarningsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}/earnings', ...options });
 
 /**
  * POST /organizations/{organization_id}/publishers/{publisher_id}/logo
- *
  * Upload a logo for a publisher
  */
 export const uploadPublisherLogo = <ThrowOnError extends boolean = false>(options: Options<UploadPublisherLogoData, ThrowOnError>) => (options.client ?? client).post<UploadPublisherLogoResponses, UploadPublisherLogoErrors, ThrowOnError>({
@@ -643,14 +675,12 @@ export const uploadPublisherLogo = <ThrowOnError extends boolean = false>(option
 
 /**
  * GET /organizations/:org_id/publishers/:publisher_id/payouts
- *
  * List payout requests for a publisher.
  */
 export const listOrgPublisherPayouts = <ThrowOnError extends boolean = false>(options: Options<ListOrgPublisherPayoutsData, ThrowOnError>) => (options.client ?? client).get<ListOrgPublisherPayoutsResponses, ListOrgPublisherPayoutsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/publishers/{publisher_id}/payouts', ...options });
 
 /**
  * POST /organizations/:org_id/publishers/:publisher_id/payouts
- *
  * Request a payout for a publisher's earnings.
  */
 export const createOrgPublisherPayout = <ThrowOnError extends boolean = false>(options: Options<CreateOrgPublisherPayoutData, ThrowOnError>) => (options.client ?? client).post<CreateOrgPublisherPayoutResponses, CreateOrgPublisherPayoutErrors, ThrowOnError>({
@@ -664,7 +694,6 @@ export const createOrgPublisherPayout = <ThrowOnError extends boolean = false>(o
 
 /**
  * PUT /organizations/:org_id/publishers/:publisher_id/pricing
- *
  * Update publisher pricing config for a specific asset
  */
 export const updatePublisherPricing = <ThrowOnError extends boolean = false>(options: Options<UpdatePublisherPricingData, ThrowOnError>) => (options.client ?? client).put<UpdatePublisherPricingResponses, UpdatePublisherPricingErrors, ThrowOnError>({
@@ -678,7 +707,6 @@ export const updatePublisherPricing = <ThrowOnError extends boolean = false>(opt
 
 /**
  * GET /organizations/:org_id/quota
- *
  * Get current quota usage for an organization
  */
 export const getQuotaUsage = <ThrowOnError extends boolean = false>(options: Options<GetQuotaUsageData, ThrowOnError>) => (options.client ?? client).get<GetQuotaUsageResponses, GetQuotaUsageErrors, ThrowOnError>({ url: '/organizations/{organization_id}/quota', ...options });
@@ -724,7 +752,6 @@ export const updateRole = <ThrowOnError extends boolean = false>(options: Option
 
 /**
  * GET /organizations/{organization_id}/templates/analytics/{publisher_id}
- *
  * Get template analytics for a specific publisher
  */
 export const getPublisherTemplateAnalytics = <ThrowOnError extends boolean = false>(options: Options<GetPublisherTemplateAnalyticsData, ThrowOnError>) => (options.client ?? client).get<GetPublisherTemplateAnalyticsResponses, GetPublisherTemplateAnalyticsErrors, ThrowOnError>({ url: '/organizations/{organization_id}/templates/analytics/{publisher_id}', ...options });
@@ -815,7 +842,6 @@ export const rotateWebhookSecret = <ThrowOnError extends boolean = false>(option
 
 /**
  * GET /payments/supported
- *
  * Returns supported x402 payment kinds for facilitator discovery.
  */
 export const getSupported = <ThrowOnError extends boolean = false>(options?: Options<GetSupportedData, ThrowOnError>) => (options?.client ?? client).get<GetSupportedResponses, GetSupportedErrors, ThrowOnError>({ url: '/payments/supported', ...options });
@@ -827,14 +853,12 @@ export const listPermissions = <ThrowOnError extends boolean = false>(options?: 
 
 /**
  * GET /plans
- *
  * List all available subscription plans
  */
 export const listPlans = <ThrowOnError extends boolean = false>(options?: Options<ListPlansData, ThrowOnError>) => (options?.client ?? client).get<ListPlansResponses, ListPlansErrors, ThrowOnError>({ url: '/plans', ...options });
 
 /**
  * GET /plans/:plan_id
- *
  * Get details of a specific plan
  */
 export const getPlan = <ThrowOnError extends boolean = false>(options: Options<GetPlanData, ThrowOnError>) => (options.client ?? client).get<GetPlanResponses, GetPlanErrors, ThrowOnError>({ url: '/plans/{plan_id}', ...options });
@@ -1272,7 +1296,6 @@ export const getProjectConnectionUri = <ThrowOnError extends boolean = false>(op
 
 /**
  * GET /projects/{project_id}/consumption
- *
  * Aggregated project-level consumption (compute, storage, PITR, network) over a billing window.
  */
 export const getProjectConsumption = <ThrowOnError extends boolean = false>(options: Options<GetProjectConsumptionData, ThrowOnError>) => (options.client ?? client).get<GetProjectConsumptionResponses, GetProjectConsumptionErrors, ThrowOnError>({ url: '/projects/{project_id}/consumption', ...options });
@@ -1418,21 +1441,18 @@ export const assignProjectVpcEndpointById = <ThrowOnError extends boolean = fals
 
 /**
  * GET /publishers
- *
  * List publishers with full details and pricing (store view)
  */
 export const listStorePublishers = <ThrowOnError extends boolean = false>(options?: Options<ListStorePublishersData, ThrowOnError>) => (options?.client ?? client).get<ListStorePublishersResponses, ListStorePublishersErrors, ThrowOnError>({ url: '/publishers', ...options });
 
 /**
  * GET /publishers/suggest
- *
  * Suggest publishers based on a task or query
  */
 export const suggestPublishers = <ThrowOnError extends boolean = false>(options: Options<SuggestPublishersData, ThrowOnError>) => (options.client ?? client).get<SuggestPublishersResponses, SuggestPublishersErrors, ThrowOnError>({ url: '/publishers/suggest', ...options });
 
 /**
  * GET /publishers/{slug}
- *
  * Get publisher by slug (store view with full details)
  */
 export const getStorePublisher = <ThrowOnError extends boolean = false>(options: Options<GetStorePublisherData, ThrowOnError>) => (options.client ?? client).get<GetStorePublisherResponses, GetStorePublisherErrors, ThrowOnError>({ url: '/publishers/{slug}', ...options });
@@ -1442,6 +1462,7 @@ export const getStorePublisher = <ThrowOnError extends boolean = false>(options:
  *
  * For database publishers, this executes a query from the request body.
  * For API publishers, this proxies to the root endpoint.
+ * For agent publishers (compute_type=agent), this creates a task and returns 202 Accepted.
  * For MCP publishers, this returns an error (use specific tool/resource endpoints).
  */
 export const publisherRootHandler = <ThrowOnError extends boolean = false>(options: Options<PublisherRootHandlerData, ThrowOnError>) => (options.client ?? client).post<PublisherRootHandlerResponses, PublisherRootHandlerErrors, ThrowOnError>({
@@ -1467,7 +1488,6 @@ export const estimateQuery = <ThrowOnError extends boolean = false>(options: Opt
 
 /**
  * GET /publishers/{slug}/logo
- *
  * Fetch publisher logo (inline data or redirect to URL)
  * Accepts either publisher slug or UUID for backwards compatibility
  */
@@ -1515,14 +1535,12 @@ export const revokeOtherSessions = <ThrowOnError extends boolean = false>(option
 
 /**
  * GET /templates
- *
  * List available templates in the catalog
  */
 export const listTemplates = <ThrowOnError extends boolean = false>(options?: Options<ListTemplatesData, ThrowOnError>) => (options?.client ?? client).get<ListTemplatesResponses, ListTemplatesErrors, ThrowOnError>({ url: '/templates', ...options });
 
 /**
  * POST /templates/publish
- *
  * Publish a new agent template
  */
 export const publishTemplate = <ThrowOnError extends boolean = false>(options: Options<PublishTemplateData, ThrowOnError>) => (options.client ?? client).post<PublishTemplateResponses, PublishTemplateErrors, ThrowOnError>({
@@ -1536,14 +1554,12 @@ export const publishTemplate = <ThrowOnError extends boolean = false>(options: O
 
 /**
  * GET /templates/{slug}
- *
  * Get template details by slug
  */
 export const getTemplate = <ThrowOnError extends boolean = false>(options: Options<GetTemplateData, ThrowOnError>) => (options.client ?? client).get<GetTemplateResponses, GetTemplateErrors, ThrowOnError>({ url: '/templates/{slug}', ...options });
 
 /**
  * POST /templates/{slug}/invoke
- *
  * Invoke an agent template.
  *
  * Supports two modes:
@@ -1615,18 +1631,16 @@ export const onchainDeposit = <ThrowOnError extends boolean = false>(options: Op
 
 /**
  * GET /wallet/lookup/{agent_wallet}
- *
  * Look up an agent's available balance (for publisher pre-checks)
  */
 export const getAgentBalance = <ThrowOnError extends boolean = false>(options: Options<GetAgentBalanceData, ThrowOnError>) => (options.client ?? client).get<GetAgentBalanceResponses, GetAgentBalanceErrors, ThrowOnError>({ url: '/wallet/lookup/{agent_wallet}', ...options });
 
 /**
  * POST /wallet/recover
- *
  * Recover an agent account using a recovery code.
  *
  * This endpoint allows agents who have lost their API key to recover their account
- * using the recovery code they saved when setting up wallet recovery or on first deposit.
+ * using the recovery code they saved when setting up wallet recovery.
  *
  * **What this does:**
  * - Verifies the recovery code
@@ -1681,7 +1695,7 @@ export const applyReferralCode = <ThrowOnError extends boolean = false>(options:
 });
 
 /**
- * Get transaction history for funded operations
+ * Get transaction history including credits and debits
  */
 export const getTransactions = <ThrowOnError extends boolean = false>(options?: Options<GetTransactionsData, ThrowOnError>) => (options?.client ?? client).get<GetTransactionsResponses, GetTransactionsErrors, ThrowOnError>({ url: '/wallet/transactions', ...options });
 
@@ -1692,7 +1706,6 @@ export const listEventTypes = <ThrowOnError extends boolean = false>(options?: O
 
 /**
  * POST /webhooks/stripe
- *
  * Handle Stripe webhook events
  */
 export const handleStripeWebhook = <ThrowOnError extends boolean = false>(options?: Options<HandleStripeWebhookData, ThrowOnError>) => (options?.client ?? client).post<HandleStripeWebhookResponses, HandleStripeWebhookErrors, ThrowOnError>({ url: '/webhooks/stripe', ...options });

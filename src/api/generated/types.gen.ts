@@ -24,433 +24,9 @@ export type AddPaymentMethodRequest = {
 };
 
 /**
- * Admin grant request
- *
- * Either `user_id` or `agent_wallet` must be provided:
- * - `user_id`: Grant to user's virtual wallet (recommended for admin UI)
- * - `agent_wallet`: Grant to specific wallet address (for advanced use cases)
- */
-export type AdminGrantCreditsRequest = {
-    /**
-     * Agent wallet address (alternative to user_id for non-platform wallets)
-     */
-    agent_wallet?: string | null;
-    /**
-     * Amount in atomic units (1,000,000 = $1.00)
-     */
-    amount_atomic: number;
-    asset_id: string;
-    description?: string | null;
-    /**
-     * Days until expiration (None = never)
-     */
-    expires_in_days?: number | null;
-    /**
-     * User ID to grant credits to (derives virtual wallet automatically)
-     */
-    user_id?: string | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type AgentBalanceDataResponse = {
-    data: AgentBalanceResponse;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Agent balance response
- */
-export type AgentBalanceResponse = {
-    agent_wallet: WalletAddress;
-    asset: AssetInfo;
-    /**
-     * Available balance in asset decimal units
-     */
-    available: number;
-    /**
-     * Balance in asset decimal units
-     */
-    balance: number;
-    /**
-     * Balance in atomic units (for precision)
-     */
-    balance_atomic: number;
-    publisher_id: string;
-    publisher_name?: string | null;
-    publisher_slug?: string | null;
-    /**
-     * Reserved balance in asset decimal units
-     */
-    reserved: number;
-    total_queries: number;
-};
-
-/**
- * Summary of agent balances across all publishers, grouped by asset
- */
-export type AgentBalanceSummary = {
-    agent_wallet: WalletAddress;
-    /**
-     * Individual balances
-     */
-    balances: Array<AgentBalanceResponse>;
-    publishers_used: number;
-    total_queries: number;
-    /**
-     * Total balances per asset
-     */
-    totals_by_asset: Array<AssetBalanceTotal>;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type AgentBalanceSummaryResponse = {
-    data: AgentBalanceSummary;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * An agent credit grant with source tracking
- */
-export type AgentCreditGrant = {
-    agent_wallet: string;
-    /**
-     * Original grant amount in atomic units
-     */
-    amount_atomic: number;
-    asset_id: string;
-    created_at: string;
-    description?: string | null;
-    expiration_notified_at?: string | null;
-    expires_at?: string | null;
-    granted_by?: string | null;
-    id: string;
-    publisher_id?: string | null;
-    /**
-     * Current remaining balance in atomic units
-     */
-    remaining_atomic: number;
-    source: AgentCreditSource;
-    /**
-     * Reference ID to source table (purchases, referrals, etc.)
-     */
-    source_reference_id?: string | null;
-    updated_at: string;
-    /**
-     * User who owns this wallet (if linked)
-     */
-    user_id?: string | null;
-};
-
-/**
  * Source of an agent credit grant (fiat-only, no on-chain deposits)
  */
 export type AgentCreditSource = 'fiat_purchase' | 'signup_bonus' | 'payment_method_bonus' | 'daily_claim' | 'referral_reward' | 'admin_grant' | 'promo_code' | 'tier_bonus' | 'refund' | 'publisher_payout';
-
-/**
- * Data for listing agent credit grants
- */
-export type AgentGrantsData = {
-    grants: Array<AgentCreditGrant>;
-    total: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type AgentGrantsDataResponse = {
-    data: AgentGrantsData;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Platform-wide statistics for agent credit grants (SerenBucks)
- */
-export type AgentGrantsStats = {
-    /**
-     * Number of active grants (remaining > 0 and not expired)
-     */
-    active_grants_count: number;
-    /**
-     * Amount granted in the current month (atomic units)
-     */
-    granted_this_month_atomic: number;
-    /**
-     * Total amount ever granted (atomic units)
-     */
-    total_granted_atomic: number;
-    /**
-     * Total amount remaining across all grants (atomic units)
-     */
-    total_remaining_atomic: number;
-    /**
-     * Total amount spent (granted - remaining) (atomic units)
-     */
-    total_spent_atomic: number;
-    /**
-     * Number of unique users with grants
-     */
-    unique_users_count: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type AgentGrantsStatsDataResponse = {
-    data: AgentGrantsStats;
-    pagination?: PaginationMeta | null;
-};
 
 /**
  * Agent information returned on successful registration
@@ -490,6 +66,9 @@ export type AgentInfo = {
  * DataResponse wrapper for agent registration (for OpenAPI schema)
  */
 export type AgentRegisterDataResponse = {
+    /**
+     * The actual response data
+     */
     data: AgentRegisterResponse;
 };
 
@@ -509,12 +88,21 @@ export type AgentRegisterRequest = {
  * Response from agent registration endpoint
  */
 export type AgentRegisterResponse = {
+    /**
+     * The newly created agent account
+     */
     agent: AgentInfo;
     /**
      * Welcome message
      */
     message: string;
+    /**
+     * Setup instructions for getting started
+     */
     setup: SetupInstructions;
+    /**
+     * Links to skill files and documentation
+     */
     skill_files: SkillFiles;
     /**
      * Whether registration was successful
@@ -523,36 +111,48 @@ export type AgentRegisterResponse = {
 };
 
 /**
- * Agent template - executable code that runs in compute backends (Daytona, Modal, etc.)
+ * An agent task — tracks a single agent invocation lifecycle.
  */
-export type AgentTemplate = {
-    code: string;
-    /**
-     * Preferred compute backend (e.g., "daytona", "modal"). If None, uses default.
-     */
-    compute_backend?: string | null;
+export type AgentTask = {
+    a2a_context_id?: string | null;
+    a2a_task_id?: string | null;
+    completed_at?: string | null;
+    cost_cap_atomic?: number | null;
+    cost_compute_atomic: number;
+    cost_llm_atomic: number;
+    cost_tool_atomic: number;
+    cost_total_atomic: number;
     created_at: string;
-    deleted_at?: string | null;
-    dependencies: unknown;
-    description?: string | null;
-    failed_invocations: number;
+    error_message?: string | null;
     id: string;
-    is_verified: boolean;
-    language: TemplateLanguage;
-    llm_model?: string | null;
-    llm_provider?: string | null;
-    name: string;
-    price_atomic: number;
+    input_message: unknown;
+    metadata?: unknown;
+    organization_id: string;
+    output?: unknown;
+    payment_request_id?: string | null;
     publisher_id: string;
-    slug: string;
-    successful_invocations: number;
-    total_invocations: number;
-    total_revenue_atomic: number;
-    unique_agents_served: number;
+    started_at?: string | null;
+    status: AgentTaskStatus;
+    trigger_type: AgentTriggerType;
     updated_at: string;
-    verified_at?: string | null;
-    verified_by?: string | null;
+    user_id: string;
 };
+
+/**
+ * An event in the agent task lifecycle (for SSE streaming).
+ */
+export type AgentTaskEvent = {
+    created_at: string;
+    event_type: string;
+    id: string;
+    payload: unknown;
+    task_id: string;
+};
+
+/**
+ * Agent task execution status, mirroring A2A TaskState with Seren additions.
+ */
+export type AgentTaskStatus = 'pending' | 'submitted' | 'working' | 'input_required' | 'completed' | 'failed' | 'canceled';
 
 /**
  * Summary view of agent template for catalog listing
@@ -570,11 +170,20 @@ export type AgentTemplateSummary = {
     total_invocations: number;
 };
 
-export type AnalyticsQueryParams = {
+/**
+ * How the agent task was triggered.
+ */
+export type AgentTriggerType = 'manual' | 'api' | 'mcp' | 'cli' | 'desktop' | 'scheduled' | 'webhook';
+
+/**
+ * Request to update an agent's profile.
+ */
+export type AgentUpdateRequest = {
     /**
-     * Number of days to analyze (default: 30)
+     * Email address to set and verify.
+     * A verification email will be sent to this address.
      */
-    days?: number;
+    email: string;
 };
 
 /**
@@ -594,76 +203,6 @@ export type ApiKeyCreated = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ApiKeyCreatedResponse = {
-    data: ApiKeyCreated;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response struct for listing API keys (never includes the secret)
  */
 export type ApiKeyInfo = {
@@ -679,94 +218,10 @@ export type ApiKeyInfo = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ApiKeysResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<ApiKeyInfo>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Request to apply a referral code
  */
 export type ApplyReferralRequest = {
     referral_code: string;
-};
-
-/**
- * Total balance for a single asset across all publishers
- */
-export type AssetBalanceTotal = {
-    asset: AssetInfo;
-    total_available: number;
-    total_balance: number;
-    total_balance_atomic: number;
-    total_reserved: number;
 };
 
 /**
@@ -835,150 +290,6 @@ export type AuditLogList = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type AuditLogListResponse = {
-    data: AuditLogList;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type AuditLogResponse = {
-    data: AuditLog;
-    pagination?: PaginationMeta | null;
-};
-
-export type BalanceResponse = {
-    balance: number;
-};
-
-/**
  * High-level billing health summary.
  */
 export type BillingHealth = {
@@ -1005,76 +316,6 @@ export type BillingHealth = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BillingHealthResponse = {
-    data: BillingHealth;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Billing job health for a single background job.
  */
 export type BillingJobHealth = {
@@ -1097,52 +338,6 @@ export type BonusClaimResponse = {
     amount_usd: string;
     bonus_type: string;
     success: boolean;
-};
-
-/**
- * Metadata structure for bounty resources
- */
-export type BountyMetadata = {
-    /**
-     * Bounty status (funding, open, in_progress, resolved, etc.)
-     */
-    bounty_status: string;
-    /**
-     * Number of contributions so far
-     */
-    contribution_count?: number;
-    /**
-     * Creator's wallet address
-     */
-    creator_wallet: string;
-    /**
-     * Optional deadline
-     */
-    deadline?: string | null;
-    /**
-     * Brief description
-     */
-    description: string;
-    /**
-     * Currently funded amount
-     */
-    funded_amount_atomic: number;
-    /**
-     * Minimum stake required to contribute
-     */
-    min_stake_to_contribute: number;
-    /**
-     * Total reward amount in atomic units
-     */
-    reward_amount_atomic: number;
-    /**
-     * Tags/categories for filtering
-     */
-    tags?: Array<string>;
-    /**
-     * Bounty title
-     */
-    title: string;
 };
 
 /**
@@ -1176,13 +371,6 @@ export type Branch = {
 };
 
 /**
- * Branch count response
- */
-export type BranchCountResponse = {
-    count: number;
-};
-
-/**
  * Response after creating a branch
  */
 export type BranchCreated = {
@@ -1206,76 +394,6 @@ export type BranchCreated = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BranchCreatedResponse = {
-    data: BranchCreated;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response wrapper returned when branch creation provisions auxiliary resources
  */
 export type BranchCreationResult = {
@@ -1287,76 +405,6 @@ export type BranchCreationResult = {
      */
     endpoint_error?: string | null;
     endpoints?: Array<EndpointCreated> | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BranchCreationResultResponse = {
-    data: BranchCreationResult;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -1373,76 +421,6 @@ export type BranchDetail = {
     remote_consistent_lsn?: string | null;
     state: string;
     timeline_id: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BranchDetailResponse = {
-    data: BranchDetail;
-    pagination?: PaginationMeta | null;
 };
 
 export type BranchEndpointRequest = {
@@ -1466,367 +444,17 @@ export type BranchProtection = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BranchProtectionResponse = {
-    data: BranchProtection;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BranchProtectionsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<BranchProtection>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BranchResponse = {
-    data: Branch;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response after restoring a branch
  */
 export type BranchRestored = {
-    backup_branch: Branch;
-    branch: Branch;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BranchRestoredResponse = {
-    data: BranchRestored;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type BranchesResponse = {
     /**
-     * The actual response data (can be a single object or a collection)
+     * The backup branch containing the pre-restore state
      */
-    data: Array<Branch>;
-    pagination?: PaginationMeta | null;
+    backup_branch: Branch;
+    /**
+     * The restored branch
+     */
+    branch: Branch;
 };
 
 /**
@@ -1834,13 +462,13 @@ export type BranchesResponse = {
  */
 export type ChangePlanRequest = {
     plan_id: string;
-    stripe_payment_method_id?: StripePaymentMethodId | null;
+    stripe_payment_method_id?: null | StripePaymentMethodId;
 };
 
 /**
  * Compute type - specific compute offering when publisher_category = Compute
  */
-export type ComputeType = 'template' | 'workflow' | 'function';
+export type ComputeType = 'template' | 'workflow' | 'function' | 'agent';
 
 /**
  * Debug view: compute_usage_events entry for an endpoint
@@ -1864,111 +492,8 @@ export type ConnectionString = {
     connection_string: string;
 };
 
-/**
- * Query parameters for getting a branch connection string.
- */
-export type ConnectionStringQueryParams = {
-    /**
-     * Return pooled connection (default: false)
-     */
-    pooled?: boolean | null;
-    /**
-     * PostgreSQL role/username to use (default: serendb_owner)
-     */
-    role?: string | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ConnectionStringResponse = {
-    data: ConnectionString;
-    pagination?: PaginationMeta | null;
-};
-
 export type ConnectionsResponse = {
     connections: Array<UserOAuthConnectionResponse>;
-};
-
-/**
- * ConsumptionPeriod represents usage metrics for a billing period
- */
-export type ConsumptionPeriod = {
-    active_time_seconds?: number;
-    compute_time_seconds?: number;
-    created_at: string;
-    data_transfer_bytes?: number;
-    id: string;
-    organization_id: string;
-    period_end: string;
-    period_id: string;
-    period_start: string;
-    project_id: string;
-    synthetic_storage_size_bytes?: number;
-    updated_at: string;
-    written_data_bytes?: number;
 };
 
 /**
@@ -1984,20 +509,6 @@ export type ConsumptionPeriodData = {
 };
 
 /**
- * Query parameters for consumption endpoints (reusing the billing usage pattern).
- */
-export type ConsumptionQueryParams = {
-    /**
-     * Optional ISO-8601 end date (YYYY-MM-DD), defaults to today (UTC).
-     */
-    end_date?: string | null;
-    /**
-     * Optional ISO-8601 start date (YYYY-MM-DD), defaults to first day of current month.
-     */
-    start_date?: string | null;
-};
-
-/**
  * ConsumptionSummary represents aggregated usage for a period
  */
 export type ConsumptionSummary = {
@@ -2006,24 +517,6 @@ export type ConsumptionSummary = {
     data_transfer_bytes?: number;
     synthetic_storage_size_bytes?: number;
     written_data_bytes?: number;
-};
-
-/**
- * Cost breakdown when a service fee is charged (pre-authorization).
- */
-export type CostBreakdown = {
-    /**
-     * Service fee charged
-     */
-    service_fee: string;
-    /**
-     * Cost charged for the target API
-     */
-    target: string;
-    /**
-     * Total cost (target + service_fee)
-     */
-    total: string;
 };
 
 /**
@@ -2130,6 +623,9 @@ export type CreateEndpointRequest = {
     autoscaling_max?: number;
     autoscaling_min?: number;
     compute_unit?: string;
+    /**
+     * Type of endpoint: read_write (default) or read_only (replica)
+     */
     endpoint_type?: EndpointType;
     /**
      * Optional name for the endpoint. If not provided, a name will be auto-generated.
@@ -2138,70 +634,6 @@ export type CreateEndpointRequest = {
     pooler_enabled?: boolean;
     pooler_mode?: PoolerMode;
     suspend_timeout_seconds?: number;
-};
-
-/**
- * Request to create a fiat deposit for agent prepaid balance
- *
- * Note: The wallet address is provided in the URL path, not in the request body.
- */
-export type CreateFiatDepositRequest = {
-    /**
-     * Amount in the currency's standard unit (e.g., 10.00 for $10 USD)
-     */
-    amount: number;
-    /**
-     * ISO 4217 currency code (default: USD)
-     */
-    currency?: string;
-    provider?: FiatPaymentProvider;
-    /**
-     * Publisher to deposit funds for
-     */
-    publisher_id: string;
-    /**
-     * Target asset to credit after conversion (e.g., USDC on Base)
-     */
-    target_asset_id: string;
-};
-
-/**
- * Response after creating a fiat deposit
- */
-export type CreateFiatDepositResponse = {
-    agent_wallet: WalletAddress;
-    /**
-     * Amount in the deposit currency
-     */
-    amount: number;
-    /**
-     * Amount in target asset that will be credited
-     */
-    amount_in_asset: number;
-    /**
-     * Data needed to complete payment on client side (e.g., Stripe client_secret)
-     * Only included for providers that need client-side completion
-     */
-    client_data?: string | null;
-    /**
-     * ISO 4217 currency code
-     */
-    currency: string;
-    /**
-     * Deposit record ID
-     */
-    id: string;
-    /**
-     * Provider's payment identifier
-     */
-    payment_id: string;
-    provider: FiatPaymentProvider;
-    /**
-     * Publisher ID
-     */
-    publisher_id: string;
-    status: FiatDepositStatus;
-    target_asset: AssetInfo;
 };
 
 /**
@@ -2214,6 +646,10 @@ export type CreateOAuthProviderRequest = {
      * Client secret (will be encrypted)
      */
     client_secret: string;
+    /**
+     * Custom provider-specific authorization URL parameters (e.g., {"access_type": "offline"} for Google)
+     */
+    custom_auth_params?: unknown;
     description?: string | null;
     logo_url?: string | null;
     name: string;
@@ -2221,7 +657,7 @@ export type CreateOAuthProviderRequest = {
     revocation_url?: string | null;
     scopes: Array<string>;
     slug: string;
-    token_endpoint_auth_method?: string;
+    token_endpoint_auth_method?: TokenEndpointAuthMethod;
     token_url: string;
     userinfo_url?: string | null;
 };
@@ -2273,35 +709,6 @@ export type CreateProjectRequest = {
 };
 
 /**
- * Request to create a promo code (admin)
- */
-export type CreatePromoCodeRequest = {
-    code: string;
-    credit_amount_usd: string;
-    /**
-     * Days until granted credits expire (None = never)
-     */
-    credit_expires_days?: number | null;
-    description?: string | null;
-    /**
-     * Max total redemptions (None = unlimited)
-     */
-    max_redemptions?: number | null;
-    /**
-     * If true, each org can only redeem once
-     */
-    one_per_org?: boolean;
-    /**
-     * Code becomes valid at this time (None = immediately)
-     */
-    valid_from?: string | null;
-    /**
-     * Code expires at this time (None = never)
-     */
-    valid_until?: string | null;
-};
-
-/**
  * Request to create a publication
  */
 export type CreatePublicationRequest = {
@@ -2328,13 +735,17 @@ export type CreatePublisherPayoutRequest = {
      * Asset to withdraw (must be an asset accepted by the publisher)
      */
     asset_id: string;
-    destination_wallet?: WalletAddress | null;
+    destination_wallet?: null | WalletAddress;
 };
 
 /**
  * Request to create a new publisher
  */
 export type CreatePublisherRequest = {
+    /**
+     * A2A endpoint base URL (required for compute_type = agent)
+     */
+    a2a_endpoint_url?: string | null;
     /**
      * Asset IDs the publisher accepts for payment
      */
@@ -2377,7 +788,7 @@ export type CreatePublisherRequest = {
      */
     capabilities?: Array<string>;
     categories?: Array<string>;
-    compute_type?: ComputeType | null;
+    compute_type?: null | ComputeType;
     /**
      * Provider-specific configuration
      * For connection_string auth: { "connection_string": "postgresql://..." }
@@ -2387,7 +798,7 @@ export type CreatePublisherRequest = {
      * Database name within the SerenDB project (default: serendb)
      */
     database_name?: string | null;
-    database_type?: DatabaseType | null;
+    database_type?: null | DatabaseType;
     description?: string | null;
     /**
      * Publisher contact email for notifications and support
@@ -2403,7 +814,7 @@ export type CreatePublisherRequest = {
     gateway_fee_percent?: string | null;
     grace_period_minutes?: number | null;
     hourly_rate?: string | null;
-    integration_type?: IntegrationType | null;
+    integration_type?: null | IntegrationType;
     /**
      * JWT access key / issuer claim (plaintext)
      */
@@ -2476,8 +887,11 @@ export type CreatePublisherRequest = {
      * Protected operations configuration - legacy, use endpoints[].is_protected instead
      */
     protected_operations?: unknown;
+    /**
+     * Publisher category: database, integration, or compute
+     */
     publisher_category: PublisherCategory;
-    publisher_type?: PublisherType | null;
+    publisher_type?: null | PublisherType;
     /**
      * Content-Type for upstream API requests (default: application/json)
      */
@@ -2497,6 +911,7 @@ export type CreatePublisherRequest = {
      */
     resource_id_url_pattern?: string | null;
     resource_name?: string | null;
+    routing?: null | GeoRoutingConfig;
     slug: string;
     /**
      * TTL for cached exchanged tokens in seconds (60-86400, default: 3600)
@@ -2518,7 +933,7 @@ export type CreatePublisherRequest = {
      * JSON field in exchange response containing the token (default: access_token)
      */
     token_response_field?: string | null;
-    undocumented_endpoint_policy?: UndocumentedEndpointPolicy | null;
+    undocumented_endpoint_policy?: null | UndocumentedEndpointPolicy;
     /**
      * Upstream static API key (will be encrypted)
      */
@@ -2540,6 +955,9 @@ export type CreatePublisherRequest = {
      * Human-readable use case descriptions
      */
     use_cases?: Array<string>;
+    /**
+     * Wallet address for receiving payments
+     */
     wallet_address: WalletAddress;
     /**
      * Network ID for wallet (CAIP-2 format, e.g., "eip155:8453" for Base)
@@ -2592,10 +1010,10 @@ export type CreateTemplateRequest = {
      */
     description?: string | null;
     /**
-     * Programming language (python, typescript, rust)
+     * Programming language (python, typescript, javascript)
      */
-    language: string;
-    llmConfig?: LlmConfig | null;
+    language: TemplateLanguage;
+    llmConfig?: null | LlmConfig;
     /**
      * Display name
      */
@@ -2625,32 +1043,6 @@ export type CreateTemplateResponse = {
 };
 
 /**
- * Request to create a fiat deposit using the authenticated user's virtual wallet.
- *
- * This is the preferred endpoint for fiat users - it automatically uses their
- * platform-generated virtual wallet, so they don't need to manage wallet addresses.
- */
-export type CreateUserDepositRequest = {
-    /**
-     * Amount in the currency's standard unit (e.g., 10.00 for $10 USD)
-     */
-    amount: number;
-    /**
-     * ISO 4217 currency code (default: USD)
-     */
-    currency?: string;
-    provider?: FiatPaymentProvider;
-    /**
-     * Publisher to deposit funds for
-     */
-    publisher_id: string;
-    /**
-     * Target asset to credit after conversion
-     */
-    target_asset_id: string;
-};
-
-/**
  * Request to create a webhook
  */
 export type CreateWebhookRequest = {
@@ -2658,369 +1050,6 @@ export type CreateWebhookRequest = {
     name: string;
     project_id?: string | null;
     url: string;
-};
-
-/**
- * Summary of an organization's credit balance
- */
-export type CreditBalanceSummary = {
-    grants: Array<CreditGrantSummary>;
-    organization_id: string;
-    total_remaining_usd: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type CreditBalanceSummaryResponse = {
-    data: CreditBalanceSummary;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * A credit grant issued to an organization
- */
-export type CreditGrant = {
-    amount_usd: string;
-    created_at: string;
-    description?: string | null;
-    expiration_notified_at?: string | null;
-    expires_at?: string | null;
-    granted_by?: string | null;
-    id: string;
-    low_balance_notified_at?: string | null;
-    organization_id: string;
-    promo_code_id?: string | null;
-    remaining_usd: string;
-    source: string;
-    updated_at: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type CreditGrantResponse = {
-    data: CreditGrant;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Summary of a single credit grant for API responses
- */
-export type CreditGrantSummary = {
-    amount_usd: string;
-    created_at: string;
-    description?: string | null;
-    expires_at?: string | null;
-    id: string;
-    remaining_usd: string;
-    source: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type CreditGrantsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<CreditGrant>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Source of a credit grant
- */
-export type CreditSource = 'manual' | 'promotional' | 'trial' | 'support' | 'referral';
-
-/**
- * A transaction recording credit usage
- */
-export type CreditTransaction = {
-    amount_usd: string;
-    balance_after: string;
-    created_at: string;
-    credit_grant_id: string;
-    description?: string | null;
-    id: string;
-    invoice_id?: string | null;
-};
-
-/**
- * Credit transaction history response
- */
-export type CreditTransactionHistory = {
-    organization_id: string;
-    transactions: Array<CreditTransactionRecord>;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type CreditTransactionHistoryResponse = {
-    data: CreditTransactionHistory;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * A credit transaction for API responses
- */
-export type CreditTransactionRecord = {
-    amount_usd: string;
-    balance_after: string;
-    created_at: string;
-    credit_grant_id: string;
-    description?: string | null;
-    id: string;
-    invoice_id?: string | null;
 };
 
 /**
@@ -3088,45 +1117,8153 @@ export type DailyClaimResponse = {
 };
 
 /**
- * Database within a SerenDB branch
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
  */
-export type Database = {
-    branch_id: string;
-    created_at: string;
+export type DataResponseAgentTask = {
     /**
-     * User who created the database. None for databases created via SQL on compute (DDL sync).
+     * An agent task — tracks a single agent invocation lifecycle.
      */
-    created_by?: string | null;
-    deleted_at?: string | null;
-    deleted_by?: string | null;
-    id: string;
-    /**
-     * System databases (like postgres) are hidden from users
-     */
-    is_system: boolean;
-    name: string;
-    owner_role_id?: string | null;
-    updated_at: string;
+    data: {
+        a2a_context_id?: string | null;
+        a2a_task_id?: string | null;
+        completed_at?: string | null;
+        cost_cap_atomic?: number | null;
+        cost_compute_atomic: number;
+        cost_llm_atomic: number;
+        cost_tool_atomic: number;
+        cost_total_atomic: number;
+        created_at: string;
+        error_message?: string | null;
+        id: string;
+        input_message: unknown;
+        metadata?: unknown;
+        organization_id: string;
+        output?: unknown;
+        payment_request_id?: string | null;
+        publisher_id: string;
+        started_at?: string | null;
+        status: AgentTaskStatus;
+        trigger_type: AgentTriggerType;
+        updated_at: string;
+        user_id: string;
+    };
+    pagination?: null | PaginationMeta;
 };
 
 /**
- * Authentication method for database providers
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
  */
-export type DatabaseAuthMethod = 'connection_string';
+export type DataResponseApiKeyCreated = {
+    /**
+     * Response struct for API key creation (includes the full key ONCE)
+     */
+    data: {
+        /**
+         * The full API key (seren_<key_id>_<secret>) - shown ONCE.
+         */
+        api_key: string;
+        created_at: string;
+        expires_at?: string | null;
+        id: string;
+        key_id: string;
+        name: string;
+        organization_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
 
 /**
- * Database configuration for external providers
+ * Generic API response wrapper with optional pagination
  *
- * Both Neon and Supabase use connection string authentication.
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
  */
-export type DatabaseConfig = {
-    auth_method?: DatabaseAuthMethod;
+export type DataResponseAuditLog = {
     /**
-     * Encrypted connection string
-     * Input: "connection_string" (plaintext)
-     * Stored: "connection_string_encrypted" (encrypted)
+     * Audit log entry from the database
      */
-    connection_string_encrypted?: string | null;
+    data: {
+        action: string;
+        action_category?: string | null;
+        actor_id?: string | null;
+        actor_type: string;
+        created_at: string;
+        error_message?: string | null;
+        id: string;
+        ip_address?: string | null;
+        metadata?: unknown;
+        organization_id?: string | null;
+        request_id?: string | null;
+        resource_id?: string | null;
+        resource_type: string;
+        status: string;
+        user_agent?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAuditLogList = {
+    /**
+     * Response for listing audit logs
+     */
+    data: {
+        data: Array<AuditLog>;
+        limit: number;
+        offset: number;
+        total: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseBillingHealth = {
+    /**
+     * High-level billing health summary.
+     */
+    data: {
+        /**
+         * Total failures recorded for the daily aggregation job since process start.
+         */
+        daily_aggregation_failures_total: number;
+        /**
+         * True when we have a recent daily aggregation run and no known failures.
+         */
+        daily_aggregation_ok: boolean;
+        /**
+         * True when the last daily aggregation was within the expected window (<= 30h old).
+         */
+        has_recent_daily_run: boolean;
+        /**
+         * Failure counters per billing job since process start.
+         */
+        jobs: Array<BillingJobHealth>;
+        /**
+         * Last time daily_aggregated_usage was written, in UTC (RFC3339).
+         */
+        last_daily_aggregation_run_utc?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseBranch = {
+    /**
+     * Branch represents a SerenDB timeline (database copy)
+     */
+    data: {
+        archived: boolean;
+        created_at: string;
+        created_by: string;
+        deleted_at?: string | null;
+        deleted_by?: string | null;
+        expires_at?: string | null;
+        id: string;
+        init_source?: string | null;
+        /**
+         * Computed field: true if this branch is the project's default branch.
+         * Not stored in DB - computed by comparing branch.id with project.default_branch_id.
+         */
+        is_default?: boolean;
+        last_reset_at?: string | null;
+        logical_size_bytes?: number;
+        name: string;
+        parent_branch_id?: string | null;
+        parent_lsn?: string | null;
+        parent_timestamp?: string | null;
+        physical_size_bytes?: number;
+        project_id: string;
+        protected: boolean;
+        timeline_id: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseBranchCreationResult = {
+    /**
+     * Response wrapper returned when branch creation provisions auxiliary resources
+     */
+    data: {
+        branch: BranchCreated;
+        /**
+         * Error message if endpoint provisioning failed.
+         * When present, the branch was created successfully but the endpoint failed.
+         * The UI should show a "Retry" or "Add Compute" button.
+         */
+        endpoint_error?: string | null;
+        endpoints?: Array<EndpointCreated> | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseBranchDetail = {
+    /**
+     * Response for branch detail information
+     */
+    data: {
+        ancestor_lsn?: string | null;
+        ancestor_timeline_id?: string | null;
+        branch_id: string;
+        current_logical_size?: number | null;
+        disk_consistent_lsn: string;
+        last_record_lsn: string;
+        prev_record_lsn?: string | null;
+        remote_consistent_lsn?: string | null;
+        state: string;
+        timeline_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseBranchProtection = {
+    /**
+     * Branch protection response (API output)
+     */
+    data: {
+        allowed_bypass_roles: Array<string>;
+        branch_id: string;
+        created_at: string;
+        id: string;
+        prevent_deletion: boolean;
+        prevent_reset: boolean;
+        project_id: string;
+        require_approval_for_changes: boolean;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseBranchRestored = {
+    /**
+     * Response after restoring a branch
+     */
+    data: {
+        /**
+         * The backup branch containing the pre-restore state
+         */
+        backup_branch: Branch;
+        /**
+         * The restored branch
+         */
+        branch: Branch;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseConnectionString = {
+    /**
+     * Response for a single, canonical connection string.
+     *
+     * The backend always prefers SerenDB proxy-based connection strings when
+     * proxy configuration is available, and falls back to direct compute
+     * connection strings only when the proxy is not configured.
+     */
+    data: {
+        /**
+         * Fully resolved PostgreSQL connection string (proxy preferred).
+         */
+        connection_string: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCreateTemplateResponse = {
+    /**
+     * Response after creating a template
+     */
+    data: {
+        createdAt: string;
+        description?: string | null;
+        id: string;
+        isVerified: boolean;
+        language: TemplateLanguage;
+        name: string;
+        priceAtomic: number;
+        slug: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseDatabaseCreated = {
+    /**
+     * Response after creating a database
+     */
+    data: {
+        branch_id: string;
+        created_at: string;
+        id: string;
+        name: string;
+        owner_role_id?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseDatabaseWithOwner = {
+    /**
+     * Database with owner role name included
+     */
+    data: {
+        branch_id: string;
+        created_at: string;
+        id: string;
+        name: string;
+        owner_name?: string | null;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseEndpoint = {
+    /**
+     * Endpoint represents a compute instance for a branch
+     */
+    data: {
+        active_time_seconds?: number;
+        autoscaling_max: number;
+        autoscaling_min: number;
+        branch_id: string;
+        compute_unit: string;
+        connection_count?: number;
+        connection_string?: string | null;
+        connection_string_direct?: string | null;
+        connection_string_pooled?: string | null;
+        created_at: string;
+        created_by: string;
+        current_state?: string | null;
+        /**
+         * Type of endpoint: read_write (primary) or read_only (replica)
+         */
+        endpoint_type: string;
+        id: string;
+        last_active_at?: string | null;
+        name: string;
+        pooler_enabled: boolean;
+        pooler_mode: string;
+        /**
+         * Reference to the primary endpoint for read replicas (NULL for read_write endpoints)
+         */
+        primary_endpoint_id?: string | null;
+        proxy_host?: string | null;
+        status: string;
+        suspend_timeout_seconds: number;
+        tenant_id: string;
+        timeline_id: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseEndpointBillingEvents = {
+    /**
+     * Combined debug response for an endpoint's billing events
+     */
+    data: {
+        compute_usage_events: Array<ComputeUsageEventDebugRecord>;
+        endpoint_id: string;
+        organization_id: string;
+        usage_events: Array<UsageEventDebugRecord>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseEndpointCreated = {
+    /**
+     * Response after creating an endpoint
+     */
+    data: {
+        branch_id: string;
+        compute_unit: string;
+        connection_string?: string | null;
+        connection_string_direct?: string | null;
+        connection_string_pooled?: string | null;
+        created_at: string;
+        /**
+         * Type of endpoint: read_write (primary) or read_only (replica)
+         */
+        endpoint_type: string;
+        id: string;
+        internal_http_address?: string | null;
+        name: string;
+        pg_address?: string | null;
+        /**
+         * Reference to the primary endpoint for read replicas
+         */
+        primary_endpoint_id?: string | null;
+        status: string;
+        warnings?: Array<string> | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseEndpointStatusInfo = {
+    /**
+     * Status response used by lifecycle endpoints
+     */
+    data: {
+        compute_status?: string | null;
+        id: string;
+        k8s_ready: boolean;
+        status: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseFederatedResourceResponse = {
+    /**
+     * Response for a single federated resource
+     */
+    data: {
+        created_at: string;
+        expires_at?: string | null;
+        external_id: string;
+        id: string;
+        metadata: unknown;
+        org_database_id?: string | null;
+        publisher_id: string;
+        resource_type: string;
+        status: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseFederationHistoryStatsResponse = {
+    /**
+     * Response for federation history aggregate statistics.
+     */
+    data: {
+        by_operation: {
+            [key: string]: number;
+        };
+        by_status: {
+            [key: string]: number;
+        };
+        by_type: {
+            [key: string]: number;
+        };
+        total_events: number;
+        unique_publishers: number;
+        unique_resources: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseFederationStatsResponse = {
+    /**
+     * Response for federation statistics
+     */
+    data: {
+        by_status: {
+            [key: string]: number;
+        };
+        by_type: {
+            [key: string]: number;
+        };
+        total_active: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseInvoice = {
+    /**
+     * Invoice response with line items
+     */
+    data: {
+        id: string;
+        invoice_number: string;
+        line_items: Array<InvoiceLineItem>;
+        organization_id: string;
+        period_end: string;
+        period_start: string;
+        status: string;
+        subtotal_usd: string;
+        tax_usd: string;
+        total_usd: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseInvoicesGenerated = {
+    /**
+     * Response for invoice generation
+     */
+    data: {
+        count: number;
+        invoice_ids: Array<string>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseInvokeTemplateResponse = {
+    /**
+     * Response from invoking a template
+     */
+    data: {
+        /**
+         * Cost breakdown
+         */
+        cost: InvocationCostBreakdown;
+        /**
+         * Execution time in milliseconds
+         */
+        executionTimeMs: number;
+        /**
+         * Invocation ID for tracking
+         */
+        invocationId: string;
+        /**
+         * Output from template execution
+         */
+        result: unknown;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseIpAllowList = {
+    /**
+     * IP allow list entry for project-level access control
+     */
+    data: {
+        created_at: string;
+        created_by: string;
+        description?: string | null;
+        id: string;
+        /**
+         * IP address or CIDR range (stored as PostgreSQL CIDR type)
+         */
+        ip_address: string;
+        project_id: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseLogicalReplicationSettings = {
+    /**
+     * Project logical replication settings
+     */
+    data: {
+        enabled: boolean;
+        project_id: string;
+        publications_count: number;
+        slots_count: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseLoginResult = {
+    data: {
+        access_token: string;
+        /**
+         * The user's default organization ID for API calls requiring an organization context.
+         * This is typically the first organization the user joined (their personal org).
+         */
+        default_organization_id: string;
+        expires_in: number;
+        refresh_token: string;
+        user: UserInfo;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseLogoUploadResponse = {
+    /**
+     * Logo upload response
+     */
+    data: {
+        /**
+         * URL to access the uploaded logo
+         */
+        logo_url: string;
+        /**
+         * Message indicating success
+         */
+        message: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseLsnByTimestamp = {
+    /**
+     * Response for LSN by timestamp query
+     */
+    data: {
+        lsn: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOperation = {
+    /**
+     * Operation represents an async operation
+     */
+    data: {
+        completed_at?: string | null;
+        created_at: string;
+        created_by: string;
+        error_message?: string | null;
+        id: string;
+        metadata: {
+            [key: string]: unknown;
+        } | null;
+        operation_type: string;
+        progress: number;
+        resource_id: string;
+        resource_type: string;
+        started_at?: string | null;
+        status: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationConsumption = {
+    /**
+     * OrganizationConsumption wraps organization-wide consumption
+     */
+    data: {
+        current_month: ConsumptionSummary;
+        from: string;
+        organization_id: string;
+        periods: Array<ConsumptionPeriodData>;
+        to: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationInvite = {
+    /**
+     * Response type for organization invites (token is not exposed over the API).
+     */
+    data: {
+        accepted_at?: string | null;
+        created_at: string;
+        email: string;
+        expires_at: string;
+        id: string;
+        invited_by: string;
+        organization_id: string;
+        revoked_at?: string | null;
+        role: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationPlanWithDetails = {
+    /**
+     * Response type that includes both the plan and organization_plan details
+     */
+    data: {
+        organization_plan: OrganizationPlan;
+        plan: Plan;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationVpcEndpoint = {
+    data: {
+        created_at: string;
+        endpoint_id: string;
+        id: string;
+        label?: string | null;
+        organization_id: string;
+        region: string;
+        state: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePasswordReset = {
+    data: {
+        message: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePasswordResetSent = {
+    data: {
+        message: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePaymentHistory = {
+    /**
+     * Payment history response
+     */
+    data: {
+        payments: Array<PaymentRecord>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePaymentIntentCreated = {
+    /**
+     * Response for creating a payment intent
+     */
+    data: {
+        /**
+         * Amount to be charged, in cents.
+         */
+        amount_cents: number;
+        /**
+         * Amount to be charged, in USD.
+         */
+        amount_usd: string;
+        client_secret: string;
+        currency: CurrencyCode;
+        payment_intent_id: StripePaymentIntentId;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePaymentMethodAdded = {
+    /**
+     * Response for adding a payment method
+     */
+    data: {
+        id: string;
+        message: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePlan = {
+    /**
+     * Plan represents a subscription tier (Free, Launch, Scale)
+     */
+    data: {
+        audit_logs_enabled: boolean;
+        branch_price_per_hour?: string | null;
+        compute_hours_quota?: number | null;
+        compute_price_per_cu_hour?: string | null;
+        created_at: string;
+        data_transfer_gb_included?: number | null;
+        data_transfer_price_per_gb?: string | null;
+        description?: string | null;
+        display_name: string;
+        id: string;
+        ip_allowlist_enabled: boolean;
+        is_active: boolean;
+        max_branches_per_project: number;
+        max_compute_units: number;
+        max_databases_per_branch?: number | null;
+        max_endpoints_per_branch?: number | null;
+        max_projects?: number | null;
+        monitoring_enabled: boolean;
+        monitoring_retention_days?: number | null;
+        name: string;
+        pitr_price_per_gb_month?: string | null;
+        pitr_retention_hours?: number | null;
+        price_monthly: string;
+        scale_to_zero_delay_seconds?: number | null;
+        sla_uptime_percent?: string | null;
+        sort_order: number;
+        sso_enabled: boolean;
+        storage_gb_quota?: string | null;
+        storage_price_per_gb_month?: string | null;
+        /**
+         * Stripe Price ID used for recurring subscriptions on this plan (for paid tiers).
+         */
+        stripe_price_id?: string | null;
+        support_level: string;
+        updated_at: string;
+        vpc_enabled: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePricingConfigResponse = {
+    /**
+     * Pricing config response
+     */
+    data: {
+        /**
+         * Asset this pricing applies to
+         */
+        asset_id: string;
+        /**
+         * Asset symbol for display
+         */
+        asset_symbol?: string | null;
+        base_price_per_1000_rows: string;
+        grace_period_minutes?: number | null;
+        hourly_rate?: string | null;
+        low_balance_threshold: string;
+        markup_multiplier: string;
+        max_charge?: string | null;
+        max_queries_per_minute?: number | null;
+        min_charge: string;
+        /**
+         * Minimum price to display in UI for passthrough publishers (informational only)
+         */
+        min_display_price?: string | null;
+        minimum_balance: string;
+        onchain_enabled: boolean;
+        payment_expiry_minutes: number;
+        prepaid_enabled: boolean;
+        price_per_call?: string | null;
+        price_per_delete?: string | null;
+        /**
+         * Price per execution for agent templates or usage-based billing
+         */
+        price_per_execution?: string | null;
+        price_per_get?: string | null;
+        price_per_patch?: string | null;
+        price_per_post?: string | null;
+        price_per_put?: string | null;
+        /**
+         * Text to display for variable pricing (e.g., "Varies by model")
+         */
+        pricing_display_text?: string | null;
+        pricing_model: PricingModel;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseProject = {
+    /**
+     * Project represents a SerenDB database instance
+     */
+    data: {
+        active_time_seconds?: number;
+        block_public_connections: boolean;
+        block_vpc_connections: boolean;
+        branch_count?: number;
+        compute_last_active_at?: string | null;
+        compute_unit_max: number;
+        compute_unit_min: number;
+        created_at: string;
+        created_by: string;
+        default_branch_id?: string | null;
+        default_compute_size_max?: number;
+        default_compute_size_min?: number;
+        deleted_at?: string | null;
+        deleted_by?: string | null;
+        enable_logical_replication?: boolean;
+        hipaa: boolean;
+        history_retention_seconds?: number;
+        id: string;
+        /**
+         * Whether this is a service project (hidden from normal listings, contains seren_* databases)
+         */
+        is_service_project?: boolean;
+        name: string;
+        organization_id: string;
+        postgres_version?: string;
+        protected_branches_only: boolean;
+        region: string;
+        storage_bytes?: number;
+        tenant_id: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseProjectConnectionUri = {
+    data: {
+        uri: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseProjectConsumption = {
+    /**
+     * ProjectConsumption wraps consumption data for API responses
+     */
+    data: {
+        current_month: ConsumptionSummary;
+        from: string;
+        periods: Array<ConsumptionPeriodData>;
+        project_id: string;
+        to: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseProjectCreated = {
+    /**
+     * Response after creating a project
+     */
+    data: {
+        block_public_connections: boolean;
+        block_vpc_connections: boolean;
+        branch_count?: number;
+        compute_unit_max: number;
+        compute_unit_min: number;
+        created_at: string;
+        /**
+         * The main branch for this project
+         */
+        default_branch_id?: string | null;
+        /**
+         * Whether logical replication is enabled for this project
+         */
+        enable_logical_replication?: boolean;
+        hipaa: boolean;
+        id: string;
+        /**
+         * Whether this is a service project (hidden from normal listings, contains seren_* databases)
+         */
+        is_service_project?: boolean;
+        name: string;
+        organization_id: string;
+        postgres_version?: string;
+        protected_branches_only: boolean;
+        region: string;
+        storage_bytes?: number;
+        tenant_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseProjectSize = {
+    /**
+     * Response for project storage size
+     */
+    data: {
+        project_id: string;
+        size_bytes: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseProjectVpcEndpointAssignment = {
+    data: {
+        created_at: string;
+        endpoint_id: string;
+        endpoint_label?: string | null;
+        id: string;
+        label?: string | null;
+        organization_vpc_endpoint_id: string;
+        project_id: string;
+        region: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePublicationInfo = {
+    /**
+     * Publication response (API output)
+     */
+    data: {
+        branch_id: string;
+        created_at: string;
+        id: string;
+        name: string;
+        project_id: string;
+        publish_delete: boolean;
+        publish_insert: boolean;
+        publish_truncate: boolean;
+        publish_update: boolean;
+        /**
+         * Tables to replicate (empty means ALL TABLES)
+         */
+        tables: Array<string>;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePublisherAgentBalance = {
+    data: {
+        onchain_atomic?: number | null;
+        serenbucks_atomic: number;
+        total_available_atomic: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePublisherAnalytics = {
+    /**
+     * Response for publisher analytics
+     */
+    data: {
+        publisher_id: string;
+        templates: Array<TemplateAnalytics>;
+        totals: PublisherAnalyticsTotals;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePublisherChargeInfo = {
+    data: {
+        agent_wallet: string;
+        amount_atomic: number;
+        id: string;
+        status: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePublisherPayoutInfo = {
+    data: {
+        amount_atomic: number;
+        destination_wallet: string;
+        error_message?: string | null;
+        id: string;
+        status: string;
+        tx_hash?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePublisherPayoutResponse = {
+    /**
+     * Publisher payout response.
+     */
+    data: {
+        amount: number;
+        amount_atomic: number;
+        asset: AssetInfo;
+        destination_wallet: WalletAddress;
+        error_message?: string | null;
+        id: string;
+        publisher_id: string;
+        requested_at: string;
+        status: PayoutStatus;
+        tx_hash?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePublisherResponse = {
+    /**
+     * Publisher response (excludes sensitive fields)
+     */
+    data: {
+        /**
+         * Cached A2A agent card
+         */
+        a2a_agent_card?: unknown;
+        /**
+         * A2A endpoint base URL (for compute_type = agent)
+         */
+        a2a_endpoint_url?: string | null;
+        /**
+         * A2A health status: unknown, healthy, unhealthy, unreachable
+         */
+        a2a_health_status?: string | null;
+        /**
+         * Accepted assets for payment
+         */
+        accepted_assets?: Array<AssetInfo> | null;
+        allowed_passthrough_headers: Array<string>;
+        /**
+         * Header name to inject upstream_api_key into (e.g., "Authorization", "X-API-Key")
+         */
+        api_key_header?: string | null;
+        /**
+         * Query parameter name to inject upstream_api_key into (e.g., "api_key", "apiKey")
+         */
+        api_key_query_param?: string | null;
+        /**
+         * External API URL (for integration_type = api)
+         */
+        api_url?: string | null;
+        billing_model: string;
+        /**
+         * SerenDB branch ID (for database_type = serendb)
+         */
+        branch_id?: string | null;
+        /**
+         * Publisher-declared capabilities for task matching
+         */
+        capabilities: Array<string>;
+        categories: Array<string>;
+        compute_type?: null | ComputeType;
+        created_at: string;
+        /**
+         * Provider config (sensitive fields redacted)
+         */
+        database_config?: unknown;
+        /**
+         * Database name within the SerenDB project
+         */
+        database_name?: string | null;
+        database_type?: null | DatabaseType;
+        description?: string | null;
+        /**
+         * Publisher contact email for notifications and support
+         */
+        email?: string | null;
+        /**
+         * Structured endpoint definitions for LLM discoverability and access control
+         */
+        endpoints?: Array<EndpointDefinition> | null;
+        gateway_fee_percent: string;
+        id: string;
+        integration_type?: null | IntegrationType;
+        is_active: boolean;
+        is_verified: boolean;
+        logo_url?: string | null;
+        /**
+         * Cached MCP capabilities (tools, resources, prompts)
+         */
+        mcp_capabilities?: unknown;
+        /**
+         * MCP server endpoint URL (for integration_type = mcp)
+         */
+        mcp_endpoint?: string | null;
+        name: string;
+        /**
+         * OAuth provider ID for BYOC (Bring Your Own Credentials) authentication
+         */
+        oauth_provider_id?: string | null;
+        ownership_tracking_enabled: boolean;
+        /**
+         * Pricing config per asset (if included)
+         */
+        pricing?: Array<PricingConfigResponse> | null;
+        /**
+         * SerenDB project ID (for database_type = serendb)
+         */
+        project_id?: string | null;
+        protected_operations?: unknown;
+        /**
+         * Publisher category: database, integration, or compute
+         */
+        publisher_category: PublisherCategory;
+        publisher_type: PublisherType;
+        /**
+         * Content-Type for upstream API requests
+         */
+        request_content_type: string;
+        /**
+         * If true, users must connect via OAuth before using this publisher
+         */
+        requires_user_oauth: boolean;
+        resource_description?: string | null;
+        resource_id_response_path?: string | null;
+        resource_id_url_pattern?: string | null;
+        resource_name?: string | null;
+        routing?: null | GeoRoutingConfig;
+        slug: string;
+        /**
+         * TTL for cached exchanged tokens in seconds
+         */
+        token_cache_ttl_seconds?: number | null;
+        /**
+         * HTTP method for exchange endpoint (POST or GET)
+         */
+        token_exchange_method?: string | null;
+        /**
+         * How to send Seren token: header, body, or query
+         */
+        token_exchange_mode?: string | null;
+        /**
+         * URL to call for exchanging Seren API keys for publisher auth tokens
+         */
+        token_exchange_url?: string | null;
+        /**
+         * JSON field in exchange response containing the token
+         */
+        token_response_field?: string | null;
+        total_queries: number;
+        /**
+         * Policy for handling requests to paths not in the endpoints catalog
+         */
+        undocumented_endpoint_policy: UndocumentedEndpointPolicy;
+        unique_agents_served: number;
+        updated_at: string;
+        /**
+         * Dot-separated path to upstream cost in response body (for pay_per_use and prepaid passthrough billing).
+         * Example: "usage.cost"
+         */
+        upstream_cost_response_path?: string | null;
+        /**
+         * Non-sensitive headers to send to upstream API
+         */
+        upstream_headers: unknown;
+        /**
+         * Usage examples showing how to call the publisher's API
+         */
+        usage_examples?: Array<UsageExample> | null;
+        /**
+         * Human-readable use case descriptions
+         */
+        use_cases: Array<string>;
+        /**
+         * When verification expires (NULL = no expiry)
+         */
+        verification_expires_at?: string | null;
+        wallet_address: WalletAddress;
+        /**
+         * Network for the wallet address
+         */
+        wallet_network_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseQuotaUsage = {
+    /**
+     * Quota usage summary for an organization
+     */
+    data: {
+        compute_hours_usage_percent?: number | null;
+        current_branches: number;
+        current_compute_hours: number;
+        current_projects: number;
+        current_storage_gb: number;
+        is_over_compute_quota: boolean;
+        is_over_projects_quota: boolean;
+        is_over_storage_quota: boolean;
+        organization_id: string;
+        plan: Plan;
+        projects_usage_percent?: number | null;
+        storage_usage_percent?: number | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseRbacRole = {
+    /**
+     * Response after creating or updating a role
+     */
+    data: {
+        created_at: string;
+        description?: string | null;
+        id: string;
+        is_built_in: boolean;
+        name: string;
+        permissions: Array<string>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseReplicationSlotInfo = {
+    /**
+     * Replication slot response (API output)
+     */
+    data: {
+        active_pid?: number | null;
+        branch_id: string;
+        confirmed_flush_lsn?: string | null;
+        created_at: string;
+        id: string;
+        name: string;
+        plugin: string;
+        project_id: string;
+        restart_lsn?: string | null;
+        slot_type: string;
+        status: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseRoleCreated = {
+    /**
+     * Response after creating a role
+     */
+    data: {
+        branch_id: string;
+        created_at: string;
+        id: string;
+        name: string;
+        password: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseRoleInfo = {
+    /**
+     * Public role info (without password hash)
+     */
+    data: {
+        branch_id: string;
+        created_at: string;
+        id: string;
+        name: string;
+        protected: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseRolePasswordReset = {
+    /**
+     * Response after resetting password
+     */
+    data: {
+        password: string;
+        role_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseSessionsRevoked = {
+    data: {
+        message: string;
+        revoked_count: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseSuggestResponse = {
+    /**
+     * Response for suggest endpoint
+     * Returns publisher and agent recommendations based on task/query matching
+     */
+    data: {
+        /**
+         * Matched agents sorted by relevance (agent templates coming soon)
+         */
+        agents: Array<unknown>;
+        /**
+         * Matched publishers sorted by relevance
+         */
+        publishers: Array<PublisherSuggestion>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseTimestampByLsn = {
+    /**
+     * Response for timestamp by LSN query
+     */
+    data: {
+        timestamp: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseUserMe = {
+    /**
+     * Response for GET /auth/me - current user info with default organization
+     */
+    data: UserInfo & {
+        /**
+         * The user's default organization ID for API calls requiring an organization context.
+         * This is typically the first organization the user joined (their personal org).
+         */
+        default_organization_id: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecAgentTask = {
+    data: Array<{
+        a2a_context_id?: string | null;
+        a2a_task_id?: string | null;
+        completed_at?: string | null;
+        cost_cap_atomic?: number | null;
+        cost_compute_atomic: number;
+        cost_llm_atomic: number;
+        cost_tool_atomic: number;
+        cost_total_atomic: number;
+        created_at: string;
+        error_message?: string | null;
+        id: string;
+        input_message: unknown;
+        metadata?: unknown;
+        organization_id: string;
+        output?: unknown;
+        payment_request_id?: string | null;
+        publisher_id: string;
+        started_at?: string | null;
+        status: AgentTaskStatus;
+        trigger_type: AgentTriggerType;
+        updated_at: string;
+        user_id: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecAgentTaskEvent = {
+    data: Array<{
+        created_at: string;
+        event_type: string;
+        id: string;
+        payload: unknown;
+        task_id: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecAgentTemplateSummary = {
+    data: Array<{
+        description?: string | null;
+        id: string;
+        is_verified: boolean;
+        language: TemplateLanguage;
+        name: string;
+        price_atomic: number;
+        publisher_name?: string | null;
+        publisher_slug?: string | null;
+        slug: string;
+        total_invocations: number;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecApiKeyInfo = {
+    data: Array<{
+        created_at: string;
+        expires_at?: string | null;
+        id: string;
+        key_id: string;
+        key_prefix: string;
+        last_used_at?: string | null;
+        name: string;
+        organization_id: string;
+        revoked_at?: string | null;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecBranch = {
+    data: Array<{
+        archived: boolean;
+        created_at: string;
+        created_by: string;
+        deleted_at?: string | null;
+        deleted_by?: string | null;
+        expires_at?: string | null;
+        id: string;
+        init_source?: string | null;
+        /**
+         * Computed field: true if this branch is the project's default branch.
+         * Not stored in DB - computed by comparing branch.id with project.default_branch_id.
+         */
+        is_default?: boolean;
+        last_reset_at?: string | null;
+        logical_size_bytes?: number;
+        name: string;
+        parent_branch_id?: string | null;
+        parent_lsn?: string | null;
+        parent_timestamp?: string | null;
+        physical_size_bytes?: number;
+        project_id: string;
+        protected: boolean;
+        timeline_id: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecBranchProtection = {
+    data: Array<{
+        allowed_bypass_roles: Array<string>;
+        branch_id: string;
+        created_at: string;
+        id: string;
+        prevent_deletion: boolean;
+        prevent_reset: boolean;
+        project_id: string;
+        require_approval_for_changes: boolean;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecDatabaseWithContext = {
+    data: Array<{
+        /**
+         * Branch ID
+         */
+        branch_id: string;
+        /**
+         * Human-readable branch name
+         */
+        branch_name: string;
+        created_at: string;
+        /**
+         * Database ID
+         */
+        id: string;
+        /**
+         * Whether this is the project's default branch
+         */
+        is_default_branch: boolean;
+        /**
+         * Database name
+         */
+        name: string;
+        /**
+         * Database owner role name
+         */
+        owner_name?: string | null;
+        /**
+         * Project ID
+         */
+        project_id: string;
+        /**
+         * Human-readable project name
+         */
+        project_name: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecDatabaseWithOwner = {
+    data: Array<{
+        branch_id: string;
+        created_at: string;
+        id: string;
+        name: string;
+        owner_name?: string | null;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecEndpoint = {
+    data: Array<{
+        active_time_seconds?: number;
+        autoscaling_max: number;
+        autoscaling_min: number;
+        branch_id: string;
+        compute_unit: string;
+        connection_count?: number;
+        connection_string?: string | null;
+        connection_string_direct?: string | null;
+        connection_string_pooled?: string | null;
+        created_at: string;
+        created_by: string;
+        current_state?: string | null;
+        /**
+         * Type of endpoint: read_write (primary) or read_only (replica)
+         */
+        endpoint_type: string;
+        id: string;
+        last_active_at?: string | null;
+        name: string;
+        pooler_enabled: boolean;
+        pooler_mode: string;
+        /**
+         * Reference to the primary endpoint for read replicas (NULL for read_write endpoints)
+         */
+        primary_endpoint_id?: string | null;
+        proxy_host?: string | null;
+        status: string;
+        suspend_timeout_seconds: number;
+        tenant_id: string;
+        timeline_id: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecFederatedResourceHistoryResponse = {
+    data: Array<{
+        changed_at: string;
+        expires_at?: string | null;
+        external_id: string;
+        federation_id?: string | null;
+        id: string;
+        metadata: unknown;
+        operation: string;
+        org_database_id?: string | null;
+        publisher_id: string;
+        publisher_name?: string | null;
+        publisher_slug?: string | null;
+        resource_type: string;
+        status: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecFederatedResourceWithPublisherResponse = {
+    data: Array<{
+        created_at: string;
+        expires_at?: string | null;
+        external_id: string;
+        id: string;
+        metadata: unknown;
+        org_database_id?: string | null;
+        publisher_id: string;
+        publisher_name: string;
+        publisher_slug: string;
+        resource_type: string;
+        status: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecIpAllowList = {
+    data: Array<{
+        created_at: string;
+        created_by: string;
+        description?: string | null;
+        id: string;
+        /**
+         * IP address or CIDR range (stored as PostgreSQL CIDR type)
+         */
+        ip_address: string;
+        project_id: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecOperation = {
+    data: Array<{
+        completed_at?: string | null;
+        created_at: string;
+        created_by: string;
+        error_message?: string | null;
+        id: string;
+        metadata: {
+            [key: string]: unknown;
+        } | null;
+        operation_type: string;
+        progress: number;
+        resource_id: string;
+        resource_type: string;
+        started_at?: string | null;
+        status: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecOrganization = {
+    data: Array<{
+        created_at: string;
+        created_by: string;
+        deleted_at?: string | null;
+        id: string;
+        is_personal: boolean;
+        name: string;
+        slug: Slug;
+        /**
+         * Stripe Customer ID for this organization (if billing is enabled).
+         */
+        stripe_customer_id?: string | null;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecOrganizationInvite = {
+    data: Array<{
+        accepted_at?: string | null;
+        created_at: string;
+        email: string;
+        expires_at: string;
+        id: string;
+        invited_by: string;
+        organization_id: string;
+        revoked_at?: string | null;
+        role: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecOrganizationMemberWithUser = {
+    data: Array<{
+        created_at: string;
+        email: Email;
+        id: string;
+        name?: string | null;
+        organization_id: string;
+        role: string;
+        user_id: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecPaymentMethod = {
+    data: Array<{
+        bank_last4?: string | null;
+        card_brand?: string | null;
+        card_exp_month?: number | null;
+        card_exp_year?: number | null;
+        card_last4?: string | null;
+        id: string;
+        is_default: boolean;
+        type_: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecPlan = {
+    data: Array<{
+        audit_logs_enabled: boolean;
+        branch_price_per_hour?: string | null;
+        compute_hours_quota?: number | null;
+        compute_price_per_cu_hour?: string | null;
+        created_at: string;
+        data_transfer_gb_included?: number | null;
+        data_transfer_price_per_gb?: string | null;
+        description?: string | null;
+        display_name: string;
+        id: string;
+        ip_allowlist_enabled: boolean;
+        is_active: boolean;
+        max_branches_per_project: number;
+        max_compute_units: number;
+        max_databases_per_branch?: number | null;
+        max_endpoints_per_branch?: number | null;
+        max_projects?: number | null;
+        monitoring_enabled: boolean;
+        monitoring_retention_days?: number | null;
+        name: string;
+        pitr_price_per_gb_month?: string | null;
+        pitr_retention_hours?: number | null;
+        price_monthly: string;
+        scale_to_zero_delay_seconds?: number | null;
+        sla_uptime_percent?: string | null;
+        sort_order: number;
+        sso_enabled: boolean;
+        storage_gb_quota?: string | null;
+        storage_price_per_gb_month?: string | null;
+        /**
+         * Stripe Price ID used for recurring subscriptions on this plan (for paid tiers).
+         */
+        stripe_price_id?: string | null;
+        support_level: string;
+        updated_at: string;
+        vpc_enabled: boolean;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecPublicationInfo = {
+    data: Array<{
+        branch_id: string;
+        created_at: string;
+        id: string;
+        name: string;
+        project_id: string;
+        publish_delete: boolean;
+        publish_insert: boolean;
+        publish_truncate: boolean;
+        publish_update: boolean;
+        /**
+         * Tables to replicate (empty means ALL TABLES)
+         */
+        tables: Array<string>;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecPublisherEarningsResponse = {
+    data: Array<{
+        asset: AssetInfo;
+        available: number;
+        available_atomic: number;
+        pending_payout: number;
+        pending_payout_atomic: number;
+        publisher_id: string;
+        publisher_name: string;
+        publisher_slug: string;
+        /**
+         * Count of billable transactions for this asset (query_charge, api_call, service_fee).
+         */
+        request_count: number;
+        total_revenue: number;
+        total_revenue_atomic: number;
+        total_withdrawn: number;
+        total_withdrawn_atomic: number;
+        wallet_address: WalletAddress;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecPublisherPayoutResponse = {
+    data: Array<{
+        amount: number;
+        amount_atomic: number;
+        asset: AssetInfo;
+        destination_wallet: WalletAddress;
+        error_message?: string | null;
+        id: string;
+        publisher_id: string;
+        requested_at: string;
+        status: PayoutStatus;
+        tx_hash?: string | null;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecPublisherResponse = {
+    data: Array<{
+        /**
+         * Cached A2A agent card
+         */
+        a2a_agent_card?: unknown;
+        /**
+         * A2A endpoint base URL (for compute_type = agent)
+         */
+        a2a_endpoint_url?: string | null;
+        /**
+         * A2A health status: unknown, healthy, unhealthy, unreachable
+         */
+        a2a_health_status?: string | null;
+        /**
+         * Accepted assets for payment
+         */
+        accepted_assets?: Array<AssetInfo> | null;
+        allowed_passthrough_headers: Array<string>;
+        /**
+         * Header name to inject upstream_api_key into (e.g., "Authorization", "X-API-Key")
+         */
+        api_key_header?: string | null;
+        /**
+         * Query parameter name to inject upstream_api_key into (e.g., "api_key", "apiKey")
+         */
+        api_key_query_param?: string | null;
+        /**
+         * External API URL (for integration_type = api)
+         */
+        api_url?: string | null;
+        billing_model: string;
+        /**
+         * SerenDB branch ID (for database_type = serendb)
+         */
+        branch_id?: string | null;
+        /**
+         * Publisher-declared capabilities for task matching
+         */
+        capabilities: Array<string>;
+        categories: Array<string>;
+        compute_type?: null | ComputeType;
+        created_at: string;
+        /**
+         * Provider config (sensitive fields redacted)
+         */
+        database_config?: unknown;
+        /**
+         * Database name within the SerenDB project
+         */
+        database_name?: string | null;
+        database_type?: null | DatabaseType;
+        description?: string | null;
+        /**
+         * Publisher contact email for notifications and support
+         */
+        email?: string | null;
+        /**
+         * Structured endpoint definitions for LLM discoverability and access control
+         */
+        endpoints?: Array<EndpointDefinition> | null;
+        gateway_fee_percent: string;
+        id: string;
+        integration_type?: null | IntegrationType;
+        is_active: boolean;
+        is_verified: boolean;
+        logo_url?: string | null;
+        /**
+         * Cached MCP capabilities (tools, resources, prompts)
+         */
+        mcp_capabilities?: unknown;
+        /**
+         * MCP server endpoint URL (for integration_type = mcp)
+         */
+        mcp_endpoint?: string | null;
+        name: string;
+        /**
+         * OAuth provider ID for BYOC (Bring Your Own Credentials) authentication
+         */
+        oauth_provider_id?: string | null;
+        ownership_tracking_enabled: boolean;
+        /**
+         * Pricing config per asset (if included)
+         */
+        pricing?: Array<PricingConfigResponse> | null;
+        /**
+         * SerenDB project ID (for database_type = serendb)
+         */
+        project_id?: string | null;
+        protected_operations?: unknown;
+        /**
+         * Publisher category: database, integration, or compute
+         */
+        publisher_category: PublisherCategory;
+        publisher_type: PublisherType;
+        /**
+         * Content-Type for upstream API requests
+         */
+        request_content_type: string;
+        /**
+         * If true, users must connect via OAuth before using this publisher
+         */
+        requires_user_oauth: boolean;
+        resource_description?: string | null;
+        resource_id_response_path?: string | null;
+        resource_id_url_pattern?: string | null;
+        resource_name?: string | null;
+        routing?: null | GeoRoutingConfig;
+        slug: string;
+        /**
+         * TTL for cached exchanged tokens in seconds
+         */
+        token_cache_ttl_seconds?: number | null;
+        /**
+         * HTTP method for exchange endpoint (POST or GET)
+         */
+        token_exchange_method?: string | null;
+        /**
+         * How to send Seren token: header, body, or query
+         */
+        token_exchange_mode?: string | null;
+        /**
+         * URL to call for exchanging Seren API keys for publisher auth tokens
+         */
+        token_exchange_url?: string | null;
+        /**
+         * JSON field in exchange response containing the token
+         */
+        token_response_field?: string | null;
+        total_queries: number;
+        /**
+         * Policy for handling requests to paths not in the endpoints catalog
+         */
+        undocumented_endpoint_policy: UndocumentedEndpointPolicy;
+        unique_agents_served: number;
+        updated_at: string;
+        /**
+         * Dot-separated path to upstream cost in response body (for pay_per_use and prepaid passthrough billing).
+         * Example: "usage.cost"
+         */
+        upstream_cost_response_path?: string | null;
+        /**
+         * Non-sensitive headers to send to upstream API
+         */
+        upstream_headers: unknown;
+        /**
+         * Usage examples showing how to call the publisher's API
+         */
+        usage_examples?: Array<UsageExample> | null;
+        /**
+         * Human-readable use case descriptions
+         */
+        use_cases: Array<string>;
+        /**
+         * When verification expires (NULL = no expiry)
+         */
+        verification_expires_at?: string | null;
+        wallet_address: WalletAddress;
+        /**
+         * Network for the wallet address
+         */
+        wallet_network_id: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecRbacRole = {
+    data: Array<{
+        created_at: string;
+        description?: string | null;
+        id: string;
+        is_built_in: boolean;
+        name: string;
+        permissions: Array<string>;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecReplicationSlotInfo = {
+    data: Array<{
+        active_pid?: number | null;
+        branch_id: string;
+        confirmed_flush_lsn?: string | null;
+        created_at: string;
+        id: string;
+        name: string;
+        plugin: string;
+        project_id: string;
+        restart_lsn?: string | null;
+        slot_type: string;
+        status: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecRoleInfo = {
+    data: Array<{
+        branch_id: string;
+        created_at: string;
+        id: string;
+        name: string;
+        protected: boolean;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecUsageSummary = {
+    data: Array<{
+        compute_cost_usd: string;
+        compute_hours_large: number;
+        compute_hours_medium: number;
+        compute_hours_small: number;
+        compute_hours_xlarge: number;
+        organization_id: string;
+        period_end: string;
+        period_start: string;
+        pitr_gb_avg: number;
+        project_id: string;
+        /**
+         * Human-readable project name (denormalized for convenience).
+         */
+        project_name: string;
+        /**
+         * Cloud region for the project (e.g., aws-us-east-1).
+         */
+        project_region: string;
+        storage_cost_usd: string;
+        storage_gb_avg: number;
+        total_cost_usd: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecWebhookInfo = {
+    data: Array<{
+        created_at: string;
+        created_by: string;
+        enabled: boolean;
+        events: Array<string>;
+        id: string;
+        name: string;
+        organization_id: string;
+        project_id?: string | null;
+        url: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVerificationSent = {
+    data: {
+        message: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWebhookCreated = {
+    /**
+     * Webhook created response (includes secret on creation only)
+     */
+    data: {
+        /**
+         * The webhook secret - only shown once at creation time
+         */
+        secret: string;
+        webhook: WebhookInfo;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWebhookInfo = {
+    /**
+     * Webhook response (hides secret)
+     */
+    data: {
+        created_at: string;
+        created_by: string;
+        enabled: boolean;
+        events: Array<string>;
+        id: string;
+        name: string;
+        organization_id: string;
+        project_id?: string | null;
+        url: string;
+    };
+    pagination?: null | PaginationMeta;
 };
 
 /**
@@ -3141,81 +9278,6 @@ export type DatabaseCreated = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type DatabaseCreatedResponse = {
-    data: DatabaseCreated;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Supported external database providers
- */
-export type DatabaseProvider = 'neon' | 'supabase' | 'planetscale' | 'turso' | 'mongodb';
-
-/**
  * Request body for database queries
  */
 export type DatabaseQueryRequest = {
@@ -3228,79 +9290,12 @@ export type DatabaseQueryRequest = {
      */
     params?: Array<unknown>;
     /**
-     * SQL query to execute
+     * Query payload to execute.
+     *
+     * - SQL publishers (serendb/neon/supabase): SQL string
+     * - MongoDB publishers: JSON string matching `MongoDbQuery`
      */
     query: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type DatabaseResponse = {
-    data: Database;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -3359,307 +9354,7 @@ export type DatabaseWithOwner = {
     updated_at: string;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type DatabaseWithOwnerResponse = {
-    data: DatabaseWithOwner;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type DatabasesResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<Database>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type DatabasesWithContextResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<DatabaseWithContext>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type DatabasesWithOwnerResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<DatabaseWithOwner>;
-    pagination?: PaginationMeta | null;
-};
-
-export type DeductBalanceRequest = {
-    amount: number;
-    endpoint_id: string;
-    query_hash: string;
-    timestamp: number;
-    user_id?: string | null;
-};
-
-export type DeductBalanceResponse = {
-    new_balance: number;
-    transaction_id: string;
-};
+export type DelegationType = 'in_loop' | 'full_handoff';
 
 /**
  * Wrapped deposit response for OpenAPI
@@ -3701,14 +9396,6 @@ export type DepositResponse = {
      */
     checkout_url: string;
     deposit_id: string;
-    /**
-     * Recovery code (only shown on first deposit, save it securely!)
-     */
-    recovery_code?: string | null;
-    /**
-     * Warning about recovery setup
-     */
-    recovery_warning?: string | null;
     /**
      * Total to be credited in atomic units
      */
@@ -3773,80 +9460,6 @@ export type Eip712Types = {
  */
 export type Email = string;
 
-export type EmailVerified = {
-    message: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type EmailVerifiedResponse = {
-    data: EmailVerified;
-    pagination?: PaginationMeta | null;
-};
-
 /**
  * Endpoint represents a compute instance for a branch
  */
@@ -3895,76 +9508,6 @@ export type EndpointBillingEvents = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type EndpointBillingEventsResponse = {
-    data: EndpointBillingEvents;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response after creating an endpoint
  */
 export type EndpointCreated = {
@@ -3988,76 +9531,6 @@ export type EndpointCreated = {
     primary_endpoint_id?: string | null;
     status: string;
     warnings?: Array<string> | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type EndpointCreatedResponse = {
-    data: EndpointCreated;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -4091,6 +9564,9 @@ export type EndpointDefinition = {
      * Protected endpoints are documented but return 403 if called
      */
     is_protected?: boolean;
+    /**
+     * HTTP method (GET, POST, PUT, DELETE, PATCH)
+     */
     method: HttpMethod;
     /**
      * Path relative to api_url (e.g., "/chat/completions")
@@ -4124,103 +9600,6 @@ export type EndpointDefinition = {
 };
 
 /**
- * Information about an API endpoint
- */
-export type EndpointInfo = {
-    /**
-     * Endpoint description
-     */
-    description?: string | null;
-    /**
-     * HTTP method (GET, POST, PUT, DELETE, etc.)
-     */
-    method: string;
-    /**
-     * Endpoint path relative to publisher base URL
-     */
-    path: string;
-    /**
-     * Price for this specific endpoint (in atomic units)
-     */
-    price?: number | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type EndpointResponse = {
-    data: Endpoint;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Endpoint status enum
- */
-export type EndpointStatus = 'creating' | 'active' | 'idle' | 'suspended' | 'error' | 'deleting';
-
-/**
  * Status response used by lifecycle endpoints
  */
 export type EndpointStatusInfo = {
@@ -4231,152 +9610,9 @@ export type EndpointStatusInfo = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type EndpointStatusInfoResponse = {
-    data: EndpointStatusInfo;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Endpoint type enum - distinguishes between primary and replica endpoints
  */
 export type EndpointType = 'read_write' | 'read_only';
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type EndpointsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<Endpoint>;
-    pagination?: PaginationMeta | null;
-};
 
 /**
  * Query estimate request body
@@ -4391,7 +9627,10 @@ export type EstimateRequestBody = {
      */
     publisher_id: string;
     /**
-     * SQL query to estimate
+     * Query payload to estimate.
+     *
+     * - SQL publishers (serendb/neon/supabase): SQL string
+     * - MongoDB publishers: JSON string matching `MongoDbQuery`
      */
     query: string;
 };
@@ -4426,120 +9665,58 @@ export type EstimateResponse = {
     publisher_slug: string;
 };
 
-/**
- * A federated resource entry in the discovery index
- */
-export type FederatedResource = {
-    /**
-     * When the entry was created
-     */
-    created_at: string;
-    /**
-     * Optional expiration time
-     */
-    expires_at?: string | null;
-    /**
-     * ID of the resource in the publisher's system
-     */
-    external_id: string;
-    /**
-     * Unique identifier
-     */
-    id: string;
-    /**
-     * Discoverable metadata (structure varies by resource_type)
-     */
-    metadata: unknown;
-    /**
-     * Optional: org database where full data resides
-     */
-    org_database_id?: string | null;
-    /**
-     * Publisher that owns this resource
-     */
-    publisher_id: string;
-    /**
-     * Type of resource (bounty, dataset, service, etc.)
-     */
-    resource_type: string;
-    /**
-     * Current status
-     */
-    status: string;
-    /**
-     * When the entry was last updated
-     */
-    updated_at: string;
+export type EvalMatrixEntry = {
+    score: number;
+    signal_count: number;
+};
+
+export type EvalMatrixResponse = {
+    generated_at: string;
+    matrix: {
+        [key: string]: {
+            [key: string]: EvalMatrixEntry;
+        };
+    };
+    total_signals: number;
+};
+
+export type EvalSignalItem = {
+    delegation_type?: DelegationType;
+    had_tool_errors?: boolean;
+    latency_ms?: null | LatencyMs;
+    model_id: string;
+    satisfaction: number;
+    task_type: TaskType;
+    token_count?: null | TokenCount;
+    tool_ids_used?: Array<string>;
+};
+
+export type EvalSignalRequest = {
+    signals: Array<EvalSignalItem>;
+};
+
+export type EvalSignalResponse = {
+    accepted: number;
+    rejected: number;
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
+ * Response for a federation history event with optional publisher metadata.
  */
-export type FederatedResourceDataResponse = {
-    data: FederatedResourceResponse;
-    pagination?: PaginationMeta | null;
+export type FederatedResourceHistoryResponse = {
+    changed_at: string;
+    expires_at?: string | null;
+    external_id: string;
+    federation_id?: string | null;
+    id: string;
+    metadata: unknown;
+    operation: string;
+    org_database_id?: string | null;
+    publisher_id: string;
+    publisher_name?: string | null;
+    publisher_slug?: string | null;
+    resource_type: string;
+    status: string;
 };
 
 /**
@@ -4556,20 +9733,6 @@ export type FederatedResourceResponse = {
     resource_type: string;
     status: string;
     updated_at: string;
-};
-
-/**
- * Response for listing federated resources with publisher info
- */
-export type FederatedResourceWithPublisher = FederatedResource & {
-    /**
-     * Publisher name for display
-     */
-    publisher_name: string;
-    /**
-     * Publisher slug for routing
-     */
-    publisher_slug: string;
 };
 
 /**
@@ -4591,178 +9754,21 @@ export type FederatedResourceWithPublisherResponse = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
+ * Response for federation history aggregate statistics.
  */
-export type FederatedResourcesDataResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<FederatedResourceWithPublisherResponse>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Summary statistics for federation
- */
-export type FederationStats = {
-    /**
-     * Count by status
-     */
+export type FederationHistoryStatsResponse = {
+    by_operation: {
+        [key: string]: number;
+    };
     by_status: {
         [key: string]: number;
     };
-    /**
-     * Count by resource type
-     */
     by_type: {
         [key: string]: number;
     };
-    /**
-     * Total active resources
-     */
-    total_active: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type FederationStatsDataResponse = {
-    data: FederationStatsResponse;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Query parameters for federation stats
- */
-export type FederationStatsParams = {
-    /**
-     * Filter by publisher slug (optional - if omitted, returns stats across all publishers)
-     */
-    publisher_slug?: string | null;
+    total_events: number;
+    unique_publishers: number;
+    unique_resources: number;
 };
 
 /**
@@ -4778,195 +9784,6 @@ export type FederationStatsResponse = {
     total_active: number;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type FiatDepositDataResponse = {
-    data: FiatDepositResponse;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Response for deposit status/history (without sensitive client data)
- */
-export type FiatDepositResponse = {
-    agent_wallet: WalletAddress;
-    /**
-     * Amount in the deposit currency
-     */
-    amount: number;
-    /**
-     * Amount in target asset credited/to be credited
-     */
-    amount_in_asset: number;
-    /**
-     * Provider's charge ID (if payment completed)
-     */
-    charge_id?: string | null;
-    completed_at?: string | null;
-    created_at: string;
-    /**
-     * ISO 4217 currency code
-     */
-    currency: string;
-    failure_code?: string | null;
-    failure_message?: string | null;
-    id: string;
-    /**
-     * Provider's payment identifier
-     */
-    payment_id: string;
-    provider: FiatPaymentProvider;
-    publisher_id: string;
-    status: FiatDepositStatus;
-    target_asset: AssetInfo;
-};
-
-/**
- * Status of fiat deposit for agent prepaid balance
- */
-export type FiatDepositStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'refunded' | 'expired' | 'cancelled';
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type FiatDepositsDataResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<FiatDepositResponse>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Payment provider for fiat deposits
- */
-export type FiatPaymentProvider = 'stripe' | 'paypal' | 'coinbase' | 'wire';
-
 export type ForgotPasswordRequest = {
     email: Email;
 };
@@ -4977,18 +9794,36 @@ export type GenerateInvoicesRequest = {
 };
 
 /**
- * Request to grant credits to an organization (admin)
+ * Error response when a publisher uses opt_in routing and the user has not opted in
  */
-export type GrantCreditsRequest = {
-    amount_usd: string;
-    description?: string | null;
-    /**
-     * Days until expiration (None = never expires)
-     */
-    expires_in_days?: number | null;
-    organization_id: string;
-    source: CreditSource;
+export type GeoRestrictedError = {
+    error: string;
+    message: string;
+    opt_in_endpoint: string;
+    proxy_region: string;
+    publisher: string;
 };
+
+export type GeoRoutingConfig = {
+    /**
+     * Routing mode (defaults to `always`).
+     */
+    mode?: GeoRoutingMode;
+    /**
+     * Proxy region to route through (e.g., "EU")
+     */
+    proxy_region: string;
+};
+
+/**
+ * Geographic routing configuration for publishers whose upstream API
+ * should be accessed through a regional proxy.
+ *
+ * Two modes:
+ * - `"always"`: all requests are routed through the proxy (e.g., upstream blocks US IPs)
+ * - `"opt_in"`: users can choose to route through the proxy via `/user/routing`
+ */
+export type GeoRoutingMode = 'always' | 'opt_in';
 
 /**
  * HTTP method for endpoint definitions
@@ -4999,246 +9834,6 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
  * Integration type - specific integration when publisher_category = Integration
  */
 export type IntegrationType = 'api' | 'mcp';
-
-/**
- * Internal authorization request from SerenDB proxy
- */
-export type InternalAuthorizeRequest = {
-    /**
-     * Agent wallet address.
-     *
-     * - For on-chain credentials: this must be the agent's real wallet address.
-     * - For account-based credentials (JWT/API key): this can be any placeholder;
-     * Seren derives the canonical wallet from the validated identity.
-     */
-    agent_wallet?: string | null;
-    /**
-     * Publisher slug to access
-     */
-    publisher_slug: string;
-    /**
-     * Authorization proof.
-     *
-     * - For account-based (fiat/prepaid): Seren user JWT or API key (`seren_...`)
-     * - For real on-chain wallets: EIP-191 personal_sign of
-     * `agent:<publisher_slug>:<agent_wallet>`
-     * - For streaming payments (EIP-3009): JSON payload string
-     */
-    signature?: string | null;
-};
-
-/**
- * Internal authorization response
- */
-export type InternalAuthorizeResponse = {
-    /**
-     * Canonical agent wallet address for the authorized session.
-     *
-     * - For virtual wallets: derived from the provided Seren credential (JWT/API key).
-     * - For on-chain wallets: the wallet address provided by the agent.
-     */
-    agent_wallet?: string | null;
-    asset?: ProxyAssetInfo | null;
-    /**
-     * Whether authorization succeeded
-     */
-    authorized: boolean;
-    balance?: ProxyBalanceInfo | null;
-    /**
-     * Error message if failed
-     */
-    error?: string | null;
-    pricing?: ProxyPricingInfo | null;
-    publisher?: ProxyPublisherInfo | null;
-    /**
-     * Session expiration (Unix timestamp)
-     */
-    session_expires_at?: number | null;
-    /**
-     * Session token for subsequent requests
-     */
-    session_token?: string | null;
-};
-
-/**
- * Internal charge request from proxy
- */
-export type InternalChargeRequest = {
-    /**
-     * Actual rows returned
-     */
-    actual_rows?: number | null;
-    /**
-     * Agent wallet
-     */
-    agent_wallet: string;
-    /**
-     * Estimated rows
-     */
-    estimated_rows: number;
-    /**
-     * Execution time in ms
-     */
-    execution_time_ms?: number | null;
-    /**
-     * Publisher ID
-     */
-    publisher_id: string;
-    /**
-     * Query hash for deduplication
-     */
-    query_hash: string;
-    /**
-     * Query type (SELECT, INSERT, etc.)
-     */
-    query_type: string;
-    /**
-     * Unique request ID for idempotency (UUID v5 for deterministic deduplication)
-     */
-    request_id: string;
-    /**
-     * Session token from authorization
-     */
-    session_token: string;
-};
-
-/**
- * Internal charge response
- */
-export type InternalChargeResponse = {
-    /**
-     * Amount charged in atomic units
-     */
-    amount_charged_atomic: number;
-    /**
-     * Error message if failed
-     */
-    error?: string | null;
-    /**
-     * New balance after charge
-     */
-    new_balance_atomic: number;
-    /**
-     * Whether charge succeeded
-     */
-    success: boolean;
-    /**
-     * Transaction ID for audit
-     */
-    transaction_id?: string | null;
-};
-
-/**
- * Internal release request from proxy
- */
-export type InternalReleaseRequest = {
-    /**
-     * Agent wallet
-     */
-    agent_wallet: string;
-    /**
-     * Publisher ID
-     */
-    publisher_id: string;
-    /**
-     * Unique request ID for idempotency (UUID v5 for deterministic deduplication)
-     */
-    request_id: string;
-    /**
-     * Session token from authorization
-     */
-    session_token: string;
-};
-
-/**
- * Internal release response
- */
-export type InternalReleaseResponse = {
-    /**
-     * Available balance (balance - reserved)
-     */
-    available_atomic: number;
-    /**
-     * Balance in atomic units
-     */
-    balance_atomic: number;
-    /**
-     * Error message if failed
-     */
-    error?: string | null;
-    /**
-     * Amount released in atomic units
-     */
-    released_amount_atomic: number;
-    /**
-     * Reserved balance in atomic units
-     */
-    reserved_atomic: number;
-    /**
-     * Whether release succeeded
-     */
-    success: boolean;
-};
-
-/**
- * Internal reserve request from proxy
- */
-export type InternalReserveRequest = {
-    /**
-     * Agent wallet
-     */
-    agent_wallet: string;
-    /**
-     * Estimated rows
-     */
-    estimated_rows: number;
-    /**
-     * Publisher ID
-     */
-    publisher_id: string;
-    /**
-     * Query hash for deduplication
-     */
-    query_hash: string;
-    /**
-     * Unique request ID for idempotency (UUID v5 for deterministic deduplication)
-     */
-    request_id: string;
-    /**
-     * Session token from authorization
-     */
-    session_token: string;
-};
-
-/**
- * Internal reserve response
- */
-export type InternalReserveResponse = {
-    /**
-     * Available balance (balance - reserved)
-     */
-    available_atomic: number;
-    /**
-     * Balance in atomic units
-     */
-    balance_atomic: number;
-    /**
-     * Error message if failed
-     */
-    error?: string | null;
-    /**
-     * Amount reserved in atomic units
-     */
-    reserved_amount_atomic: number;
-    /**
-     * Reserved balance in atomic units
-     */
-    reserved_atomic: number;
-    /**
-     * Whether reserve succeeded
-     */
-    success: boolean;
-};
 
 /**
  * Cost breakdown for template invocation response
@@ -5262,90 +9857,20 @@ export type Invoice = {
     period_end: string;
     period_start: string;
     status: string;
-    subtotal_usd: number;
-    tax_usd: number;
-    total_usd: number;
+    subtotal_usd: string;
+    tax_usd: string;
+    total_usd: string;
 };
 
 /**
  * Invoice line item response
  */
 export type InvoiceLineItem = {
-    amount_usd: number;
+    amount_usd: string;
     description: string;
     line_type: string;
-    quantity: number;
-    unit_price: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type InvoiceResponse = {
-    data: Invoice;
-    pagination?: PaginationMeta | null;
+    quantity: string;
+    unit_price: string;
 };
 
 /**
@@ -5354,146 +9879,6 @@ export type InvoiceResponse = {
 export type InvoicesGenerated = {
     count: number;
     invoice_ids: Array<string>;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type InvoicesGeneratedResponse = {
-    data: InvoicesGenerated;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type InvokeDataResponse = {
-    data: InvokeTemplateResponse;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -5510,6 +9895,9 @@ export type InvokeTemplateRequest = {
  * Response from invoking a template
  */
 export type InvokeTemplateResponse = {
+    /**
+     * Cost breakdown
+     */
     cost: InvocationCostBreakdown;
     /**
      * Execution time in milliseconds
@@ -5541,293 +9929,9 @@ export type IpAllowList = {
     updated_at: string;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type IpAllowListResponse = {
-    data: IpAllowList;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type IpAllowListsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<IpAllowList>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Limits response for API (simplified)
- */
-export type LimitsResponse = {
-    branches?: number;
-    compute_hours?: number;
-    data_transfer_gb?: number;
-    logical_size_bytes?: number;
-    projects?: number;
-    storage_gb?: number;
-};
-
-/**
- * Query parameters for listing agent credit grants
- */
-export type ListAgentGrantsParams = {
-    /**
-     * Only show active grants (has remaining balance and not expired)
-     */
-    active_only?: boolean;
-    /**
-     * Filter by agent wallet address directly
-     */
-    agent_wallet?: string | null;
-    /**
-     * Filter by admin who granted
-     */
-    granted_by?: string | null;
-    /**
-     * Maximum number of results (default: 50)
-     */
-    limit?: number;
-    /**
-     * Offset for pagination (default: 0)
-     */
-    offset?: number;
-    source?: AgentCreditSource | null;
-    /**
-     * Filter by user ID (derives virtual wallet)
-     */
-    user_id?: string | null;
-};
-
-/**
- * Query parameters for listing federated resources
- */
-export type ListFederatedResourcesParams = {
-    /**
-     * Maximum number of results (default: 50, max: 100)
-     */
-    limit?: number;
-    /**
-     * Offset for pagination
-     */
-    offset?: number;
-    /**
-     * Filter by publisher slug
-     */
-    publisher_slug?: string | null;
-    /**
-     * Filter by resource type (e.g., "bounty", "dataset")
-     */
-    resource_type?: string | null;
-    /**
-     * Filter by status (default: "active")
-     */
-    status?: string | null;
-};
-
-/**
- * Query params for listing fiat deposits
- */
-export type ListFiatDepositsParams = {
-    /**
-     * Maximum number of results (default: 50)
-     */
-    limit?: number | null;
-    /**
-     * Offset for pagination
-     */
-    offset?: number | null;
-    provider?: FiatPaymentProvider | null;
-    /**
-     * Filter by publisher
-     */
-    publisher_id?: string | null;
-    status?: FiatDepositStatus | null;
-};
-
-/**
- * Response for listing MCP resources from a publisher
- */
-export type ListMcpResourcesResponse = {
-    /**
-     * List of available MCP resources
-     */
-    resources: Array<McpResourceInfo>;
-};
-
-/**
- * Response for listing MCP tools from a publisher
- */
-export type ListMcpToolsResponse = {
-    /**
-     * List of available MCP tools
-     */
-    tools: Array<McpToolInfo>;
-};
-
-/**
- * Query params for listing publisher payouts.
- */
-export type ListPublisherPayoutsParams = {
-    /**
-     * Maximum number of results (default: 50)
-     */
-    limit?: number | null;
-    /**
-     * Offset for pagination
-     */
-    offset?: number | null;
-};
-
-/**
- * Query parameters for listing publishers (store view with full details)
- */
-export type ListPublishersParams = {
-    category?: PublisherCategory | null;
-    /**
-     * Filter by verification status
-     */
-    is_verified?: boolean | null;
-    /**
-     * Maximum number of results (default: 50, max: 100)
-     */
-    limit?: number;
-    /**
-     * Offset for pagination
-     */
-    offset?: number;
-    /**
-     * Search by name or slug
-     */
-    search?: string | null;
+export type LatencyMs = {
+    first?: number | null;
+    total?: number | null;
 };
 
 /**
@@ -5858,76 +9962,6 @@ export type LogicalReplicationSettings = {
     slots_count: number;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type LogicalReplicationSettingsResponse = {
-    data: LogicalReplicationSettings;
-    pagination?: PaginationMeta | null;
-};
-
 export type LoginResult = {
     access_token: string;
     /**
@@ -5938,146 +9972,6 @@ export type LoginResult = {
     expires_in: number;
     refresh_token: string;
     user: UserInfo;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type LoginResultResponse = {
-    data: LoginResult;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type LogoUploadDataResponse = {
-    data: LogoUploadResponse;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -6114,193 +10008,6 @@ export type LogoUploadResponse = {
 export type LsnByTimestamp = {
     lsn: string;
 };
-
-/**
- * Query parameters for getting LSN by timestamp.
- */
-export type LsnByTimestampQuery = {
-    /**
-     * ISO 8601 timestamp (e.g., 2024-05-06T10:00:00.000Z)
-     */
-    timestamp: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type LsnByTimestampResponse = {
-    data: LsnByTimestamp;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Discovered capabilities of an MCP server
- */
-export type McpCapabilities = {
-    prompts?: Array<McpPromptInfo> | null;
-    resources?: Array<McpResourceInfo> | null;
-    server_name?: string | null;
-    server_version?: string | null;
-    tools?: Array<McpToolInfo> | null;
-};
-
-/**
- * Argument for an MCP prompt
- */
-export type McpPromptArgument = {
-    description?: string | null;
-    name: string;
-    required?: boolean | null;
-};
-
-/**
- * Information about an MCP prompt
- */
-export type McpPromptInfo = {
-    arguments?: Array<McpPromptArgument> | null;
-    description?: string | null;
-    name: string;
-};
-
-/**
- * Content of an MCP resource
- */
-export type McpResourceContent = {
-    blob?: string | null;
-    mime_type?: string | null;
-    text?: string | null;
-    uri: string;
-};
-
-/**
- * Information about an MCP resource
- */
-export type McpResourceInfo = {
-    /**
-     * Resource description
-     */
-    description?: string | null;
-    /**
-     * MIME type of the resource
-     */
-    mime_type?: string | null;
-    /**
-     * Resource name
-     */
-    name: string;
-    /**
-     * Resource URI
-     */
-    uri: string;
-};
-
-/**
- * Information about an MCP tool
- */
-export type McpToolInfo = {
-    /**
-     * Tool description
-     */
-    description?: string | null;
-    /**
-     * JSON Schema for tool input parameters
-     */
-    input_schema?: unknown;
-    /**
-     * Tool name
-     */
-    name: string;
-};
-
-/**
- * A validated network identifier.
- *
- * Supports common blockchain networks. Stored as TEXT in database.
- *
- * # Known Networks
- * - `evm:1` - Ethereum Mainnet
- * - `evm:8453` - Base
- * - `evm:137` - Polygon
- * - `evm:42161` - Arbitrum One
- * - `evm:10` - Optimism
- * - `solana:mainnet` - Solana Mainnet
- * - `solana:devnet` - Solana Devnet
- *
- * # Examples
- *
- * ```
- * use seren_core::models::NetworkId;
- *
- * let eth = NetworkId::new("evm:1").unwrap();
- * assert!(eth.is_evm());
- *
- * let sol = NetworkId::new("solana:mainnet").unwrap();
- * assert!(sol.is_solana());
- * ```
- */
-export type NetworkId = string;
 
 /**
  * DataResponse wrapper for OpenAPI schema
@@ -6390,6 +10097,9 @@ export type OnchainDepositRequest = {
  * Response after successful on-chain deposit
  */
 export type OnchainDepositResponse = {
+    /**
+     * Agent wallet address
+     */
     agent_wallet: WalletAddress;
     /**
      * Asset symbol (e.g., USDC, USDT)
@@ -6438,154 +10148,6 @@ export type Operation = {
     updated_at: string;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OperationResponse = {
-    data: Operation;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Operation status
- */
-export type OperationStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OperationsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<Operation>;
-    pagination?: PaginationMeta | null;
-};
-
 export type Organization = {
     created_at: string;
     created_by: string;
@@ -6613,76 +10175,6 @@ export type OrganizationConsumption = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OrganizationConsumptionResponse = {
-    data: OrganizationConsumption;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response type for organization invites (token is not exposed over the API).
  */
 export type OrganizationInvite = {
@@ -6698,165 +10190,6 @@ export type OrganizationInvite = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OrganizationInviteResponse = {
-    data: OrganizationInvite;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OrganizationInvitesResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<OrganizationInvite>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Limits represents resource quotas for an organization
- */
-export type OrganizationLimits = {
-    branches?: number;
-    compute_hours?: number;
-    created_at: string;
-    data_transfer_gb?: number;
-    id: string;
-    logical_size_bytes?: number;
-    organization_id: string;
-    projects?: number;
-    storage_gb?: number;
-    updated_at: string;
-};
-
-/**
  * Organization member with denormalized user fields for API responses.
  */
 export type OrganizationMemberWithUser = {
@@ -6867,79 +10200,6 @@ export type OrganizationMemberWithUser = {
     organization_id: string;
     role: string;
     user_id: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OrganizationMembersResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<OrganizationMemberWithUser>;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -6962,151 +10222,11 @@ export type OrganizationPlan = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OrganizationPlanResponse = {
-    data: OrganizationPlanWithDetails;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response type that includes both the plan and organization_plan details
  */
 export type OrganizationPlanWithDetails = {
     organization_plan: OrganizationPlan;
     plan: Plan;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OrganizationResponse = {
-    data: Organization;
-    pagination?: PaginationMeta | null;
 };
 
 export type OrganizationVpcEndpoint = {
@@ -7121,197 +10241,49 @@ export type OrganizationVpcEndpoint = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OrganizationVpcEndpointResponse = {
-    data: OrganizationVpcEndpoint;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type OrganizationsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<Organization>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Paginated response wrapper.
  *
  * Wraps a list of items with pagination metadata.
  */
-export type PaginatedBranchResponse = {
+export type PaginatedResponseProject = {
     /**
      * The items in this page
      */
-    data: Array<Branch>;
-    pagination: PaginationMeta;
-};
-
-/**
- * Paginated response wrapper.
- *
- * Wraps a list of items with pagination metadata.
- */
-export type PaginatedEndpointResponse = {
+    data: Array<{
+        active_time_seconds?: number;
+        block_public_connections: boolean;
+        block_vpc_connections: boolean;
+        branch_count?: number;
+        compute_last_active_at?: string | null;
+        compute_unit_max: number;
+        compute_unit_min: number;
+        created_at: string;
+        created_by: string;
+        default_branch_id?: string | null;
+        default_compute_size_max?: number;
+        default_compute_size_min?: number;
+        deleted_at?: string | null;
+        deleted_by?: string | null;
+        enable_logical_replication?: boolean;
+        hipaa: boolean;
+        history_retention_seconds?: number;
+        id: string;
+        /**
+         * Whether this is a service project (hidden from normal listings, contains seren_* databases)
+         */
+        is_service_project?: boolean;
+        name: string;
+        organization_id: string;
+        postgres_version?: string;
+        protected_branches_only: boolean;
+        region: string;
+        storage_bytes?: number;
+        tenant_id: string;
+        updated_at: string;
+    }>;
     /**
-     * The items in this page
+     * Pagination metadata
      */
-    data: Array<Endpoint>;
-    pagination: PaginationMeta;
-};
-
-/**
- * Paginated response wrapper.
- *
- * Wraps a list of items with pagination metadata.
- */
-export type PaginatedOperationResponse = {
-    /**
-     * The items in this page
-     */
-    data: Array<Operation>;
-    pagination: PaginationMeta;
-};
-
-/**
- * Paginated response wrapper.
- *
- * Wraps a list of items with pagination metadata.
- */
-export type PaginatedProjectResponse = {
-    /**
-     * The items in this page
-     */
-    data: Array<Project>;
     pagination: PaginationMeta;
 };
 
@@ -7320,11 +10292,172 @@ export type PaginatedProjectResponse = {
  *
  * Use this for list endpoints that use limit/offset pagination.
  */
-export type PaginatedPublishersResponse = {
+export type PaginatedResponseVecPublisherResponse = {
+    data: Array<{
+        /**
+         * Cached A2A agent card
+         */
+        a2a_agent_card?: unknown;
+        /**
+         * A2A endpoint base URL (for compute_type = agent)
+         */
+        a2a_endpoint_url?: string | null;
+        /**
+         * A2A health status: unknown, healthy, unhealthy, unreachable
+         */
+        a2a_health_status?: string | null;
+        /**
+         * Accepted assets for payment
+         */
+        accepted_assets?: Array<AssetInfo> | null;
+        allowed_passthrough_headers: Array<string>;
+        /**
+         * Header name to inject upstream_api_key into (e.g., "Authorization", "X-API-Key")
+         */
+        api_key_header?: string | null;
+        /**
+         * Query parameter name to inject upstream_api_key into (e.g., "api_key", "apiKey")
+         */
+        api_key_query_param?: string | null;
+        /**
+         * External API URL (for integration_type = api)
+         */
+        api_url?: string | null;
+        billing_model: string;
+        /**
+         * SerenDB branch ID (for database_type = serendb)
+         */
+        branch_id?: string | null;
+        /**
+         * Publisher-declared capabilities for task matching
+         */
+        capabilities: Array<string>;
+        categories: Array<string>;
+        compute_type?: null | ComputeType;
+        created_at: string;
+        /**
+         * Provider config (sensitive fields redacted)
+         */
+        database_config?: unknown;
+        /**
+         * Database name within the SerenDB project
+         */
+        database_name?: string | null;
+        database_type?: null | DatabaseType;
+        description?: string | null;
+        /**
+         * Publisher contact email for notifications and support
+         */
+        email?: string | null;
+        /**
+         * Structured endpoint definitions for LLM discoverability and access control
+         */
+        endpoints?: Array<EndpointDefinition> | null;
+        gateway_fee_percent: string;
+        id: string;
+        integration_type?: null | IntegrationType;
+        is_active: boolean;
+        is_verified: boolean;
+        logo_url?: string | null;
+        /**
+         * Cached MCP capabilities (tools, resources, prompts)
+         */
+        mcp_capabilities?: unknown;
+        /**
+         * MCP server endpoint URL (for integration_type = mcp)
+         */
+        mcp_endpoint?: string | null;
+        name: string;
+        /**
+         * OAuth provider ID for BYOC (Bring Your Own Credentials) authentication
+         */
+        oauth_provider_id?: string | null;
+        ownership_tracking_enabled: boolean;
+        /**
+         * Pricing config per asset (if included)
+         */
+        pricing?: Array<PricingConfigResponse> | null;
+        /**
+         * SerenDB project ID (for database_type = serendb)
+         */
+        project_id?: string | null;
+        protected_operations?: unknown;
+        /**
+         * Publisher category: database, integration, or compute
+         */
+        publisher_category: PublisherCategory;
+        publisher_type: PublisherType;
+        /**
+         * Content-Type for upstream API requests
+         */
+        request_content_type: string;
+        /**
+         * If true, users must connect via OAuth before using this publisher
+         */
+        requires_user_oauth: boolean;
+        resource_description?: string | null;
+        resource_id_response_path?: string | null;
+        resource_id_url_pattern?: string | null;
+        resource_name?: string | null;
+        routing?: null | GeoRoutingConfig;
+        slug: string;
+        /**
+         * TTL for cached exchanged tokens in seconds
+         */
+        token_cache_ttl_seconds?: number | null;
+        /**
+         * HTTP method for exchange endpoint (POST or GET)
+         */
+        token_exchange_method?: string | null;
+        /**
+         * How to send Seren token: header, body, or query
+         */
+        token_exchange_mode?: string | null;
+        /**
+         * URL to call for exchanging Seren API keys for publisher auth tokens
+         */
+        token_exchange_url?: string | null;
+        /**
+         * JSON field in exchange response containing the token
+         */
+        token_response_field?: string | null;
+        total_queries: number;
+        /**
+         * Policy for handling requests to paths not in the endpoints catalog
+         */
+        undocumented_endpoint_policy: UndocumentedEndpointPolicy;
+        unique_agents_served: number;
+        updated_at: string;
+        /**
+         * Dot-separated path to upstream cost in response body (for pay_per_use and prepaid passthrough billing).
+         * Example: "usage.cost"
+         */
+        upstream_cost_response_path?: string | null;
+        /**
+         * Non-sensitive headers to send to upstream API
+         */
+        upstream_headers: unknown;
+        /**
+         * Usage examples showing how to call the publisher's API
+         */
+        usage_examples?: Array<UsageExample> | null;
+        /**
+         * Human-readable use case descriptions
+         */
+        use_cases: Array<string>;
+        /**
+         * When verification expires (NULL = no expiry)
+         */
+        verification_expires_at?: string | null;
+        wallet_address: WalletAddress;
+        /**
+         * Network for the wallet address
+         */
+        wallet_network_id: string;
+    }>;
     /**
-     * The response data
+     * Pagination metadata
      */
-    data: Array<PublisherResponse>;
     pagination: OffsetPaginationMeta;
 };
 
@@ -7363,148 +10496,8 @@ export type PasswordReset = {
     message: string;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PasswordResetResponse = {
-    data: PasswordReset;
-    pagination?: PaginationMeta | null;
-};
-
 export type PasswordResetSent = {
     message: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PasswordResetSentResponse = {
-    data: PasswordResetSent;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -7515,153 +10508,20 @@ export type PaymentHistory = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PaymentHistoryResponse = {
-    data: PaymentHistory;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response for creating a payment intent
  */
 export type PaymentIntentCreated = {
-    amount_usd: number;
+    /**
+     * Amount to be charged, in cents.
+     */
+    amount_cents: number;
+    /**
+     * Amount to be charged, in USD.
+     */
+    amount_usd: string;
     client_secret: string;
     currency: CurrencyCode;
     payment_intent_id: StripePaymentIntentId;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PaymentIntentCreatedResponse = {
-    data: PaymentIntentCreated;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -7687,153 +10547,10 @@ export type PaymentMethodAdded = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PaymentMethodAddedResponse = {
-    data: PaymentMethodAdded;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PaymentMethodsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<PaymentMethod>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Individual payment record
  */
 export type PaymentRecord = {
-    amount_usd: number;
+    amount_usd: string;
     attempted_at: string;
     currency: CurrencyCode;
     failed_at?: string | null;
@@ -7841,7 +10558,7 @@ export type PaymentRecord = {
     failure_message?: string | null;
     id: string;
     status: string;
-    stripe_charge_id?: StripeChargeId | null;
+    stripe_charge_id?: null | StripeChargeId;
     stripe_payment_intent_id: StripePaymentIntentId;
     succeeded_at?: string | null;
 };
@@ -7850,8 +10567,8 @@ export type PaymentRecord = {
  * Internal payment request tracking (extends with Seren-specific fields)
  */
 export type PaymentRequestInfo = {
-    eip712TypedData?: Eip712TypedData | null;
-    estimate?: CostEstimate | null;
+    eip712TypedData?: null | Eip712TypedData;
+    estimate?: null | CostEstimate;
     /**
      * Expiration timestamp (Unix seconds)
      */
@@ -7884,6 +10601,9 @@ export type PaymentRequiredResponse = {
      * Optional extensions (V2 feature for protocol extensibility)
      */
     extensions?: unknown;
+    /**
+     * Resource information (V2 - moved to top level)
+     */
     resource: ResourceInfo;
     /**
      * x402 protocol version (2 for V2)
@@ -7895,7 +10615,7 @@ export type PaymentRequiredResponse = {
  * 402 Payment Required response body (x402 v2) with Seren-specific extensions.
  */
 export type PaymentRequiredResponseWithInfo = PaymentRequiredResponse & {
-    seren?: PaymentRequestInfo | null;
+    seren?: null | PaymentRequestInfo;
 };
 
 /**
@@ -7943,63 +10663,6 @@ export type PaymentRequirements = {
      */
     scheme: string;
 };
-
-/**
- * x402 V1 Payment Requirements.
- *
- * V1 embeds resource information directly inside each requirement.
- */
-export type PaymentRequirementsV1 = {
-    /**
-     * Payment asset address (token contract)
-     */
-    asset: string;
-    /**
-     * Human-readable description of the resource
-     */
-    description: string;
-    /**
-     * Scheme-specific additional information
-     */
-    extra?: unknown;
-    /**
-     * Maximum amount in atomic units (token decimals)
-     */
-    maxAmountRequired: string;
-    /**
-     * Maximum time in seconds for the resource server to respond
-     */
-    maxTimeoutSeconds: number;
-    /**
-     * MIME type of the resource response
-     */
-    mimeType?: string | null;
-    /**
-     * Network for payment (e.g., "base", "base-sepolia")
-     */
-    network: string;
-    /**
-     * Optional JSON schema describing the response format
-     */
-    outputSchema?: unknown;
-    /**
-     * Payment recipient address (gateway or publisher wallet)
-     */
-    payTo: string;
-    /**
-     * URL of the resource being paid for
-     */
-    resource: string;
-    /**
-     * Payment scheme (e.g., "exact")
-     */
-    scheme: string;
-};
-
-/**
- * Payment source for transactions
- */
-export type PaymentSource = 'onchain' | 'prepaid_balance' | 'credits';
 
 /**
  * Status of a publisher payout request.
@@ -8061,149 +10724,6 @@ export type Plan = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PlanResponse = {
-    data: Plan;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PlansResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<Plan>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Point in time specification (timestamp or LSN)
  */
 export type PointInTime = {
@@ -8216,147 +10736,6 @@ export type PointInTime = {
  * Pooler mode enum
  */
 export type PoolerMode = 'transaction' | 'session';
-
-/**
- * Bounded pre-authorization used for automated executions (e.g., scheduled jobs).
- */
-export type PreAuthorization = {
-    /**
-     * Agent wallet address (real wallet for x402, virtual wallet for prepaid).
-     */
-    agent_wallet: string;
-    /**
-     * Optional API key id hint (prepaid only) to avoid checking all keys.
-     */
-    api_key_id?: string | null;
-    /**
-     * Optional asset to bind the authorization to (prepaid: NULL = any stablecoin).
-     */
-    asset_id?: string | null;
-    auth_type: PreAuthorizationType;
-    /**
-     * Job ID this pre-authorization applies to.
-     */
-    job_id: string;
-    /**
-     * Maximum total charge per execution (atomic units, includes service fee).
-     */
-    max_per_execution_atomic: number;
-    /**
-     * Maximum total budget across all executions (atomic units, includes service fee).
-     */
-    max_total_atomic: number;
-    /**
-     * Replay-protection nonce (opaque string for prepaid, bytes32 hex for x402).
-     */
-    nonce: string;
-    /**
-     * Target publisher this pre-authorization applies to.
-     *
-     * Must match the publisher in the `/publishers/{slug}/{*path}` request.
-     */
-    publisher_id: string;
-    /**
-     * Service fee amount charged per execution (atomic units).
-     */
-    service_fee_per_execution_atomic?: number;
-    /**
-     * Publisher that receives the service fee (defaults to `publisher_id`).
-     */
-    service_fee_recipient_id?: string | null;
-    /**
-     * Signature: EIP-712 for x402, HMAC-SHA256 hex for prepaid.
-     */
-    signature: string;
-    /**
-     * User ID (required for prepaid, omitted for x402).
-     */
-    user_id?: string | null;
-    /**
-     * Validity window start (Unix seconds).
-     */
-    valid_after: number;
-    /**
-     * Validity window end (Unix seconds).
-     */
-    valid_before: number;
-};
-
-/**
- * Pre-authorization signature allowing a service (e.g., SerenCron) to spend on behalf
- * of an agent without storing the agent's credentials.
- */
-export type PreAuthorizationType = 'x402' | 'prepaid';
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PricingConfigDataResponse = {
-    data: PricingConfigResponse;
-    pagination?: PaginationMeta | null;
-};
 
 /**
  * Pricing config response
@@ -8401,32 +10780,6 @@ export type PricingConfigResponse = {
      */
     pricing_display_text?: string | null;
     pricing_model: PricingModel;
-};
-
-/**
- * Pricing information for a publisher (simple view)
- */
-export type PricingInfo = {
-    /**
-     * Base price per 1000 rows for database publishers
-     */
-    base_price_per_1000_rows?: string | null;
-    /**
-     * Pricing model (per_row, per_byte, per_call, per_request)
-     */
-    model: string;
-    /**
-     * Price per API call
-     */
-    price_per_call?: string | null;
-    /**
-     * Price per GET request
-     */
-    price_per_get?: string | null;
-    /**
-     * Price per POST request
-     */
-    price_per_post?: string | null;
 };
 
 /**
@@ -8482,99 +10835,6 @@ export type ProjectConnectionUri = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ProjectConnectionUriDataResponse = {
-    data: ProjectConnectionUri;
-    pagination?: PaginationMeta | null;
-};
-
-export type ProjectConnectionUriQuery = {
-    /**
-     * Branch ID to target (defaults to project's default branch)
-     */
-    branch_id?: string | null;
-    /**
-     * Database name override (currently ignored)
-     */
-    database_name?: string | null;
-    /**
-     * Endpoint ID to target (defaults to first endpoint in branch)
-     */
-    endpoint_id?: string | null;
-    /**
-     * Return pooled connection (currently ignored)
-     */
-    pooled?: boolean | null;
-    /**
-     * Role name override (currently ignored)
-     */
-    role_name?: string | null;
-};
-
-/**
  * ProjectConsumption wraps consumption data for API responses
  */
 export type ProjectConsumption = {
@@ -8583,76 +10843,6 @@ export type ProjectConsumption = {
     periods: Array<ConsumptionPeriodData>;
     project_id: string;
     to: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ProjectConsumptionResponse = {
-    data: ProjectConsumption;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -8689,221 +10879,11 @@ export type ProjectCreated = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ProjectCreatedResponse = {
-    data: ProjectCreated;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ProjectResponse = {
-    data: Project;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response for project storage size
  */
 export type ProjectSize = {
     project_id: string;
     size_bytes: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ProjectSizeResponse = {
-    data: ProjectSize;
-    pagination?: PaginationMeta | null;
 };
 
 export type ProjectVpcEndpointAssignment = {
@@ -8918,437 +10898,8 @@ export type ProjectVpcEndpointAssignment = {
     updated_at: string;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ProjectVpcEndpointAssignmentResponse = {
-    data: ProjectVpcEndpointAssignment;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * A promotional code that can be redeemed for credits
- */
-export type PromoCode = {
-    code: string;
-    created_at: string;
-    created_by?: string | null;
-    credit_amount_usd: string;
-    credit_expires_days?: number | null;
-    description?: string | null;
-    id: string;
-    is_active: boolean;
-    max_redemptions?: number | null;
-    one_per_org: boolean;
-    updated_at: string;
-    valid_from?: string | null;
-    valid_until?: string | null;
-};
-
-/**
- * A record of a promo code redemption
- */
-export type PromoCodeRedemption = {
-    created_at: string;
-    credit_grant_id: string;
-    id: string;
-    organization_id: string;
-    promo_code_id: string;
-    redeemed_by?: string | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PromoCodeRedemptionsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<PromoCodeRedemption>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PromoCodeResponse = {
-    data: PromoCode;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Promo code with redemption count for admin views
- */
-export type PromoCodeWithStats = PromoCode & {
-    redemption_count: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PromoCodesWithStatsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<PromoCodeWithStats>;
-    pagination?: PaginationMeta | null;
-};
-
 export type ProvidersResponse = {
     providers: Array<PublisherOAuthProviderResponse>;
-};
-
-/**
- * Asset info returned to proxy for metering and settlement.
- */
-export type ProxyAssetInfo = {
-    /**
-     * Asset decimals
-     */
-    asset_decimals: number;
-    /**
-     * Asset ID
-     */
-    asset_id: string;
-    /**
-     * Asset symbol (e.g., "USDC")
-     */
-    asset_symbol: string;
-    /**
-     * Token contract address (EVM) or mint address (Solana) when applicable.
-     */
-    contract_address?: string | null;
-    /**
-     * Network identifier (CAIP-2)
-     */
-    network_id: string;
-};
-
-/**
- * Agent balance info returned to proxy
- */
-export type ProxyBalanceInfo = {
-    /**
-     * Available balance (balance - reserved)
-     */
-    available_atomic: number;
-    /**
-     * Balance in atomic units
-     */
-    balance_atomic: number;
-    /**
-     * Reserved balance in atomic units
-     */
-    reserved_atomic: number;
-};
-
-/**
- * Pricing info returned to proxy
- */
-export type ProxyPricingInfo = {
-    /**
-     * Base price per 1000 rows (configured asset)
-     */
-    base_price_per_1000_rows: number;
-    /**
-     * Markup multiplier
-     */
-    markup_multiplier: number;
-    /**
-     * Maximum charge (configured asset)
-     */
-    max_charge?: number | null;
-    /**
-     * Minimum charge (configured asset)
-     */
-    min_charge: number;
-    /**
-     * Whether on-chain payments are accepted
-     */
-    onchain_enabled: boolean;
-    /**
-     * Whether prepaid balance is accepted
-     */
-    prepaid_enabled: boolean;
-    pricing_model: PricingModel;
-};
-
-/**
- * Publisher info returned to proxy
- */
-export type ProxyPublisherInfo = {
-    /**
-     * Connection string (decrypted)
-     */
-    connection_string: string;
-    /**
-     * Default database name
-     */
-    database_name: string;
-    /**
-     * Publisher ID
-     */
-    publisher_id: string;
-    /**
-     * Publisher name
-     */
-    publisher_name: string;
-    /**
-     * Publisher slug
-     */
-    publisher_slug: string;
-    /**
-     * PostgreSQL role to use
-     */
-    role_name: string;
 };
 
 /**
@@ -9371,223 +10922,10 @@ export type PublicationInfo = {
     updated_at: string;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublicationInfoResponse = {
-    data: PublicationInfo;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublicationsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<PublicationInfo>;
-    pagination?: PaginationMeta | null;
-};
-
 export type PublisherAgentBalance = {
     onchain_atomic?: number | null;
     serenbucks_atomic: number;
     total_available_atomic: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublisherAgentBalanceDataResponse = {
-    data: PublisherAgentBalance;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -9600,76 +10938,6 @@ export type PublisherAnalytics = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublisherAnalyticsDataResponse = {
-    data: PublisherAnalytics;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Aggregated totals for publisher analytics
  */
 export type PublisherAnalyticsTotals = {
@@ -9678,7 +10946,7 @@ export type PublisherAnalyticsTotals = {
     successful_invocations: number;
     total_invocations: number;
     total_revenue_atomic: number;
-    total_revenue_usd: number;
+    total_revenue_usd: string;
     total_templates: number;
     unique_agents_served: number;
 };
@@ -9696,219 +10964,6 @@ export type PublisherChargeInfo = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublisherChargeInfoDataResponse = {
-    data: PublisherChargeInfo;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublisherDataResponse = {
-    data: PublisherResponse;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublisherEarningsDataResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<PublisherEarningsResponse>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Publisher earnings summary response (per asset).
  */
 export type PublisherEarningsResponse = {
@@ -9920,6 +10975,9 @@ export type PublisherEarningsResponse = {
     publisher_id: string;
     publisher_name: string;
     publisher_slug: string;
+    /**
+     * Count of billable transactions for this asset (query_charge, api_call, service_fee).
+     */
     request_count: number;
     total_revenue: number;
     total_revenue_atomic: number;
@@ -9929,63 +10987,14 @@ export type PublisherEarningsResponse = {
 };
 
 /**
- * Detailed information about a publisher including capabilities and pricing
- */
-export type PublisherInfoResponse = {
-    /**
-     * Publisher category (database, integration, compute)
-     */
-    category: string;
-    /**
-     * Database type for database publishers (serendb, neon, supabase, mongodb)
-     */
-    database_type?: string | null;
-    /**
-     * Full description of the publisher
-     */
-    description?: string | null;
-    /**
-     * Available API endpoints (for API publishers)
-     */
-    endpoints?: Array<EndpointInfo> | null;
-    /**
-     * Integration type for integration publishers (api, mcp)
-     */
-    integration_type?: string | null;
-    /**
-     * Display name of the publisher
-     */
-    name: string;
-    pricing: PricingInfo;
-    /**
-     * Available MCP resources (for MCP publishers)
-     */
-    resources?: Array<McpResourceInfo> | null;
-    /**
-     * Unique slug identifier for the publisher
-     */
-    slug: string;
-    /**
-     * Available MCP tools (for MCP publishers)
-     */
-    tools?: Array<McpToolInfo> | null;
-};
-
-/**
- * Response containing a list of publishers (simple summary view)
- */
-export type PublisherListResponse = {
-    /**
-     * List of publisher summaries
-     */
-    publishers: Array<PublisherSummary>;
-};
-
-/**
  * Response type for OAuth provider (excludes sensitive fields)
  */
 export type PublisherOAuthProviderResponse = {
     created_at: string;
+    /**
+     * Custom provider-specific authorization URL parameters
+     */
+    custom_auth_params?: unknown;
     description?: string | null;
     id: string;
     is_active: boolean;
@@ -9996,76 +11005,6 @@ export type PublisherOAuthProviderResponse = {
     slug: string;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublisherPayoutDataResponse = {
-    data: PublisherPayoutResponse;
-    pagination?: PaginationMeta | null;
-};
-
 export type PublisherPayoutInfo = {
     amount_atomic: number;
     destination_wallet: string;
@@ -10073,76 +11012,6 @@ export type PublisherPayoutInfo = {
     id: string;
     status: string;
     tx_hash?: string | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublisherPayoutInfoDataResponse = {
-    data: PublisherPayoutInfo;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -10162,82 +11031,21 @@ export type PublisherPayoutResponse = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublisherPayoutsDataResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<PublisherPayoutResponse>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Publisher response (excludes sensitive fields)
  */
 export type PublisherResponse = {
+    /**
+     * Cached A2A agent card
+     */
+    a2a_agent_card?: unknown;
+    /**
+     * A2A endpoint base URL (for compute_type = agent)
+     */
+    a2a_endpoint_url?: string | null;
+    /**
+     * A2A health status: unknown, healthy, unhealthy, unreachable
+     */
+    a2a_health_status?: string | null;
     /**
      * Accepted assets for payment
      */
@@ -10265,7 +11073,7 @@ export type PublisherResponse = {
      */
     capabilities: Array<string>;
     categories: Array<string>;
-    compute_type?: ComputeType | null;
+    compute_type?: null | ComputeType;
     created_at: string;
     /**
      * Provider config (sensitive fields redacted)
@@ -10275,7 +11083,7 @@ export type PublisherResponse = {
      * Database name within the SerenDB project
      */
     database_name?: string | null;
-    database_type?: DatabaseType | null;
+    database_type?: null | DatabaseType;
     description?: string | null;
     /**
      * Publisher contact email for notifications and support
@@ -10287,7 +11095,7 @@ export type PublisherResponse = {
     endpoints?: Array<EndpointDefinition> | null;
     gateway_fee_percent: string;
     id: string;
-    integration_type?: IntegrationType | null;
+    integration_type?: null | IntegrationType;
     is_active: boolean;
     is_verified: boolean;
     logo_url?: string | null;
@@ -10314,6 +11122,9 @@ export type PublisherResponse = {
      */
     project_id?: string | null;
     protected_operations?: unknown;
+    /**
+     * Publisher category: database, integration, or compute
+     */
     publisher_category: PublisherCategory;
     publisher_type: PublisherType;
     /**
@@ -10328,6 +11139,7 @@ export type PublisherResponse = {
     resource_id_response_path?: string | null;
     resource_id_url_pattern?: string | null;
     resource_name?: string | null;
+    routing?: null | GeoRoutingConfig;
     slug: string;
     /**
      * TTL for cached exchanged tokens in seconds
@@ -10350,6 +11162,9 @@ export type PublisherResponse = {
      */
     token_response_field?: string | null;
     total_queries: number;
+    /**
+     * Policy for handling requests to paths not in the endpoints catalog
+     */
     undocumented_endpoint_policy: UndocumentedEndpointPolicy;
     unique_agents_served: number;
     updated_at: string;
@@ -10403,33 +11218,11 @@ export type PublisherSuggestion = {
      */
     match_reason: string;
     name: string;
-    pricing?: PricingSummary | null;
+    pricing?: null | PricingSummary;
     /**
      * Match score (0.0 to 1.0)
      */
     score: number;
-    slug: string;
-};
-
-/**
- * Summary information about a publisher
- */
-export type PublisherSummary = {
-    /**
-     * Publisher category (database, integration, compute)
-     */
-    category: string;
-    /**
-     * Short description of what the publisher offers
-     */
-    description?: string | null;
-    /**
-     * Display name of the publisher
-     */
-    name: string;
-    /**
-     * Unique slug identifier for the publisher
-     */
     slug: string;
 };
 
@@ -10457,79 +11250,6 @@ export type PublisherTypeInstructions = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type PublishersDataResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<PublisherResponse>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Query parameter definition for an endpoint
  */
 export type QueryParamDefinition = {
@@ -10545,27 +11265,15 @@ export type QueryParamDefinition = {
      * Parameter name (e.g., "id", "limit")
      */
     name: string;
+    /**
+     * Parameter type
+     */
     param_type?: ParamType;
     /**
      * Whether this parameter is required
      */
     required?: boolean;
 };
-
-/**
- * Enum for quota check results
- */
-export type QuotaCheckResult = 'Allowed' | {
-    /**
-     * Operation would exceed quota
-     */
-    QuotaExceeded: {
-        current: number;
-        limit: number;
-        message: string;
-        quota_type: string;
-    };
-} | 'NoPlanFound';
 
 /**
  * Quota usage summary for an organization
@@ -10586,76 +11294,6 @@ export type QuotaUsage = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type QuotaUsageResponse = {
-    data: QuotaUsage;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response after creating or updating a role
  */
 export type RbacRole = {
@@ -10665,149 +11303,6 @@ export type RbacRole = {
     is_built_in: boolean;
     name: string;
     permissions: Array<string>;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type RbacRoleResponse = {
-    data: RbacRole;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type RbacRolesResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<RbacRole>;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -10841,13 +11336,6 @@ export type RecoveryResponse = {
 };
 
 /**
- * Request to redeem a promo code (user)
- */
-export type RedeemPromoCodeRequest = {
-    code: string;
-};
-
-/**
  * Wrapped referral info response for OpenAPI
  */
 export type ReferralInfoDataResponse = {
@@ -10869,30 +11357,6 @@ export type ReferralInfoResponse = {
 
 export type RefundChargeRequest = {
     reason: string;
-};
-
-export type RefundTransactionRequest = {
-    amount: number;
-    endpoint_id: string;
-    reason: string;
-    timestamp: number;
-    transaction_id: string;
-    user_id?: string | null;
-};
-
-export type RefundTransactionResponse = {
-    new_balance: number;
-    refund_id: string;
-};
-
-/**
- * Query parameters for filtering VPC endpoints.
- */
-export type RegionQuery = {
-    /**
-     * Filter endpoints by region
-     */
-    region?: string | null;
 };
 
 /**
@@ -10918,149 +11382,6 @@ export type ReplicationSlotInfo = {
     slot_type: string;
     status: string;
     updated_at: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ReplicationSlotInfoResponse = {
-    data: ReplicationSlotInfo;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type ReplicationSlotsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<ReplicationSlotInfo>;
-    pagination?: PaginationMeta | null;
 };
 
 export type ResendVerificationRequest = {
@@ -11143,6 +11464,9 @@ export type RestoreBranchRequest = {
      * Name for the backup branch that will preserve the current state
      */
     preserve_under_name: string;
+    /**
+     * Source to restore from
+     */
     source: RestoreSource;
 };
 
@@ -11153,10 +11477,10 @@ export type RestoreSource = {
     point_in_time: PointInTime;
     type: '^self';
 } | {
-    point_in_time?: PointInTime | null;
+    point_in_time?: null | PointInTime;
     type: '^parent';
 } | {
-    point_in_time?: PointInTime | null;
+    point_in_time?: null | PointInTime;
     source_branch_id: string;
     type: 'branch';
 };
@@ -11239,31 +11563,6 @@ export type RevokeResponse = {
 };
 
 /**
- * PostgreSQL role/user within a SerenDB branch
- */
-export type Role = {
-    branch_id: string;
-    created_at: string;
-    /**
-     * User who created the role. None for roles created via SQL on compute (DDL sync).
-     */
-    created_by?: string | null;
-    deleted_at?: string | null;
-    deleted_by?: string | null;
-    id: string;
-    /**
-     * System roles (like cloud_admin) are hidden from users
-     */
-    is_system: boolean;
-    name: string;
-    password_ciphertext?: Blob | File | null;
-    password_nonce?: Blob | File | null;
-    protected: boolean;
-    scram_secret?: string | null;
-    updated_at: string;
-};
-
-/**
  * Response after creating a role
  */
 export type RoleCreated = {
@@ -11272,76 +11571,6 @@ export type RoleCreated = {
     id: string;
     name: string;
     password: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type RoleCreatedResponse = {
-    data: RoleCreated;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -11356,224 +11585,11 @@ export type RoleInfo = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type RoleInfoResponse = {
-    data: RoleInfo;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type RoleInfosResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<RoleInfo>;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response after resetting password
  */
 export type RolePasswordReset = {
     password: string;
     role_id: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type RolePasswordResetResponse = {
-    data: RolePasswordReset;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -11589,152 +11605,9 @@ export type Session = {
     user_agent?: string | null;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type SessionsResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<Session>;
-    pagination?: PaginationMeta | null;
-};
-
 export type SessionsRevoked = {
     message: string;
     revoked_count: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type SessionsRevokedResponse = {
-    data: SessionsRevoked;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -11762,32 +11635,6 @@ export type SetRecoveryRequest = {
 };
 
 /**
- * Settlement response - returned in PAYMENT-RESPONSE (v2) / X-PAYMENT-RESPONSE (v1) headers (base64 encoded)
- */
-export type SettlementResponse = {
-    /**
-     * Error reason if settlement failed (omitted if successful)
-     */
-    errorReason?: string | null;
-    /**
-     * Network where payment was processed
-     */
-    network: string;
-    /**
-     * Payer wallet address
-     */
-    payer?: string | null;
-    /**
-     * Whether payment was accepted
-     */
-    success: boolean;
-    /**
-     * Blockchain transaction hash (empty string if settlement failed)
-     */
-    transaction: string;
-};
-
-/**
  * Setup instructions for new agents
  */
 export type SetupInstructions = {
@@ -11803,6 +11650,9 @@ export type SetupInstructions = {
      * Step 3: Browse publishers
      */
     step_3: string;
+    /**
+     * Step 4: Use publishers by type
+     */
     step_4: PublisherTypeInstructions;
 };
 
@@ -11852,11 +11702,6 @@ export type Slug = string;
 export type StripeChargeId = string;
 
 /**
- * A Stripe Customer ID (cus_xxx).
- */
-export type StripeCustomerId = string;
-
-/**
  * A Stripe Payment Intent ID (pi_xxx).
  */
 export type StripePaymentIntentId = string;
@@ -11865,106 +11710,6 @@ export type StripePaymentIntentId = string;
  * A Stripe Payment Method ID (pm_xxx).
  */
 export type StripePaymentMethodId = string;
-
-/**
- * A Stripe Price ID (price_xxx).
- */
-export type StripePriceId = string;
-
-/**
- * A Stripe Subscription ID (sub_xxx).
- */
-export type StripeSubscriptionId = string;
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type SuggestDataResponse = {
-    data: SuggestResponse;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Query parameters for suggesting publishers based on task/query
- */
-export type SuggestParams = {
-    /**
-     * Maximum number of results (default: 5, max: 20)
-     */
-    limit?: number;
-    /**
-     * The task or query to match against publisher capabilities.
-     * Examples: "scrape website", "AI research", "PDF extraction"
-     */
-    query: string;
-    /**
-     * Type of suggestions: "publisher", "agent", or "both" (default: "both")
-     * Note: Agent suggestions are planned but not yet implemented.
-     */
-    type?: string;
-};
 
 /**
  * Response for suggest endpoint
@@ -12021,6 +11766,8 @@ export type SupportedResponse = {
     signers?: unknown;
 };
 
+export type TaskType = 'code_generation' | 'file_operations' | 'research' | 'document_generation' | 'general_chat';
+
 /**
  * Analytics data for a single template
  */
@@ -12034,157 +11781,11 @@ export type TemplateAnalytics = {
     template_id: string;
     total_invocations: number;
     total_revenue_atomic: number;
-    total_revenue_usd: number;
+    total_revenue_usd: string;
     unique_agents_served: number;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type TemplateDataResponse = {
-    data: CreateTemplateResponse;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Programming language for agent templates
- */
-export type TemplateLanguage = 'python' | 'typescript' | 'rust';
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type TemplateListResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<AgentTemplateSummary>;
-    pagination?: PaginationMeta | null;
-};
+export type TemplateLanguage = 'python' | 'typescript' | 'javascript';
 
 /**
  * Sorting options for template catalog
@@ -12198,85 +11799,12 @@ export type TimestampByLsn = {
     timestamp: string;
 };
 
-/**
- * Query parameters for getting timestamp by LSN.
- */
-export type TimestampByLsnQuery = {
-    /**
-     * Log Sequence Number (e.g., 0/1234567)
-     */
-    lsn: string;
+export type TokenCount = {
+    input?: number | null;
+    output?: number | null;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type TimestampByLsnResponse = {
-    data: TimestampByLsn;
-    pagination?: PaginationMeta | null;
-};
+export type TokenEndpointAuthMethod = 'client_secret_post' | 'client_secret_basic';
 
 /**
  * Top agent by spending.
@@ -12310,202 +11838,6 @@ export type TopAgent = {
      * Total amount spent (atomic units)
      */
     total_spent_atomic: number;
-};
-
-export type TopAgentsQueryParams = {
-    /**
-     * Number of agents to return (default: 10)
-     */
-    limit?: number;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type TransactionDataResponse = {
-    data: TransactionResponse;
-    pagination?: PaginationMeta | null;
-};
-
-/**
- * Query params for transaction history
- */
-export type TransactionHistoryQuery = {
-    /**
-     * Maximum number of transactions to return (default 50, max 100)
-     */
-    limit?: number;
-    /**
-     * Offset for pagination
-     */
-    offset?: number;
-};
-
-/**
- * Transaction history response
- */
-export type TransactionResponse = {
-    agent_wallet: WalletAddress;
-    /**
-     * Amount in asset decimal units (positive = credit, negative = debit)
-     */
-    amount: number;
-    /**
-     * Amount in atomic units (for precision)
-     */
-    amount_atomic: number;
-    asset: AssetInfo;
-    /**
-     * Balance after transaction in asset decimal units
-     */
-    balance_after: number;
-    created_at: string;
-    description?: string | null;
-    id: string;
-    payment_source?: PaymentSource | null;
-    publisher_id: string;
-    transaction_type: TransactionType;
-    tx_hash?: string | null;
-};
-
-/**
- * Transaction type for audit log
- */
-export type TransactionType = 'deposit' | 'query_charge' | 'api_call' | 'refund' | 'withdrawal' | 'settlement' | 'service_fee';
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type TransactionsDataResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<TransactionResponse>;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -12545,20 +11877,8 @@ export type UpdateEndpointRequest = {
     autoscaling_max?: number | null;
     autoscaling_min?: number | null;
     pooler_enabled?: boolean | null;
-    pooler_mode?: PoolerMode | null;
+    pooler_mode?: null | PoolerMode;
     suspend_timeout_seconds?: number | null;
-};
-
-/**
- * Request to update organization limits
- */
-export type UpdateLimitsRequest = {
-    branches?: number | null;
-    compute_hours?: number | null;
-    data_transfer_gb?: number | null;
-    logical_size_bytes?: number | null;
-    projects?: number | null;
-    storage_gb?: number | null;
 };
 
 /**
@@ -12581,6 +11901,10 @@ export type UpdateOAuthProviderRequest = {
      */
     client_secret?: string | null;
     /**
+     * Custom provider-specific authorization URL parameters. If omitted, leave unchanged.
+     */
+    custom_auth_params?: unknown;
+    /**
      * If omitted, leave unchanged. If null, clear.
      */
     description?: string | null;
@@ -12601,7 +11925,7 @@ export type UpdateOAuthProviderRequest = {
     revocation_url?: string | null;
     scopes?: Array<string> | null;
     slug?: string | null;
-    token_endpoint_auth_method?: string | null;
+    token_endpoint_auth_method?: null | TokenEndpointAuthMethod;
     token_url?: string | null;
     /**
      * If omitted, leave unchanged. If null, clear.
@@ -12647,7 +11971,7 @@ export type UpdatePricingRequest = {
      * Text to display for variable pricing (e.g., "Varies by model")
      */
     pricing_display_text?: string | null;
-    pricing_model?: PricingModel | null;
+    pricing_model?: null | PricingModel;
     /**
      * TTL for cached exchanged tokens in seconds (60-86400)
      */
@@ -12695,16 +12019,6 @@ export type UpdateProjectRequest = {
 };
 
 /**
- * Request to update a promo code (admin)
- */
-export type UpdatePromoCodeRequest = {
-    description?: string | null;
-    is_active?: boolean | null;
-    max_redemptions?: number | null;
-    valid_until?: string | null;
-};
-
-/**
  * Request to update a publication
  */
 export type UpdatePublicationRequest = {
@@ -12719,6 +12033,10 @@ export type UpdatePublicationRequest = {
  * Request to update a publisher
  */
 export type UpdatePublisherRequest = {
+    /**
+     * A2A endpoint base URL (for compute_type = agent)
+     */
+    a2a_endpoint_url?: string | null;
     /**
      * Asset IDs to add to accepted assets
      */
@@ -12761,7 +12079,7 @@ export type UpdatePublisherRequest = {
      */
     capabilities?: Array<string> | null;
     categories?: Array<string> | null;
-    compute_type?: ComputeType | null;
+    compute_type?: null | ComputeType;
     /**
      * Provider-specific configuration
      */
@@ -12770,7 +12088,7 @@ export type UpdatePublisherRequest = {
      * Database name within the SerenDB project
      */
     database_name?: string | null;
-    database_type?: DatabaseType | null;
+    database_type?: null | DatabaseType;
     description?: string | null;
     /**
      * Publisher contact email for notifications and support
@@ -12786,7 +12104,7 @@ export type UpdatePublisherRequest = {
     gateway_fee_percent?: string | null;
     grace_period_minutes?: number | null;
     hourly_rate?: string | null;
-    integration_type?: IntegrationType | null;
+    integration_type?: null | IntegrationType;
     is_active?: boolean | null;
     /**
      * JWT access key / issuer claim (plaintext)
@@ -12859,7 +12177,7 @@ export type UpdatePublisherRequest = {
      * Protected operations configuration - legacy, use endpoints[].is_protected instead
      */
     protected_operations?: unknown;
-    publisher_category?: PublisherCategory | null;
+    publisher_category?: null | PublisherCategory;
     /**
      * Asset IDs to remove from accepted assets
      */
@@ -12883,6 +12201,7 @@ export type UpdatePublisherRequest = {
      */
     resource_id_url_pattern?: string | null;
     resource_name?: string | null;
+    routing?: null | GeoRoutingConfig;
     /**
      * TTL for cached exchanged tokens in seconds (60-86400)
      */
@@ -12903,7 +12222,7 @@ export type UpdatePublisherRequest = {
      * JSON field in exchange response containing the token (default: access_token)
      */
     token_response_field?: string | null;
-    undocumented_endpoint_policy?: UndocumentedEndpointPolicy | null;
+    undocumented_endpoint_policy?: null | UndocumentedEndpointPolicy;
     /**
      * Upstream static API key (will be encrypted)
      */
@@ -12925,7 +12244,7 @@ export type UpdatePublisherRequest = {
      * Human-readable use case descriptions (e.g., "Scrape dynamic JavaScript websites")
      */
     use_cases?: Array<string> | null;
-    wallet_address?: WalletAddress | null;
+    wallet_address?: null | WalletAddress;
     /**
      * Network ID for wallet (must be provided if changing wallet_address)
      */
@@ -12972,6 +12291,10 @@ export type UpsertFederatedResourceRequest = {
      */
     org_database_id?: string | null;
     /**
+     * Optional publisher slug for disambiguation when an organization owns multiple publishers
+     */
+    publisher_slug?: string | null;
+    /**
      * Type of resource being registered
      */
     resource_type: string;
@@ -13010,89 +12333,11 @@ export type UsageExample = {
     title?: string | null;
 };
 
-export type UsageQueryParams = {
-    end_date?: string | null;
-    start_date?: string | null;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type UsageSummariesResponse = {
-    /**
-     * The actual response data (can be a single object or a collection)
-     */
-    data: Array<UsageSummary>;
-    pagination?: PaginationMeta | null;
-};
-
 /**
  * Usage summary for billing period
  */
 export type UsageSummary = {
-    compute_cost_usd: number;
+    compute_cost_usd: string;
     compute_hours_large: number;
     compute_hours_medium: number;
     compute_hours_small: number;
@@ -13110,9 +12355,9 @@ export type UsageSummary = {
      * Cloud region for the project (e.g., aws-us-east-1).
      */
     project_region: string;
-    storage_cost_usd: number;
+    storage_cost_usd: string;
     storage_gb_avg: number;
-    total_cost_usd: number;
+    total_cost_usd: string;
 };
 
 /**
@@ -13128,76 +12373,6 @@ export type UserInfo = {
 };
 
 /**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type UserInfoResponse = {
-    data: UserInfo;
-    pagination?: PaginationMeta | null;
-};
-
-/**
  * Response for GET /auth/me - current user info with default organization
  */
 export type UserMe = UserInfo & {
@@ -13206,76 +12381,6 @@ export type UserMe = UserInfo & {
      * This is typically the first organization the user joined (their personal org).
      */
     default_organization_id: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type UserMeResponse = {
-    data: UserMe;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -13301,91 +12406,8 @@ export type UserOAuthConnectionResponse = {
  */
 export type UserStatus = 'active' | 'deleted' | 'disabled' | 'paused';
 
-export type ValidateTokenRequest = {
-    endpoint_id?: string | null;
-    token: string;
-};
-
-export type ValidateTokenResponse = {
-    balance: number;
-    endpoint_id: string;
-    expires_at: number;
-    user_id: string;
-    valid: boolean;
-};
-
 export type VerificationSent = {
     message: string;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type VerificationSentResponse = {
-    data: VerificationSent;
-    pagination?: PaginationMeta | null;
 };
 
 export type VerifyEmailRequest = {
@@ -13475,8 +12497,8 @@ export type WalletRecoverDataResponse = {
 /**
  * Request to recover an agent account using a recovery code.
  *
- * Use this endpoint when you've lost access to your API key but have your
- * recovery code (provided when setting up wallet recovery or on first deposit).
+ * Use this endpoint when you've lost access to your API key but still have
+ * your recovery code (provided when setting up wallet recovery).
  */
 export type WalletRecoverRequest = {
     /**
@@ -13489,6 +12511,9 @@ export type WalletRecoverRequest = {
  * Response from wallet recovery endpoint.
  */
 export type WalletRecoverResponse = {
+    /**
+     * The recovered agent account (with a new API key)
+     */
     agent: AgentInfo;
     /**
      * Message about recovery result
@@ -13498,7 +12523,13 @@ export type WalletRecoverResponse = {
      * New recovery code (the old one has been rotated). Save this securely!
      */
     new_recovery_code: string;
+    /**
+     * Setup instructions for getting started
+     */
     setup: SetupInstructions;
+    /**
+     * Links to skill files and documentation
+     */
     skill_files: SkillFiles;
     /**
      * Whether recovery was successful
@@ -13515,6 +12546,11 @@ export type WalletSourceBalance = {
     kind: WalletBalanceKind;
     source: AgentCreditSource;
 };
+
+/**
+ * Response for a single transaction
+ */
+export type WalletTransactionDirection = 'credit' | 'debit';
 
 /**
  * Wrapped transaction history response for OpenAPI
@@ -13540,19 +12576,38 @@ export type WalletTransactionResponse = {
     amount_atomic: number;
     amount_usd: string;
     /**
+     * Wallet balance immediately after this debit (debit entries only)
+     */
+    balance_after_atomic?: number | null;
+    /**
+     * Wallet balance immediately after this debit in USD (debit entries only)
+     */
+    balance_after_usd?: string | null;
+    /**
      * Bonus amount included in this grant (only for tier_bonus source)
      */
     bonus_amount_usd?: string | null;
     created_at: string;
     description?: string | null;
+    direction: WalletTransactionDirection;
     expires_at?: string | null;
     id: string;
     /**
      * Original Stripe payment amount (only for fiat_purchase source)
      */
     paid_amount_usd?: string | null;
-    remaining_atomic: number;
-    remaining_usd: string;
+    /**
+     * Publisher context for this transaction (when available)
+     */
+    publisher_id?: string | null;
+    /**
+     * Remaining amount on the grant (credit entries only)
+     */
+    remaining_atomic?: number | null;
+    /**
+     * Remaining amount on the grant in USD (credit entries only)
+     */
+    remaining_usd?: string | null;
     source: string;
 };
 
@@ -13565,76 +12620,6 @@ export type WebhookCreated = {
      */
     secret: string;
     webhook: WebhookInfo;
-};
-
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type WebhookCreatedResponse = {
-    data: WebhookCreated;
-    pagination?: PaginationMeta | null;
 };
 
 /**
@@ -13672,147 +12657,29 @@ export type WebhookInfo = {
     url: string;
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type WebhookInfoResponse = {
-    data: WebhookInfo;
-    pagination?: PaginationMeta | null;
+export type AgentUpdateData = {
+    body: AgentUpdateRequest;
+    path?: never;
+    query?: never;
+    url: '/auth/agent';
 };
 
-/**
- * Generic API response wrapper with optional pagination
- *
- * This wrapper provides a consistent structure for all API responses,
- * making it easier for clients to handle responses uniformly. It supports
- * both single resources and collections, with optional pagination metadata.
- *
- * # Response Structure
- *
- * ```json
- * {
- * "data": T,
- * "pagination": { ... } // optional
- * }
- * ```
- *
- * # Examples
- *
- * ## Single Resource
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let project = Project {
- * id: "123".to_string(),
- * name: "My Project".to_string(),
- * };
- *
- * let response = DataResponse::new(project);
- * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
- * ```
- *
- * ## Collection with Pagination
- *
- * ```rust
- * use seren_core::http::DataResponse;
- * use seren_core::pagination::PaginationMeta;
- * use serde::Serialize;
- *
- * #[derive(Serialize)]
- * struct Project {
- * id: String,
- * name: String,
- * }
- *
- * let projects: Vec<Project> = Vec::new();
- * let pagination = PaginationMeta {
- * total: 0,
- * count: 0,
- * limit: 20,
- * offset: 0,
- * has_more: false,
- * };
- *
- * let response = DataResponse::with_pagination(projects, pagination);
- * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
- * ```
- */
-export type WebhooksResponse = {
+export type AgentUpdateErrors = {
     /**
-     * The actual response data (can be a single object or a collection)
+     * Invalid email
      */
-    data: Array<WebhookInfo>;
-    pagination?: PaginationMeta | null;
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type AgentUpdateResponses = {
+    /**
+     * Agent updated
+     */
+    200: unknown;
 };
 
 export type AgentRegisterData = {
@@ -13860,7 +12727,7 @@ export type ForgotPasswordResponses = {
     /**
      * Password reset email sent if account exists
      */
-    200: PasswordResetSentResponse;
+    200: DataResponsePasswordResetSent;
 };
 
 export type ForgotPasswordResponse = ForgotPasswordResponses[keyof ForgotPasswordResponses];
@@ -13883,7 +12750,7 @@ export type GetCurrentUserResponses = {
     /**
      * Current user information with default organization
      */
-    200: UserMeResponse;
+    200: DataResponseUserMe;
 };
 
 export type GetCurrentUserResponse = GetCurrentUserResponses[keyof GetCurrentUserResponses];
@@ -13906,7 +12773,7 @@ export type ResendVerificationEmailResponses = {
     /**
      * Verification email sent if account exists
      */
-    200: VerificationSentResponse;
+    200: DataResponseVerificationSent;
 };
 
 export type ResendVerificationEmailResponse = ResendVerificationEmailResponses[keyof ResendVerificationEmailResponses];
@@ -13933,7 +12800,7 @@ export type ResetPasswordResponses = {
     /**
      * Password reset successfully
      */
-    200: PasswordResetResponse;
+    200: DataResponsePasswordReset;
 };
 
 export type ResetPasswordResponse = ResetPasswordResponses[keyof ResetPasswordResponses];
@@ -13956,7 +12823,7 @@ export type VerifyEmailResponses = {
     /**
      * Email verified and user logged in
      */
-    200: LoginResultResponse;
+    200: DataResponseLoginResult;
 };
 
 export type VerifyEmailResponse = VerifyEmailResponses[keyof VerifyEmailResponses];
@@ -13979,7 +12846,7 @@ export type GetBillingHealthResponses = {
     /**
      * Billing health retrieved successfully
      */
-    200: BillingHealthResponse;
+    200: DataResponseBillingHealth;
 };
 
 export type GetBillingHealthResponse = GetBillingHealthResponses[keyof GetBillingHealthResponses];
@@ -14006,7 +12873,7 @@ export type GenerateInvoicesResponses = {
     /**
      * Invoices generated successfully
      */
-    200: InvoicesGeneratedResponse;
+    200: DataResponseInvoicesGenerated;
 };
 
 export type GenerateInvoicesResponse = GenerateInvoicesResponses[keyof GenerateInvoicesResponses];
@@ -14038,7 +12905,7 @@ export type GetInvoiceResponses = {
     /**
      * Invoice retrieved successfully
      */
-    200: InvoiceResponse;
+    200: DataResponseInvoice;
 };
 
 export type GetInvoiceResponse = GetInvoiceResponses[keyof GetInvoiceResponses];
@@ -14104,7 +12971,7 @@ export type CreatePaymentIntentResponses = {
     /**
      * Payment intent created
      */
-    200: PaymentIntentCreatedResponse;
+    200: DataResponsePaymentIntentCreated;
 };
 
 export type CreatePaymentIntentResponse = CreatePaymentIntentResponses[keyof CreatePaymentIntentResponses];
@@ -14136,7 +13003,7 @@ export type GetPaymentHistoryResponses = {
     /**
      * Payment history retrieved
      */
-    200: PaymentHistoryResponse;
+    200: DataResponsePaymentHistory;
 };
 
 export type GetPaymentHistoryResponse = GetPaymentHistoryResponses[keyof GetPaymentHistoryResponses];
@@ -14159,7 +13026,7 @@ export type ListPaymentMethodsResponses = {
     /**
      * Payment methods retrieved
      */
-    200: PaymentMethodsResponse;
+    200: DataResponseVecPaymentMethod;
 };
 
 export type ListPaymentMethodsResponse = ListPaymentMethodsResponses[keyof ListPaymentMethodsResponses];
@@ -14186,7 +13053,7 @@ export type AddPaymentMethodResponses = {
     /**
      * Payment method added
      */
-    200: PaymentMethodAddedResponse;
+    200: DataResponsePaymentMethodAdded;
 };
 
 export type AddPaymentMethodResponse = AddPaymentMethodResponses[keyof AddPaymentMethodResponses];
@@ -14258,7 +13125,7 @@ export type CreateChargeResponses = {
     /**
      * Charge created
      */
-    200: PublisherChargeInfoDataResponse;
+    200: DataResponsePublisherChargeInfo;
 };
 
 export type CreateChargeResponse = CreateChargeResponses[keyof CreateChargeResponses];
@@ -14298,7 +13165,7 @@ export type GetChargeStatusResponses = {
     /**
      * Charge retrieved
      */
-    200: PublisherChargeInfoDataResponse;
+    200: DataResponsePublisherChargeInfo;
 };
 
 export type GetChargeStatusResponse = GetChargeStatusResponses[keyof GetChargeStatusResponses];
@@ -14338,7 +13205,7 @@ export type RefundChargeResponses = {
     /**
      * Charge refunded
      */
-    200: PublisherChargeInfoDataResponse;
+    200: DataResponsePublisherChargeInfo;
 };
 
 export type RefundChargeResponse = RefundChargeResponses[keyof RefundChargeResponses];
@@ -14418,7 +13285,7 @@ export type CreatePayoutResponses = {
     /**
      * Payout created
      */
-    200: PublisherPayoutInfoDataResponse;
+    200: DataResponsePublisherPayoutInfo;
 };
 
 export type CreatePayoutResponse = CreatePayoutResponses[keyof CreatePayoutResponses];
@@ -14458,7 +13325,7 @@ export type GetPayoutStatusResponses = {
     /**
      * Payout retrieved
      */
-    200: PublisherPayoutInfoDataResponse;
+    200: DataResponsePublisherPayoutInfo;
 };
 
 export type GetPayoutStatusResponse = GetPayoutStatusResponses[keyof GetPayoutStatusResponses];
@@ -14493,7 +13360,7 @@ export type GetUsageSummaryResponses = {
     /**
      * Usage summary retrieved
      */
-    200: UsageSummariesResponse;
+    200: DataResponseVecUsageSummary;
 };
 
 export type GetUsageSummaryResponse = GetUsageSummaryResponses[keyof GetUsageSummaryResponses];
@@ -14516,10 +13383,60 @@ export type ListAllDatabasesResponses = {
     /**
      * List of all databases with context
      */
-    200: DatabasesWithContextResponse;
+    200: DataResponseVecDatabaseWithContext;
 };
 
 export type ListAllDatabasesResponse = ListAllDatabasesResponses[keyof ListAllDatabasesResponses];
+
+export type GetMatrixData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/eval/matrix';
+};
+
+export type GetMatrixErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type GetMatrixResponses = {
+    /**
+     * Eval matrix
+     */
+    200: EvalMatrixResponse;
+};
+
+export type GetMatrixResponse = GetMatrixResponses[keyof GetMatrixResponses];
+
+export type PostSignalsData = {
+    body: EvalSignalRequest;
+    path?: never;
+    query?: never;
+    url: '/eval/signals';
+};
+
+export type PostSignalsErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type PostSignalsResponses = {
+    /**
+     * Signals accepted
+     */
+    201: EvalSignalResponse;
+};
+
+export type PostSignalsResponse = PostSignalsResponses[keyof PostSignalsResponses];
 
 export type ListResourcesData = {
     body?: never;
@@ -14564,7 +13481,7 @@ export type ListResourcesResponses = {
     /**
      * Resources retrieved successfully
      */
-    200: FederatedResourcesDataResponse;
+    200: DataResponseVecFederatedResourceWithPublisherResponse;
 };
 
 export type ListResourcesResponse = ListResourcesResponses[keyof ListResourcesResponses];
@@ -14599,10 +13516,94 @@ export type UpsertResourceResponses = {
     /**
      * Resource upserted successfully
      */
-    200: FederatedResourceDataResponse;
+    200: DataResponseFederatedResourceResponse;
 };
 
 export type UpsertResourceResponse = UpsertResourceResponses[keyof UpsertResourceResponses];
+
+export type ListHistoryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter by publisher slug
+         */
+        publisher_slug?: string | null;
+        /**
+         * Filter by resource type
+         */
+        resource_type?: string | null;
+        /**
+         * Filter by external resource ID
+         */
+        external_id?: string | null;
+        /**
+         * Filter by history operation: insert, update, delete
+         */
+        operation?: string | null;
+        /**
+         * Maximum number of results (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Offset for pagination
+         */
+        offset?: number;
+    };
+    url: '/federation/history';
+};
+
+export type ListHistoryErrors = {
+    /**
+     * Invalid query parameters
+     */
+    400: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ListHistoryResponses = {
+    /**
+     * History retrieved successfully
+     */
+    200: DataResponseVecFederatedResourceHistoryResponse;
+};
+
+export type ListHistoryResponse = ListHistoryResponses[keyof ListHistoryResponses];
+
+export type GetHistoryStatsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Filter by publisher slug (optional)
+         */
+        publisher_slug?: string | null;
+        /**
+         * Filter by resource type (optional)
+         */
+        resource_type?: string | null;
+    };
+    url: '/federation/history/stats';
+};
+
+export type GetHistoryStatsErrors = {
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type GetHistoryStatsResponses = {
+    /**
+     * History stats retrieved successfully
+     */
+    200: DataResponseFederationHistoryStatsResponse;
+};
+
+export type GetHistoryStatsResponse = GetHistoryStatsResponses[keyof GetHistoryStatsResponses];
 
 export type GetStatsData = {
     body?: never;
@@ -14627,7 +13628,7 @@ export type GetStatsResponses = {
     /**
      * Stats retrieved successfully
      */
-    200: FederationStatsDataResponse;
+    200: DataResponseFederationStatsResponse;
 };
 
 export type GetStatsResponse = GetStatsResponses[keyof GetStatsResponses];
@@ -14659,7 +13660,7 @@ export type GetResourceResponses = {
     /**
      * Resource retrieved successfully
      */
-    200: FederatedResourceDataResponse;
+    200: DataResponseFederatedResourceResponse;
 };
 
 export type GetResourceResponse = GetResourceResponses[keyof GetResourceResponses];
@@ -14808,7 +13809,7 @@ export type InitiateOauthByIdData = {
         /**
          * Where to redirect after OAuth completes
          */
-        redirect_uri?: string | null;
+        redirect_uri?: string;
     };
     url: '/oauth/providers/{provider_id}/authorize';
 };
@@ -14864,7 +13865,7 @@ export type InitiateOauthData = {
         /**
          * Where to redirect after OAuth completes
          */
-        redirect_uri?: string | null;
+        redirect_uri?: string;
     };
     url: '/oauth/{provider}/authorize';
 };
@@ -14922,7 +13923,7 @@ export type ListOrganizationsResponses = {
     /**
      * List of organizations
      */
-    200: OrganizationsResponse;
+    200: DataResponseVecOrganization;
 };
 
 export type ListOrganizationsResponse = ListOrganizationsResponses[keyof ListOrganizationsResponses];
@@ -14949,7 +13950,7 @@ export type ListDefaultOrgApiKeysResponses = {
     /**
      * List of API keys
      */
-    200: ApiKeysResponse;
+    200: DataResponseVecApiKeyInfo;
 };
 
 export type ListDefaultOrgApiKeysResponse = ListDefaultOrgApiKeysResponses[keyof ListDefaultOrgApiKeysResponses];
@@ -14976,7 +13977,7 @@ export type CreateDefaultOrgApiKeyResponses = {
     /**
      * API key created
      */
-    201: ApiKeyCreatedResponse;
+    201: DataResponseApiKeyCreated;
 };
 
 export type CreateDefaultOrgApiKeyResponse = CreateDefaultOrgApiKeyResponses[keyof CreateDefaultOrgApiKeyResponses];
@@ -15015,6 +14016,160 @@ export type RevokeDefaultOrgApiKeyResponses = {
     200: unknown;
 };
 
+export type ListTasksData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+    };
+    query?: {
+        limit?: number;
+        offset?: number;
+    };
+    url: '/organizations/{organization_id}/agents/tasks';
+};
+
+export type ListTasksErrors = {
+    /**
+     * Not authorized
+     */
+    403: unknown;
+};
+
+export type ListTasksResponses = {
+    /**
+     * Tasks retrieved
+     */
+    200: DataResponseVecAgentTask;
+};
+
+export type ListTasksResponse = ListTasksResponses[keyof ListTasksResponses];
+
+export type GetTaskData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Task ID
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/agents/tasks/{task_id}';
+};
+
+export type GetTaskErrors = {
+    /**
+     * Task not found
+     */
+    404: unknown;
+};
+
+export type GetTaskResponses = {
+    /**
+     * Task retrieved
+     */
+    200: DataResponseAgentTask;
+};
+
+export type GetTaskResponse = GetTaskResponses[keyof GetTaskResponses];
+
+export type CancelTaskData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Task ID
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/agents/tasks/{task_id}/cancel';
+};
+
+export type CancelTaskErrors = {
+    /**
+     * Already terminal
+     */
+    400: unknown;
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type CancelTaskResponses = {
+    /**
+     * Task canceled
+     */
+    200: DataResponseAgentTask;
+};
+
+export type CancelTaskResponse = CancelTaskResponses[keyof CancelTaskResponses];
+
+export type ListTaskEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Task ID
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/agents/tasks/{task_id}/events';
+};
+
+export type ListTaskEventsErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type ListTaskEventsResponses = {
+    /**
+     * Events retrieved
+     */
+    200: DataResponseVecAgentTaskEvent;
+};
+
+export type ListTaskEventsResponse = ListTaskEventsResponses[keyof ListTaskEventsResponses];
+
+export type StreamTaskData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Task ID
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/agents/tasks/{task_id}/stream';
+};
+
+export type StreamTaskResponses = {
+    /**
+     * SSE event stream
+     */
+    200: unknown;
+};
+
 export type ListOrgApiKeysData = {
     body?: never;
     path: {
@@ -15042,7 +14197,7 @@ export type ListOrgApiKeysResponses = {
     /**
      * List of API keys
      */
-    200: ApiKeysResponse;
+    200: DataResponseVecApiKeyInfo;
 };
 
 export type ListOrgApiKeysResponse = ListOrgApiKeysResponses[keyof ListOrgApiKeysResponses];
@@ -15074,7 +14229,7 @@ export type CreateOrgApiKeyResponses = {
     /**
      * API key created
      */
-    201: ApiKeyCreatedResponse;
+    201: DataResponseApiKeyCreated;
 };
 
 export type CreateOrgApiKeyResponse = CreateOrgApiKeyResponses[keyof CreateOrgApiKeyResponses];
@@ -15185,7 +14340,7 @@ export type ListAuditLogsResponses = {
     /**
      * Audit logs retrieved successfully
      */
-    200: AuditLogListResponse;
+    200: DataResponseAuditLogList;
 };
 
 export type ListAuditLogsResponse = ListAuditLogsResponses[keyof ListAuditLogsResponses];
@@ -15225,7 +14380,7 @@ export type GetAuditLogResponses = {
     /**
      * Audit log retrieved successfully
      */
-    200: AuditLogResponse;
+    200: DataResponseAuditLog;
 };
 
 export type GetAuditLogResponse = GetAuditLogResponses[keyof GetAuditLogResponses];
@@ -15261,7 +14416,7 @@ export type GetEndpointBillingEventsResponses = {
     /**
      * Billing events retrieved successfully
      */
-    200: EndpointBillingEventsResponse;
+    200: DataResponseEndpointBillingEvents;
 };
 
 export type GetEndpointBillingEventsResponse = GetEndpointBillingEventsResponses[keyof GetEndpointBillingEventsResponses];
@@ -15306,7 +14461,7 @@ export type GetOrganizationConsumptionResponses = {
     /**
      * Organization consumption retrieved
      */
-    200: OrganizationConsumptionResponse;
+    200: DataResponseOrganizationConsumption;
 };
 
 export type GetOrganizationConsumptionResponse = GetOrganizationConsumptionResponses[keyof GetOrganizationConsumptionResponses];
@@ -15338,7 +14493,7 @@ export type ListInvitesResponses = {
     /**
      * Organization invites retrieved
      */
-    200: OrganizationInvitesResponse;
+    200: DataResponseVecOrganizationInvite;
 };
 
 export type ListInvitesResponse = ListInvitesResponses[keyof ListInvitesResponses];
@@ -15374,7 +14529,7 @@ export type CreateInviteResponses = {
     /**
      * Invite created and email sent
      */
-    201: OrganizationInviteResponse;
+    201: DataResponseOrganizationInvite;
 };
 
 export type CreateInviteResponse = CreateInviteResponses[keyof CreateInviteResponses];
@@ -15406,7 +14561,7 @@ export type ListMembersResponses = {
     /**
      * Organization members retrieved
      */
-    200: OrganizationMembersResponse;
+    200: DataResponseVecOrganizationMemberWithUser;
 };
 
 export type ListMembersResponse = ListMembersResponses[keyof ListMembersResponses];
@@ -15768,7 +14923,7 @@ export type GetOrganizationPlanResponses = {
     /**
      * Organization plan retrieved successfully
      */
-    200: OrganizationPlanResponse;
+    200: DataResponseOrganizationPlanWithDetails;
 };
 
 export type GetOrganizationPlanResponse = GetOrganizationPlanResponses[keyof GetOrganizationPlanResponses];
@@ -15804,7 +14959,7 @@ export type ChangeOrganizationPlanResponses = {
     /**
      * Plan changed successfully
      */
-    200: OrganizationPlanResponse;
+    200: DataResponseOrganizationPlanWithDetails;
 };
 
 export type ChangeOrganizationPlanResponse = ChangeOrganizationPlanResponses[keyof ChangeOrganizationPlanResponses];
@@ -15836,7 +14991,7 @@ export type ListOrgPublishersResponses = {
     /**
      * Publishers retrieved successfully
      */
-    200: PublishersDataResponse;
+    200: DataResponseVecPublisherResponse;
 };
 
 export type ListOrgPublishersResponse = ListOrgPublishersResponses[keyof ListOrgPublishersResponses];
@@ -15876,7 +15031,7 @@ export type CreatePublisherResponses = {
     /**
      * Publisher created successfully
      */
-    201: PublisherDataResponse;
+    201: DataResponsePublisherResponse;
 };
 
 export type CreatePublisherResponse = CreatePublisherResponses[keyof CreatePublisherResponses];
@@ -15954,7 +15109,7 @@ export type GetOrgPublisherResponses = {
     /**
      * Publisher retrieved successfully
      */
-    200: PublisherDataResponse;
+    200: DataResponsePublisherResponse;
 };
 
 export type GetOrgPublisherResponse = GetOrgPublisherResponses[keyof GetOrgPublisherResponses];
@@ -15998,7 +15153,7 @@ export type UpdatePublisherResponses = {
     /**
      * Publisher updated successfully
      */
-    200: PublisherDataResponse;
+    200: DataResponsePublisherResponse;
 };
 
 export type UpdatePublisherResponse = UpdatePublisherResponses[keyof UpdatePublisherResponses];
@@ -16161,7 +15316,7 @@ export type GetOrgPublisherEarningsResponses = {
     /**
      * Earnings retrieved successfully
      */
-    200: PublisherEarningsDataResponse;
+    200: DataResponseVecPublisherEarningsResponse;
 };
 
 export type GetOrgPublisherEarningsResponse = GetOrgPublisherEarningsResponses[keyof GetOrgPublisherEarningsResponses];
@@ -16205,7 +15360,7 @@ export type UploadPublisherLogoResponses = {
     /**
      * Logo uploaded successfully
      */
-    200: LogoUploadDataResponse;
+    200: DataResponseLogoUploadResponse;
 };
 
 export type UploadPublisherLogoResponse = UploadPublisherLogoResponses[keyof UploadPublisherLogoResponses];
@@ -16254,7 +15409,7 @@ export type ListOrgPublisherPayoutsResponses = {
     /**
      * Payouts retrieved successfully
      */
-    200: PublisherPayoutsDataResponse;
+    200: DataResponseVecPublisherPayoutResponse;
 };
 
 export type ListOrgPublisherPayoutsResponse = ListOrgPublisherPayoutsResponses[keyof ListOrgPublisherPayoutsResponses];
@@ -16298,7 +15453,7 @@ export type CreateOrgPublisherPayoutResponses = {
     /**
      * Payout request created
      */
-    201: PublisherPayoutDataResponse;
+    201: DataResponsePublisherPayoutResponse;
 };
 
 export type CreateOrgPublisherPayoutResponse = CreateOrgPublisherPayoutResponses[keyof CreateOrgPublisherPayoutResponses];
@@ -16342,7 +15497,7 @@ export type UpdatePublisherPricingResponses = {
     /**
      * Pricing updated successfully
      */
-    200: PricingConfigDataResponse;
+    200: DataResponsePricingConfigResponse;
 };
 
 export type UpdatePublisherPricingResponse = UpdatePublisherPricingResponses[keyof UpdatePublisherPricingResponses];
@@ -16374,7 +15529,7 @@ export type GetQuotaUsageResponses = {
     /**
      * Quota usage retrieved successfully
      */
-    200: QuotaUsageResponse;
+    200: DataResponseQuotaUsage;
 };
 
 export type GetQuotaUsageResponse = GetQuotaUsageResponses[keyof GetQuotaUsageResponses];
@@ -16406,7 +15561,7 @@ export type ListOrganizationRolesResponses = {
     /**
      * Roles retrieved successfully
      */
-    200: RbacRolesResponse;
+    200: DataResponseVecRbacRole;
 };
 
 export type ListOrganizationRolesResponse = ListOrganizationRolesResponses[keyof ListOrganizationRolesResponses];
@@ -16442,7 +15597,7 @@ export type CreateOrganizationRoleResponses = {
     /**
      * Role created successfully
      */
-    201: RbacRoleResponse;
+    201: DataResponseRbacRole;
 };
 
 export type CreateOrganizationRoleResponse = CreateOrganizationRoleResponses[keyof CreateOrganizationRoleResponses];
@@ -16526,7 +15681,7 @@ export type GetRoleResponses = {
     /**
      * Role retrieved successfully
      */
-    200: RbacRoleResponse;
+    200: DataResponseRbacRole;
 };
 
 export type GetRoleResponse = GetRoleResponses[keyof GetRoleResponses];
@@ -16570,7 +15725,7 @@ export type UpdateRoleResponses = {
     /**
      * Role updated successfully
      */
-    200: RbacRoleResponse;
+    200: DataResponseRbacRole;
 };
 
 export type UpdateRoleResponse = UpdateRoleResponses[keyof UpdateRoleResponses];
@@ -16614,7 +15769,7 @@ export type GetPublisherTemplateAnalyticsResponses = {
     /**
      * Analytics retrieved successfully
      */
-    200: PublisherAnalyticsDataResponse;
+    200: DataResponsePublisherAnalytics;
 };
 
 export type GetPublisherTemplateAnalyticsResponse = GetPublisherTemplateAnalyticsResponses[keyof GetPublisherTemplateAnalyticsResponses];
@@ -16679,7 +15834,7 @@ export type CreateOrgVpcEndpointResponses = {
     /**
      * VPC endpoint recorded
      */
-    201: OrganizationVpcEndpointResponse;
+    201: DataResponseOrganizationVpcEndpoint;
 };
 
 export type CreateOrgVpcEndpointResponse = CreateOrgVpcEndpointResponses[keyof CreateOrgVpcEndpointResponses];
@@ -16751,7 +15906,7 @@ export type GetOrgVpcEndpointResponses = {
     /**
      * VPC endpoint details
      */
-    200: OrganizationVpcEndpointResponse;
+    200: DataResponseOrganizationVpcEndpoint;
 };
 
 export type GetOrgVpcEndpointResponse = GetOrgVpcEndpointResponses[keyof GetOrgVpcEndpointResponses];
@@ -16867,7 +16022,7 @@ export type GetOrgVpcEndpointByRegionResponses = {
     /**
      * VPC endpoint details
      */
-    200: OrganizationVpcEndpointResponse;
+    200: DataResponseOrganizationVpcEndpoint;
 };
 
 export type GetOrgVpcEndpointByRegionResponse = GetOrgVpcEndpointByRegionResponses[keyof GetOrgVpcEndpointByRegionResponses];
@@ -16931,7 +16086,7 @@ export type ListWebhooksResponses = {
     /**
      * Webhooks retrieved successfully
      */
-    200: WebhooksResponse;
+    200: DataResponseVecWebhookInfo;
 };
 
 export type ListWebhooksResponse = ListWebhooksResponses[keyof ListWebhooksResponses];
@@ -16967,7 +16122,7 @@ export type CreateWebhookResponses = {
     /**
      * Webhook created successfully
      */
-    201: WebhookCreatedResponse;
+    201: DataResponseWebhookCreated;
 };
 
 export type CreateWebhookResponse = CreateWebhookResponses[keyof CreateWebhookResponses];
@@ -17047,7 +16202,7 @@ export type GetWebhookResponses = {
     /**
      * Webhook retrieved successfully
      */
-    200: WebhookInfoResponse;
+    200: DataResponseWebhookInfo;
 };
 
 export type GetWebhookResponse = GetWebhookResponses[keyof GetWebhookResponses];
@@ -17091,7 +16246,7 @@ export type UpdateWebhookResponses = {
     /**
      * Webhook updated successfully
      */
-    200: WebhookInfoResponse;
+    200: DataResponseWebhookInfo;
 };
 
 export type UpdateWebhookResponse = UpdateWebhookResponses[keyof UpdateWebhookResponses];
@@ -17171,7 +16326,7 @@ export type RotateWebhookSecretResponses = {
     /**
      * Secret rotated successfully
      */
-    200: WebhookCreatedResponse;
+    200: DataResponseWebhookCreated;
 };
 
 export type RotateWebhookSecretResponse = RotateWebhookSecretResponses[keyof RotateWebhookSecretResponses];
@@ -17240,7 +16395,7 @@ export type ListPlansResponses = {
     /**
      * Plans retrieved successfully
      */
-    200: PlansResponse;
+    200: DataResponseVecPlan;
 };
 
 export type ListPlansResponse = ListPlansResponses[keyof ListPlansResponses];
@@ -17272,7 +16427,7 @@ export type GetPlanResponses = {
     /**
      * Plan retrieved successfully
      */
-    200: PlanResponse;
+    200: DataResponsePlan;
 };
 
 export type GetPlanResponse = GetPlanResponses[keyof GetPlanResponses];
@@ -17308,7 +16463,7 @@ export type ListProjectsResponses = {
     /**
      * List of projects
      */
-    200: PaginatedProjectResponse;
+    200: PaginatedResponseProject;
 };
 
 export type ListProjectsResponse = ListProjectsResponses[keyof ListProjectsResponses];
@@ -17331,7 +16486,7 @@ export type CreateProjectResponses = {
     /**
      * Project created successfully
      */
-    201: ProjectCreatedResponse;
+    201: DataResponseProjectCreated;
 };
 
 export type CreateProjectResponse = CreateProjectResponses[keyof CreateProjectResponses];
@@ -17397,7 +16552,7 @@ export type GetProjectResponses = {
     /**
      * Project details
      */
-    200: ProjectResponse;
+    200: DataResponseProject;
 };
 
 export type GetProjectResponse = GetProjectResponses[keyof GetProjectResponses];
@@ -17429,7 +16584,7 @@ export type UpdateProjectResponses = {
     /**
      * Project updated successfully
      */
-    200: ProjectResponse;
+    200: DataResponseProject;
 };
 
 export type UpdateProjectResponse = UpdateProjectResponses[keyof UpdateProjectResponses];
@@ -17461,7 +16616,7 @@ export type ListBranchProtectionRulesResponses = {
     /**
      * List of branch protection rules
      */
-    200: BranchProtectionsResponse;
+    200: DataResponseVecBranchProtection;
 };
 
 export type ListBranchProtectionRulesResponse = ListBranchProtectionRulesResponses[keyof ListBranchProtectionRulesResponses];
@@ -17493,7 +16648,7 @@ export type ListBranchesResponses = {
     /**
      * List of branches
      */
-    200: BranchesResponse;
+    200: DataResponseVecBranch;
 };
 
 export type ListBranchesResponse = ListBranchesResponses[keyof ListBranchesResponses];
@@ -17525,7 +16680,7 @@ export type CreateBranchResponses = {
     /**
      * Branch created successfully
      */
-    201: BranchCreationResultResponse;
+    201: DataResponseBranchCreationResult;
 };
 
 export type CreateBranchResponse = CreateBranchResponses[keyof CreateBranchResponses];
@@ -17629,7 +16784,7 @@ export type GetBranchResponses = {
     /**
      * Branch details
      */
-    200: BranchResponse;
+    200: DataResponseBranch;
 };
 
 export type GetBranchResponse = GetBranchResponses[keyof GetBranchResponses];
@@ -17665,7 +16820,7 @@ export type RenameBranchResponses = {
     /**
      * Branch renamed successfully
      */
-    200: BranchResponse;
+    200: DataResponseBranch;
 };
 
 export type RenameBranchResponse = RenameBranchResponses[keyof RenameBranchResponses];
@@ -17748,7 +16903,7 @@ export type GetConnectionStringResponses = {
     /**
      * Connection string retrieved
      */
-    200: ConnectionStringResponse;
+    200: DataResponseConnectionString;
 };
 
 export type GetConnectionStringResponse = GetConnectionStringResponses[keyof GetConnectionStringResponses];
@@ -17784,7 +16939,7 @@ export type ListDatabasesResponses = {
     /**
      * List of databases
      */
-    200: DatabasesWithOwnerResponse;
+    200: DataResponseVecDatabaseWithOwner;
 };
 
 export type ListDatabasesResponse = ListDatabasesResponses[keyof ListDatabasesResponses];
@@ -17824,7 +16979,7 @@ export type CreateDatabaseResponses = {
     /**
      * Database created successfully
      */
-    201: DatabaseCreatedResponse;
+    201: DataResponseDatabaseCreated;
 };
 
 export type CreateDatabaseResponse = CreateDatabaseResponses[keyof CreateDatabaseResponses];
@@ -17902,7 +17057,7 @@ export type GetDatabaseResponses = {
     /**
      * Database details
      */
-    200: DatabaseWithOwnerResponse;
+    200: DataResponseDatabaseWithOwner;
 };
 
 export type GetDatabaseResponse = GetDatabaseResponses[keyof GetDatabaseResponses];
@@ -17942,7 +17097,7 @@ export type UpdateDatabaseResponses = {
     /**
      * Database updated successfully
      */
-    200: DatabaseWithOwnerResponse;
+    200: DataResponseDatabaseWithOwner;
 };
 
 export type UpdateDatabaseResponse = UpdateDatabaseResponses[keyof UpdateDatabaseResponses];
@@ -18020,7 +17175,7 @@ export type GetDatabaseByNameResponses = {
     /**
      * Database details
      */
-    200: DatabaseWithOwnerResponse;
+    200: DataResponseDatabaseWithOwner;
 };
 
 export type GetDatabaseByNameResponse = GetDatabaseByNameResponses[keyof GetDatabaseByNameResponses];
@@ -18060,7 +17215,7 @@ export type UpdateDatabaseByNameResponses = {
     /**
      * Database updated successfully
      */
-    200: DatabaseWithOwnerResponse;
+    200: DataResponseDatabaseWithOwner;
 };
 
 export type UpdateDatabaseByNameResponse = UpdateDatabaseByNameResponses[keyof UpdateDatabaseByNameResponses];
@@ -18096,7 +17251,7 @@ export type GetBranchDetailsResponses = {
     /**
      * Branch details retrieved successfully
      */
-    200: BranchDetailResponse;
+    200: DataResponseBranchDetail;
 };
 
 export type GetBranchDetailsResponse = GetBranchDetailsResponses[keyof GetBranchDetailsResponses];
@@ -18128,7 +17283,7 @@ export type ListEndpointsResponses = {
     /**
      * List of endpoints
      */
-    200: EndpointsResponse;
+    200: DataResponseVecEndpoint;
 };
 
 export type ListEndpointsResponse = ListEndpointsResponses[keyof ListEndpointsResponses];
@@ -18164,7 +17319,7 @@ export type CreateEndpointResponses = {
     /**
      * Endpoint created successfully
      */
-    201: EndpointCreatedResponse;
+    201: DataResponseEndpointCreated;
 };
 
 export type CreateEndpointResponse = CreateEndpointResponses[keyof CreateEndpointResponses];
@@ -18242,7 +17397,7 @@ export type UpdateEndpointResponses = {
     /**
      * Endpoint updated successfully
      */
-    200: EndpointResponse;
+    200: DataResponseEndpoint;
 };
 
 export type UpdateEndpointResponse = UpdateEndpointResponses[keyof UpdateEndpointResponses];
@@ -18286,7 +17441,7 @@ export type StartEndpointResponses = {
     /**
      * Endpoint start initiated
      */
-    200: EndpointStatusInfoResponse;
+    200: DataResponseEndpointStatusInfo;
 };
 
 export type StartEndpointResponse = StartEndpointResponses[keyof StartEndpointResponses];
@@ -18326,7 +17481,7 @@ export type GetEndpointStatusResponses = {
     /**
      * Endpoint status
      */
-    200: EndpointStatusInfoResponse;
+    200: DataResponseEndpointStatusInfo;
 };
 
 export type GetEndpointStatusResponse = GetEndpointStatusResponses[keyof GetEndpointStatusResponses];
@@ -18439,7 +17594,7 @@ export type GetLsnByTimestampResponses = {
     /**
      * LSN retrieved successfully
      */
-    200: LsnByTimestampResponse;
+    200: DataResponseLsnByTimestamp;
 };
 
 export type GetLsnByTimestampResponse = GetLsnByTimestampResponses[keyof GetLsnByTimestampResponses];
@@ -18511,7 +17666,7 @@ export type GetBranchProtectionResponses = {
     /**
      * Branch protection rule
      */
-    200: BranchProtectionResponse;
+    200: DataResponseBranchProtection;
 };
 
 export type GetBranchProtectionResponse = GetBranchProtectionResponses[keyof GetBranchProtectionResponses];
@@ -18547,7 +17702,7 @@ export type UpdateBranchProtectionResponses = {
     /**
      * Branch protection rule updated
      */
-    200: BranchProtectionResponse;
+    200: DataResponseBranchProtection;
 };
 
 export type UpdateBranchProtectionResponse = UpdateBranchProtectionResponses[keyof UpdateBranchProtectionResponses];
@@ -18587,7 +17742,7 @@ export type CreateBranchProtectionResponses = {
     /**
      * Branch protection rule created
      */
-    201: BranchProtectionResponse;
+    201: DataResponseBranchProtection;
 };
 
 export type CreateBranchProtectionResponse = CreateBranchProtectionResponses[keyof CreateBranchProtectionResponses];
@@ -18627,7 +17782,7 @@ export type ListPublicationsResponses = {
     /**
      * Publications retrieved
      */
-    200: PublicationsResponse;
+    200: DataResponseVecPublicationInfo;
 };
 
 export type ListPublicationsResponse = ListPublicationsResponses[keyof ListPublicationsResponses];
@@ -18671,7 +17826,7 @@ export type CreatePublicationResponses = {
     /**
      * Publication created
      */
-    201: PublicationInfoResponse;
+    201: DataResponsePublicationInfo;
 };
 
 export type CreatePublicationResponse = CreatePublicationResponses[keyof CreatePublicationResponses];
@@ -18759,7 +17914,7 @@ export type UpdatePublicationResponses = {
     /**
      * Publication updated
      */
-    200: PublicationInfoResponse;
+    200: DataResponsePublicationInfo;
 };
 
 export type UpdatePublicationResponse = UpdatePublicationResponses[keyof UpdatePublicationResponses];
@@ -18799,7 +17954,7 @@ export type ListReplicationSlotsResponses = {
     /**
      * Replication slots retrieved
      */
-    200: ReplicationSlotsResponse;
+    200: DataResponseVecReplicationSlotInfo;
 };
 
 export type ListReplicationSlotsResponse = ListReplicationSlotsResponses[keyof ListReplicationSlotsResponses];
@@ -18843,7 +17998,7 @@ export type CreateReplicationSlotResponses = {
     /**
      * Replication slot created
      */
-    201: ReplicationSlotInfoResponse;
+    201: DataResponseReplicationSlotInfo;
 };
 
 export type CreateReplicationSlotResponse = CreateReplicationSlotResponses[keyof CreateReplicationSlotResponses];
@@ -18927,7 +18082,7 @@ export type ResetBranchResponses = {
     /**
      * Branch reset successfully
      */
-    200: BranchResponse;
+    200: DataResponseBranch;
 };
 
 export type ResetBranchResponse = ResetBranchResponses[keyof ResetBranchResponses];
@@ -18967,7 +18122,7 @@ export type RestoreBranchResponses = {
     /**
      * Branch restored successfully
      */
-    200: BranchRestoredResponse;
+    200: DataResponseBranchRestored;
 };
 
 export type RestoreBranchResponse = RestoreBranchResponses[keyof RestoreBranchResponses];
@@ -19003,7 +18158,7 @@ export type ListBranchRolesResponses = {
     /**
      * List of roles
      */
-    200: RoleInfosResponse;
+    200: DataResponseVecRoleInfo;
 };
 
 export type ListBranchRolesResponse = ListBranchRolesResponses[keyof ListBranchRolesResponses];
@@ -19043,7 +18198,7 @@ export type CreateBranchRoleResponses = {
     /**
      * Role created successfully
      */
-    201: RoleCreatedResponse;
+    201: DataResponseRoleCreated;
 };
 
 export type CreateBranchRoleResponse = CreateBranchRoleResponses[keyof CreateBranchRoleResponses];
@@ -19125,7 +18280,7 @@ export type ResetRolePasswordResponses = {
     /**
      * Password reset successfully
      */
-    200: RolePasswordResetResponse;
+    200: DataResponseRolePasswordReset;
 };
 
 export type ResetRolePasswordResponse = ResetRolePasswordResponses[keyof ResetRolePasswordResponses];
@@ -19207,7 +18362,7 @@ export type GetRoleByNameResponses = {
     /**
      * Role details
      */
-    200: RoleInfoResponse;
+    200: DataResponseRoleInfo;
 };
 
 export type GetRoleByNameResponse = GetRoleByNameResponses[keyof GetRoleByNameResponses];
@@ -19247,7 +18402,7 @@ export type ResetRolePasswordByNameResponses = {
     /**
      * Password reset successfully
      */
-    200: RolePasswordResetResponse;
+    200: DataResponseRolePasswordReset;
 };
 
 export type ResetRolePasswordByNameResponse = ResetRolePasswordByNameResponses[keyof ResetRolePasswordByNameResponses];
@@ -19287,7 +18442,7 @@ export type RevealRolePasswordResponses = {
     /**
      * Role password revealed
      */
-    200: RolePasswordResetResponse;
+    200: DataResponseRolePasswordReset;
 };
 
 export type RevealRolePasswordResponse = RevealRolePasswordResponses[keyof RevealRolePasswordResponses];
@@ -19396,7 +18551,7 @@ export type GetTimestampByLsnResponses = {
     /**
      * Timestamp retrieved successfully
      */
-    200: TimestampByLsnResponse;
+    200: DataResponseTimestampByLsn;
 };
 
 export type GetTimestampByLsnResponse = GetTimestampByLsnResponses[keyof GetTimestampByLsnResponses];
@@ -19449,7 +18604,7 @@ export type GetProjectConnectionUriResponses = {
     /**
      * Connection URI retrieved
      */
-    200: ProjectConnectionUriDataResponse;
+    200: DataResponseProjectConnectionUri;
 };
 
 export type GetProjectConnectionUriResponse = GetProjectConnectionUriResponses[keyof GetProjectConnectionUriResponses];
@@ -19498,7 +18653,7 @@ export type GetProjectConsumptionResponses = {
     /**
      * Project consumption retrieved
      */
-    200: ProjectConsumptionResponse;
+    200: DataResponseProjectConsumption;
 };
 
 export type GetProjectConsumptionResponse = GetProjectConsumptionResponses[keyof GetProjectConsumptionResponses];
@@ -19530,7 +18685,7 @@ export type ListProjectDatabasesResponses = {
     /**
      * List of all databases in project with context
      */
-    200: DatabasesWithContextResponse;
+    200: DataResponseVecDatabaseWithContext;
 };
 
 export type ListProjectDatabasesResponse = ListProjectDatabasesResponses[keyof ListProjectDatabasesResponses];
@@ -19562,7 +18717,7 @@ export type ListProjectEndpointsResponses = {
     /**
      * List of endpoints
      */
-    200: EndpointsResponse;
+    200: DataResponseVecEndpoint;
 };
 
 export type ListProjectEndpointsResponse = ListProjectEndpointsResponses[keyof ListProjectEndpointsResponses];
@@ -19632,7 +18787,7 @@ export type UpdateProjectEndpointResponses = {
     /**
      * Endpoint updated successfully
      */
-    200: EndpointResponse;
+    200: DataResponseEndpoint;
 };
 
 export type UpdateProjectEndpointResponse = UpdateProjectEndpointResponses[keyof UpdateProjectEndpointResponses];
@@ -19668,7 +18823,7 @@ export type RestartProjectEndpointResponses = {
     /**
      * Endpoint restart initiated
      */
-    200: EndpointStatusInfoResponse;
+    200: DataResponseEndpointStatusInfo;
 };
 
 export type RestartProjectEndpointResponse = RestartProjectEndpointResponses[keyof RestartProjectEndpointResponses];
@@ -19704,7 +18859,7 @@ export type StartProjectEndpointResponses = {
     /**
      * Endpoint start initiated
      */
-    200: EndpointStatusInfoResponse;
+    200: DataResponseEndpointStatusInfo;
 };
 
 export type StartProjectEndpointResponse = StartProjectEndpointResponses[keyof StartProjectEndpointResponses];
@@ -19770,7 +18925,7 @@ export type ListIpAllowListResponses = {
     /**
      * List of IP allow list entries
      */
-    200: IpAllowListsResponse;
+    200: DataResponseVecIpAllowList;
 };
 
 export type ListIpAllowListResponse = ListIpAllowListResponses[keyof ListIpAllowListResponses];
@@ -19810,7 +18965,7 @@ export type AddIpToAllowListResponses = {
     /**
      * IP added to allow list
      */
-    201: IpAllowListResponse;
+    201: DataResponseIpAllowList;
 };
 
 export type AddIpToAllowListResponse = AddIpToAllowListResponses[keyof AddIpToAllowListResponses];
@@ -19842,7 +18997,7 @@ export type ResetIpAllowListResponses = {
     /**
      * IP allow list reset successfully
      */
-    200: IpAllowListsResponse;
+    200: DataResponseVecIpAllowList;
 };
 
 export type ResetIpAllowListResponse = ResetIpAllowListResponses[keyof ResetIpAllowListResponses];
@@ -19910,7 +19065,7 @@ export type ListOperationsResponses = {
     /**
      * List of operations
      */
-    200: OperationsResponse;
+    200: DataResponseVecOperation;
 };
 
 export type ListOperationsResponse = ListOperationsResponses[keyof ListOperationsResponses];
@@ -19946,7 +19101,7 @@ export type GetOperationResponses = {
     /**
      * Operation details
      */
-    200: OperationResponse;
+    200: DataResponseOperation;
 };
 
 export type GetOperationResponse = GetOperationResponses[keyof GetOperationResponses];
@@ -19982,7 +19137,7 @@ export type GetReplicationSettingsResponses = {
     /**
      * Replication settings retrieved
      */
-    200: LogicalReplicationSettingsResponse;
+    200: DataResponseLogicalReplicationSettings;
 };
 
 export type GetReplicationSettingsResponse = GetReplicationSettingsResponses[keyof GetReplicationSettingsResponses];
@@ -20018,7 +19173,7 @@ export type UpdateReplicationSettingsResponses = {
     /**
      * Replication settings updated
      */
-    200: LogicalReplicationSettingsResponse;
+    200: DataResponseLogicalReplicationSettings;
 };
 
 export type UpdateReplicationSettingsResponse = UpdateReplicationSettingsResponses[keyof UpdateReplicationSettingsResponses];
@@ -20050,7 +19205,7 @@ export type GetProjectSizeResponses = {
     /**
      * Storage size retrieved successfully
      */
-    200: ProjectSizeResponse;
+    200: DataResponseProjectSize;
 };
 
 export type GetProjectSizeResponse = GetProjectSizeResponses[keyof GetProjectSizeResponses];
@@ -20114,7 +19269,7 @@ export type AssignProjectVpcEndpointResponses = {
     /**
      * Project VPC endpoint assignment created
      */
-    201: ProjectVpcEndpointAssignmentResponse;
+    201: DataResponseProjectVpcEndpointAssignment;
 };
 
 export type AssignProjectVpcEndpointResponse = AssignProjectVpcEndpointResponses[keyof AssignProjectVpcEndpointResponses];
@@ -20254,7 +19409,7 @@ export type AssignProjectVpcEndpointByIdResponses = {
     /**
      * Project VPC endpoint assignment created
      */
-    201: ProjectVpcEndpointAssignmentResponse;
+    201: DataResponseProjectVpcEndpointAssignment;
 };
 
 export type AssignProjectVpcEndpointByIdResponse = AssignProjectVpcEndpointByIdResponses[keyof AssignProjectVpcEndpointByIdResponses];
@@ -20270,7 +19425,7 @@ export type ListStorePublishersData = {
         /**
          * Filter by publisher category
          */
-        category?: PublisherCategory | null;
+        category?: null | PublisherCategory;
         /**
          * Search by name or slug
          */
@@ -20302,7 +19457,7 @@ export type ListStorePublishersResponses = {
     /**
      * Publishers retrieved successfully
      */
-    200: PaginatedPublishersResponse;
+    200: PaginatedResponseVecPublisherResponse;
 };
 
 export type ListStorePublishersResponse = ListStorePublishersResponses[keyof ListStorePublishersResponses];
@@ -20344,7 +19499,7 @@ export type SuggestPublishersResponses = {
     /**
      * Publisher suggestions retrieved successfully
      */
-    200: SuggestDataResponse;
+    200: DataResponseSuggestResponse;
 };
 
 export type SuggestPublishersResponse = SuggestPublishersResponses[keyof SuggestPublishersResponses];
@@ -20376,7 +19531,7 @@ export type GetStorePublisherResponses = {
     /**
      * Publisher retrieved successfully
      */
-    200: PublisherDataResponse;
+    200: DataResponsePublisherResponse;
 };
 
 export type GetStorePublisherResponse = GetStorePublisherResponses[keyof GetStorePublisherResponses];
@@ -20410,10 +19565,16 @@ export type PublisherRootHandlerErrors = {
 
 export type PublisherRootHandlerResponses = {
     /**
-     * Request processed successfully
+     * Request processed successfully (database/API)
      */
     200: unknown;
+    /**
+     * Agent task accepted (async)
+     */
+    202: DataResponseAgentTask;
 };
+
+export type PublisherRootHandlerResponse = PublisherRootHandlerResponses[keyof PublisherRootHandlerResponses];
 
 export type EstimateQueryData = {
     body: EstimateRequestBody;
@@ -20474,7 +19635,7 @@ export type GetStorePublisherLogoResponses = {
 };
 
 export type ProxyToPublisherGetData = {
-    body: Blob | File;
+    body: unknown;
     path: {
         /**
          * Publisher slug identifier
@@ -20495,6 +19656,10 @@ export type ProxyToPublisherGetErrors = {
      */
     402: unknown;
     /**
+     * Publisher is geo-restricted and routing is not enabled
+     */
+    403: GeoRestrictedError;
+    /**
      * Publisher or endpoint not found
      */
     404: unknown;
@@ -20504,6 +19669,8 @@ export type ProxyToPublisherGetErrors = {
     500: unknown;
 };
 
+export type ProxyToPublisherGetError = ProxyToPublisherGetErrors[keyof ProxyToPublisherGetErrors];
+
 export type ProxyToPublisherGetResponses = {
     /**
      * Request proxied successfully
@@ -20512,7 +19679,7 @@ export type ProxyToPublisherGetResponses = {
 };
 
 export type ProxyToPublisherPostData = {
-    body: Blob | File;
+    body: unknown;
     path: {
         /**
          * Publisher slug identifier
@@ -20533,6 +19700,10 @@ export type ProxyToPublisherPostErrors = {
      */
     402: unknown;
     /**
+     * Publisher is geo-restricted and routing is not enabled
+     */
+    403: GeoRestrictedError;
+    /**
      * Publisher or endpoint not found
      */
     404: unknown;
@@ -20541,6 +19712,8 @@ export type ProxyToPublisherPostErrors = {
      */
     500: unknown;
 };
+
+export type ProxyToPublisherPostError = ProxyToPublisherPostErrors[keyof ProxyToPublisherPostErrors];
 
 export type ProxyToPublisherPostResponses = {
     /**
@@ -20590,7 +19763,7 @@ export type RevokeAllSessionsResponses = {
     /**
      * All sessions revoked successfully
      */
-    200: SessionsRevokedResponse;
+    200: DataResponseSessionsRevoked;
 };
 
 export type RevokeAllSessionsResponse = RevokeAllSessionsResponses[keyof RevokeAllSessionsResponses];
@@ -20622,7 +19795,7 @@ export type RevokeSessionResponses = {
     /**
      * Session revoked successfully
      */
-    200: SessionsRevokedResponse;
+    200: DataResponseSessionsRevoked;
 };
 
 export type RevokeSessionResponse = RevokeSessionResponses[keyof RevokeSessionResponses];
@@ -20654,7 +19827,7 @@ export type RevokeOtherSessionsResponses = {
     /**
      * Other sessions revoked successfully
      */
-    200: SessionsRevokedResponse;
+    200: DataResponseSessionsRevoked;
 };
 
 export type RevokeOtherSessionsResponse = RevokeOtherSessionsResponses[keyof RevokeOtherSessionsResponses];
@@ -20666,35 +19839,35 @@ export type ListTemplatesData = {
         /**
          * Filter to verified templates only
          */
-        verified_only?: boolean | null;
+        verified_only?: boolean;
         /**
-         * Filter by language (python, typescript, rust)
+         * Filter by language (python, typescript, javascript)
          */
-        language?: string | null;
+        language?: string;
         /**
          * Minimum price in atomic units
          */
-        min_price?: number | null;
+        min_price?: number;
         /**
          * Maximum price in atomic units
          */
-        max_price?: number | null;
+        max_price?: number;
         /**
          * Search in name and description
          */
-        search?: string | null;
+        search?: string;
         /**
          * Sort order (popularity, price_asc, price_desc, newest, oldest)
          */
-        sort_by?: TemplateSortBy | null;
+        sort_by?: TemplateSortBy;
         /**
          * Maximum number of templates to return (default: 50)
          */
-        limit?: number | null;
+        limit?: number;
         /**
          * Offset for pagination (default: 0)
          */
-        offset?: number | null;
+        offset?: number;
     };
     url: '/templates';
 };
@@ -20710,7 +19883,7 @@ export type ListTemplatesResponses = {
     /**
      * Templates retrieved successfully
      */
-    200: TemplateListResponse;
+    200: DataResponseVecAgentTemplateSummary;
 };
 
 export type ListTemplatesResponse = ListTemplatesResponses[keyof ListTemplatesResponses];
@@ -20745,7 +19918,7 @@ export type PublishTemplateResponses = {
     /**
      * Template published successfully
      */
-    201: TemplateDataResponse;
+    201: DataResponseCreateTemplateResponse;
 };
 
 export type PublishTemplateResponse = PublishTemplateResponses[keyof PublishTemplateResponses];
@@ -20777,7 +19950,7 @@ export type GetTemplateResponses = {
     /**
      * Template retrieved successfully
      */
-    200: TemplateDataResponse;
+    200: DataResponseCreateTemplateResponse;
 };
 
 export type GetTemplateResponse = GetTemplateResponses[keyof GetTemplateResponses];
@@ -20825,7 +19998,7 @@ export type InvokeTemplateResponses = {
     /**
      * Template invoked successfully
      */
-    200: InvokeDataResponse;
+    200: DataResponseInvokeTemplateResponse;
 };
 
 export type InvokeTemplateResponse2 = InvokeTemplateResponses[keyof InvokeTemplateResponses];
@@ -20866,6 +20039,10 @@ export type ClaimPaymentMethodBonusErrors = {
      */
     401: unknown;
     /**
+     * Recovery setup required
+     */
+    403: unknown;
+    /**
      * Bonus already claimed
      */
     409: unknown;
@@ -20892,6 +20069,10 @@ export type ClaimSignupBonusErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * Recovery setup required
+     */
+    403: unknown;
     /**
      * Bonus already claimed
      */
@@ -20923,6 +20104,10 @@ export type ClaimDailyErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * Recovery setup required
+     */
+    403: unknown;
 };
 
 export type ClaimDailyResponses = {
@@ -20973,6 +20158,10 @@ export type CreateDepositErrors = {
      * Unauthorized
      */
     401: unknown;
+    /**
+     * Recovery setup required
+     */
+    403: unknown;
 };
 
 export type CreateDepositResponses = {
@@ -21052,7 +20241,7 @@ export type GetAgentBalanceResponses = {
     /**
      * Balance retrieved
      */
-    200: PublisherAgentBalanceDataResponse;
+    200: DataResponsePublisherAgentBalance;
 };
 
 export type GetAgentBalanceResponse = GetAgentBalanceResponses[keyof GetAgentBalanceResponses];
@@ -21175,6 +20364,11 @@ export type GetTransactionsData = {
          * Offset for pagination
          */
         offset?: number;
+        /**
+         * Include raw usage/micropayment debits (default false).
+         * When false, usage debits are aggregated by day and publisher.
+         */
+        include_usage?: boolean;
     };
     url: '/wallet/transactions';
 };
