@@ -28,6 +28,7 @@ const SKILLS_RAW_URL = `https://raw.githubusercontent.com/${SKILLS_REPO_OWNER}/$
 const INDEX_CACHE_KEY = "seren:skills_index";
 const PUBLISHER_SKILLS_CACHE_KEY = "seren:publisher_skills";
 const INDEX_CACHE_DURATION = 1000 * 60 * 5; // 5 minutes
+const MAX_STALE_CACHE_AGE = 1000 * 60 * 60; // 1 hour — don't serve cache older than this on error
 
 interface GitHubTreeNode {
   path?: string;
@@ -334,11 +335,15 @@ export const skills = {
       return skills;
     } catch (error) {
       log.error("[Skills] Error fetching index:", error);
-      // Return cached data if available, even if expired
       const cached = localStorage.getItem(INDEX_CACHE_KEY);
       if (cached) {
-        const { data } = JSON.parse(cached);
-        return (data as SkillIndexEntry[]).map(indexEntryToSkill);
+        const { timestamp, data } = JSON.parse(cached);
+        const ageMs = Date.now() - timestamp;
+        if (ageMs < MAX_STALE_CACHE_AGE) {
+          log.warn("[Skills] Serving stale index cache, age:", Math.round(ageMs / 1000), "s");
+          return (data as SkillIndexEntry[]).map(indexEntryToSkill);
+        }
+        log.error("[Skills] Stale cache too old to serve:", Math.round(ageMs / 1000), "s");
       }
       return [];
     }
@@ -383,11 +388,15 @@ export const skills = {
       return skills;
     } catch (error) {
       log.error("[Skills] Error fetching publisher skills:", error);
-      // Return cached data if available, even if expired
       const cached = localStorage.getItem(PUBLISHER_SKILLS_CACHE_KEY);
       if (cached) {
-        const { data } = JSON.parse(cached);
-        return data as Skill[];
+        const { timestamp, data } = JSON.parse(cached);
+        const ageMs = Date.now() - timestamp;
+        if (ageMs < MAX_STALE_CACHE_AGE) {
+          log.warn("[Skills] Serving stale publisher skills cache, age:", Math.round(ageMs / 1000), "s");
+          return data as Skill[];
+        }
+        log.error("[Skills] Stale publisher skills cache too old to serve:", Math.round(ageMs / 1000), "s");
       }
       return [];
     }
