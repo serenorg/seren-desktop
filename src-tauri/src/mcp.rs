@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::State;
+use tauri::{Manager, State};
 
 /// Global request ID counter for JSON-RPC
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);

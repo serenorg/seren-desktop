@@ -12,6 +12,9 @@ const TOOLSETS_SETTINGS_KEY = "toolsets";
 const BROWSER_SETTINGS_KEY = "seren_settings";
 const BROWSER_MCP_KEY = "seren_mcp_settings";
 const BROWSER_TOOLSETS_KEY = "seren_toolsets_settings";
+const PLAYWRIGHT_SERVER_NAME = "playwright";
+const PLAYWRIGHT_MCP_RELATIVE_SCRIPT =
+  "mcp-servers/playwright-stealth/dist/index.js";
 
 /**
  * Get invoke function only when in Tauri runtime.
@@ -189,20 +192,28 @@ const DEFAULT_SETTINGS: Settings = {
   telemetryEnabled: true,
 };
 
-const defaultMcpSettings: McpSettings = {
-  servers: [
-    {
-      name: "playwright",
-      type: "local",
-      enabled: true,
-      autoConnect: true,
-      command: "node",
-      args: ["mcp-servers/playwright-stealth/dist/index.js"],
-      env: {},
-    },
-  ],
-  defaultTimeout: 30000,
-};
+function buildPlaywrightServer(scriptPath: string): McpServerConfig {
+  return {
+    name: PLAYWRIGHT_SERVER_NAME,
+    type: "local",
+    enabled: true,
+    autoConnect: true,
+    command: "node",
+    args: [scriptPath],
+    env: {},
+  };
+}
+
+function buildDefaultMcpSettings(playwrightScriptPath: string): McpSettings {
+  return {
+    servers: [buildPlaywrightServer(playwrightScriptPath)],
+    defaultTimeout: 30000,
+  };
+}
+
+const defaultMcpSettings: McpSettings = buildDefaultMcpSettings(
+  PLAYWRIGHT_MCP_RELATIVE_SCRIPT,
+);
 
 const defaultToolsetSettings: ToolsetSettings = {
   toolsets: [],
@@ -352,6 +363,7 @@ export const settingsStore = {
 async function loadMcpSettings(): Promise<void> {
   try {
     const invoke = await getInvoke();
+    const playwrightScriptPath = await resolvePlaywrightMcpScriptPath();
     let stored: string | null = null;
 
     if (invoke) {
@@ -366,33 +378,68 @@ async function loadMcpSettings(): Promise<void> {
 
     if (stored) {
       const parsed = JSON.parse(stored) as McpSettings;
+      let hasChanges = false;
 
       // Migration: Add Playwright stealth server if it doesn't exist
       const hasPlaywrightServer = parsed.servers.some(
-        (server) => server.name === "playwright",
+        (server) => server.name === PLAYWRIGHT_SERVER_NAME,
       );
 
       if (!hasPlaywrightServer) {
-        parsed.servers.push({
-          name: "playwright",
-          type: "local",
-          enabled: true,
-          autoConnect: true,
-          command: "node",
-          args: ["mcp-servers/playwright-stealth/dist/index.js"],
-          env: {},
-        });
-
-        // Save the migrated settings
-        setSettingsState("mcp", parsed);
-        await saveMcpSettings();
-      } else {
-        setSettingsState("mcp", parsed);
+        parsed.servers.push(buildPlaywrightServer(playwrightScriptPath));
+        hasChanges = true;
       }
+
+      // Migration: Resolve old relative Playwright script path to absolute/resource path.
+      parsed.servers = parsed.servers.map((server) => {
+        if (
+          server.name !== PLAYWRIGHT_SERVER_NAME ||
+          server.type !== "local" ||
+          server.command !== "node" ||
+          server.args[0] !== PLAYWRIGHT_MCP_RELATIVE_SCRIPT
+        ) {
+          return server;
+        }
+
+        hasChanges = true;
+        return {
+          ...server,
+          args: [playwrightScriptPath, ...server.args.slice(1)],
+        };
+      });
+
+      setSettingsState("mcp", parsed);
+      if (hasChanges) {
+        await saveMcpSettings();
+      }
+    } else {
+      setSettingsState("mcp", buildDefaultMcpSettings(playwrightScriptPath));
     }
   } catch {
     // Use defaults if loading fails
   }
+}
+
+async function resolvePlaywrightMcpScriptPath(): Promise<string> {
+  if (!isTauriRuntime()) {
+    return PLAYWRIGHT_MCP_RELATIVE_SCRIPT;
+  }
+
+  try {
+    const invoke = await getInvoke();
+    if (!invoke) {
+      return PLAYWRIGHT_MCP_RELATIVE_SCRIPT;
+    }
+
+    const resolved = await invoke<string>("resolve_playwright_mcp_script_path");
+    if (resolved && resolved.trim().length > 0) {
+      return resolved;
+    }
+  } catch {
+    // Fall back to legacy relative path if resolution command is unavailable.
+  }
+
+  return PLAYWRIGHT_MCP_RELATIVE_SCRIPT;
 }
 
 /**

@@ -71,7 +71,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "embedded-runtime/": "embedded-runtime/"
+      "embedded-runtime/": "embedded-runtime/",
+      "../mcp-servers/playwright-stealth/": "mcp-servers/playwright-stealth/"
     },
     "macOS": {
       "entitlements": "entitlements.plist",

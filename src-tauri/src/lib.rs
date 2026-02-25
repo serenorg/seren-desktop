@@ -704,6 +704,7 @@ pub fn run() {
             mcp::mcp_read_resource,
             mcp::mcp_is_connected,
             mcp::mcp_list_connected,
+            mcp::resolve_playwright_mcp_script_path,
             // HTTP MCP commands (for mcp.serendb.com)
             mcp::mcp_connect_http,
             mcp::mcp_disconnect_http,
