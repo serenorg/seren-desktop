@@ -221,6 +221,51 @@ pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
     PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH.to_string()
 }
 
+/// Resolve a bare command name to an absolute path by searching the embedded PATH.
+///
+/// On macOS/Linux, when the app is launched from Finder or a desktop launcher,
+/// the parent process PATH is minimal (e.g. `/usr/bin:/bin`). Setting `cmd.env("PATH", ...)`
+/// only affects the child's environment after exec — the OS uses the PARENT's PATH to
+/// locate the executable for `Command::new("node")`. This function resolves bare names
+/// (like "node") against the embedded PATH so we use an absolute path for spawning.
+fn resolve_command_in_embedded_path(command: &str) -> String {
+    // Absolute paths and paths with separators are used as-is.
+    if std::path::Path::new(command).is_absolute() || command.contains(std::path::MAIN_SEPARATOR) {
+        return command.to_string();
+    }
+
+    let embedded_path = embedded_runtime::get_embedded_path();
+    if embedded_path.is_empty() {
+        return command.to_string();
+    }
+
+    #[cfg(target_os = "windows")]
+    let sep = ";";
+    #[cfg(not(target_os = "windows"))]
+    let sep = ":";
+
+    // On Windows, try bare name, then .exe and .cmd suffixes.
+    #[cfg(target_os = "windows")]
+    let names: Vec<String> = vec![
+        command.to_string(),
+        format!("{}.exe", command),
+        format!("{}.cmd", command),
+    ];
+    #[cfg(not(target_os = "windows"))]
+    let names: Vec<String> = vec![command.to_string()];
+
+    for dir in embedded_path.split(sep) {
+        for name in &names {
+            let candidate = std::path::Path::new(dir).join(name);
+            if candidate.exists() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    command.to_string()
+}
+
 /// Connect to an MCP server
 #[tauri::command]
 pub fn mcp_connect(
@@ -230,7 +275,12 @@ pub fn mcp_connect(
     args: Vec<String>,
     env: Option<HashMap<String, String>>,
 ) -> Result<McpInitializeResult, String> {
-    let mut cmd = Command::new(&command);
+    // Resolve bare command names (e.g. "node") to absolute paths using the embedded PATH.
+    // The parent process PATH may be minimal when launched from Finder/Dock on macOS,
+    // so we cannot rely on the OS to find commands that live in /opt/homebrew/bin etc.
+    let resolved_command = resolve_command_in_embedded_path(&command);
+
+    let mut cmd = Command::new(&resolved_command);
     cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
