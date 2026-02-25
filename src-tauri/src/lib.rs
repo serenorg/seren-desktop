@@ -599,7 +599,7 @@ pub fn run() {
                         log::debug!("[Deep Link] Processing URL: {}", url);
                         log::debug!("[Deep Link] - scheme: {}", url.scheme());
                         log::debug!("[Deep Link] - path: {}", url.path());
-                        if url.scheme() == "seren" && url.path() == "/oauth/callback" {
+                        if url.scheme() == "seren" && url.path() == "/callback" {
                             log::info!("[Deep Link] Match! Emitting oauth-callback event");
                             // Emit event to frontend with OAuth callback data
                             if let Err(e) = handle.emit("oauth-callback", url.to_string()) {
