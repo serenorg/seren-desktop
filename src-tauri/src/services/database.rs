@@ -4,6 +4,7 @@
 use rusqlite::{Connection, Result};
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 pub fn get_db_path(app: &AppHandle) -> PathBuf {
@@ -20,6 +21,8 @@ pub fn init_db(app: &AppHandle) -> Result<Connection> {
     }
 
     let conn = Connection::open(path)?;
+    conn.busy_timeout(Duration::from_millis(5000))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
     setup_schema(&conn)?;
     Ok(conn)
 }
