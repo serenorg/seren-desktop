@@ -41,6 +41,16 @@ const TOOL_EXECUTION_TIMEOUT_SECS: u64 = 300;
 /// via `WorkerEvent::ToolResult`.
 const MAX_TOOL_RESULT_CONTEXT_BYTES: usize = 30_000;
 
+/// Conservative byte budget for the serialized tool-definitions array sent to
+/// the Gateway.  The Gateway's body buffer is finite; sending ~100 verbose tool
+/// schemas can easily push the request body over the limit and produce an HTTP
+/// 413 "Payload Too Large" / "length limit exceeded" response.
+///
+/// 400 KB leaves ample room in the body for the system prompt, skill content,
+/// conversation history, and the user message, while fitting comfortably within
+/// a 1–2 MB Gateway body limit.
+const MAX_TOOL_DEFINITIONS_BYTES: usize = 400 * 1024;
+
 // =============================================================================
 // Types for SSE Parsing and Tool Execution
 // =============================================================================
@@ -703,6 +713,53 @@ impl ChatModelWorker {
     }
 
     // =========================================================================
+    // Tool Definition Budget
+    // =========================================================================
+
+    /// Trim the tool-definitions list so its serialized JSON size stays within
+    /// `MAX_TOOL_DEFINITIONS_BYTES`.
+    ///
+    /// Tools are kept in their original order (highest-priority first as built
+    /// by the frontend).  When the budget is exceeded the remaining tools are
+    /// silently dropped and a warning is logged.  This prevents HTTP 413
+    /// responses from the Gateway when a user has many local MCP servers or
+    /// active skills that produce large combined payloads.
+    fn budget_tool_definitions(tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+        // Fast path: check total size first to avoid per-tool allocation.
+        let total =
+            serde_json::to_string(tools).map(|s| s.len()).unwrap_or(usize::MAX);
+        if total <= MAX_TOOL_DEFINITIONS_BYTES {
+            return tools.to_vec();
+        }
+
+        let mut result: Vec<serde_json::Value> = Vec::with_capacity(tools.len());
+        // 2 bytes for the outer `[` and `]`
+        let mut running_bytes: usize = 2;
+
+        for tool in tools {
+            let serialized = serde_json::to_string(tool).unwrap_or_default();
+            // +1 for the comma separator between elements
+            let entry_bytes = serialized.len() + 1;
+            if running_bytes + entry_bytes > MAX_TOOL_DEFINITIONS_BYTES {
+                break;
+            }
+            running_bytes += entry_bytes;
+            result.push(tool.clone());
+        }
+
+        log::warn!(
+            "[ChatModelWorker] Tool definitions truncated: keeping {} of {} tools \
+             ({} bytes, budget {} bytes)",
+            result.len(),
+            tools.len(),
+            running_bytes,
+            MAX_TOOL_DEFINITIONS_BYTES,
+        );
+
+        result
+    }
+
+    // =========================================================================
     // Tool Execution
     // =========================================================================
 
@@ -966,10 +1023,15 @@ impl Worker for ChatModelWorker {
         // Reset cancellation flag
         *self.cancelled.lock().await = false;
 
+        // Apply a byte budget to the tool list before building the request body.
+        // Sending too many verbose tool schemas can push the body over the
+        // Gateway's buffer limit and produce an HTTP 413 response.
+        let budgeted_tools = Self::budget_tool_definitions(&self.tool_definitions);
+
         log::info!(
             "[ChatModelWorker] Executing with model: {}, tools: {}",
             routing.model_id,
-            self.tool_definitions.len()
+            budgeted_tools.len()
         );
         log::debug!(
             "[ChatModelWorker] Prompt preview: {}",
@@ -980,7 +1042,7 @@ impl Worker for ChatModelWorker {
             "{}/publishers/{}/chat/completions",
             GATEWAY_BASE_URL, PUBLISHER_SLUG
         );
-        let tools = &self.tool_definitions;
+        let tools = &budgeted_tools;
 
         // Build initial request body (includes system prompt, history, user message, images)
         let initial_body = self.build_request_body(
