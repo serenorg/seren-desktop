@@ -221,6 +221,48 @@ pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
     PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH.to_string()
 }
 
+/// Resolve a bare command name against the embedded PATH.
+/// If `command` contains a path separator it is returned as-is (already absolute/relative).
+/// Otherwise each directory in `EMBEDDED_PATH` is searched for the binary.
+/// Returns the absolute path if found, or the original command string if not.
+fn resolve_command_in_embedded_path(command: &str) -> String {
+    if command.contains('/') || command.contains('\\') {
+        return command.to_string();
+    }
+
+    let embedded_path = embedded_runtime::get_embedded_path();
+    if embedded_path.is_empty() {
+        return command.to_string();
+    }
+
+    #[cfg(target_os = "windows")]
+    let separator = ';';
+    #[cfg(not(target_os = "windows"))]
+    let separator = ':';
+
+    for dir in embedded_path.split(separator) {
+        if dir.is_empty() {
+            continue;
+        }
+        let candidate = std::path::Path::new(dir).join(command);
+        if candidate.is_file() {
+            return candidate.to_string_lossy().to_string();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            for ext in &[".exe", ".cmd"] {
+                let candidate_ext =
+                    std::path::Path::new(dir).join(format!("{}{}", command, ext));
+                if candidate_ext.is_file() {
+                    return candidate_ext.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+
+    command.to_string()
+}
+
 /// Connect to an MCP server
 #[tauri::command]
 pub fn mcp_connect(
@@ -230,7 +272,12 @@ pub fn mcp_connect(
     args: Vec<String>,
     env: Option<HashMap<String, String>>,
 ) -> Result<McpInitializeResult, String> {
-    let mut cmd = Command::new(&command);
+    // Resolve bare command names (e.g. "node") using the embedded PATH before spawning.
+    // Command::new() resolves bare names via the *parent* process PATH, which is minimal
+    // on macOS GUI launches (Finder/Dock). Searching EMBEDDED_PATH first lets us pass an
+    // absolute path to Command::new(), bypassing that parent-PATH limitation.
+    let resolved_command = resolve_command_in_embedded_path(&command);
+    let mut cmd = Command::new(&resolved_command);
     cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
