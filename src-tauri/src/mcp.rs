@@ -5,6 +5,7 @@ use crate::embedded_runtime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -136,10 +137,14 @@ fn send_request<T: Serialize>(
 
     // Read response
     let mut response_line = String::new();
-    process
+    let bytes_read = process
         .stdout
         .read_line(&mut response_line)
         .map_err(|e| e.to_string())?;
+
+    if bytes_read == 0 {
+        return Err("MCP process closed unexpectedly".to_string());
+    }
 
     let response: JsonRpcResponse = serde_json::from_str(&response_line)
         .map_err(|e| format!("Failed to parse response: {}", e))?;
@@ -169,6 +174,51 @@ struct ClientCapabilities {}
 struct ClientInfo {
     name: &'static str,
     version: &'static str,
+}
+
+const PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH: &str = "mcp-servers/playwright-stealth/dist/index.js";
+
+/// Resolve the bundled/dev Playwright MCP server script to an absolute path.
+#[tauri::command]
+pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join(PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH));
+        candidates.push(
+            resource_dir
+                .join("embedded-runtime")
+                .join(PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH),
+        );
+    }
+
+    // Development fallback: workspace root is one level above src-tauri.
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    candidates.push(workspace_root.join(PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH));
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH));
+    }
+
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        candidates.push(exe_dir.join(PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH));
+        candidates.push(
+            exe_dir
+                .join("../Resources")
+                .join(PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH),
+        );
+    }
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate.to_string_lossy().to_string();
+        }
+    }
+
+    // Last-resort fallback keeps backwards compatibility with existing settings.
+    PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH.to_string()
 }
 
 /// Connect to an MCP server
