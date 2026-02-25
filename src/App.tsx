@@ -83,7 +83,16 @@ function App() {
     await threadStore.refresh();
   });
 
+  // Periodically refresh available skills so newly published skills appear without restart.
+  // Base interval: 10 min + up to 2 min jitter to avoid thundering herd across instances.
+  const SKILLS_REFRESH_BASE = 10 * 60 * 1000;
+  const skillsRefreshTimer = setInterval(
+    () => void skillsStore.refresh(),
+    SKILLS_REFRESH_BASE + Math.random() * 2 * 60 * 1000,
+  );
+
   onCleanup(() => {
+    clearInterval(skillsRefreshTimer);
     shortcuts.destroy();
     stopOpenClawAgent();
     openclawStore.destroy();
