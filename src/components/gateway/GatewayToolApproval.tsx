@@ -9,6 +9,8 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { conversationStore } from "@/stores/conversation.store";
+import type { UnifiedMessage } from "@/types/conversation";
 
 interface ApprovalRequest {
   approvalId: string;
@@ -19,9 +21,55 @@ interface ApprovalRequest {
   isDestructive: boolean;
 }
 
+interface Provenance {
+  userMessage: string | null;
+  precedingTool: string | null;
+  isFromExternalContent: boolean;
+}
+
+const EXTERNAL_TOOL_INDICATORS = [
+  "web_fetch",
+  "fetch_url",
+  "scrape",
+  "browse",
+  "crawl",
+  "search",
+];
+
+function deriveProvenance(messages: UnifiedMessage[]): Provenance {
+  // Snapshot the last user message as the trigger context
+  let userMessage: string | null = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].type === "user" && messages[i].role === "user") {
+      userMessage = messages[i].content;
+      break;
+    }
+  }
+
+  // Look at the last 10 messages for the most recent tool_call — its name
+  // tells us whether external content fed into this approval.
+  const recent = messages.slice(-10);
+  let precedingTool: string | null = null;
+  let isFromExternalContent = false;
+
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const msg = recent[i];
+    if (msg.type === "tool_call" && msg.toolCall?.name) {
+      precedingTool = msg.toolCall.name;
+      isFromExternalContent = EXTERNAL_TOOL_INDICATORS.some((indicator) =>
+        precedingTool?.toLowerCase().includes(indicator),
+      );
+      break;
+    }
+  }
+
+  return { userMessage, precedingTool, isFromExternalContent };
+}
+
 export const GatewayToolApproval: Component = () => {
   const [request, setRequest] = createSignal<ApprovalRequest | null>(null);
   const [isProcessing, setIsProcessing] = createSignal(false);
+  const [provenance, setProvenance] = createSignal<Provenance | null>(null);
 
   onMount(async () => {
     const unlisten = await listen<ApprovalRequest>(
@@ -31,6 +79,8 @@ export const GatewayToolApproval: Component = () => {
           "[GatewayToolApproval] Received approval request:",
           event.payload,
         );
+        // Snapshot provenance at the moment the request arrives
+        setProvenance(deriveProvenance(conversationStore.messages));
         setRequest(event.payload);
         setIsProcessing(false);
       },
@@ -54,6 +104,7 @@ export const GatewayToolApproval: Component = () => {
         approved: true,
       });
       setRequest(null);
+      setProvenance(null);
     } catch (err) {
       console.error("[GatewayToolApproval] Failed to emit approval:", err);
       setIsProcessing(false);
@@ -73,6 +124,7 @@ export const GatewayToolApproval: Component = () => {
         approved: false,
       });
       setRequest(null);
+      setProvenance(null);
     } catch (err) {
       console.error("[GatewayToolApproval] Failed to emit denial:", err);
       setIsProcessing(false);
@@ -147,8 +199,38 @@ export const GatewayToolApproval: Component = () => {
                 </span>
               </div>
 
+              <Show when={provenance()?.userMessage}>
+                <div class="flex flex-col gap-1.5 mb-4">
+                  <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                    Triggered by:
+                  </span>
+                  <span class="text-[0.85rem] text-muted-foreground bg-surface-1 px-3 py-2 rounded-md border border-border italic leading-relaxed">
+                    "
+                    {provenance()?.userMessage?.length > 120
+                      ? `${provenance()?.userMessage?.slice(0, 120)}…`
+                      : provenance()?.userMessage}
+                    "
+                  </span>
+                </div>
+              </Show>
+
+              <Show when={provenance()?.isFromExternalContent}>
+                <div class="mt-2 mb-4 px-4 py-3 bg-[hsl(38,92%,50%)]/10 border border-[hsl(38,92%,50%)]/30 rounded-lg text-[hsl(38,92%,50%)] text-[0.9rem]">
+                  <strong>Heads up:</strong> This tool call was triggered after
+                  the agent read external content
+                  <Show when={provenance()?.precedingTool}>
+                    {" "}
+                    via{" "}
+                    <code class="font-[var(--font-mono)] text-[0.85em]">
+                      {provenance()?.precedingTool}
+                    </code>
+                  </Show>
+                  . Verify this matches your intent.
+                </div>
+              </Show>
+
               <Show when={req().isDestructive}>
-                <div class="mt-4 px-4 py-3 bg-destructive/10 border border-destructive/30 rounded-lg text-destructive text-[0.9rem]">
+                <div class="mt-2 px-4 py-3 bg-destructive/10 border border-destructive/30 rounded-lg text-destructive text-[0.9rem]">
                   <strong>Warning:</strong> This operation cannot be undone.
                 </div>
               </Show>
