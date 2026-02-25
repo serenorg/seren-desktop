@@ -538,7 +538,7 @@ export const acpStore = {
     try {
       const [page, localRows] = await Promise.all([
         acpService.listRemoteSessions(resolvedAgentType, cwd),
-        getAgentConversations(200, cwd),
+        getAgentConversations(200),
       ]);
 
       setState("recentAgentConversations", localRows);
