@@ -376,7 +376,8 @@ async fn execute_single_task(
         // For 408 timeouts: Opus → Sonnet → Haiku, then retry same model once before giving up.
         if user_explicitly_selected {
             // Check if this is a 408 timeout error that's eligible for model fallback
-            let is_timeout_error = error_msg.contains("408") || error_msg.contains("Request Timeout");
+            let is_timeout_error =
+                error_msg.contains("408") || error_msg.contains("Request Timeout");
 
             // Try cascading to a faster model on timeout (Opus→Sonnet→Haiku)
             if is_timeout_error {

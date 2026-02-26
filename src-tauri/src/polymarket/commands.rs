@@ -281,7 +281,9 @@ pub async fn subscribe_polymarket_market(
 
     match &*state {
         Some(ws) => {
-            let channel = Channel::Market { market_id: market_id.clone() };
+            let channel = Channel::Market {
+                market_id: market_id.clone(),
+            };
             match ws.subscribe(channel).await {
                 Ok(()) => Ok(format!("Subscribed to market {}", market_id)),
                 Err(e) => Err(format!("Subscription failed: {}", e)),

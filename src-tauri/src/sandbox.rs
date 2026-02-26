@@ -80,10 +80,7 @@ impl SandboxConfig {
 
         // WorkspaceWrite allows network — blocking it prevents git, npm,
         // pip, cargo, and other essential developer tools from working.
-        let network_allowed = matches!(
-            mode,
-            SandboxMode::WorkspaceWrite | SandboxMode::FullAccess
-        );
+        let network_allowed = matches!(mode, SandboxMode::WorkspaceWrite | SandboxMode::FullAccess);
 
         // Allow gpg-agent Unix socket connections for commit signing
         let allowed_socket_paths = vec![home.join(".gnupg")];

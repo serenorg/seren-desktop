@@ -530,17 +530,12 @@ pub fn install_skill(
 
             // Create parent directories
             if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    format!(
-                        "Failed to create directory for {}: {}",
-                        file.path, e
-                    )
-                })?;
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create directory for {}: {}", file.path, e))?;
             }
 
-            fs::write(&target, &file.content).map_err(|e| {
-                format!("Failed to write {}: {}", file.path, e)
-            })?;
+            fs::write(&target, &file.content)
+                .map_err(|e| format!("Failed to write {}: {}", file.path, e))?;
 
             // Make scripts executable on Unix
             #[cfg(unix)]
@@ -795,7 +790,10 @@ See [section](#overview) and [email](mailto:test@example.com).
 
         let skill_md = tmp.path().join("test-skill").join("SKILL.md");
         assert!(skill_md.exists());
-        assert_eq!(fs::read_to_string(&skill_md).unwrap(), "# Test Skill\nHello");
+        assert_eq!(
+            fs::read_to_string(&skill_md).unwrap(),
+            "# Test Skill\nHello"
+        );
     }
 
     #[test]

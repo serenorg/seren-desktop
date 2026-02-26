@@ -122,7 +122,10 @@ pub async fn diagnose_shell_network() -> Result<serde_json::Value, String> {
     } else {
         run_diagnostic_command("cat /etc/resolv.conf 2>&1", 2).await
     };
-    results.insert("resolver_config".into(), diagnostic_to_json(&resolver_check));
+    results.insert(
+        "resolver_config".into(),
+        diagnostic_to_json(&resolver_check),
+    );
 
     // Check 5: Raw IP connectivity (bypasses DNS)
     let ip_check = run_diagnostic_command("ping -c 1 -W 3 1.1.1.1 2>&1 | tail -2", 5).await;
@@ -132,7 +135,10 @@ pub async fn diagnose_shell_network() -> Result<serde_json::Value, String> {
     let dns_ok = dns_check.exit_code == Some(0);
     let http_ok = http_check.exit_code == Some(0);
     let ip_ok = ip_check.exit_code == Some(0);
-    results.insert("overall_pass".into(), serde_json::Value::Bool(dns_ok && http_ok));
+    results.insert(
+        "overall_pass".into(),
+        serde_json::Value::Bool(dns_ok && http_ok),
+    );
     results.insert("dns_ok".into(), serde_json::Value::Bool(dns_ok));
     results.insert("http_ok".into(), serde_json::Value::Bool(http_ok));
     results.insert("ip_ok".into(), serde_json::Value::Bool(ip_ok));

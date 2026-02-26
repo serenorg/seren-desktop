@@ -27,6 +27,25 @@ const DOWNLOAD_QUIPS = [
   "99% done...",
 ];
 
+const DISCORD_AUTOPROMPT =
+  "Set up and start OpenClaw Discord in chat-only mode. If Discord is not connected, guide me through connecting it first, then confirm readiness for support-intake to send Discord chat/ticket.";
+
+function startDiscordFlow() {
+  window.dispatchEvent(new CustomEvent("seren:open-panel", { detail: "chat" }));
+  setTimeout(() => {
+    window.dispatchEvent(
+      new CustomEvent("seren:set-chat-input", {
+        detail: {
+          text: DISCORD_AUTOPROMPT,
+          autoSend: true,
+          skipAuthGate: true,
+          command: "discord",
+        },
+      }),
+    );
+  }, 0);
+}
+
 function quipForPercent(percent: number): string {
   const index = Math.floor((percent / 100) * (DOWNLOAD_QUIPS.length - 1));
   return DOWNLOAD_QUIPS[Math.min(index, DOWNLOAD_QUIPS.length - 1)];
@@ -52,6 +71,10 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
     if (selected && typeof selected === "string") {
       setRootPath(selected);
     }
+  };
+
+  const handleSupportClick = () => {
+    startDiscordFlow();
   };
 
   return (
@@ -177,6 +200,31 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         <Show when={authStore.isAuthenticated}>
           <BalanceDisplay />
         </Show>
+
+        <button
+          type="button"
+          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
+          onClick={handleSupportClick}
+          title="Support"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            role="img"
+            aria-label="Support"
+          >
+            <path d="M4 14a8 8 0 1 1 16 0" />
+            <path d="M18 14v4a2 2 0 0 1-2 2h-1v-6h3z" />
+            <path d="M6 14v6H5a2 2 0 0 1-2-2v-4h3z" />
+            <path d="M9 20h6" />
+          </svg>
+        </button>
 
         <button
           type="button"

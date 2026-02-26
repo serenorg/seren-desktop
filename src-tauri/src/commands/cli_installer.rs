@@ -44,13 +44,20 @@ pub async fn install_cli_tool(app: AppHandle, tool: CliTool) -> Result<bool, Str
         CliTool::Codex => get_codex_install_script(),
     };
 
-    log::info!("[CliInstaller] Installing {:?} using: {}", tool, install_script);
+    log::info!(
+        "[CliInstaller] Installing {:?} using: {}",
+        tool,
+        install_script
+    );
 
     // Emit status update
-    let _ = app.emit("cli-install-status", serde_json::json!({
-        "tool": tool,
-        "status": "downloading"
-    }));
+    let _ = app.emit(
+        "cli-install-status",
+        serde_json::json!({
+            "tool": tool,
+            "status": "downloading"
+        }),
+    );
 
     // Run the installation command
     let result = if cfg!(target_os = "windows") {
@@ -62,27 +69,36 @@ pub async fn install_cli_tool(app: AppHandle, tool: CliTool) -> Result<bool, Str
     match result {
         Ok(success) => {
             if success {
-                let _ = app.emit("cli-install-status", serde_json::json!({
-                    "tool": tool,
-                    "status": "installed"
-                }));
+                let _ = app.emit(
+                    "cli-install-status",
+                    serde_json::json!({
+                        "tool": tool,
+                        "status": "installed"
+                    }),
+                );
                 log::info!("[CliInstaller] {:?} installed successfully", tool);
             } else {
-                let _ = app.emit("cli-install-status", serde_json::json!({
-                    "tool": tool,
-                    "status": "error",
-                    "message": "Installation failed"
-                }));
+                let _ = app.emit(
+                    "cli-install-status",
+                    serde_json::json!({
+                        "tool": tool,
+                        "status": "error",
+                        "message": "Installation failed"
+                    }),
+                );
                 log::error!("[CliInstaller] {:?} installation failed", tool);
             }
             Ok(success)
         }
         Err(e) => {
-            let _ = app.emit("cli-install-status", serde_json::json!({
-                "tool": tool,
-                "status": "error",
-                "message": e.clone()
-            }));
+            let _ = app.emit(
+                "cli-install-status",
+                serde_json::json!({
+                    "tool": tool,
+                    "status": "error",
+                    "message": e.clone()
+                }),
+            );
             log::error!("[CliInstaller] {:?} installation error: {}", tool, e);
             Err(e)
         }

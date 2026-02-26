@@ -768,9 +768,30 @@ async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
         return Err(format!("Channel status failed: {}", msg.trim()));
     }
 
-    // Parse JSON output from openclaw channels status --json
-    let body: serde_json::Value = serde_json::from_str(stdout.trim())
-        .map_err(|e| format!("Failed to parse channels status JSON: {}", e))?;
+    // Parse JSON output from openclaw channels status --json.
+    // During startup races, CLI can return an empty payload briefly.
+    let stdout_trimmed = stdout.trim();
+    if stdout_trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Some environments prepend warnings before JSON; recover by parsing from
+    // the first JSON object marker when possible.
+    let json_payload = if stdout_trimmed.starts_with('{') {
+        stdout_trimmed
+    } else if let Some(start) = stdout_trimmed.find('{') {
+        &stdout_trimmed[start..]
+    } else {
+        stdout_trimmed
+    };
+
+    let body: serde_json::Value = serde_json::from_str(json_payload).map_err(|e| {
+        let snippet: String = stdout_trimmed.chars().take(240).collect();
+        format!(
+            "Failed to parse channels status JSON: {} (stdout starts with: {:?})",
+            e, snippet
+        )
+    })?;
 
     // The output is a map of channel IDs to account snapshots
     let mut channels = Vec::new();

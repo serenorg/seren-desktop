@@ -44,6 +44,26 @@ class CommandRegistry {
 
 export const registry = new CommandRegistry();
 
+const DISCORD_AUTOPROMPT =
+  "Set up and start OpenClaw Discord in chat-only mode. If Discord is not connected, guide me through connecting it first, then confirm readiness for support-intake to send Discord chat/ticket.";
+
+function startDiscordFlow(showStatus: (message: string) => void) {
+  window.dispatchEvent(new CustomEvent("seren:open-panel", { detail: "chat" }));
+  setTimeout(() => {
+    window.dispatchEvent(
+      new CustomEvent("seren:set-chat-input", {
+        detail: {
+          text: DISCORD_AUTOPROMPT,
+          autoSend: true,
+          skipAuthGate: true,
+          command: "discord",
+        },
+      }),
+    );
+  }, 0);
+  showStatus("Starting Discord setup flow...");
+}
+
 // ---------------------------------------------------------------------------
 // Tier 1: Essential Commands
 // ---------------------------------------------------------------------------
@@ -153,6 +173,17 @@ registry.register({
     window.dispatchEvent(new CustomEvent("seren:open-deposit"));
     ctx.clearInput();
     ctx.showStatus("Opening deposit...");
+    return true;
+  },
+});
+
+registry.register({
+  name: "discord",
+  description: "Setup/start OpenClaw Discord in chat-only mode",
+  panels: ["chat", "agent"],
+  execute: (ctx) => {
+    ctx.clearInput();
+    startDiscordFlow(ctx.showStatus);
     return true;
   },
 });

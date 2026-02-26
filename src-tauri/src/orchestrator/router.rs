@@ -449,11 +449,8 @@ mod tests {
     #[test]
     fn routes_code_generation_without_active_session_to_chat_model() {
         let classification = make_classification("code_generation", true, true);
-        let mut capabilities = make_capabilities(
-            true,
-            &["anthropic/claude-opus-4-6"],
-            &["firecrawl"],
-        );
+        let mut capabilities =
+            make_capabilities(true, &["anthropic/claude-opus-4-6"], &["firecrawl"]);
         // Agent is available but no active session — should fall back to ChatModel
         capabilities.active_acp_session_id = None;
         let decision = route(&classification, &capabilities);
@@ -597,11 +594,7 @@ mod tests {
     #[test]
     fn chat_model_uses_in_loop_delegation() {
         let classification = make_classification("general_chat", false, false);
-        let capabilities = make_capabilities(
-            false,
-            &["anthropic/claude-sonnet-4"],
-            &[],
-        );
+        let capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &[]);
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.delegation, DelegationType::InLoop);

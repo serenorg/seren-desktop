@@ -726,8 +726,9 @@ impl ChatModelWorker {
     /// active skills that produce large combined payloads.
     fn budget_tool_definitions(tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
         // Fast path: check total size first to avoid per-tool allocation.
-        let total =
-            serde_json::to_string(tools).map(|s| s.len()).unwrap_or(usize::MAX);
+        let total = serde_json::to_string(tools)
+            .map(|s| s.len())
+            .unwrap_or(usize::MAX);
         if total <= MAX_TOOL_DEFINITIONS_BYTES {
             return tools.to_vec();
         }
@@ -1229,8 +1230,7 @@ impl Worker for ChatModelWorker {
                         } else {
                             // Route non-local tools (gateway__, mcp__, openclaw__)
                             // to the frontend for execution via the tool bridge.
-                            Self::execute_frontend_tool(app, &tc.id, &tc.name, &tc.arguments)
-                                .await
+                            Self::execute_frontend_tool(app, &tc.id, &tc.name, &tc.arguments).await
                         };
 
                         // Emit ToolResult event to frontend
@@ -1244,8 +1244,7 @@ impl Worker for ChatModelWorker {
 
                         // Truncate tool result for LLM context to prevent
                         // unbounded payload growth that causes upstream 408s.
-                        let context_content =
-                            Self::truncate_for_context(&result_content, &tc.name);
+                        let context_content = Self::truncate_for_context(&result_content, &tc.name);
 
                         // Add tool result message for the next API call
                         messages.push(serde_json::json!({

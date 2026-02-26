@@ -393,7 +393,8 @@ export async function* streamMessageWithTools(
       "'https://html.duckduckgo.com/html/?q=your+search+terms' to find information.\n" +
       "- For fetching web pages: use seren_web_fetch with the page URL.\n" +
       "- Chain tool calls when needed: search first to find URLs, then fetch those URLs for full content.\n" +
-      "- NEVER say 'I cannot browse the web' or 'I need a URL' — you CAN search by constructing search engine URLs." +
+      "- NEVER say 'I cannot browse the web' or 'I need a URL' — you CAN search by constructing search engine URLs.\n" +
+      "- For support incident workflows, use OpenClaw setup tools first (for example openclaw__setup_discord) before sending a ticket via openclaw__send_message." +
       serenPublishersContext;
   } else {
     // No tools available - don't claim tool capabilities

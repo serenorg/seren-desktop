@@ -469,7 +469,8 @@ pub fn run() {
         .manage(orchestrator::service::OrchestratorState::new())
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
-        .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None)) as polymarket::commands::PolymarketWsState);
+        .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
+            as polymarket::commands::PolymarketWsState);
 
     #[cfg(feature = "acp")]
     {
@@ -578,7 +579,9 @@ pub fn run() {
 
             // Start OAuth callback server in dev mode
             // Provides localhost:8787 redirect for OAuth without deep links
-            if let Some(handle) = oauth_callback_server::start_oauth_callback_server(app.handle().clone()) {
+            if let Some(handle) =
+                oauth_callback_server::start_oauth_callback_server(app.handle().clone())
+            {
                 app.manage(handle);
             }
 

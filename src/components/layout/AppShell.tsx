@@ -58,7 +58,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
   // Expose panel controls to global events (for slash commands, etc.)
   const handleOpenPanel = ((e: CustomEvent) => {
     const p = e.detail as string;
-    if (p === "editor") {
+    if (p === "chat") {
+      setSlidePanel(null);
+    } else if (p === "editor") {
       setSlidePanel("editor");
     } else if (p === "settings") {
       setSlidePanel("settings");
