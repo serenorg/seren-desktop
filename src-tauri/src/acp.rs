@@ -3414,14 +3414,17 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
             }
 
             // Fallback: return the expected installation location
-            if cfg!(target_os = "windows") {
-                let home = std::env::var("USERPROFILE")
-                    .unwrap_or_else(|_| String::from("C:\\Users\\Default"));
-                Ok(format!("{}/.local/bin", home))
+            let home = if cfg!(target_os = "windows") {
+                std::env::var("USERPROFILE")
+                    .unwrap_or_else(|_| String::from("C:\\Users\\Default"))
             } else {
-                let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/root"));
-                Ok(format!("{}/.local/bin", home))
-            }
+                std::env::var("HOME").unwrap_or_else(|_| String::from("/root"))
+            };
+            Ok(std::path::PathBuf::from(home)
+                .join(".local")
+                .join("bin")
+                .to_string_lossy()
+                .to_string())
         }
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);

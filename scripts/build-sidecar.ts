@@ -298,7 +298,10 @@ function buildSidecar(
 
     srcBin = path.join(installRoot, "bin", `${binName}${ext}`);
 
-    if (!forceInstall && existsSync(srcBin)) {
+    // Branch pins track a moving target — always rebuild to pick up upstream changes.
+    // Only rev and tag pins are safe to cache (they're immutable).
+    const isMutablePin = source.type === "git" && source.branch;
+    if (!forceInstall && !isMutablePin && existsSync(srcBin)) {
       console.log(`  Using cached install at ${srcBin}`);
     } else {
       mkdirSync(installRoot, { recursive: true });
@@ -314,7 +317,7 @@ function buildSidecar(
       baseArgs.push("--bin", binName, "--root", installRoot);
       if (profile === "debug") baseArgs.push("--debug");
       if (targetTriple !== hostTriple) baseArgs.push("--target", targetTriple);
-      if (forceInstall) baseArgs.push("--force");
+      if (forceInstall || isMutablePin) baseArgs.push("--force");
       // For git repos with workspaces, the crate/package name is a positional argument at the end
       if (source.package) baseArgs.push(source.package);
 
