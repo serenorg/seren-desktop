@@ -44,6 +44,9 @@ class CommandRegistry {
 
 export const registry = new CommandRegistry();
 
+const SUPPORT_AUTOPROMPT =
+  "I need to report an incident. Start the OpenClaw Discord support flow in chat-only mode: set up Discord if needed, then collect my incident details and prepare/send the ticket.";
+
 // ---------------------------------------------------------------------------
 // Tier 1: Essential Commands
 // ---------------------------------------------------------------------------
@@ -153,6 +156,28 @@ registry.register({
     window.dispatchEvent(new CustomEvent("seren:open-deposit"));
     ctx.clearInput();
     ctx.showStatus("Opening deposit...");
+    return true;
+  },
+});
+
+registry.register({
+  name: "support",
+  description: "Start chat-only support flow",
+  panels: ["chat", "agent"],
+  execute: (ctx) => {
+    window.dispatchEvent(
+      new CustomEvent("seren:open-panel", { detail: "chat" }),
+    );
+    window.dispatchEvent(
+      new CustomEvent("seren:set-chat-input", {
+        detail: {
+          text: SUPPORT_AUTOPROMPT,
+          autoSend: true,
+        },
+      }),
+    );
+    ctx.clearInput();
+    ctx.showStatus("Starting support flow...");
     return true;
   },
 });

@@ -27,6 +27,7 @@ interface FileEntry {
 const OPENCLAW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const GATEWAY_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const SHELL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const OPENCLAW_STORE = "openclaw.json";
 const MAX_RESULT_SIZE = 50_000; // 50KB cap
 const MAX_ARRAY_ITEMS = 25;
 
@@ -180,6 +181,22 @@ async function waitForOpenClawApproval(approvalId: string): Promise<boolean> {
         resolve(false);
       });
   });
+}
+
+async function ensureOpenClawRunning(): Promise<{
+  started: boolean;
+  alreadyRunning: boolean;
+}> {
+  try {
+    await invoke("openclaw_start");
+    return { started: true, alreadyRunning: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.toLowerCase().includes("already running")) {
+      return { started: false, alreadyRunning: true };
+    }
+    throw error;
+  }
 }
 
 /**
@@ -487,6 +504,186 @@ async function executeOpenClawTool(
 ): Promise<ToolResult> {
   try {
     switch (toolName) {
+      case "start": {
+        const start = await ensureOpenClawRunning();
+        const status = await invoke<{
+          processStatus: string;
+          port: number | null;
+          channels: Array<{
+            id: string;
+            platform: string;
+            displayName: string;
+            status: string;
+          }>;
+          uptimeSecs: number | null;
+        }>("openclaw_status");
+        return {
+          tool_call_id: toolCallId,
+          content: JSON.stringify(
+            {
+              ok: true,
+              ...start,
+              status,
+            },
+            null,
+            2,
+          ),
+          is_error: false,
+        };
+      }
+      case "setup_discord": {
+        const botToken = args.bot_token as string;
+        if (!botToken || typeof botToken !== "string") {
+          return {
+            tool_call_id: toolCallId,
+            content: "Missing required parameter: bot_token",
+            is_error: true,
+          };
+        }
+
+        const start = await ensureOpenClawRunning();
+        const connectResult = await invoke<Record<string, unknown>>(
+          "openclaw_connect_channel",
+          {
+            platform: "discord",
+            credentials: { botToken },
+          },
+        );
+
+        await invoke("set_setting", {
+          store: OPENCLAW_STORE,
+          key: "setup_complete",
+          value: "true",
+        });
+
+        let channels: Array<{
+          id: string;
+          platform: string;
+          displayName: string;
+          status: string;
+        }> = [];
+        try {
+          channels = await invoke<
+            Array<{
+              id: string;
+              platform: string;
+              displayName: string;
+              status: string;
+            }>
+          >("openclaw_list_channels");
+        } catch {
+          // Best-effort refresh only
+        }
+
+        return {
+          tool_call_id: toolCallId,
+          content: JSON.stringify(
+            {
+              ok: true,
+              start,
+              setupComplete: true,
+              connectResult,
+              channels,
+            },
+            null,
+            2,
+          ),
+          is_error: false,
+        };
+      }
+      case "connect_channel": {
+        const platform = args.platform as string;
+        const rawCredentials = args.credentials as unknown;
+        if (!platform || typeof platform !== "string") {
+          return {
+            tool_call_id: toolCallId,
+            content: "Missing required parameter: platform",
+            is_error: true,
+          };
+        }
+        if (
+          typeof rawCredentials !== "object" ||
+          rawCredentials == null ||
+          Array.isArray(rawCredentials)
+        ) {
+          return {
+            tool_call_id: toolCallId,
+            content:
+              "Missing or invalid required parameter: credentials (object)",
+            is_error: true,
+          };
+        }
+
+        const credentials: Record<string, string> = {};
+        for (const [key, value] of Object.entries(
+          rawCredentials as Record<string, unknown>,
+        )) {
+          if (typeof value === "string") {
+            credentials[key] = value;
+          }
+        }
+        if (Object.keys(credentials).length === 0) {
+          return {
+            tool_call_id: toolCallId,
+            content:
+              "Invalid credentials: provide at least one string credential field",
+            is_error: true,
+          };
+        }
+
+        const start = await ensureOpenClawRunning();
+        const connectResult = await invoke<Record<string, unknown>>(
+          "openclaw_connect_channel",
+          {
+            platform,
+            credentials,
+          },
+        );
+        return {
+          tool_call_id: toolCallId,
+          content: JSON.stringify(
+            {
+              ok: true,
+              start,
+              connectResult,
+            },
+            null,
+            2,
+          ),
+          is_error: false,
+        };
+      }
+      case "launch_channel_login": {
+        const platform = args.platform as string;
+        if (!platform || typeof platform !== "string") {
+          return {
+            tool_call_id: toolCallId,
+            content: "Missing required parameter: platform",
+            is_error: true,
+          };
+        }
+        await ensureOpenClawRunning();
+        await invoke("openclaw_launch_channel_login", {
+          platform,
+        });
+        return {
+          tool_call_id: toolCallId,
+          content: `Launched terminal login for platform "${platform}".`,
+          is_error: false,
+        };
+      }
+      case "complete_setup": {
+        await invoke("set_setting", {
+          store: OPENCLAW_STORE,
+          key: "setup_complete",
+          value: "true",
+        });
+        return {
+          tool_call_id: toolCallId,
+          content: "OpenClaw setup marked complete.",
+          is_error: false,
+        };
+      }
       case "send_message": {
         const channel = args.channel as string;
         const to = args.to as string;
