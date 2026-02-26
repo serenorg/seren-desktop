@@ -6,6 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "@/lib/providers/types";
 
 const MAX_BASE64_SIZE = 27 * 1024 * 1024; // ~20MB file = ~27MB base64
+const MAX_VIDEO_BASE64_SIZE = 267 * 1024 * 1024; // ~200MB file = ~267MB base64
 const MAX_IMAGE_DIMENSION = 1024;
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
@@ -313,8 +314,12 @@ export async function readAttachment(path: string): Promise<Attachment> {
   }
 
   const base64 = await invoke<string>("read_file_base64", { path });
-  if (base64.length > MAX_BASE64_SIZE) {
-    throw new Error("File too large (max 20MB)");
+  const sizeLimit = mimeType.startsWith("video/")
+    ? MAX_VIDEO_BASE64_SIZE
+    : MAX_BASE64_SIZE;
+  const maxLabel = mimeType.startsWith("video/") ? "200MB" : "20MB";
+  if (base64.length > sizeLimit) {
+    throw new Error(`File too large (max ${maxLabel})`);
   }
 
   // Only resize raster images (not SVGs, PDFs, or text files)

@@ -492,6 +492,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     let promptWithDocs = trimmed;
     if (docAttachments.length > 0) {
       setIsProcessingDocs(true);
+      setCommandStatus("Processing documents…");
       try {
         const docBlocks = await Promise.all(
           docAttachments.map(async (doc: Attachment) => {
@@ -508,6 +509,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         setIsProcessingDocs(false);
         return; // Input and attachments are intentionally preserved
       }
+      setCommandStatus(null);
       setIsProcessingDocs(false);
     }
 
