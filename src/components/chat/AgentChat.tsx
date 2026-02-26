@@ -246,6 +246,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     userHasScrolledUp = scrollHeight - scrollTop - clientHeight > 80;
   };
 
+  // Reset scroll position when switching threads so the latest message is visible
+  createEffect(() => {
+    activeAgentThread();
+    userHasScrolledUp = false;
+    requestAnimationFrame(() => {
+      if (messagesRef) messagesRef.scrollTop = messagesRef.scrollHeight;
+    });
+  });
+
   // Auto-scroll when messages change or permission dialogs appear
   createEffect(() => {
     threadMessages();
