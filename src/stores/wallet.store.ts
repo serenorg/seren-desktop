@@ -2,7 +2,6 @@
 // ABOUTME: Provides reactive balance updates with automatic refresh.
 
 import { createStore } from "solid-js/store";
-import { refreshAccessToken } from "@/services/auth";
 import {
   claimDailyCredits,
   type DailyClaimEligibility,
@@ -10,7 +9,6 @@ import {
   fetchDailyEligibility,
 } from "@/services/dailyClaim";
 import { fetchBalance, type WalletBalance } from "@/services/wallet";
-import { promptLogin } from "@/stores/auth.store";
 
 /**
  * Wallet state interface.
@@ -71,9 +69,6 @@ let topUpInProgress = false;
 const MAX_CONSECUTIVE_FAILURES = 5;
 let consecutiveFailures = 0;
 
-// Guard against infinite auth retry loops
-let authRetryAttempted = false;
-
 /**
  * Refresh the wallet balance from the API.
  */
@@ -108,36 +103,22 @@ async function refreshBalance(): Promise<void> {
       message.includes("Authentication") ||
       message.includes("Unauthorized");
 
-    // On auth errors, attempt token refresh and retry once before giving up
-    if (isAuthError && !authRetryAttempted) {
-      authRetryAttempted = true;
-      console.log("[Wallet Store] Auth error, attempting token refresh...");
-      try {
-        const refreshed = await refreshAccessToken();
-        if (refreshed) {
-          console.log("[Wallet Store] Token refreshed, retrying balance fetch");
-          setWalletState("isLoading", false);
-          authRetryAttempted = false;
-          consecutiveFailures = 0;
-          return refreshBalance();
-        }
-        console.warn("[Wallet Store] Token refresh failed, stopping poller");
-        promptLogin();
-      } catch (refreshErr) {
-        console.error("[Wallet Store] Token refresh threw:", refreshErr);
-        promptLogin();
-      }
+    // On auth errors, just stop polling. Never force logout from here —
+    // the Rust backend emits auth:session-expired when both tokens are dead,
+    // and user-initiated requests handle their own refresh. A background
+    // poller should not yank tokens from under in-flight orchestrator work.
+    if (isAuthError) {
+      console.warn(
+        "[Wallet Store] Auth error, stopping poller (backend handles refresh)",
+      );
       stopAutoRefresh();
-    } else if (isAuthError || consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.warn(
-          `[Wallet Store] Stopping auto-refresh after ${consecutiveFailures} consecutive failures`,
-        );
-      }
+    } else if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      console.warn(
+        `[Wallet Store] Stopping auto-refresh after ${consecutiveFailures} consecutive failures`,
+      );
       stopAutoRefresh();
     }
 
-    authRetryAttempted = false;
     setWalletState({
       isLoading: false,
       error: message,
@@ -290,7 +271,6 @@ function resetWalletState(): void {
   setWalletState(initialState);
   topUpInProgress = false;
   consecutiveFailures = 0;
-  authRetryAttempted = false;
 }
 
 /**
