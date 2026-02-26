@@ -1897,7 +1897,8 @@ async fn run_session_worker(
                         // creating a fresh session instead of crashing the worker.
                         log::warn!(
                             "[ACP] Could not resume session {}: {:?}. Falling back to fresh session.",
-                            resume_id, e
+                            resume_id,
+                            e
                         );
                         resume_agent_session_id = None;
                         continue;
@@ -2082,9 +2083,8 @@ async fn run_session_worker(
                                 item.get("data").and_then(|v| v.as_str()),
                                 item.get("mimeType").and_then(|v| v.as_str()),
                             ) {
-                                content_blocks.push(ContentBlock::Image(
-                                    ImageContent::new(data, mime_type),
-                                ));
+                                content_blocks
+                                    .push(ContentBlock::Image(ImageContent::new(data, mime_type)));
                             }
                         } else if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
                             content_blocks.push(ContentBlock::Text(TextContent::new(text)));
@@ -2121,7 +2121,9 @@ async fn run_session_worker(
                 const ONE_YEAR_SECS: u64 = 365 * 24 * 60 * 60;
                 let mut idle_deadline = timeout_secs
                     .map(|secs| tokio::time::Instant::now() + std::time::Duration::from_secs(secs))
-                    .unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(ONE_YEAR_SECS));
+                    .unwrap_or_else(|| {
+                        tokio::time::Instant::now() + std::time::Duration::from_secs(ONE_YEAR_SECS)
+                    });
 
                 let prompt_result = loop {
                     // If cancel was sent, enforce a deadline for the prompt to finish
@@ -3337,10 +3339,7 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
         "which"
     };
 
-    if let Ok(output) = std::process::Command::new(which_cmd)
-        .arg("claude")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new(which_cmd).arg("claude").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Some(parent) = std::path::Path::new(&path).parent() {
@@ -3405,10 +3404,7 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
 
             // The native installer puts claude in ~/.local/bin or system PATH
             // Check again to find the installed location
-            if let Ok(output) = std::process::Command::new(which_cmd)
-                .arg("claude")
-                .output()
-            {
+            if let Ok(output) = std::process::Command::new(which_cmd).arg("claude").output() {
                 if output.status.success() {
                     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if let Some(parent) = std::path::Path::new(&path).parent() {
@@ -3419,7 +3415,8 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
 
             // Fallback: return the expected installation location
             if cfg!(target_os = "windows") {
-                let home = std::env::var("USERPROFILE").unwrap_or_else(|_| String::from("C:\\Users\\Default"));
+                let home = std::env::var("USERPROFILE")
+                    .unwrap_or_else(|_| String::from("C:\\Users\\Default"));
                 Ok(format!("{}/.local/bin", home))
             } else {
                 let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/root"));

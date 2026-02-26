@@ -109,9 +109,7 @@ impl TerminalManager {
         // computed PATH that includes embedded runtime + system directories.
         for (key, value) in env_vars {
             if key == "PATH" {
-                log::warn!(
-                    "[TerminalManager] Agent tried to override PATH via env_vars, ignoring"
-                );
+                log::warn!("[TerminalManager] Agent tried to override PATH via env_vars, ignoring");
                 continue;
             }
             cmd.env(key, value);

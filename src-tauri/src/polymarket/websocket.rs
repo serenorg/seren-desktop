@@ -29,17 +29,11 @@ pub enum PolymarketWsMessage {
         data: serde_json::Value,
     },
     /// Subscription confirmation
-    Subscribed {
-        channel: String,
-    },
+    Subscribed { channel: String },
     /// Unsubscription confirmation
-    Unsubscribed {
-        channel: String,
-    },
+    Unsubscribed { channel: String },
     /// Error message
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// Subscription channel types
@@ -126,14 +120,20 @@ impl<R: Runtime> PolymarketWebSocket<R> {
     }
 
     /// Subscribe to a channel
-    pub async fn subscribe(&self, channel: Channel) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn subscribe(
+        &self,
+        channel: Channel,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         log::info!("Adding subscription: {:?}", channel);
         self.subscriptions.write().await.push(channel);
         Ok(())
     }
 
     /// Unsubscribe from a channel
-    pub async fn unsubscribe(&self, channel: &Channel) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn unsubscribe(
+        &self,
+        channel: &Channel,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         log::info!("Removing subscription: {:?}", channel);
         let mut subs = self.subscriptions.write().await;
         subs.retain(|c| !channels_equal(c, channel));
@@ -143,22 +143,18 @@ impl<R: Runtime> PolymarketWebSocket<R> {
     /// Build subscribe message for a channel
     fn build_subscribe_message(&self, channel: &Channel) -> String {
         match channel {
-            Channel::Market { market_id } => {
-                json!({
-                    "type": "subscribe",
-                    "channel": "market",
-                    "market_id": market_id
-                })
-                .to_string()
-            }
-            Channel::User { api_key } => {
-                json!({
-                    "type": "subscribe",
-                    "channel": "user",
-                    "api_key": api_key
-                })
-                .to_string()
-            }
+            Channel::Market { market_id } => json!({
+                "type": "subscribe",
+                "channel": "market",
+                "market_id": market_id
+            })
+            .to_string(),
+            Channel::User { api_key } => json!({
+                "type": "subscribe",
+                "channel": "user",
+                "api_key": api_key
+            })
+            .to_string(),
         }
     }
 
@@ -174,7 +170,11 @@ impl<R: Runtime> PolymarketWebSocket<R> {
 
         // Emit Tauri event based on message type
         match msg {
-            PolymarketWsMessage::Market { event, market, data } => {
+            PolymarketWsMessage::Market {
+                event,
+                market,
+                data,
+            } => {
                 app.emit(
                     "polymarket-market-update",
                     json!({

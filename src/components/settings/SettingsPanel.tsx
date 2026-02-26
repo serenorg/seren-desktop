@@ -1,7 +1,7 @@
 // ABOUTME: Settings panel UI for managing user preferences.
 // ABOUTME: Provides controls for editor, wallet, theme, and MCP settings.
 
-import { type Component, createSignal, For, Show } from "solid-js";
+import { type Component, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
@@ -129,6 +129,28 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "mcp", label: "MCP Servers", icon: "🔌" },
     { id: "openclaw", label: "OpenClaw", icon: "🦞" },
   ];
+
+  const handleOpenSection = (event: Event) => {
+    const custom = event as CustomEvent<SettingsSection>;
+    const section = custom.detail;
+    if (sections.some((s) => s.id === section)) {
+      setActiveSection(section);
+    }
+  };
+
+  onMount(() => {
+    window.addEventListener(
+      "seren:open-settings-section",
+      handleOpenSection as EventListener,
+    );
+  });
+
+  onCleanup(() => {
+    window.removeEventListener(
+      "seren:open-settings-section",
+      handleOpenSection as EventListener,
+    );
+  });
 
   return (
     <div class="flex h-full bg-surface text-foreground">

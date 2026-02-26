@@ -35,12 +35,7 @@ impl ToolResultBridge {
     }
 
     /// Submit a tool result from the frontend. Returns true if a pending request was found.
-    pub async fn submit(
-        &self,
-        tool_call_id: &str,
-        content: String,
-        is_error: bool,
-    ) -> bool {
+    pub async fn submit(&self, tool_call_id: &str, content: String, is_error: bool) -> bool {
         let mut pending = self.pending.lock().await;
         if let Some(tx) = pending.remove(tool_call_id) {
             let _ = tx.send(ToolExecutionResult { content, is_error });
@@ -78,7 +73,9 @@ mod tests {
     #[tokio::test]
     async fn submit_unknown_id_returns_false() {
         let bridge = ToolResultBridge::new();
-        let submitted = bridge.submit("nonexistent", "data".to_string(), false).await;
+        let submitted = bridge
+            .submit("nonexistent", "data".to_string(), false)
+            .await;
         assert!(!submitted);
     }
 
