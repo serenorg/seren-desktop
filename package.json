@@ -35,7 +35,8 @@
     "prepare:runtime:win32-x64": "tsx build/win32/prepare-embedded-runtime.ts x64",
     "prepare:runtime:win32-arm64": "tsx build/win32/prepare-embedded-runtime.ts arm64",
     "prepare:runtime:linux-x64": "tsx build/linux/prepare-embedded-runtime.ts x64",
-    "prepare:runtime:linux-arm64": "tsx build/linux/prepare-embedded-runtime.ts arm64"
+    "prepare:runtime:linux-arm64": "tsx build/linux/prepare-embedded-runtime.ts arm64",
+    "prepare:mcp-servers": "cd mcp-servers/playwright-stealth && pnpm install --frozen-lockfile && pnpm build && cd ../.. && rm -rf src-tauri/mcp-servers && cp -rL mcp-servers src-tauri/mcp-servers"
   },
   "license": "MIT",
   "dependencies": {
