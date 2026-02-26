@@ -12,6 +12,8 @@ const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
 
 const DOCUMENT_EXTENSIONS = ["pdf"];
 
+const DOCREADER_EXTENSIONS = ["doc", "docx", "xls", "xlsx", "ppt", "pptx"];
+
 const TEXT_EXTENSIONS = [
   // Plain text & markup
   "txt",
@@ -63,6 +65,7 @@ const TEXT_EXTENSIONS = [
 const ALL_EXTENSIONS = [
   ...IMAGE_EXTENSIONS,
   ...DOCUMENT_EXTENSIONS,
+  ...DOCREADER_EXTENSIONS,
   ...TEXT_EXTENSIONS,
 ];
 
@@ -76,6 +79,12 @@ const MIME_TYPES: Record<string, string> = {
   svg: "image/svg+xml",
   // Documents
   pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   // Text & markup
   txt: "text/plain",
   md: "text/markdown",
@@ -135,6 +144,17 @@ function getFileName(path: string): string {
 /** Check whether a MIME type represents an image. */
 export function isImageMime(mimeType: string): boolean {
   return mimeType.startsWith("image/");
+}
+
+/** Check whether a MIME type requires docreader processing (PDFs and Office documents). */
+export function isDocreaderMime(mimeType: string): boolean {
+  return (
+    mimeType === "application/pdf" ||
+    mimeType === "application/msword" ||
+    mimeType.startsWith("application/vnd.openxmlformats-officedocument") ||
+    mimeType === "application/vnd.ms-excel" ||
+    mimeType === "application/vnd.ms-powerpoint"
+  );
 }
 
 /** Check whether a MIME type represents a text/code file. */
@@ -232,6 +252,10 @@ export async function pickFiles(): Promise<string[]> {
         {
           name: "Documents",
           extensions: DOCUMENT_EXTENSIONS,
+        },
+        {
+          name: "Office Documents",
+          extensions: DOCREADER_EXTENSIONS,
         },
         {
           name: "Text & Code",
