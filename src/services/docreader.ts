@@ -4,6 +4,7 @@
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getToken } from "@/services/auth";
+import { updateBalanceFromError } from "@/stores/wallet.store";
 import type { Attachment } from "@/lib/providers/types";
 
 interface DocReaderResponseBody {
@@ -37,7 +38,11 @@ function extractText(payload: DocReaderResponseBody): string | undefined {
  */
 export async function readDocument(attachment: Attachment): Promise<string> {
   const token = await getToken();
-  if (!token) throw new Error("Not authenticated");
+  if (!token) {
+    throw new Error(
+      "Document processing requires a Seren account. Sign in to continue.",
+    );
+  }
 
   const response = await appFetch(
     `${apiBase}/publishers/seren-docreader/process`,
@@ -53,6 +58,17 @@ export async function readDocument(attachment: Attachment): Promise<string> {
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    if (response.status === 402) {
+      updateBalanceFromError(errorText);
+      throw new Error(
+        "Insufficient SerenBucks balance. Add funds to process documents.",
+      );
+    }
+    if (response.status === 401) {
+      throw new Error(
+        "Document processing requires a Seren account. Sign in to continue.",
+      );
+    }
     throw new Error(`DocReader error ${response.status}: ${errorText}`);
   }
 

@@ -488,19 +488,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const imageAttachments = images.filter((a) => !isDocreaderMime(a.mimeType));
     const docAttachments = images.filter((a) => isDocreaderMime(a.mimeType));
 
-    setInput("");
-    setAttachedImages([]);
-    setHistoryIndex(-1);
-    setSavedInput("");
-    userHasScrolledUp = false;
-
-    // Extract text from documents via seren-docreader before sending
+    // Process documents BEFORE clearing state so input/attachments are preserved on failure
     let promptWithDocs = trimmed;
     if (docAttachments.length > 0) {
       setIsProcessingDocs(true);
       try {
         const docBlocks = await Promise.all(
-          docAttachments.map(async (doc) => {
+          docAttachments.map(async (doc: Attachment) => {
             const text = await readDocument(doc);
             return `[${doc.name}]\n${text}`;
           }),
@@ -508,14 +502,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         promptWithDocs = `${docBlocks.join("\n\n---\n\n")}\n\n${trimmed}`;
       } catch (err) {
         setCommandStatus(
-          `Failed to read document: ${err instanceof Error ? err.message : String(err)}`,
+          err instanceof Error ? err.message : "Failed to read document.",
         );
         setTimeout(() => setCommandStatus(null), 6000);
-        return;
-      } finally {
         setIsProcessingDocs(false);
+        return; // Input and attachments are intentionally preserved
       }
+      setIsProcessingDocs(false);
     }
+
+    setInput("");
+    setAttachedImages([]);
+    setHistoryIndex(-1);
+    setSavedInput("");
+    userHasScrolledUp = false;
 
     const context: Array<Record<string, string>> | undefined =
       imageAttachments.length > 0
