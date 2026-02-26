@@ -26,7 +26,8 @@ import { escapeHtml } from "@/lib/escape-html";
 import { openExternalLink } from "@/lib/external-link";
 import { openFileInTab } from "@/lib/files/service";
 import { formatDurationWithVerb } from "@/lib/format-duration";
-import { pickAndReadAttachments } from "@/lib/images/attachments";
+import { isDocreaderMime, pickAndReadAttachments } from "@/lib/images/attachments";
+import { readDocument } from "@/services/docreader";
 import type { Attachment } from "@/lib/providers/types";
 import {
   getModelDisplayName,
@@ -70,6 +71,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const [historyIndex, setHistoryIndex] = createSignal(-1);
   const [savedInput, setSavedInput] = createSignal("");
   const [isAttaching, setIsAttaching] = createSignal(false);
+  const [isProcessingDocs, setIsProcessingDocs] = createSignal(false);
   const [awaitingLogin, setAwaitingLogin] = createSignal<AgentType | null>(
     null,
   );
@@ -491,22 +493,51 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
 
-    // Build context with images as ACP image content blocks
-    const context: Array<Record<string, string>> | undefined =
-      images.length > 0
-        ? images.map((img) => ({
-            type: "image",
-            data: img.base64,
-            mimeType: img.mimeType,
-          }))
-        : undefined;
+    // Split attachments: images go as ACP context blocks; docreader files get extracted to text
+    const imageAttachments = images.filter((a) => !isDocreaderMime(a.mimeType));
+    const docAttachments = images.filter((a) => isDocreaderMime(a.mimeType));
+
+    // Process documents BEFORE clearing state so input/attachments are preserved on failure
+    let promptWithDocs = trimmed;
+    if (docAttachments.length > 0) {
+      setIsProcessingDocs(true);
+      setCommandStatus("Processing documents…");
+      try {
+        const docBlocks = await Promise.all(
+          docAttachments.map(async (doc: Attachment) => {
+            const text = await readDocument(doc);
+            return `[${doc.name}]\n${text}`;
+          }),
+        );
+        promptWithDocs = `${docBlocks.join("\n\n---\n\n")}\n\n${trimmed}`;
+      } catch (err) {
+        setCommandStatus(
+          err instanceof Error ? err.message : "Failed to read document.",
+        );
+        setTimeout(() => setCommandStatus(null), 6000);
+        setIsProcessingDocs(false);
+        return; // Input and attachments are intentionally preserved
+      }
+      setCommandStatus(null);
+      setIsProcessingDocs(false);
+    }
 
     setInput("");
     setAttachedImages([]);
     setHistoryIndex(-1);
     setSavedInput("");
     userHasScrolledUp = false;
-    await acpStore.sendPrompt(trimmed, context);
+
+    const context: Array<Record<string, string>> | undefined =
+      imageAttachments.length > 0
+        ? imageAttachments.map((img) => ({
+            type: "image",
+            data: img.base64,
+            mimeType: img.mimeType,
+          }))
+        : undefined;
+
+    await acpStore.sendPrompt(promptWithDocs, context);
   };
 
   // Guard flag prevents concurrent queue processing
@@ -1400,7 +1431,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     <button
                       type="submit"
                       class="px-4 py-1.5 bg-success text-white rounded-md text-[13px] font-medium hover:bg-emerald-700 transition-colors disabled:bg-surface-2 disabled:text-muted-foreground disabled:cursor-not-allowed"
-                      disabled={!hasSession() || !input().trim()}
+                      disabled={!hasSession() || !input().trim() || isProcessingDocs()}
                     >
                       Send
                     </button>

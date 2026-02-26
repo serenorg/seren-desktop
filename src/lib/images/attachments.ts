@@ -6,11 +6,16 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { Attachment } from "@/lib/providers/types";
 
 const MAX_BASE64_SIZE = 27 * 1024 * 1024; // ~20MB file = ~27MB base64
+const MAX_VIDEO_BASE64_SIZE = 267 * 1024 * 1024; // ~200MB file = ~267MB base64
 const MAX_IMAGE_DIMENSION = 1024;
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"];
 
 const DOCUMENT_EXTENSIONS = ["pdf"];
+
+const DOCREADER_EXTENSIONS = ["doc", "docx", "xls", "xlsx", "ppt", "pptx"];
+
+const VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "avi", "mkv"];
 
 const TEXT_EXTENSIONS = [
   // Plain text & markup
@@ -63,6 +68,8 @@ const TEXT_EXTENSIONS = [
 const ALL_EXTENSIONS = [
   ...IMAGE_EXTENSIONS,
   ...DOCUMENT_EXTENSIONS,
+  ...DOCREADER_EXTENSIONS,
+  ...VIDEO_EXTENSIONS,
   ...TEXT_EXTENSIONS,
 ];
 
@@ -76,6 +83,18 @@ const MIME_TYPES: Record<string, string> = {
   svg: "image/svg+xml",
   // Documents
   pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  // Video
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  avi: "video/x-msvideo",
+  mkv: "video/x-matroska",
   // Text & markup
   txt: "text/plain",
   md: "text/markdown",
@@ -135,6 +154,18 @@ function getFileName(path: string): string {
 /** Check whether a MIME type represents an image. */
 export function isImageMime(mimeType: string): boolean {
   return mimeType.startsWith("image/");
+}
+
+/** Check whether a MIME type requires docreader processing (PDFs and Office documents). */
+export function isDocreaderMime(mimeType: string): boolean {
+  return (
+    mimeType === "application/pdf" ||
+    mimeType === "application/msword" ||
+    mimeType.startsWith("application/vnd.openxmlformats-officedocument") ||
+    mimeType === "application/vnd.ms-excel" ||
+    mimeType === "application/vnd.ms-powerpoint" ||
+    mimeType.startsWith("video/")
+  );
 }
 
 /** Check whether a MIME type represents a text/code file. */
@@ -234,6 +265,14 @@ export async function pickFiles(): Promise<string[]> {
           extensions: DOCUMENT_EXTENSIONS,
         },
         {
+          name: "Office Documents",
+          extensions: DOCREADER_EXTENSIONS,
+        },
+        {
+          name: "Video",
+          extensions: VIDEO_EXTENSIONS,
+        },
+        {
           name: "Text & Code",
           extensions: TEXT_EXTENSIONS,
         },
@@ -275,8 +314,12 @@ export async function readAttachment(path: string): Promise<Attachment> {
   }
 
   const base64 = await invoke<string>("read_file_base64", { path });
-  if (base64.length > MAX_BASE64_SIZE) {
-    throw new Error("File too large (max 20MB)");
+  const sizeLimit = mimeType.startsWith("video/")
+    ? MAX_VIDEO_BASE64_SIZE
+    : MAX_BASE64_SIZE;
+  const maxLabel = mimeType.startsWith("video/") ? "200MB" : "20MB";
+  if (base64.length > sizeLimit) {
+    throw new Error(`File too large (max ${maxLabel})`);
   }
 
   // Only resize raster images (not SVGs, PDFs, or text files)
