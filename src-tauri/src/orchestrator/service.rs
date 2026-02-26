@@ -372,6 +372,45 @@ async fn execute_single_task(
 
         let error_msg = reroutable_error.unwrap();
 
+        // Context-overflow errors get special handling: reroute to a 1M-context
+        // model regardless of whether the user explicitly selected a model.
+        if router::is_context_overflow_error(&error_msg) {
+            if let Some(fallback_model_str) =
+                router::get_large_context_fallback(&tried_models)
+            {
+                let failed_model = routing.model_id.clone();
+                let fallback_model = fallback_model_str.to_string();
+
+                log::info!(
+                    "[Orchestrator] Context overflow on {}, falling back to large-context model: {}",
+                    failed_model,
+                    fallback_model
+                );
+
+                let reroute_event = OrchestratorEvent {
+                    conversation_id: conversation_id.to_string(),
+                    worker_event: WorkerEvent::Reroute {
+                        from_model: failed_model.clone(),
+                        to_model: fallback_model.clone(),
+                        reason: "Switched to larger context model — conversation exceeded model limit".to_string(),
+                    },
+                    subtask_id: None,
+                };
+                let _ = app.emit("orchestrator://event", &reroute_event);
+
+                routing.model_id = fallback_model.clone();
+                tried_models.push(fallback_model);
+
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+            // All large-context models exhausted — fall through to give up
+            log::warn!(
+                "[Orchestrator] Context overflow but all large-context fallbacks exhausted"
+            );
+            break;
+        }
+
         // When user explicitly selected a model, try cascading fallback on timeout errors.
         // For 408 timeouts: Opus → Sonnet → Haiku, then retry same model once before giving up.
         if user_explicitly_selected {

@@ -100,6 +100,11 @@ interface GatewayResponse<T> {
 const DEFAULT_MODELS: ProviderModel[] = [
   // Anthropic
   {
+    id: "anthropic/claude-opus-4.6",
+    name: "Claude Opus 4.6",
+    contextWindow: 1000000,
+  },
+  {
     id: "anthropic/claude-opus-4.5",
     name: "Claude Opus 4.5",
     contextWindow: 200000,
@@ -120,6 +125,16 @@ const DEFAULT_MODELS: ProviderModel[] = [
   { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", contextWindow: 128000 },
   // Google Gemini
   {
+    id: "google/gemini-3.1-pro-preview",
+    name: "Gemini 3.1 Pro",
+    contextWindow: 1048576,
+  },
+  {
+    id: "google/gemini-3-flash-preview",
+    name: "Gemini 3 Flash",
+    contextWindow: 1048576,
+  },
+  {
     id: "google/gemini-2.5-pro",
     name: "Gemini 2.5 Pro",
     contextWindow: 1000000,
@@ -127,11 +142,6 @@ const DEFAULT_MODELS: ProviderModel[] = [
   {
     id: "google/gemini-2.5-flash",
     name: "Gemini 2.5 Flash",
-    contextWindow: 1000000,
-  },
-  {
-    id: "google/gemini-3-flash-preview",
-    name: "Gemini 3 Flash",
     contextWindow: 1000000,
   },
   // Zhipu AI
