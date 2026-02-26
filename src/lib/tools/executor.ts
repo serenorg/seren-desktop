@@ -695,6 +695,7 @@ async function executeOpenClawTool(
             is_error: true,
           };
         }
+        await ensureOpenClawRunning();
         let result: string;
         try {
           result = await invoke<string>("openclaw_send", {
@@ -730,6 +731,7 @@ async function executeOpenClawTool(
         };
       }
       case "list_channels": {
+        await ensureOpenClawRunning();
         const channels = await invoke<
           Array<{
             id: string;
@@ -753,6 +755,7 @@ async function executeOpenClawTool(
             is_error: true,
           };
         }
+        await ensureOpenClawRunning();
         const allChannels = await invoke<
           Array<{
             id: string;

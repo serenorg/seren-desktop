@@ -27,8 +27,24 @@ const DOWNLOAD_QUIPS = [
   "99% done...",
 ];
 
-const SUPPORT_AUTOPROMPT =
-  "I need to report an incident. Start the OpenClaw Discord support flow in chat-only mode: set up Discord if needed, then collect my incident details and prepare/send the ticket.";
+const DISCORD_AUTOPROMPT =
+  "Set up and start OpenClaw Discord in chat-only mode. If Discord is not connected, guide me through connecting it first, then confirm readiness for support-intake to send Discord chat/ticket.";
+
+function startDiscordFlow() {
+  window.dispatchEvent(new CustomEvent("seren:open-panel", { detail: "chat" }));
+  setTimeout(() => {
+    window.dispatchEvent(
+      new CustomEvent("seren:set-chat-input", {
+        detail: {
+          text: DISCORD_AUTOPROMPT,
+          autoSend: true,
+          skipAuthGate: true,
+          command: "discord",
+        },
+      }),
+    );
+  }, 0);
+}
 
 function quipForPercent(percent: number): string {
   const index = Math.floor((percent / 100) * (DOWNLOAD_QUIPS.length - 1));
@@ -58,17 +74,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
   };
 
   const handleSupportClick = () => {
-    window.dispatchEvent(
-      new CustomEvent("seren:open-panel", { detail: "chat" }),
-    );
-    window.dispatchEvent(
-      new CustomEvent("seren:set-chat-input", {
-        detail: {
-          text: SUPPORT_AUTOPROMPT,
-          autoSend: true,
-        },
-      }),
-    );
+    startDiscordFlow();
   };
 
   return (
