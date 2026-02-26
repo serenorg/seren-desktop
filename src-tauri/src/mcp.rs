@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{Manager, State};
@@ -38,6 +39,9 @@ struct McpProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    /// Buffered stderr output from the background drain thread.
+    /// Used to enrich error messages when the process fails.
+    stderr_buffer: Arc<Mutex<String>>,
 }
 
 /// JSON-RPC request structure
@@ -266,6 +270,72 @@ fn resolve_command_in_embedded_path(command: &str) -> String {
     command.to_string()
 }
 
+/// Maximum bytes to retain in the stderr buffer.
+const STDERR_BUFFER_CAP: usize = 8192;
+
+/// Spawn a background thread that drains a child's stderr into a shared buffer.
+/// This prevents the child from blocking on a full stderr pipe while still
+/// preserving diagnostic output for error messages.
+fn spawn_stderr_drain(
+    stderr: std::process::ChildStderr,
+    server_name: String,
+) -> Arc<Mutex<String>> {
+    let buffer = Arc::new(Mutex::new(String::new()));
+    let buf_clone = buffer.clone();
+
+    std::thread::Builder::new()
+        .name(format!("mcp-stderr-{}", server_name))
+        .spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(line) => {
+                        log::debug!("[MCP:{}] stderr: {}", server_name, line);
+                        if let Ok(mut guard) = buf_clone.lock() {
+                            if guard.len() > STDERR_BUFFER_CAP {
+                                let drain_to = guard.len() - STDERR_BUFFER_CAP / 2;
+                                guard.drain(..drain_to);
+                            }
+                            guard.push_str(&line);
+                            guard.push('\n');
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+        .ok();
+
+    buffer
+}
+
+/// Collect diagnostic context from a failed MCP process.
+/// Checks exit code and stderr buffer to build an actionable error message.
+fn collect_process_diagnostics(process: &mut McpProcess, base_error: &str) -> String {
+    let mut diagnostic = base_error.to_string();
+
+    // Check if the process has exited and capture the exit code
+    if let Ok(Some(status)) = process.child.try_wait() {
+        let code_str = status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "signal".to_string());
+        diagnostic = format!("{} (exit code: {})", diagnostic, code_str);
+    }
+
+    // Give the stderr drain thread a moment to collect output
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    if let Ok(guard) = process.stderr_buffer.lock() {
+        let stderr = guard.trim();
+        if !stderr.is_empty() {
+            diagnostic = format!("{}\nProcess stderr:\n{}", diagnostic, stderr);
+        }
+    }
+
+    diagnostic
+}
+
 /// Connect to an MCP server
 #[tauri::command]
 pub fn mcp_connect(
@@ -280,16 +350,24 @@ pub fn mcp_connect(
     // so we cannot rely on the OS to find commands that live in /opt/homebrew/bin etc.
     let resolved_command = resolve_command_in_embedded_path(&command);
 
+    log::info!(
+        "[MCP:{}] Connecting: command={:?} (resolved={:?}), args={:?}",
+        server_name,
+        command,
+        resolved_command,
+        args
+    );
+
     let mut cmd = Command::new(&resolved_command);
     cmd.args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null()); // Discard stderr to prevent blocking
+        .stderr(Stdio::piped());
 
     // Inject the embedded runtime PATH so child processes can find bundled node/git
     let embedded_path = embedded_runtime::get_embedded_path();
     if !embedded_path.is_empty() {
-        cmd.env("PATH", embedded_path);
+        cmd.env("PATH", &embedded_path);
     }
 
     if let Some(env_vars) = env {
@@ -298,17 +376,30 @@ pub fn mcp_connect(
         }
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn MCP server: {}", e))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        let msg = format!(
+            "Failed to spawn MCP server '{}': {} (command={:?}, PATH={:?})",
+            server_name, e, resolved_command, embedded_path,
+        );
+        log::error!("[MCP:{}] {}", server_name, msg);
+        msg
+    })?;
 
     let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
     let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+
+    // Pipe stderr to a background drain thread so the child doesn't block on
+    // a full pipe buffer, while still capturing output for diagnostics.
+    let stderr_buffer = match child.stderr.take() {
+        Some(stderr) => spawn_stderr_drain(stderr, server_name.clone()),
+        None => Arc::new(Mutex::new(String::new())),
+    };
 
     let mut process = McpProcess {
         child,
         stdin,
         stdout: BufReader::new(stdout),
+        stderr_buffer,
     };
 
     // Send initialize request
@@ -321,7 +412,11 @@ pub fn mcp_connect(
         },
     };
 
-    let result = send_request(&mut process, "initialize", Some(init_params))?;
+    let result = send_request(&mut process, "initialize", Some(init_params)).map_err(|e| {
+        let diagnostic = collect_process_diagnostics(&mut process, &e);
+        log::error!("[MCP:{}] Initialize failed: {}", server_name, diagnostic);
+        diagnostic
+    })?;
 
     let init_result: McpInitializeResult = serde_json::from_value(result)
         .map_err(|e| format!("Failed to parse init result: {}", e))?;
@@ -333,6 +428,13 @@ pub fn mcp_connect(
     });
     writeln!(process.stdin, "{}", notification).map_err(|e| e.to_string())?;
     process.stdin.flush().map_err(|e| e.to_string())?;
+
+    log::info!(
+        "[MCP:{}] Connected successfully (server: {} v{})",
+        server_name,
+        init_result.server_info.name,
+        init_result.server_info.version
+    );
 
     // Store the process
     state
@@ -479,7 +581,6 @@ use rmcp::ServiceExt;
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// HTTP MCP client for remote servers like mcp.serendb.com
