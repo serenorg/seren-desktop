@@ -14,6 +14,8 @@ const DOCUMENT_EXTENSIONS = ["pdf"];
 
 const DOCREADER_EXTENSIONS = ["doc", "docx", "xls", "xlsx", "ppt", "pptx"];
 
+const VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "avi", "mkv"];
+
 const TEXT_EXTENSIONS = [
   // Plain text & markup
   "txt",
@@ -66,6 +68,7 @@ const ALL_EXTENSIONS = [
   ...IMAGE_EXTENSIONS,
   ...DOCUMENT_EXTENSIONS,
   ...DOCREADER_EXTENSIONS,
+  ...VIDEO_EXTENSIONS,
   ...TEXT_EXTENSIONS,
 ];
 
@@ -85,6 +88,12 @@ const MIME_TYPES: Record<string, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ppt: "application/vnd.ms-powerpoint",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  // Video
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  avi: "video/x-msvideo",
+  mkv: "video/x-matroska",
   // Text & markup
   txt: "text/plain",
   md: "text/markdown",
@@ -153,7 +162,8 @@ export function isDocreaderMime(mimeType: string): boolean {
     mimeType === "application/msword" ||
     mimeType.startsWith("application/vnd.openxmlformats-officedocument") ||
     mimeType === "application/vnd.ms-excel" ||
-    mimeType === "application/vnd.ms-powerpoint"
+    mimeType === "application/vnd.ms-powerpoint" ||
+    mimeType.startsWith("video/")
   );
 }
 
@@ -256,6 +266,10 @@ export async function pickFiles(): Promise<string[]> {
         {
           name: "Office Documents",
           extensions: DOCREADER_EXTENSIONS,
+        },
+        {
+          name: "Video",
+          extensions: VIDEO_EXTENSIONS,
         },
         {
           name: "Text & Code",
