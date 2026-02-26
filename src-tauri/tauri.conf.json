@@ -5,9 +5,9 @@
   "identifier": "com.serendb.desktop",
   "mainBinaryName": "Seren",
   "build": {
-    "beforeDevCommand": "pnpm build:openclaw && pnpm dev",
+    "beforeDevCommand": "pnpm prepare:mcp-servers && pnpm build:openclaw && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build:sidecar:release && pnpm build:openclaw && pnpm sign:embedded-runtime && pnpm build",
+    "beforeBuildCommand": "pnpm prepare:mcp-servers && pnpm build:sidecar:release && pnpm build:openclaw && pnpm sign:embedded-runtime && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -72,7 +72,7 @@
     ],
     "resources": {
       "embedded-runtime/": "embedded-runtime/",
-      "../mcp-servers/playwright-stealth/": "mcp-servers/playwright-stealth/"
+      "mcp-servers/playwright-stealth/": "mcp-servers/playwright-stealth/"
     },
     "macOS": {
       "entitlements": "entitlements.plist",

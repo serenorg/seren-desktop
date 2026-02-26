@@ -182,6 +182,24 @@ struct ClientInfo {
 
 const PLAYWRIGHT_MCP_SCRIPT_RELATIVE_PATH: &str = "mcp-servers/playwright-stealth/dist/index.js";
 
+/// Check that a candidate script path has a usable node_modules directory.
+/// Tauri's resource copier drops pnpm symlinks, leaving node_modules with
+/// only `.pnpm/` internals. Node.js can't resolve packages from that layout.
+fn has_working_node_modules(script_path: &std::path::Path) -> bool {
+    // Walk up from dist/index.js → dist/ → playwright-stealth/
+    let package_dir = match script_path.parent().and_then(|d| d.parent()) {
+        Some(dir) => dir,
+        None => return false,
+    };
+    // Check for a top-level dependency that pnpm symlinks (not inside .pnpm/).
+    // If the symlink was dropped, this directory won't exist.
+    package_dir
+        .join("node_modules")
+        .join("@modelcontextprotocol")
+        .join("sdk")
+        .is_dir()
+}
+
 /// Resolve the bundled/dev Playwright MCP server script to an absolute path.
 #[tauri::command]
 pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
@@ -215,8 +233,20 @@ pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
         );
     }
 
-    for candidate in candidates {
+    for candidate in &candidates {
+        if candidate.exists() && has_working_node_modules(candidate) {
+            return candidate.to_string_lossy().to_string();
+        }
+    }
+
+    // Second pass: accept any candidate where the script exists, even without
+    // verified node_modules (better to attempt and get a clear error than skip).
+    for candidate in &candidates {
         if candidate.exists() {
+            log::warn!(
+                "[MCP] Resolved playwright script at {:?} but node_modules may be broken",
+                candidate
+            );
             return candidate.to_string_lossy().to_string();
         }
     }
