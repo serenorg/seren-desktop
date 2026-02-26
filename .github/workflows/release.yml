@@ -161,6 +161,64 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # ---- Inject publisher plugin (if sidecar binaries were pre-built to R2) ----
+      - name: Check for publisher sidecar binaries
+        id: check_sidecars
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          TARGET="${{ matrix.target }}"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${{ secrets.R2_PUBLIC_URL }}/sidecars/${TAG}/${TARGET}/desktop-mcp-coinbase-trading${EXT}")
+          if [ "$STATUS" = "200" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "Publisher sidecars found for ${TAG}/${TARGET}"
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "No publisher sidecars for ${TAG}/${TARGET} — building OSS-only"
+          fi
+
+      - name: Clone seren-desktop-publishers
+        if: steps.check_sidecars.outputs.found == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: serenorg/seren-desktop-publishers
+          token: ${{ secrets.GH_PAT }}
+          path: seren-desktop-publishers
+
+      - name: Download sidecar binaries from R2
+        if: steps.check_sidecars.outputs.found == 'true'
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          TARGET="${{ matrix.target }}"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+          mkdir -p seren-desktop-mcp/target/release
+          for bin in desktop-mcp-coinbase-trading desktop-mcp-kraken-trading desktop-mcp-polymarket-trading; do
+            curl -fSL -o "seren-desktop-mcp/target/release/${bin}${EXT}" \
+              "${{ secrets.R2_PUBLIC_URL }}/sidecars/${TAG}/${TARGET}/${bin}${EXT}"
+            chmod +x "seren-desktop-mcp/target/release/${bin}${EXT}" 2>/dev/null || true
+            echo "Downloaded: ${bin}${EXT}"
+          done
+
+      - name: Inject publisher plugin
+        if: steps.check_sidecars.outputs.found == 'true'
+        shell: bash
+        run: |
+          bash seren-desktop-publishers/ci/inject-plugin.sh \
+            . \
+            seren-desktop-publishers \
+            seren-desktop-mcp
+
       - name: Prepare embedded runtime (macOS arm64)
         if: matrix.target == 'aarch64-apple-darwin'
         run: pnpm prepare:runtime:darwin-arm64
