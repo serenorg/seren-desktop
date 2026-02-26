@@ -20,6 +20,15 @@ const SIMPLE_PREFERRED_MODELS: &[&str] = &[
     "anthropic/claude-sonnet-4",
 ];
 
+/// Fallback models for context-overflow errors (all have 1M+ token windows).
+/// Tried in order when the primary model rejects a request for exceeding its
+/// context limit (e.g. Claude 4.5 at 200K).
+pub const LARGE_CONTEXT_FALLBACK_MODELS: &[&str] = &[
+    "google/gemini-3.1-pro-preview",
+    "google/gemini-3-flash-preview",
+    "anthropic/claude-opus-4.6",
+];
+
 /// Route a classified task to the appropriate worker.
 ///
 /// Bootstrap routing logic:
@@ -212,6 +221,9 @@ fn humanize_model_id(model_id: &str) -> &str {
         "openai/gpt-5" => "GPT-5",
         "openai/gpt-4o" => "GPT-4o",
         "openai/gpt-4o-mini" => "GPT-4o Mini",
+        "anthropic/claude-opus-4.6" => "Claude Opus 4.6",
+        "anthropic/claude-sonnet-4.6" => "Claude Sonnet 4.6",
+        "google/gemini-3.1-pro-preview" => "Gemini 3.1 Pro",
         "google/gemini-2.5-pro" => "Gemini Pro",
         "google/gemini-2.5-flash" => "Gemini Flash",
         "google/gemini-3-flash-preview" => "Gemini 3 Flash",
@@ -230,6 +242,12 @@ pub const MAX_REROUTE_ATTEMPTS: usize = 2;
 
 /// Check whether an error message indicates a transient failure eligible for reroute.
 pub fn is_reroutable_error(error_message: &str) -> bool {
+    // Context-overflow errors are always reroutable — a larger-context model
+    // can handle them without any changes to the request payload.
+    if is_context_overflow_error(error_message) {
+        return true;
+    }
+
     // Don't reroute auth or client errors
     if error_message.contains("401")
         || error_message.contains("403")
@@ -243,6 +261,21 @@ pub fn is_reroutable_error(error_message: &str) -> bool {
     REROUTABLE_STATUS_CODES
         .iter()
         .any(|code| error_message.contains(&code.to_string()))
+}
+
+/// Check whether an error indicates the prompt exceeded the model's context window.
+pub fn is_context_overflow_error(error_message: &str) -> bool {
+    error_message.contains("prompt is too long")
+        || error_message.contains("context_length_exceeded")
+        || error_message.contains("maximum context length")
+}
+
+/// Pick the first large-context fallback model not yet tried.
+pub fn get_large_context_fallback(tried_models: &[String]) -> Option<&'static str> {
+    LARGE_CONTEXT_FALLBACK_MODELS
+        .iter()
+        .find(|m| !tried_models.contains(&m.to_string()))
+        .copied()
 }
 
 /// Select a fallback model after a transient failure, ranked by satisfaction signals.
@@ -788,6 +821,36 @@ mod tests {
     #[test]
     fn rejects_400_as_not_reroutable() {
         assert!(!is_reroutable_error("HTTP 400: Bad Request"));
+    }
+
+    #[test]
+    fn context_overflow_400_is_reroutable() {
+        assert!(is_reroutable_error(
+            r#"HTTP 400: Provider returned error — {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 205969 tokens > 200000 maximum"}}"#
+        ));
+    }
+
+    #[test]
+    fn context_length_exceeded_is_reroutable() {
+        assert!(is_reroutable_error(
+            "HTTP 400: context_length_exceeded"
+        ));
+    }
+
+    #[test]
+    fn large_context_fallback_picks_first_untried() {
+        let tried = vec!["google/gemini-3.1-pro-preview".to_string()];
+        let fallback = get_large_context_fallback(&tried);
+        assert_eq!(fallback, Some("google/gemini-3-flash-preview"));
+    }
+
+    #[test]
+    fn large_context_fallback_returns_none_when_all_tried() {
+        let tried: Vec<String> = LARGE_CONTEXT_FALLBACK_MODELS
+            .iter()
+            .map(|m| m.to_string())
+            .collect();
+        assert_eq!(get_large_context_fallback(&tried), None);
     }
 
     #[test]

@@ -628,14 +628,25 @@ impl ChatModelWorker {
                             .pointer("/body/error/message")
                             .and_then(|v| v.as_str())
                             .unwrap_or("Gateway API error");
+                        // Include raw provider error when available so the
+                        // orchestrator can detect context-overflow and reroute
+                        // to a large-context model.
+                        let raw_detail = wrapper
+                            .pointer("/body/error/metadata/raw")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let full_error = if raw_detail.is_empty() {
+                            format!("HTTP {}: {}", status, error_msg)
+                        } else {
+                            format!("HTTP {}: {} — {}", status, error_msg, raw_detail)
+                        };
                         log::error!(
-                            "[ChatModelWorker] Non-streaming wrapper error: HTTP {} — {}",
-                            status,
-                            error_msg
+                            "[ChatModelWorker] Non-streaming wrapper error: {}",
+                            full_error,
                         );
                         event_tx
                             .send(WorkerEvent::Error {
-                                message: format!("HTTP {}: {}", status, error_msg),
+                                message: full_error,
                             })
                             .await
                             .map_err(|e| format!("Failed to send error event: {}", e))?;
