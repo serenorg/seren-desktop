@@ -150,7 +150,7 @@ const DEFAULT_SETTINGS: Settings = {
   chatMaxToolIterations: 0,
   // Auto-compact
   autoCompactEnabled: true,
-  autoCompactThreshold: 80,
+  autoCompactThreshold: 85,
   autoCompactPreserveMessages: 10,
   // Editor
   editorFontSize: 14,

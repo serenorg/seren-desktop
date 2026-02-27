@@ -126,6 +126,11 @@ export interface PromptCompleteEvent {
   stopReason: string;
   /** Synthetic completion emitted after load_session history replay. */
   historyReplay?: boolean;
+  /** Agent-forwarded metadata (usage stats, turn count). */
+  meta?: {
+    usage?: { input_tokens?: number; output_tokens?: number };
+    numTurns?: number;
+  };
 }
 
 export interface PermissionOption {

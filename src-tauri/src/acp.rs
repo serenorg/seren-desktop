@@ -2309,12 +2309,18 @@ async fn run_session_worker(
                                 response.stop_reason
                             );
                         }
+                        let mut payload = serde_json::json!({
+                            "sessionId": session_id,
+                            "stopReason": format!("{:?}", response.stop_reason)
+                        });
+                        if let Some(meta) = &response.meta {
+                            if let Ok(meta_val) = serde_json::to_value(meta) {
+                                payload["meta"] = meta_val;
+                            }
+                        }
                         let _ = app.emit(
                             events::PROMPT_COMPLETE,
-                            serde_json::json!({
-                                "sessionId": session_id,
-                                "stopReason": format!("{:?}", response.stop_reason)
-                            }),
+                            payload,
                         );
                         let _ = response_tx.send(Ok(()));
                     }
