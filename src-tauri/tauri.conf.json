@@ -81,6 +81,10 @@
     "windows": {
       "certificateThumbprint": null,
       "timestampUrl": "https://timestamp.digicert.com",
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      },
       "nsis": {
         "installerHooks": "nsis/installer-hooks.nsh"
       }
