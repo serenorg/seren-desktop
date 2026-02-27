@@ -17,6 +17,7 @@ import {
 import { createStore } from "solid-js/store";
 import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
 import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
+import { CompactedMessage } from "@/components/chat/CompactedMessage";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError } from "@/lib/auth-errors";
@@ -26,8 +27,10 @@ import { escapeHtml } from "@/lib/escape-html";
 import { openExternalLink } from "@/lib/external-link";
 import { openFileInTab } from "@/lib/files/service";
 import { formatDurationWithVerb } from "@/lib/format-duration";
-import { isDocreaderMime, pickAndReadAttachments } from "@/lib/images/attachments";
-import { readDocument } from "@/services/docreader";
+import {
+  isDocreaderMime,
+  pickAndReadAttachments,
+} from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
 import {
   getModelDisplayName,
@@ -41,7 +44,12 @@ import {
   launchLogin,
   type ToolCallEvent,
 } from "@/services/acp";
-import { type AgentMessage, acpStore } from "@/stores/acp.store";
+import { readDocument } from "@/services/docreader";
+import {
+  type AgentCompactedSummary,
+  type AgentMessage,
+  acpStore,
+} from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
 import { threadStore } from "@/stores/thread.store";
@@ -422,6 +430,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const compactConversation = async (preserveCount: number) => {
+    const session = acpStore.activeSession;
+    if (!session) return;
+
     const messages = threadMessages();
     if (messages.length <= preserveCount) {
       alert("Not enough messages to compact");
@@ -434,9 +445,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     );
     if (!confirmCompact) return;
 
-    // For now, show a message that this feature is coming soon
-    // TODO: Implement agent conversation compaction
-    alert("Agent conversation compaction coming soon!");
+    await acpStore.compactAgentConversation(session.info.id, preserveCount);
   };
 
   const executeSlashCommand = (trimmed: string) => {
@@ -851,15 +860,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         <div class="flex items-center justify-end gap-2 px-4 py-2 border-b border-surface-3">
           <button
             type="button"
-            class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
+            class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() =>
               compactConversation(
                 settingsStore.get("autoCompactPreserveMessages"),
               )
             }
-            title="Compact older messages"
+            disabled={acpStore.activeSession?.isCompacting}
+            title={
+              acpStore.activeSession?.isCompacting
+                ? "Compacting..."
+                : "Compact older messages"
+            }
           >
-            Compact
+            {acpStore.activeSession?.isCompacting ? "Compacting..." : "Compact"}
           </button>
           <button
             type="button"
@@ -1060,6 +1074,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               </div>
             }
           >
+            {/* Compacted summary from previous messages */}
+            <Show when={acpStore.activeSession?.compactedSummary}>
+              {(summary) => (
+                <CompactedMessage
+                  summary={summary() as AgentCompactedSummary}
+                />
+              )}
+            </Show>
+
             <For each={groupConsecutiveToolCalls()}>
               {(item) => {
                 if (item.type === "tool_group") {
@@ -1431,7 +1454,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     <button
                       type="submit"
                       class="px-4 py-1.5 bg-success text-white rounded-md text-[13px] font-medium hover:bg-emerald-700 transition-colors disabled:bg-surface-2 disabled:text-muted-foreground disabled:cursor-not-allowed"
-                      disabled={!hasSession() || !input().trim() || isProcessingDocs()}
+                      disabled={
+                        !hasSession() || !input().trim() || isProcessingDocs()
+                      }
                     >
                       Send
                     </button>

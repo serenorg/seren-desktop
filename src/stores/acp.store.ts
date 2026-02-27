@@ -48,11 +48,18 @@ import type {
   ToolCallEvent,
 } from "@/services/acp";
 import * as acpService from "@/services/acp";
+import { sendMessage } from "@/services/chat";
 import { telemetry } from "@/services/telemetry";
 
 // ============================================================================
 // Types
 // ============================================================================
+
+export interface AgentCompactedSummary {
+  content: string;
+  originalMessageCount: number;
+  compactedAt: number;
+}
 
 export interface AgentMessage {
   id: string;
@@ -126,6 +133,14 @@ export interface ActiveSession {
    *  Set when the session was spawned with restored messages from SQLite,
    *  cleared when the replay phase ends (promptComplete with historyReplay). */
   skipHistoryReplay?: boolean;
+  /** Most recent input_tokens from the agent's usage metadata. */
+  lastInputTokens?: number;
+  /** Context window size for the agent model (tokens). */
+  contextWindowSize: number;
+  /** When true, a compaction is in progress. */
+  isCompacting?: boolean;
+  /** Compacted summary from older messages. */
+  compactedSummary?: AgentCompactedSummary;
 }
 
 // ============================================================================
@@ -816,6 +831,7 @@ export const acpStore = {
         // pollution (the backend replays the full context including injected
         // skill text as user messages).
         skipHistoryReplay: hasRestoredMessages ? true : undefined,
+        contextWindowSize: resolvedAgentType === "codex" ? 200_000 : 200_000,
       };
 
       setState("sessions", info.id, session);
@@ -1264,6 +1280,95 @@ export const acpStore = {
     clearConversationHistory(session.conversationId).catch((err) =>
       console.error("[AcpStore] Failed to clear persisted messages:", err),
     );
+  },
+
+  /**
+   * Compact an agent conversation: generate a summary of older messages via
+   * Gateway API, terminate the current agent session, and spawn a fresh one
+   * seeded with the summary. The user stays in the same conversation.
+   */
+  async compactAgentConversation(
+    sessionId: string,
+    preserveCount: number,
+  ): Promise<void> {
+    const session = state.sessions[sessionId];
+    if (!session || session.isCompacting) return;
+
+    const messages = session.messages;
+    if (messages.length <= preserveCount) {
+      console.info("[AcpStore] Not enough messages to compact");
+      return;
+    }
+
+    setState("sessions", sessionId, "isCompacting", true);
+
+    try {
+      // Split messages into those to summarize and those to keep
+      const toCompact = messages.slice(0, messages.length - preserveCount);
+      const toPreserve = messages.slice(-preserveCount);
+
+      // Generate summary via Gateway API (not via the agent — its context is
+      // what's overloaded). Uses the default Seren Chat model.
+      const summaryPrompt = `Please provide a concise summary of the following AI coding agent conversation. Focus on: what tasks were requested, what files were modified, key decisions made, and current state of the work. Keep the summary under 500 words.
+
+Conversation to summarize:
+${toCompact.map((m) => `${m.type.toUpperCase()}: ${m.content}`).join("\n\n")}
+
+Summary:`;
+
+      const summaryModel = "anthropic/claude-sonnet-4";
+      const summary = await sendMessage(summaryPrompt, summaryModel);
+
+      const compactedSummary: AgentCompactedSummary = {
+        content: summary,
+        originalMessageCount: toCompact.length,
+        compactedAt: Date.now(),
+      };
+
+      // Capture session details before termination
+      const cwd = session.cwd;
+      const agentType = session.info.agentType;
+      const conversationId = session.conversationId;
+
+      // Terminate the old agent session
+      await this.terminateSession(sessionId);
+
+      // Spawn a new agent session with the same conversation
+      const newSessionId = await this.spawnSession(cwd, agentType, {
+        localSessionId: conversationId,
+      });
+
+      if (!newSessionId) {
+        console.error(
+          "[AcpStore] Failed to spawn new session after compaction",
+        );
+        return;
+      }
+
+      // Store compacted summary and preserved messages on the new session
+      setState("sessions", newSessionId, "compactedSummary", compactedSummary);
+      setState("sessions", newSessionId, "messages", toPreserve);
+
+      // Seed the new agent with the summary so it has context
+      console.info(
+        `[AcpStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}. Seeding new session.`,
+      );
+
+      const seedPrompt = `Here is a summary of our prior conversation:\n\n${summary}\n\nContinue from where we left off. The user may send a new message shortly.`;
+
+      // Wait for the new session to be ready, then send the seed prompt
+      const readyEntry = sessionReadyPromises.get(newSessionId);
+      if (readyEntry) {
+        await readyEntry.promise;
+      }
+      await acpService.sendPrompt(newSessionId, seedPrompt);
+    } catch (error) {
+      console.error("[AcpStore] Failed to compact agent conversation:", error);
+      // If the original session still exists, clear compacting flag
+      if (state.sessions[sessionId]) {
+        setState("sessions", sessionId, "isCompacting", false);
+      }
+    }
   },
 
   /**
@@ -1898,6 +2003,19 @@ export const acpStore = {
         if (!isHistoryReplay) {
           this.markPendingToolCallsComplete(sessionId);
         }
+
+        // Track agent usage metadata for compaction decisions
+        if (!isHistoryReplay && event.data.meta) {
+          const inputTokens = event.data.meta.usage?.input_tokens;
+          if (inputTokens != null) {
+            setState("sessions", sessionId, "lastInputTokens", inputTokens);
+            console.log(
+              `[AcpStore] Agent usage: ${inputTokens} input tokens`,
+              `(${Math.round((inputTokens / (state.sessions[sessionId]?.contextWindowSize ?? 200_000)) * 100)}% of context)`,
+            );
+          }
+        }
+
         // Transition status back to "ready" so queued messages can be processed
         setState(
           "sessions",
@@ -1906,6 +2024,27 @@ export const acpStore = {
           "status",
           "ready" as SessionStatus,
         );
+
+        // Auto-compact check: trigger compaction at 85% of context window
+        if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
+          const sess = state.sessions[sessionId];
+          if (
+            sess?.lastInputTokens &&
+            settingsStore.settings.autoCompactEnabled
+          ) {
+            const usagePercent = sess.lastInputTokens / sess.contextWindowSize;
+            const threshold = settingsStore.settings.autoCompactThreshold / 100;
+            if (usagePercent >= threshold) {
+              console.info(
+                `[AcpStore] Context usage at ${Math.round(usagePercent * 100)}% — triggering auto-compaction`,
+              );
+              this.compactAgentConversation(
+                sessionId,
+                settingsStore.settings.autoCompactPreserveMessages,
+              );
+            }
+          }
+        }
         break;
       }
 
