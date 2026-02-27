@@ -105,9 +105,9 @@ export const X402PaymentApproval: Component = () => {
         icon: "🔐",
         balance: configured
           ? `${cryptoWalletStore.state().address?.slice(0, 10)}...`
-          : "Not configured",
+          : "Not connected",
         available: configured,
-        reason: configured ? undefined : "Wallet not configured",
+        reason: configured ? undefined : "Wallet not connected",
       });
     }
 
@@ -245,7 +245,8 @@ export const X402PaymentApproval: Component = () => {
                 <Show when={selectedMethod() === "crypto"}>
                   <p class="m-0 p-3 bg-warning/10 border border-warning/30 rounded-lg text-[0.85rem] text-warning/85 leading-relaxed">
                     This payment will be signed with your crypto wallet and
-                    submitted to {p().chainName}.
+                    submitted to {p().chainName}. Your wallet will prompt you to
+                    confirm the signature.
                   </p>
                 </Show>
 

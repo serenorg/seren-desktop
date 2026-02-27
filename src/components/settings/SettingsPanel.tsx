@@ -1,7 +1,14 @@
 // ABOUTME: Settings panel UI for managing user preferences.
 // ABOUTME: Provides controls for editor, wallet, theme, and MCP settings.
 
-import { type Component, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import {
+  type Component,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
@@ -45,7 +52,6 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const [activeSection, setActiveSection] =
     createSignal<SettingsSection>("chat");
   const [showResetConfirm, setShowResetConfirm] = createSignal(false);
-  const [privateKeyInput, setPrivateKeyInput] = createSignal("");
   const [showClearConfirm, setShowClearConfirm] = createSignal(false);
 
   const handleNumberChange = (key: keyof Settings, value: string) => {
@@ -93,26 +99,13 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     await toggleMcpServer(name);
   };
 
-  const handleSavePrivateKey = async () => {
-    const key = privateKeyInput().trim();
-    if (!key) return;
-
-    try {
-      await cryptoWalletStore.storeKey(key);
-      setPrivateKeyInput("");
-    } catch {
-      // Error is handled by the store
-    }
+  const handleConnectWallet = async () => {
+    await cryptoWalletStore.connectWallet();
   };
 
   const handleClearCryptoWallet = async () => {
     await cryptoWalletStore.clearWallet();
     setShowClearConfirm(false);
-  };
-
-  const isValidPrivateKeyFormat = (key: string): boolean => {
-    const cleaned = key.startsWith("0x") ? key.slice(2) : key;
-    return /^[0-9a-fA-F]{64}$/.test(cleaned);
   };
 
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
@@ -816,52 +809,23 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
                   <label class="flex flex-col gap-0.5 flex-1">
                     <span class="text-[0.95rem] font-medium text-foreground">
-                      Private Key
+                      Connect Wallet
                     </span>
                     <span class="text-[0.8rem] text-muted-foreground">
-                      Enter your wallet private key (64 hex characters)
+                      Connect your crypto wallet for USDC payments
                     </span>
                   </label>
-                  <div class="flex flex-col gap-2 w-full max-w-md">
-                    <div class="flex gap-2">
-                      <input
-                        type="password"
-                        placeholder="0x... or 64 hex characters"
-                        value={privateKeyInput()}
-                        onInput={(e) =>
-                          setPrivateKeyInput(e.currentTarget.value)
-                        }
-                        class={`flex-1 px-3 py-2.5 bg-surface-3/80 border rounded-md text-foreground text-[0.9rem] font-mono focus:outline-none focus:border-accent ${
-                          privateKeyInput() &&
-                          !isValidPrivateKeyFormat(privateKeyInput())
-                            ? "border-destructive"
-                            : "border-border-strong"
-                        }`}
-                      />
-                      <button
-                        type="button"
-                        class="px-5 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 whitespace-nowrap hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled={
-                          !isValidPrivateKeyFormat(privateKeyInput()) ||
-                          cryptoWalletStore.state().isLoading
-                        }
-                        onClick={handleSavePrivateKey}
-                      >
-                        {cryptoWalletStore.state().isLoading
-                          ? "Saving..."
-                          : "Save"}
-                      </button>
-                    </div>
-                    <Show
-                      when={
-                        privateKeyInput() &&
-                        !isValidPrivateKeyFormat(privateKeyInput())
-                      }
+                  <div class="flex flex-col gap-2 items-end">
+                    <button
+                      type="button"
+                      class="px-5 py-2.5 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 whitespace-nowrap hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={cryptoWalletStore.state().isLoading}
+                      onClick={handleConnectWallet}
                     >
-                      <span class="text-[0.8rem] text-destructive">
-                        Invalid key format. Must be 64 hex characters.
-                      </span>
-                    </Show>
+                      {cryptoWalletStore.state().isLoading
+                        ? "Connecting..."
+                        : "Connect Wallet"}
+                    </button>
                     <Show when={cryptoWalletStore.state().error}>
                       <span class="text-[0.8rem] text-destructive">
                         {cryptoWalletStore.state().error}
@@ -890,7 +854,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                       class="px-4 py-2.5 bg-transparent border border-destructive/50 rounded-md text-destructive text-[0.9rem] cursor-pointer transition-all duration-150 whitespace-nowrap hover:bg-destructive/10 hover:border-destructive"
                       onClick={() => setShowClearConfirm(true)}
                     >
-                      Remove Wallet
+                      Disconnect Wallet
                     </button>
                   </div>
                 </div>
@@ -1536,10 +1500,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             class="bg-popover border border-border-strong rounded-xl p-6 max-w-[400px] w-[90%]"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 class="m-0 mb-3 text-[1.1rem]">Remove Crypto Wallet?</h3>
+            <h3 class="m-0 mb-3 text-[1.1rem]">Disconnect Wallet?</h3>
             <p class="m-0 mb-5 text-muted-foreground leading-normal">
-              This will delete your private key from this device. You will need
-              to re-enter it to make USDC payments.
+              This will disconnect your crypto wallet. You can reconnect at any
+              time.
             </p>
             <div class="flex justify-end gap-2">
               <button
@@ -1554,7 +1518,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 class="px-4 py-2 bg-destructive border-none rounded-md text-white text-[0.9rem] cursor-pointer transition-all duration-150 hover:bg-destructive/85"
                 onClick={handleClearCryptoWallet}
               >
-                Remove Wallet
+                Disconnect
               </button>
             </div>
           </div>

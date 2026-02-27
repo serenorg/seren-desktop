@@ -3,6 +3,7 @@
 
 export {
   formatUsdcAmount,
+  getChainId,
   getChainName,
   getX402Option,
   hasX402Option,

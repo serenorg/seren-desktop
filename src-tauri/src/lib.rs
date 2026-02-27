@@ -715,11 +715,6 @@ pub fn run() {
             mcp::mcp_call_tool_http,
             mcp::mcp_is_connected_http,
             mcp::mcp_list_connected_http,
-            wallet::commands::store_crypto_private_key,
-            wallet::commands::get_crypto_wallet_address,
-            wallet::commands::clear_crypto_wallet,
-            wallet::commands::sign_x402_payment,
-            wallet::commands::get_crypto_usdc_balance,
             // Polymarket CLOB API authentication commands
             polymarket::commands::store_polymarket_credentials,
             polymarket::commands::get_polymarket_address,

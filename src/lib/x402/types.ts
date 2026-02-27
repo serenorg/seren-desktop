@@ -195,6 +195,35 @@ export function formatUsdcAmount(amountRaw: string): string {
 }
 
 /**
+ * Get numeric chain ID from a network identifier.
+ * Supports "eip155:NNNN" format and named networks.
+ * Returns null if the network is not recognized.
+ */
+export function getChainId(network: string): number | null {
+  if (network.startsWith("eip155:")) {
+    const id = Number.parseInt(network.slice(7), 10);
+    return Number.isNaN(id) ? null : id;
+  }
+
+  switch (network) {
+    case "base":
+      return 8453;
+    case "base-sepolia":
+      return 84532;
+    case "ethereum":
+      return 1;
+    case "ethereum-sepolia":
+      return 11155111;
+    case "avalanche":
+      return 43114;
+    case "avalanche-fuji":
+      return 43113;
+    default:
+      return null;
+  }
+}
+
+/**
  * Get chain name from network identifier.
  */
 export function getChainName(network: string): string {
