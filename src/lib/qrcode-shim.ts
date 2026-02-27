@@ -8,5 +8,5 @@ import qrcode from "../../node_modules/qrcode/lib/browser.js";
 export const create = qrcode.create;
 export const toCanvas = qrcode.toCanvas;
 export const toDataURL = qrcode.toDataURL;
-export const toString = qrcode.toString;
+export const toStr = qrcode.toString;
 export default qrcode;

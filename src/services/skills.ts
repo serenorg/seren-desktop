@@ -245,7 +245,7 @@ async function fetchRepoSkillPayloadFiles(
 
   const results = await Promise.allSettled(
     siblingFiles.map(async (node): Promise<ExtraFile | null> => {
-      const filePath = node.path!;
+      const filePath = node.path ?? "";
       const relativePath = filePath.slice(dirPrefix.length);
       const segments = filePath
         .split("/")
