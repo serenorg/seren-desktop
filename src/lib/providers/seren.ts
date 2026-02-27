@@ -21,10 +21,10 @@ const PUBLISHER_SLUG = "seren-models";
 
 /**
  * User-friendly error message for credits/payment issues.
- * Hides technical OpenRouter details from end users.
+ * Contains "Insufficient" keyword so isPaymentError() detects it.
  */
 const CREDITS_ERROR_MESSAGE =
-  "SerenModels is not available currently. Please contact the Seren team at hello@serendb.com with this alert.";
+  "Insufficient SerenBucks balance. Please add funds to continue.";
 
 /**
  * Check if an error status indicates a credits/payment issue.
