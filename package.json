@@ -57,6 +57,7 @@
     "marked": "^17.0.3",
     "monaco-editor": "^0.55.1",
     "pdfjs-dist": "^5.4.624",
+    "qrcode": "^1.5.4",
     "solid-js": "^1.9.3",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "4",

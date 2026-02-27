@@ -14,12 +14,14 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),
+      // Shim qrcode CJS → ESM for Thirdweb's dynamic import("qrcode")
+      qrcode: resolve(__dirname, "src/lib/qrcode-shim.ts"),
     },
   },
 
   // Optimize Monaco Editor
   optimizeDeps: {
-    include: ["monaco-editor"],
+    include: ["monaco-editor", "qrcode"],
   },
 
   // Build configuration for Monaco workers
