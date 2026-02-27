@@ -83,7 +83,9 @@ pub fn start_watching(app: AppHandle, path: String) -> Result<(), String> {
     // Create watcher
     let watcher = RecommendedWatcher::new(
         move |res| {
-            let _ = event_tx.send(res);
+            if let Err(e) = event_tx.send(res) {
+                log::warn!("[Sync] Event channel closed, file change dropped: {}", e);
+            }
         },
         Config::default(),
     )
