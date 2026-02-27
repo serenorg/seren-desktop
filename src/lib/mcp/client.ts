@@ -88,11 +88,11 @@ function createMcpClient() {
         env: env || null,
       });
 
-      // Fetch tools and resources
-      const [tools, resources] = await Promise.all([
-        listTools(serverName),
-        listResources(serverName),
-      ]);
+      // Fetch tools (always) and resources (only if server announced capability)
+      const tools = await listTools(serverName);
+      const resources = result.capabilities?.resources
+        ? await listResources(serverName)
+        : [];
 
       // Update connection state
       setConnections((prev) => {
