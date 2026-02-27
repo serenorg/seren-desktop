@@ -16,6 +16,7 @@ import {
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
+import { DepositModal } from "@/components/wallet/DepositModal";
 import { isAuthError } from "@/lib/auth-errors";
 import { getCompletions, parseCommand } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
@@ -23,6 +24,7 @@ import { openExternalLink } from "@/lib/external-link";
 import { openFileInTab } from "@/lib/files/service";
 import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
+import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
@@ -183,6 +185,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // Message queue for sending messages while streaming
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   const [showSignInPrompt, setShowSignInPrompt] = createSignal(false);
+  const [showDepositFromError, setShowDepositFromError] = createSignal(false);
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [isAttaching, setIsAttaching] = createSignal(false);
   let inputRef: HTMLTextAreaElement | undefined;
@@ -461,12 +464,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // Event handler for setting chat input (e.g., from skill invocation)
   const handleSetChatInput = (event: Event) => {
     const customEvent = event as CustomEvent<
-      string | {
-        text: string;
-        autoSend?: boolean;
-        skipAuthGate?: boolean;
-        command?: string;
-      }
+      | string
+      | {
+          text: string;
+          autoSend?: boolean;
+          skipAuthGate?: boolean;
+          command?: string;
+        }
     >;
     const detail = customEvent.detail;
 
@@ -552,7 +556,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             ". Discord login flow launched. Complete the prompt, then run /discord again.";
         } catch (loginError) {
           const loginMessage =
-            loginError instanceof Error ? loginError.message : String(loginError);
+            loginError instanceof Error
+              ? loginError.message
+              : String(loginError);
           statusMessage += `.\n\nCould not launch Discord login automatically (${loginMessage}).`;
           statusMessage +=
             " You can still connect manually in Settings > OpenClaw when needed.";
@@ -578,7 +584,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     setCommandStatus("Started Discord setup in chat-only mode.");
   };
 
-  const sendMessage = async (opts?: { skipAuthGate?: boolean; command?: string }) => {
+  const sendMessage = async (opts?: {
+    skipAuthGate?: boolean;
+    command?: string;
+  }) => {
     const trimmed = input().trim();
     const images = attachedImages();
     if (!trimmed && images.length === 0) return;
@@ -1054,62 +1063,103 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                         </div>
                       </Show>
                       <Show when={message.status === "error"}>
-                        <div class="mt-2 px-2 py-1.5 bg-destructive/10 border border-destructive/40 rounded flex items-center gap-2 text-xs text-destructive">
-                          <Show
-                            when={!isAuthError(message.error)}
-                            fallback={
-                              <>
+                        <Show
+                          when={!isPaymentError(message.error)}
+                          fallback={
+                            <div class="mt-2 px-2 py-1.5 bg-warning/10 border border-warning/30 rounded flex items-center gap-2 text-xs text-foreground">
+                              <span>Insufficient SerenBucks balance.</span>
+                              <button
+                                type="button"
+                                class="bg-transparent border border-warning/40 text-warning px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-warning/15 font-medium"
+                                onClick={() => setShowDepositFromError(true)}
+                              >
+                                Top Up
+                              </button>
+                              <Show when={message.request}>
+                                <button
+                                  type="button"
+                                  class="bg-transparent border border-warning/40 text-warning px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-warning/15"
+                                  onClick={() => handleManualRetry(message)}
+                                >
+                                  Retry
+                                </button>
+                              </Show>
+                              <Show
+                                when={
+                                  !message.request &&
+                                  message.workerType === "orchestrator"
+                                }
+                              >
+                                <button
+                                  type="button"
+                                  class="bg-transparent border border-warning/40 text-warning px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-warning/15"
+                                  onClick={() => retryOrchestration()}
+                                >
+                                  Retry
+                                </button>
+                              </Show>
+                            </div>
+                          }
+                        >
+                          <div class="mt-2 px-2 py-1.5 bg-destructive/10 border border-destructive/40 rounded flex items-center gap-2 text-xs text-destructive">
+                            <Show
+                              when={!isAuthError(message.error)}
+                              fallback={
+                                <>
+                                  <span>
+                                    Session expired. Please sign in to continue.
+                                  </span>
+                                  <button
+                                    type="button"
+                                    class="bg-transparent border border-destructive/40 text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-destructive/15"
+                                    onClick={() => setShowSignInPrompt(true)}
+                                  >
+                                    Sign In
+                                  </button>
+                                </>
+                              }
+                            >
+                              <span>{message.error ?? "Message failed"}</span>
+                              <Show
+                                when={
+                                  chatStore.retryingMessageId === message.id
+                                }
+                              >
                                 <span>
-                                  Session expired. Please sign in to continue.
+                                  Retrying (
+                                  {Math.min(
+                                    message.attemptCount ?? 1,
+                                    CHAT_MAX_RETRIES,
+                                  )}
+                                  /{CHAT_MAX_RETRIES})…
                                 </span>
+                              </Show>
+                              <Show when={message.request}>
                                 <button
                                   type="button"
                                   class="bg-transparent border border-destructive/40 text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-destructive/15"
-                                  onClick={() => setShowSignInPrompt(true)}
+                                  onClick={() => handleManualRetry(message)}
                                 >
-                                  Sign In
+                                  Retry
                                 </button>
-                              </>
-                            }
-                          >
-                            <span>{message.error ?? "Message failed"}</span>
-                            <Show
-                              when={chatStore.retryingMessageId === message.id}
-                            >
-                              <span>
-                                Retrying (
-                                {Math.min(
-                                  message.attemptCount ?? 1,
-                                  CHAT_MAX_RETRIES,
-                                )}
-                                /{CHAT_MAX_RETRIES})…
-                              </span>
-                            </Show>
-                            <Show when={message.request}>
-                              <button
-                                type="button"
-                                class="bg-transparent border border-destructive/40 text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-destructive/15"
-                                onClick={() => handleManualRetry(message)}
+                              </Show>
+                              <Show
+                                when={
+                                  !message.request &&
+                                  message.workerType === "orchestrator"
+                                }
                               >
-                                Retry
-                              </button>
+                                <button
+                                  type="button"
+                                  class="bg-transparent border border-destructive/40 text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-destructive/15"
+                                  onClick={() => retryOrchestration()}
+                                >
+                                  Retry
+                                </button>
+                              </Show>
                             </Show>
-                            <Show
-                              when={
-                                !message.request &&
-                                message.workerType === "orchestrator"
-                              }
-                            >
-                              <button
-                                type="button"
-                                class="bg-transparent border border-destructive/40 text-destructive px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-destructive/15"
-                                onClick={() => retryOrchestration()}
-                              >
-                                Retry
-                              </button>
-                            </Show>
-                          </Show>
-                        </div>
+                          </div>
+                        </Show>
                       </Show>
                     </article>
                   </Show>
@@ -1418,6 +1468,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             </div>
           </form>
         </div>
+      </Show>
+      <Show when={showDepositFromError()}>
+        <DepositModal onClose={() => setShowDepositFromError(false)} />
       </Show>
     </section>
   );
