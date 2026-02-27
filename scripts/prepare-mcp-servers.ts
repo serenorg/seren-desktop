@@ -10,27 +10,6 @@ const SOURCE = path.join(ROOT, "mcp-servers", "playwright-stealth");
 const DEST_PARENT = path.join(ROOT, "src-tauri", "mcp-servers");
 const DEST = path.join(DEST_PARENT, "playwright-stealth");
 
-// Helper to copy directory recursively, dereferencing symlinks
-function copyDirDeref(src: string, dest: string): void {
-	fs.mkdirSync(dest, { recursive: true });
-
-	const entries = fs.readdirSync(src, { withFileTypes: true });
-	for (const entry of entries) {
-		const srcPath = path.join(src, entry.name);
-		const destPath = path.join(dest, entry.name);
-
-		// Resolve symlinks to get the real path
-		const realPath = fs.realpathSync(srcPath);
-		const stat = fs.statSync(realPath);
-
-		if (stat.isDirectory()) {
-			copyDirDeref(realPath, destPath);
-		} else {
-			fs.copyFileSync(realPath, destPath);
-		}
-	}
-}
-
 // Main
 console.log("Preparing MCP servers...");
 
@@ -47,8 +26,13 @@ if (fs.existsSync(DEST_PARENT)) {
 	fs.rmSync(DEST_PARENT, { recursive: true, force: true });
 }
 
-// 3. Copy with symlink dereferencing
+// 3. Copy with symlink dereferencing using Node.js native cpSync
+// The dereference option follows symlinks and copies the actual files
 console.log("Copying with symlink dereferencing...");
-copyDirDeref(SOURCE, DEST);
+fs.cpSync(SOURCE, DEST, {
+	recursive: true,
+	dereference: true,
+	verbatimSymlinks: false,
+});
 
 console.log("MCP servers prepared successfully.");
