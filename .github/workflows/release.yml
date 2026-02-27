@@ -162,11 +162,31 @@ jobs:
         run: pnpm install
 
       # ---- Inject publisher plugin (if sidecar binaries were pre-built to R2) ----
-      - name: Check for publisher sidecar binaries
-        id: check_sidecars
+      # Publisher sidecars are keyed by publisherVersion from package.json,
+      # NOT by the desktop release tag. This decouples publisher builds from
+      # the desktop release cycle — only rebuild when publisher code changes.
+      - name: Read publisher version from package.json
+        id: publisher_version
         shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          PUB_VERSION=$(node -e "
+            const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8'));
+            console.log(pkg.publisherVersion || '');
+          ")
+          if [ -z "$PUB_VERSION" ]; then
+            echo "No publisherVersion in package.json — skipping publisher injection"
+            echo "version=" >> $GITHUB_OUTPUT
+          else
+            echo "Publisher version: $PUB_VERSION"
+            echo "version=$PUB_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for publisher sidecar binaries
+        id: check_sidecars
+        if: steps.publisher_version.outputs.version != ''
+        shell: bash
+        run: |
+          PUB_VERSION="${{ steps.publisher_version.outputs.version }}"
           TARGET="${{ matrix.target }}"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             EXT=".exe"
@@ -174,13 +194,13 @@ jobs:
             EXT=""
           fi
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "${{ secrets.R2_PUBLIC_URL }}/sidecars/${TAG}/${TARGET}/desktop-mcp-coinbase-trading${EXT}")
+            "${{ secrets.R2_PUBLIC_URL }}/sidecars/publishers/${PUB_VERSION}/${TARGET}/desktop-mcp-coinbase-trading${EXT}")
           if [ "$STATUS" = "200" ]; then
             echo "found=true" >> $GITHUB_OUTPUT
-            echo "Publisher sidecars found for ${TAG}/${TARGET}"
+            echo "Publisher sidecars found for publishers/${PUB_VERSION}/${TARGET}"
           else
             echo "found=false" >> $GITHUB_OUTPUT
-            echo "No publisher sidecars for ${TAG}/${TARGET} — building OSS-only"
+            echo "No publisher sidecars for publishers/${PUB_VERSION}/${TARGET} — building OSS-only"
           fi
 
       - name: Clone seren-desktop-publishers
@@ -195,7 +215,7 @@ jobs:
         if: steps.check_sidecars.outputs.found == 'true'
         shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          PUB_VERSION="${{ steps.publisher_version.outputs.version }}"
           TARGET="${{ matrix.target }}"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             EXT=".exe"
@@ -205,7 +225,7 @@ jobs:
           mkdir -p seren-desktop-mcp/target/release
           for bin in desktop-mcp-coinbase-trading desktop-mcp-kraken-trading desktop-mcp-polymarket-trading; do
             curl -fSL -o "seren-desktop-mcp/target/release/${bin}${EXT}" \
-              "${{ secrets.R2_PUBLIC_URL }}/sidecars/${TAG}/${TARGET}/${bin}${EXT}"
+              "${{ secrets.R2_PUBLIC_URL }}/sidecars/publishers/${PUB_VERSION}/${TARGET}/${bin}${EXT}"
             chmod +x "seren-desktop-mcp/target/release/${bin}${EXT}" 2>/dev/null || true
             echo "Downloaded: ${bin}${EXT}"
           done

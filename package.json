@@ -73,6 +73,7 @@
     "vite-plugin-solid": "^2.11.0",
     "vitest": "^4.0.18"
   },
+  "publisherVersion": "v1.0.0",
   "sidecars": {
     "seren-acp-claude": {
       "name": "Claude Code",

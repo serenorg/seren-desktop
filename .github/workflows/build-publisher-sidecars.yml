@@ -1,0 +1,136 @@
+# ABOUTME: Builds publisher MCP sidecars and uploads to R2 for release injection.
+# ABOUTME: Run manually when publisher code changes — decouples from desktop release cycle.
+
+name: Build Publisher Sidecars
+
+on:
+  workflow_dispatch:
+    inputs:
+      publisher_version:
+        description: 'Publisher version tag (e.g., v1.0.0). Must match publisherVersion in package.json.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-publisher-sidecars-${{ github.event.inputs.publisher_version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macOS-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: macOS-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: Windows-x64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            name: Linux-x64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Validate version format
+        shell: bash
+        run: |
+          VERSION="${{ github.event.inputs.publisher_version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: publisher_version must match vX.Y.Z format (got: $VERSION)"
+            exit 1
+          fi
+
+      - name: Clone seren-desktop-mcp
+        uses: actions/checkout@v6
+        with:
+          repository: serenorg/seren-desktop-mcp
+          token: ${{ secrets.GH_PAT }}
+          path: seren-desktop-mcp
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: publisher-${{ matrix.target }}
+          workspaces: 'seren-desktop-mcp'
+
+      - name: Install dependencies (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build publisher sidecars
+        shell: bash
+        run: |
+          cd seren-desktop-mcp
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload to R2
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          VERSION="${{ github.event.inputs.publisher_version }}"
+          TARGET="${{ matrix.target }}"
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+
+          for bin in desktop-mcp-coinbase-trading desktop-mcp-kraken-trading desktop-mcp-polymarket-trading; do
+            SRC="seren-desktop-mcp/target/${TARGET}/release/${bin}${EXT}"
+            DEST="s3://${R2_BUCKET}/sidecars/publishers/${VERSION}/${TARGET}/${bin}${EXT}"
+
+            if [ ! -f "$SRC" ]; then
+              echo "WARNING: ${bin}${EXT} not found at ${SRC}, skipping"
+              continue
+            fi
+
+            aws s3 cp "$SRC" "$DEST" --endpoint-url="${AWS_ENDPOINT_URL}"
+            echo "Uploaded: sidecars/publishers/${VERSION}/${TARGET}/${bin}${EXT}"
+          done
+
+      - name: Verify uploads
+        shell: bash
+        env:
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+        run: |
+          VERSION="${{ github.event.inputs.publisher_version }}"
+          TARGET="${{ matrix.target }}"
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            EXT=".exe"
+          else
+            EXT=""
+          fi
+
+          echo "Verifying uploads for ${VERSION}/${TARGET}..."
+          for bin in desktop-mcp-coinbase-trading desktop-mcp-kraken-trading desktop-mcp-polymarket-trading; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "${R2_PUBLIC_URL}/sidecars/publishers/${VERSION}/${TARGET}/${bin}${EXT}")
+            if [ "$STATUS" = "200" ]; then
+              echo "  OK: ${bin}${EXT}"
+            else
+              echo "  FAIL: ${bin}${EXT} (HTTP ${STATUS})"
+              exit 1
+            fi
+          done
+          echo "All uploads verified for ${TARGET}"
