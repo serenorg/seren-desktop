@@ -1,5 +1,5 @@
 // ABOUTME: Cross-platform script to prepare MCP servers for bundling.
-// ABOUTME: Copies mcp-servers to src-tauri, dereferencing pnpm symlinks.
+// ABOUTME: Uses pnpm node-linker=hoisted to create flat node_modules without symlinks.
 
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -13,26 +13,30 @@ const DEST = path.join(DEST_PARENT, "playwright-stealth");
 // Main
 console.log("Preparing MCP servers...");
 
-// 1. Install and build playwright-stealth
-console.log("Installing dependencies...");
-execSync("pnpm install --frozen-lockfile", { cwd: SOURCE, stdio: "inherit" });
+// 1. Clean existing node_modules to ensure fresh hoisted install
+const nodeModules = path.join(SOURCE, "node_modules");
+if (fs.existsSync(nodeModules)) {
+	console.log("Cleaning existing node_modules...");
+	fs.rmSync(nodeModules, { recursive: true, force: true });
+}
+
+// 2. Install with node-linker=hoisted to create flat node_modules WITHOUT symlinks
+// This is the documented solution for bundled apps (Electron, Tauri) on Windows
+// See: https://pnpm.io/blog/2020/10/17/node-modules-configuration-options-with-pnpm
+console.log("Installing dependencies with hoisted node-linker (no symlinks)...");
+execSync("pnpm install --node-linker=hoisted", { cwd: SOURCE, stdio: "inherit" });
 
 console.log("Building...");
 execSync("pnpm build", { cwd: SOURCE, stdio: "inherit" });
 
-// 2. Clean destination
+// 3. Clean destination
 if (fs.existsSync(DEST_PARENT)) {
 	console.log("Cleaning destination...");
 	fs.rmSync(DEST_PARENT, { recursive: true, force: true });
 }
 
-// 3. Copy with symlink dereferencing using Node.js native cpSync
-// The dereference option follows symlinks and copies the actual files
-console.log("Copying with symlink dereferencing...");
-fs.cpSync(SOURCE, DEST, {
-	recursive: true,
-	dereference: true,
-	verbatimSymlinks: false,
-});
+// 4. Simple copy - no symlink handling needed since hoisted mode creates real files
+console.log("Copying to bundle location...");
+fs.cpSync(SOURCE, DEST, { recursive: true });
 
 console.log("MCP servers prepared successfully.");
