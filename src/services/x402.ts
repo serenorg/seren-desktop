@@ -2,7 +2,6 @@
 // ABOUTME: Supports both SerenBucks (prepaid) and crypto wallet payment methods.
 
 import { createRoot, createSignal } from "solid-js";
-import { getCryptoWalletAddress, signX402Payment } from "@/lib/tauri-bridge";
 import {
   formatUsdcAmount,
   getChainName,
@@ -11,6 +10,8 @@ import {
   type PaymentRequirements,
   parsePaymentRequirements,
 } from "@/lib/x402";
+import { buildSignedPayload } from "@/lib/x402/payload";
+import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { settingsState } from "@/stores/settings.store";
 
 /**
@@ -198,18 +199,28 @@ function createX402Service() {
     setIsProcessing(true);
 
     try {
-      // Check if wallet is configured
-      const address = await getCryptoWalletAddress();
-      if (!address) {
+      // Check if wallet is connected
+      const account = cryptoWalletStore.getAccount();
+      if (!account) {
         return {
           success: false,
           error:
-            "Crypto wallet not configured. Please add your private key in Settings > Wallet.",
+            "Crypto wallet not connected. Please connect your wallet in Settings > Wallet.",
         };
       }
 
-      // Sign the payment via Tauri IPC
-      const result = await signX402Payment(requirementsJson);
+      // Parse requirements and get the x402 option
+      const requirements = parsePaymentRequirements(requirementsJson);
+      const option = getX402Option(requirements);
+      if (!option) {
+        return {
+          success: false,
+          error: "No x402 payment option found in requirements",
+        };
+      }
+
+      // Sign via the connected wallet (EIP-712)
+      const result = await buildSignedPayload(account, requirements, option);
 
       return {
         success: true,
