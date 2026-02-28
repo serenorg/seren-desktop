@@ -19,22 +19,20 @@ interface DocReaderResponse extends DocReaderResponseBody {
   cost?: string;
 }
 
-/** Safely extract a string from a field that may be a string, array, or object. */
+/** Safely extract a string from a field that may be a string, object, or array. */
 function coerceText(value: unknown): string | undefined {
   if (typeof value === "string") return value;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    // Handle plain object: { text: "..." } or { content: "..." }
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.text === "string") return obj.text;
+    if (typeof obj.content === "string") return obj.content;
+  }
   if (Array.isArray(value)) {
     // Handle array of content blocks: [{type:"text", text:"..."}, ...]
     const parts = value
-      .map((item) => {
-        if (typeof item === "string") return item;
-        if (item && typeof item === "object") {
-          const obj = item as Record<string, unknown>;
-          if (typeof obj.text === "string") return obj.text;
-          if (typeof obj.content === "string") return obj.content;
-        }
-        return "";
-      })
-      .filter(Boolean);
+      .map((item) => coerceText(item))
+      .filter(Boolean) as string[];
     if (parts.length) return parts.join("\n\n");
   }
   return undefined;
