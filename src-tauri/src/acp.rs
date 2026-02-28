@@ -3369,34 +3369,100 @@ pub fn acp_launch_login(agent_type: AgentType) {
     launch_agent_login(agent_type);
 }
 
-/// Ensure Claude Code CLI is installed, auto-installing via official native installer if needed.
-/// Returns the directory path containing the claude binary.
-///
-/// This function:
-/// 1. Checks if `claude` is available on the system PATH (native install location)
-/// 2. If not found, automatically downloads and runs the official Anthropic installer
-/// 3. Emits progress events to the frontend for UI feedback
-///
-/// Note: Uses the official native installer (https://claude.ai/install.sh|.ps1) instead of
-/// the deprecated npm package (@anthropic-ai/claude-code) to ensure users always get the
-/// latest version with auto-update support.
-#[tauri::command]
-pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
-    // First, check if claude is already installed on the system PATH
+/// Serializes concurrent Claude CLI installer runs to prevent race conditions.
+/// Multiple `spawnSession` calls can trigger `acp_ensure_claude_cli` concurrently;
+/// without this lock, concurrent installers download to the same file and corrupt
+/// each other's checksum verification.
+static CLI_INSTALL_LOCK: std::sync::LazyLock<Mutex<()>> =
+    std::sync::LazyLock::new(|| Mutex::new(()));
+
+/// Check well-known locations for the Claude CLI binary.
+/// Returns the parent directory if found at any location.
+fn find_claude_cli(app: &AppHandle) -> Option<String> {
+    // 1. Check native install location (~/.local/bin/claude on macOS/Linux).
+    //    GUI apps don't inherit ~/.local/bin in PATH, so `which` misses this.
+    let home_var = if cfg!(target_os = "windows") {
+        "USERPROFILE"
+    } else {
+        "HOME"
+    };
+    if let Ok(home) = std::env::var(home_var) {
+        let native_path = std::path::PathBuf::from(&home)
+            .join(".local")
+            .join("bin")
+            .join("claude");
+        if native_path.exists() {
+            log::info!(
+                "[ACP] Found Claude CLI at native location: {}",
+                native_path.display()
+            );
+            return Some(
+                native_path
+                    .parent()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
+    }
+
+    // 2. Check app's local npm install (legacy cli-tools location).
+    if let Some(bin_dir) = get_cli_tools_bin_dir(app) {
+        let npm_cli = bin_dir.join("claude");
+        if npm_cli.exists() {
+            log::info!(
+                "[ACP] Found Claude CLI at npm location: {}",
+                npm_cli.display()
+            );
+            return Some(bin_dir.to_string_lossy().to_string());
+        }
+    }
+
+    // 3. Check system PATH via which/where.
     let which_cmd = if cfg!(target_os = "windows") {
         "where"
     } else {
         "which"
     };
-
-    if let Ok(output) = std::process::Command::new(which_cmd).arg("claude").output() {
+    if let Ok(output) = std::process::Command::new(which_cmd)
+        .arg("claude")
+        .output()
+    {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Some(parent) = std::path::Path::new(&path).parent() {
                 log::info!("[ACP] Found Claude CLI on system PATH: {}", path);
-                return Ok(parent.to_string_lossy().to_string());
+                return Some(parent.to_string_lossy().to_string());
             }
         }
+    }
+
+    None
+}
+
+/// Ensure Claude Code CLI is installed, auto-installing via official native installer if needed.
+/// Returns the directory path containing the claude binary.
+///
+/// This function:
+/// 1. Checks well-known install paths (~/.local/bin, cli-tools, system PATH)
+/// 2. If not found, acquires a lock and downloads via the official Anthropic installer
+/// 3. Emits progress events to the frontend for UI feedback
+///
+/// The install lock prevents concurrent installer runs from corrupting each other's
+/// downloads (they all write to the same file path).
+#[tauri::command]
+pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
+    // Fast path: check known locations without holding any lock
+    if let Some(dir) = find_claude_cli(&app) {
+        return Ok(dir);
+    }
+
+    // Slow path: acquire lock so only one installer runs at a time
+    let _guard = CLI_INSTALL_LOCK.lock().await;
+
+    // Re-check after acquiring lock — another call may have installed while we waited
+    if let Some(dir) = find_claude_cli(&app) {
+        return Ok(dir);
     }
 
     log::info!("[ACP] Claude CLI not found, installing via official native installer...");
@@ -3452,15 +3518,9 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
                 }),
             );
 
-            // The native installer puts claude in ~/.local/bin or system PATH
-            // Check again to find the installed location
-            if let Ok(output) = std::process::Command::new(which_cmd).arg("claude").output() {
-                if output.status.success() {
-                    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if let Some(parent) = std::path::Path::new(&path).parent() {
-                        return Ok(parent.to_string_lossy().to_string());
-                    }
-                }
+            // Re-check known locations to find the newly installed binary
+            if let Some(dir) = find_claude_cli(&app) {
+                return Ok(dir);
             }
 
             // Fallback: return the expected installation location
