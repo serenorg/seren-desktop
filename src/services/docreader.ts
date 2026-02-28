@@ -3,14 +3,14 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import type { Attachment } from "@/lib/providers/types";
 import { getToken } from "@/services/auth";
 import { updateBalanceFromError } from "@/stores/wallet.store";
-import type { Attachment } from "@/lib/providers/types";
 
 interface DocReaderResponseBody {
   text?: string;
-  content?: string;
-  pages?: Array<{ text?: string; content?: string }>;
+  content?: unknown;
+  pages?: Array<{ text?: string; content?: unknown }>;
 }
 
 interface DocReaderResponse extends DocReaderResponseBody {
@@ -19,12 +19,37 @@ interface DocReaderResponse extends DocReaderResponseBody {
   cost?: string;
 }
 
+/** Safely extract a string from a field that may be a string, array, or object. */
+function coerceText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    // Handle array of content blocks: [{type:"text", text:"..."}, ...]
+    const parts = value
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          const obj = item as Record<string, unknown>;
+          if (typeof obj.text === "string") return obj.text;
+          if (typeof obj.content === "string") return obj.content;
+        }
+        return "";
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("\n\n");
+  }
+  return undefined;
+}
+
 function extractText(payload: DocReaderResponseBody): string | undefined {
-  if (payload.text?.trim()) return payload.text;
-  if (payload.content?.trim()) return payload.content;
+  const text = coerceText(payload.text);
+  if (text?.trim()) return text;
+
+  const content = coerceText(payload.content);
+  if (content?.trim()) return content;
+
   if (payload.pages?.length) {
     const joined = payload.pages
-      .map((p) => p.text ?? p.content ?? "")
+      .map((p) => coerceText(p.text) ?? coerceText(p.content) ?? "")
       .filter(Boolean)
       .join("\n\n");
     if (joined.trim()) return joined;
@@ -93,6 +118,18 @@ export async function readDocument(attachment: Attachment): Promise<string> {
   console.log("[DocReader] Response payload keys:", Object.keys(data));
   // Seren gateway wraps upstream responses in { status, body, cost }
   const payload: DocReaderResponseBody = data.body ?? data;
+  console.log(
+    "[DocReader] Payload shape:",
+    "text:",
+    typeof payload.text,
+    "content:",
+    typeof payload.content,
+    Array.isArray(payload.content)
+      ? `(array[${(payload.content as unknown[]).length}])`
+      : "",
+    "pages:",
+    typeof payload.pages,
+  );
   const text = extractText(payload);
 
   if (!text) {
