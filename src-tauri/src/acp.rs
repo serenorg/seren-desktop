@@ -1647,27 +1647,40 @@ async fn run_session_worker(
         log::info!("[ACP] Set SEREN_ACP_CODEX_SANDBOX={}", sandbox_env);
     }
 
-    // Set CLAUDE_CLI_PATH so the SDK can find the Claude CLI directly without relying on PATH.
-    // This is more reliable than PATH resolution, especially when the claude binary is a Node.js
-    // script that requires finding Node.js via its shebang.
+    // Set the appropriate CLI_PATH env var so the agent can find its CLI directly.
+    // Claude uses CLAUDE_CLI_PATH; Codex uses CODEX_CLI_PATH.
     if let Some(ref bin) = cli_tools_bin {
-        let claude_binary = if cfg!(target_os = "windows") {
-            bin.join("claude.cmd")
-        } else {
-            bin.join("claude")
+        let (env_var, binary_name) = match agent_type {
+            AgentType::ClaudeCode => (
+                "CLAUDE_CLI_PATH",
+                if cfg!(target_os = "windows") {
+                    "claude.cmd"
+                } else {
+                    "claude"
+                },
+            ),
+            AgentType::Codex => (
+                "CODEX_CLI_PATH",
+                if cfg!(target_os = "windows") {
+                    "codex.cmd"
+                } else {
+                    "codex"
+                },
+            ),
         };
-        if claude_binary.exists() {
-            cmd.env("CLAUDE_CLI_PATH", &claude_binary);
-            log::info!("[ACP] Set CLAUDE_CLI_PATH to: {}", claude_binary.display());
+        let cli_binary = bin.join(binary_name);
+        if cli_binary.exists() {
+            cmd.env(env_var, &cli_binary);
+            log::info!("[ACP] Set {} to: {}", env_var, cli_binary.display());
         } else {
             log::warn!(
-                "[ACP] Bundled Claude CLI not found at: {}. SDK will fall back to PATH resolution.",
-                claude_binary.display()
+                "[ACP] Bundled CLI not found at: {}. Agent will fall back to PATH resolution.",
+                cli_binary.display()
             );
         }
     } else {
         log::warn!(
-            "[ACP] cli_tools_bin directory not available. SDK will fall back to PATH resolution."
+            "[ACP] cli_tools_bin directory not available. Agent will fall back to PATH resolution."
         );
     }
 
@@ -1767,10 +1780,27 @@ async fn run_session_worker(
 
     let init_response = match init_result {
         Err(_elapsed) => {
-            return Err(
-                "Agent initialization timed out after 30 seconds. The agent binary may be hung."
-                    .to_string(),
-            );
+            let exit_status = child.try_wait().ok().flatten();
+            let stderr_lines = {
+                let buf = stderr_tail.lock().await;
+                buf.iter()
+                    .rev()
+                    .take(STDERR_TAIL_ON_ERROR)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+            };
+            let mut msg = "Agent initialization timed out after 30 seconds. The agent binary may be hung.".to_string();
+            if let Some(status) = exit_status {
+                msg.push_str(&format!("\nAgent exit status: {status}"));
+            }
+            if !stderr_lines.is_empty() {
+                msg.push_str("\nACP agent stderr (tail):\n");
+                msg.push_str(&stderr_lines.join("\n"));
+            }
+            return Err(msg);
         }
         Ok(result) => match result {
             Ok(resp) => resp,
@@ -2829,16 +2859,30 @@ async fn list_remote_sessions_inner(
         cmd.env("PATH", &combined);
     }
 
-    // Set CLAUDE_CLI_PATH so the SDK can find the Claude CLI directly without relying on PATH.
+    // Set the appropriate CLI_PATH env var based on agent type.
     if let Some(ref bin) = cli_tools_bin {
-        let claude_binary = if cfg!(target_os = "windows") {
-            bin.join("claude.cmd")
-        } else {
-            bin.join("claude")
+        let (env_var, binary_name) = match agent_type {
+            AgentType::ClaudeCode => (
+                "CLAUDE_CLI_PATH",
+                if cfg!(target_os = "windows") {
+                    "claude.cmd"
+                } else {
+                    "claude"
+                },
+            ),
+            AgentType::Codex => (
+                "CODEX_CLI_PATH",
+                if cfg!(target_os = "windows") {
+                    "codex.cmd"
+                } else {
+                    "codex"
+                },
+            ),
         };
-        if claude_binary.exists() {
-            cmd.env("CLAUDE_CLI_PATH", &claude_binary);
-            log::info!("[ACP] Set CLAUDE_CLI_PATH to: {}", claude_binary.display());
+        let cli_binary = bin.join(binary_name);
+        if cli_binary.exists() {
+            cmd.env(env_var, &cli_binary);
+            log::info!("[ACP] Set {} to: {}", env_var, cli_binary.display());
         }
     }
 
