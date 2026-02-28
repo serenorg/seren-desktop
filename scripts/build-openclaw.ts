@@ -3,6 +3,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   cpSync,
   existsSync,
@@ -139,6 +140,36 @@ function formatBytes(bytes: number): string {
   return `${fixed}${units[unitIndex]}`;
 }
 
+/**
+ * Create shell wrappers in embedded-runtime/bin/ so agents can run `openclaw` from PATH.
+ * The bin/ directory is already on the agent's PATH via embedded_runtime.rs.
+ */
+function ensureCliWrappers(destDir: string): void {
+  const binDir = path.join(destDir, "bin");
+  const openclawMjs = path.join(destDir, "openclaw", "openclaw.mjs");
+  if (!existsSync(openclawMjs)) return;
+  mkdirSync(binDir, { recursive: true });
+
+  // Unix shell wrapper
+  const unixWrapper = path.join(binDir, "openclaw");
+  writeFileSync(
+    unixWrapper,
+    '#!/bin/sh\nexec node "$(dirname "$0")/../openclaw/openclaw.mjs" "$@"\n',
+    "utf8",
+  );
+  chmodSync(unixWrapper, 0o755);
+
+  // Windows .cmd wrapper
+  const winWrapper = path.join(binDir, "openclaw.cmd");
+  writeFileSync(
+    winWrapper,
+    '@node "%~dp0\\..\\openclaw\\openclaw.mjs" %*\r\n',
+    "utf8",
+  );
+
+  console.log("[build-openclaw] Created CLI wrappers in bin/");
+}
+
 async function main(): Promise<void> {
   const { optional } = parseArgs(process.argv.slice(2));
 
@@ -214,6 +245,7 @@ async function main(): Promise<void> {
             console.warn(
               `[build-openclaw] Warning: failed to resolve ${npmRequestedSpec}; using existing bundle at ${openclawRuntimeDir}`,
             );
+            ensureCliWrappers(destDir);
             return;
           }
         }
@@ -231,6 +263,7 @@ async function main(): Promise<void> {
           const marker = JSON.parse(readFileSync(markerPath, "utf8"));
           if (marker?.source === `npm:${npmResolvedSpec}`) {
             console.log("[build-openclaw] Already bundled; skipping.");
+            ensureCliWrappers(destDir);
             return;
           }
         } catch {
@@ -375,6 +408,7 @@ async function main(): Promise<void> {
     }
 
     console.log(`[build-openclaw] Done. OpenClaw package at: ${openclawRuntimeDir}`);
+    ensureCliWrappers(destDir);
 
     let sizeText = "";
     try {
