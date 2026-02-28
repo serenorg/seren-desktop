@@ -37,27 +37,44 @@ function extractText(payload: DocReaderResponseBody): string | undefined {
  * Supports PDFs, Word, Excel, and PowerPoint files.
  */
 export async function readDocument(attachment: Attachment): Promise<string> {
+  console.log(
+    "[DocReader] Processing:",
+    attachment.name,
+    attachment.mimeType,
+    "size:",
+    Math.round(attachment.base64.length / 1024),
+    "KB base64",
+  );
+
   const token = await getToken();
   if (!token) {
+    console.error("[DocReader] No auth token available");
     throw new Error(
       "Document processing requires a Seren account. Sign in to continue.",
     );
   }
 
-  const response = await appFetch(
-    `${apiBase}/publishers/seren-docreader/process`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ file: attachment.base64 }),
+  const url = `${apiBase}/publishers/seren-docreader/process`;
+  console.log("[DocReader] POST", url);
+
+  const response = await appFetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
     },
-  );
+    body: JSON.stringify({ file: attachment.base64 }),
+  });
+
+  console.log("[DocReader] Response:", response.status, response.statusText);
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    console.error(
+      "[DocReader] Error response:",
+      response.status,
+      errorText.slice(0, 500),
+    );
     if (response.status === 402) {
       updateBalanceFromError(errorText);
       throw new Error(
@@ -73,13 +90,25 @@ export async function readDocument(attachment: Attachment): Promise<string> {
   }
 
   const data = (await response.json()) as DocReaderResponse;
+  console.log("[DocReader] Response payload keys:", Object.keys(data));
   // Seren gateway wraps upstream responses in { status, body, cost }
   const payload: DocReaderResponseBody = data.body ?? data;
   const text = extractText(payload);
 
   if (!text) {
+    console.error(
+      "[DocReader] No text extracted from payload:",
+      JSON.stringify(data).slice(0, 500),
+    );
     throw new Error(`DocReader returned no content for ${attachment.name}`);
   }
 
+  console.log(
+    "[DocReader] Success:",
+    attachment.name,
+    "extracted",
+    text.length,
+    "chars",
+  );
   return text;
 }

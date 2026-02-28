@@ -476,15 +476,33 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const sendMessage = async () => {
     const trimmed = input().trim();
     const images = attachedImages();
-    if (!hasSession()) return;
+    console.log("[AgentChat] sendMessage called:", {
+      hasText: !!trimmed,
+      attachments: images.length,
+      mimeTypes: images.map((a) => a.mimeType),
+      hasSession: hasSession(),
+      isPrompting: isPrompting(),
+    });
+
+    if (!hasSession()) {
+      console.warn("[AgentChat] sendMessage aborted: no active session");
+      return;
+    }
 
     // Require text content even when images are attached
     if (!trimmed) {
       if (images.length > 0) {
+        console.warn(
+          "[AgentChat] sendMessage aborted: no text with",
+          images.length,
+          "attachments",
+        );
         setCommandStatus(
           "Please add text to your message. Image-only messages are not supported.",
         );
         setTimeout(() => setCommandStatus(null), 4000);
+      } else {
+        console.warn("[AgentChat] sendMessage aborted: empty input");
       }
       return;
     }
@@ -505,21 +523,45 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // Split attachments: images go as ACP context blocks; docreader files get extracted to text
     const imageAttachments = images.filter((a) => !isDocreaderMime(a.mimeType));
     const docAttachments = images.filter((a) => isDocreaderMime(a.mimeType));
+    console.log("[AgentChat] Attachment split:", {
+      imageAttachments: imageAttachments.length,
+      docAttachments: docAttachments.map((d) => d.name),
+    });
 
     // Process documents BEFORE clearing state so input/attachments are preserved on failure
     let promptWithDocs = trimmed;
     if (docAttachments.length > 0) {
       setIsProcessingDocs(true);
       setCommandStatus("Processing documents…");
+      console.log(
+        "[AgentChat] Starting DocReader processing for",
+        docAttachments.length,
+        "documents",
+      );
       try {
         const docBlocks = await Promise.all(
           docAttachments.map(async (doc: Attachment) => {
+            console.log(
+              "[AgentChat] Processing document:",
+              doc.name,
+              doc.mimeType,
+              "base64 length:",
+              doc.base64.length,
+            );
             const text = await readDocument(doc);
+            console.log(
+              "[AgentChat] DocReader success for",
+              doc.name,
+              "extracted",
+              text.length,
+              "chars",
+            );
             return `[${doc.name}]\n${text}`;
           }),
         );
         promptWithDocs = `${docBlocks.join("\n\n---\n\n")}\n\n${trimmed}`;
       } catch (err) {
+        console.error("[AgentChat] DocReader failed:", err);
         setCommandStatus(
           err instanceof Error ? err.message : "Failed to read document.",
         );
@@ -529,6 +571,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       }
       setCommandStatus(null);
       setIsProcessingDocs(false);
+      console.log(
+        "[AgentChat] DocReader complete, prompt length:",
+        promptWithDocs.length,
+      );
     }
 
     setInput("");
@@ -546,6 +592,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           }))
         : undefined;
 
+    console.log("[AgentChat] Sending prompt to ACP, context blocks:", context?.length ?? 0);
     await acpStore.sendPrompt(promptWithDocs, context);
   };
 
