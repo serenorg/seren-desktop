@@ -73,6 +73,8 @@ export interface AgentMessage {
   duration?: number;
   /** Total cost in SerenBucks for this message's query, reported by Gateway. */
   cost?: number;
+  /** Names of documents processed via DocReader for this message. */
+  docNames?: string[];
 }
 
 export interface AgentModelInfo {
@@ -1395,7 +1397,11 @@ Summary:`;
    * Send a prompt to the active session.
    * Auto-recovers from dead sessions by restarting and retrying.
    */
-  async sendPrompt(prompt: string, context?: Array<Record<string, string>>) {
+  async sendPrompt(
+    prompt: string,
+    context?: Array<Record<string, string>>,
+    options?: { displayContent?: string; docNames?: string[] },
+  ) {
     const sessionId = state.activeSessionId;
     console.log("[AcpStore] sendPrompt called:", {
       sessionId,
@@ -1445,12 +1451,13 @@ Summary:`;
     // Track when the prompt started for duration calculation
     setState("sessions", sessionId, "promptStartTime", Date.now());
 
-    // Add user message
+    // Add user message — display only user's typed text, not extracted doc content
     const userMessage: AgentMessage = {
       id: crypto.randomUUID(),
       type: "user",
-      content: prompt,
+      content: options?.displayContent ?? prompt,
       timestamp: Date.now(),
+      ...(options?.docNames?.length ? { docNames: options.docNames } : {}),
     };
 
     console.log(

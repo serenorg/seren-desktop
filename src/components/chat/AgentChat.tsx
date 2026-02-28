@@ -592,8 +592,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           }))
         : undefined;
 
-    console.log("[AgentChat] Sending prompt to ACP, context blocks:", context?.length ?? 0);
-    await acpStore.sendPrompt(promptWithDocs, context);
+    console.log(
+      "[AgentChat] Sending prompt to ACP, context blocks:",
+      context?.length ?? 0,
+    );
+    const docNames =
+      docAttachments.length > 0 ? docAttachments.map((d) => d.name) : undefined;
+    await acpStore.sendPrompt(promptWithDocs, context, {
+      displayContent: trimmed,
+      docNames,
+    });
   };
 
   // Guard flag prevents concurrent queue processing
@@ -797,6 +805,27 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       case "user":
         return (
           <article class="px-5 py-4 bg-surface-1 border-b border-surface-2">
+            <Show when={message.docNames?.length}>
+              <div class="flex flex-wrap gap-1.5 mb-2">
+                <For each={message.docNames}>
+                  {(name: string) => (
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-surface-2 text-muted-foreground border border-border">
+                      <svg
+                        aria-hidden="true"
+                        width="12"
+                        height="12"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        class="shrink-0 opacity-60"
+                      >
+                        <path d="M4 1h5.586L13 4.414V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zm5 1H4v12h8V5H9V2z" />
+                      </svg>
+                      {name}
+                    </span>
+                  )}
+                </For>
+              </div>
+            </Show>
             <div
               class="text-sm leading-relaxed text-foreground whitespace-pre-wrap"
               innerHTML={escapeHtmlWithLinks(message.content)}
