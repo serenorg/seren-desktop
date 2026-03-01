@@ -2082,6 +2082,18 @@ Summary:`;
           ]);
           const cancelConvoId = state.sessions[sessionId]?.conversationId;
           if (cancelConvoId) persistAgentMessage(cancelConvoId, cancelMsg);
+
+          // Transition back to "ready" so the UI unfreezes and the send
+          // button reappears.  Without this the session stays stuck in
+          // "prompting" forever (the promptComplete event never fires
+          // after a cancellation).
+          setState(
+            "sessions",
+            sessionId,
+            "info",
+            "status",
+            "ready" as SessionStatus,
+          );
         } else if (String(event.data.error).includes("unresponsive")) {
           // "Agent unresponsive" errors are handled by the sendPrompt catch
           // block which spawns a fresh session and retries. Adding the error
