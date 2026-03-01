@@ -821,14 +821,36 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           {formatTime(thread.timestamp)}
                         </span>
 
-                        <Show when={thread.status === "running"}>
-                          <span class="w-2 h-2 rounded-full shrink-0 bg-status-running shadow-[0_0_6px_var(--status-running)] animate-pulse" />
+                        <Show
+                          when={
+                            thread.kind === "agent" &&
+                            thread.id !== threadStore.activeThreadId &&
+                            acpStore.hasPendingApprovals(thread.id)
+                          }
+                        >
+                          <span
+                            class="permission-indicator"
+                            title="Permission required"
+                          />
                         </Show>
-                        <Show when={thread.status === "waiting-input"}>
-                          <span class="w-2 h-2 rounded-full shrink-0 bg-status-waiting shadow-[0_0_6px_var(--status-waiting)] animate-pulse" />
-                        </Show>
-                        <Show when={thread.status === "error"}>
-                          <span class="w-2 h-2 rounded-full shrink-0 bg-status-error" />
+                        <Show
+                          when={
+                            !(
+                              thread.kind === "agent" &&
+                              thread.id !== threadStore.activeThreadId &&
+                              acpStore.hasPendingApprovals(thread.id)
+                            )
+                          }
+                        >
+                          <Show when={thread.status === "running"}>
+                            <span class="w-2 h-2 rounded-full shrink-0 bg-status-running shadow-[0_0_6px_var(--status-running)] animate-pulse" />
+                          </Show>
+                          <Show when={thread.status === "waiting-input"}>
+                            <span class="w-2 h-2 rounded-full shrink-0 bg-status-waiting shadow-[0_0_6px_var(--status-waiting)] animate-pulse" />
+                          </Show>
+                          <Show when={thread.status === "error"}>
+                            <span class="w-2 h-2 rounded-full shrink-0 bg-status-error" />
+                          </Show>
                         </Show>
 
                         {/* Close button */}
