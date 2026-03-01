@@ -41,6 +41,7 @@ const PROMPT_TOO_LONG_PATTERNS = [
   "request too large",
   "content too large",
   "exceeds the model",
+  "ran out of room",
 ];
 
 /**

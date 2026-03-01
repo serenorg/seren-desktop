@@ -829,7 +829,7 @@ export const acpStore = {
         // pollution (the backend replays the full context including injected
         // skill text as user messages).
         skipHistoryReplay: hasRestoredMessages ? true : undefined,
-        contextWindowSize: resolvedAgentType === "codex" ? 200_000 : 200_000,
+        contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
       };
 
       setState("sessions", info.id, session);
