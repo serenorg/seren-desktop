@@ -418,14 +418,6 @@ export const acpStore = {
    */
   get messages(): AgentMessage[] {
     const session = this.activeSession;
-    console.log(
-      "[ACP] messages getter - activeSessionId:",
-      state.activeSessionId,
-      "session:",
-      session?.info.id,
-      "messageCount:",
-      session?.messages.length ?? 0,
-    );
     return session?.messages ?? [];
   },
 
@@ -437,14 +429,6 @@ export const acpStore = {
   getMessagesForConversation(conversationId: string): AgentMessage[] {
     const session = Object.values(state.sessions).find(
       (s) => s.conversationId === conversationId,
-    );
-    console.log(
-      "[ACP] getMessagesForConversation - conversationId:",
-      conversationId,
-      "found session:",
-      session?.info.id,
-      "messageCount:",
-      session?.messages.length ?? 0,
     );
     return session?.messages ?? [];
   },
@@ -1946,8 +1930,6 @@ Summary:`;
   // ============================================================================
 
   handleSessionEvent(sessionId: string, event: AcpEvent) {
-    console.log("[AcpStore] handleSessionEvent:", event.type, sessionId);
-
     // User replay messages can arrive as multiple chunks; flush buffered user
     // text when the stream transitions to a non-user event.
     if (event.type !== "userMessage") {
