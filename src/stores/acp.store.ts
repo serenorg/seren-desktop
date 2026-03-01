@@ -16,7 +16,6 @@ import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
   isPromptTooLongError,
   isRateLimitError,
-  isTimeoutAssistantContent,
   isTimeoutError,
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
@@ -49,7 +48,6 @@ import type {
 } from "@/services/acp";
 import * as acpService from "@/services/acp";
 import { sendMessage } from "@/services/chat";
-import { telemetry } from "@/services/telemetry";
 
 // ============================================================================
 // Types
@@ -2647,27 +2645,6 @@ Summary:`;
 
     // Finalize assistant content if any
     if (session.streamingContent) {
-      if (isTimeoutAssistantContent(session.streamingContent)) {
-        // Some agents emit a timeout string as assistant content even when the
-        // prompt completes successfully. Surface this as a session error banner
-        // instead of adding a misleading assistant message.
-        console.info(
-          "[AcpStore] Suppressing timeout assistant message — surfacing banner instead",
-        );
-        telemetry.captureError(new Error("ACP assistant timeout content"), {
-          type: "acp_timeout_assistant_content",
-          agentType: session.info.agentType,
-          sessionId,
-          agentSessionId: session.agentSessionId,
-          conversationId: session.conversationId,
-          timeoutSecs: session.info.timeoutSecs,
-        });
-        setState("sessions", sessionId, "error", session.streamingContent);
-        setState("sessions", sessionId, "streamingContent", "");
-        setState("sessions", sessionId, "streamingContentTimestamp", undefined);
-        setState("sessions", sessionId, "promptStartTime", undefined);
-        return;
-      }
       // Calculate duration if we have a start time
       const duration = session.promptStartTime
         ? Date.now() - session.promptStartTime
