@@ -94,7 +94,7 @@
     "seren-mcp": {
       "name": "Seren MCP",
       "git": "https://github.com/serenorg/seren",
-      "tag": "v0.3.0",
+      "tag": "v0.4.0",
       "package": "seren-mcp",
       "bin": "seren-mcp",
       "dest": "seren-mcp"
