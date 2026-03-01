@@ -1,11 +1,12 @@
 // ABOUTME: Service for checking and claiming daily SerenBucks credits.
 // ABOUTME: Wraps generated SDK calls with error handling.
 
-import { checkDailyEligibility, claimDaily } from "@/api";
-import type {
-  DailyClaimEligibilityResponse,
-  DailyClaimResponse,
-} from "@/api/generated/types.gen";
+import {
+  checkDailyEligibility,
+  claimDaily,
+  type DailyClaimEligibilityResponse,
+  type DailyClaimResponse,
+} from "@/api";
 
 export type { DailyClaimResponse };
 

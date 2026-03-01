@@ -3,14 +3,14 @@
 
 import {
   type CreateProjectRequest,
-  createProject,
-  deleteProject,
-  getProject,
-  listProjects,
+  serenDbCreateProject,
+  serenDbDeleteProject,
+  serenDbGetProject,
+  serenDbListProjects,
   type Project,
   type UpdateProjectRequest,
-  updateProject,
-} from "@/api";
+  serenDbUpdateProject,
+} from "@/api/seren-db";
 
 // Re-export types for backwards compatibility
 export type { Project };
@@ -26,7 +26,7 @@ export const projects = {
    * List all projects for the authenticated user.
    */
   async list(): Promise<Project[]> {
-    const { data, error } = await listProjects({ throwOnError: false });
+    const { data, error } = await serenDbListProjects({ throwOnError: false });
     if (error) {
       throw new Error("Failed to list projects");
     }
@@ -37,7 +37,7 @@ export const projects = {
    * Create a new project.
    */
   async create(params: CreateProjectParams): Promise<Project> {
-    const { data, error } = await createProject({
+    const { data, error } = await serenDbCreateProject({
       body: params,
       throwOnError: false,
     });
@@ -52,8 +52,8 @@ export const projects = {
    * Get a single project by ID.
    */
   async get(id: string): Promise<Project> {
-    const { data, error } = await getProject({
-      path: { project_id: id },
+    const { data, error } = await serenDbGetProject({
+      path: { id },
       throwOnError: false,
     });
     if (error || !data?.data) {
@@ -66,8 +66,8 @@ export const projects = {
    * Update a project.
    */
   async update(id: string, params: UpdateProjectParams): Promise<Project> {
-    const { data, error } = await updateProject({
-      path: { project_id: id },
+    const { data, error } = await serenDbUpdateProject({
+      path: { id },
       body: params,
       throwOnError: false,
     });
@@ -81,8 +81,8 @@ export const projects = {
    * Delete a project.
    */
   async delete(id: string): Promise<void> {
-    const { error } = await deleteProject({
-      path: { project_id: id },
+    const { error } = await serenDbDeleteProject({
+      path: { id },
       throwOnError: false,
     });
     if (error) {

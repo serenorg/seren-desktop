@@ -1,22 +1,26 @@
 // ABOUTME: Database service for fetching SerenDB database data from Seren API.
 // ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
+// listOrganizations is a core platform endpoint, not a seren-db endpoint,
+// so it comes from the core client.
 import {
-  createProject as apiCreateProject,
-  deleteProject as apiDeleteProject,
-  getBranch as apiGetBranch,
-  getConnectionString as apiGetConnectionString,
-  getDatabase as apiGetDatabase,
-  getProject as apiGetProject,
-  listBranches as apiListBranches,
-  listDatabases as apiListDatabases,
   listOrganizations as apiListOrganizations,
-  listProjects as apiListProjects,
+  type Organization,
+} from "@/api";
+import {
+  serenDbCreateProject as apiCreateProject,
+  serenDbDeleteProject as apiDeleteProject,
+  serenDbGetBranch as apiGetBranch,
+  serenDbConnectionUri as apiGetConnectionUri,
+  serenDbGetDatabase as apiGetDatabase,
+  serenDbGetProject as apiGetProject,
+  serenDbListBranches as apiListBranches,
+  serenDbListDatabases as apiListDatabases,
+  serenDbListProjects as apiListProjects,
   type Branch,
   type DatabaseWithOwner,
-  type Organization,
   type Project,
-} from "@/api";
+} from "@/api/seren-db";
 
 // Use DatabaseWithOwner as the Database type (list endpoint returns this)
 export type Database = DatabaseWithOwner;
@@ -86,7 +90,7 @@ export const databases = {
   async deleteProject(projectId: string): Promise<void> {
     console.log("[Databases] Deleting project:", projectId);
     const { error } = await apiDeleteProject({
-      path: { project_id: projectId },
+      path: { id: projectId },
       throwOnError: false,
     });
     if (error) {
@@ -101,7 +105,7 @@ export const databases = {
   async listBranches(projectId: string): Promise<Branch[]> {
     console.log("[Databases] Fetching branches for project:", projectId);
     const { data, error } = await apiListBranches({
-      path: { project_id: projectId },
+      path: { id: projectId },
       throwOnError: false,
     });
     if (error) {
@@ -121,15 +125,16 @@ export const databases = {
     branchId: string,
   ): Promise<string> {
     console.log("[Databases] Fetching connection string");
-    const { data, error } = await apiGetConnectionString({
-      path: { project_id: projectId, branch_id: branchId },
+    const { data, error } = await apiGetConnectionUri({
+      path: { id: projectId },
+      query: { branch_id: branchId },
       throwOnError: false,
     });
     if (error || !data?.data) {
       console.error("[Databases] Error fetching connection string:", error);
       throw new Error("Failed to get connection string");
     }
-    return data.data.connection_string;
+    return data.data.uri;
   },
 
   /**
@@ -141,7 +146,7 @@ export const databases = {
   ): Promise<Database[]> {
     console.log("[Databases] Fetching databases for branch:", branchId);
     const { data, error } = await apiListDatabases({
-      path: { project_id: projectId, branch_id: branchId },
+      path: { id: projectId, bid: branchId },
       throwOnError: false,
     });
     if (error) {
@@ -158,7 +163,7 @@ export const databases = {
    */
   async getProject(projectId: string): Promise<Project> {
     const { data, error } = await apiGetProject({
-      path: { project_id: projectId },
+      path: { id: projectId },
       throwOnError: false,
     });
     if (error || !data?.data) {
@@ -172,7 +177,7 @@ export const databases = {
    */
   async getBranch(projectId: string, branchId: string): Promise<Branch> {
     const { data, error } = await apiGetBranch({
-      path: { project_id: projectId, branch_id: branchId },
+      path: { id: projectId, bid: branchId },
       throwOnError: false,
     });
     if (error || !data?.data) {
@@ -191,9 +196,9 @@ export const databases = {
   ): Promise<Database> {
     const { data, error } = await apiGetDatabase({
       path: {
-        project_id: projectId,
-        branch_id: branchId,
-        database_id: databaseId,
+        id: projectId,
+        bid: branchId,
+        did: databaseId,
       },
       throwOnError: false,
     });

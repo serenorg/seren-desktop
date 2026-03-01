@@ -4,7 +4,7 @@
 import { apiBase } from "@/lib/config";
 import { getToken } from "@/lib/tauri-bridge";
 import { getTauriFetch, shouldSkipRefresh } from "@/lib/tauri-fetch";
-import type { ClientOptions, Config } from "./generated/client";
+import type { ClientOptions, Config } from "./generated/seren-core/client";
 
 /**
  * Custom fetch that uses Tauri HTTP plugin when available.
@@ -53,6 +53,9 @@ export const createClientConfig = <T extends ClientOptions>(
 ): Config<T> => {
   return {
     ...override,
+    // Sub-spec clients pass relative baseUrls (e.g. '/publishers/seren-db')
+    // from their spec's servers[].url. Override because the Gateway routes
+    // all SDK paths from the API root.
     baseUrl: apiBase,
     fetch: customFetch,
   } as Config<T>;
