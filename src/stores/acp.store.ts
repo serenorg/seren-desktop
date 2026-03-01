@@ -2032,19 +2032,33 @@ Summary:`;
           "ready" as SessionStatus,
         );
 
-        // Auto-compact check: trigger compaction at 85% of context window
+        // Auto-compact check: trigger compaction at 85% of context window,
+        // or at 850 messages when the agent doesn't report token usage.
         if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
           const sess = state.sessions[sessionId];
-          if (
-            sess?.lastInputTokens &&
-            settingsStore.settings.autoCompactEnabled
-          ) {
-            const usagePercent = sess.lastInputTokens / sess.contextWindowSize;
-            const threshold = settingsStore.settings.autoCompactThreshold / 100;
-            if (usagePercent >= threshold) {
+          if (settingsStore.settings.autoCompactEnabled && sess) {
+            const MESSAGE_COUNT_COMPACT_THRESHOLD = 850;
+            let shouldCompact = false;
+
+            if (sess.lastInputTokens) {
+              const usagePercent =
+                sess.lastInputTokens / sess.contextWindowSize;
+              const threshold =
+                settingsStore.settings.autoCompactThreshold / 100;
+              if (usagePercent >= threshold) {
+                console.info(
+                  `[AcpStore] Context usage at ${Math.round(usagePercent * 100)}% — triggering auto-compaction`,
+                );
+                shouldCompact = true;
+              }
+            } else if (sess.messages.length > MESSAGE_COUNT_COMPACT_THRESHOLD) {
               console.info(
-                `[AcpStore] Context usage at ${Math.round(usagePercent * 100)}% — triggering auto-compaction`,
+                `[AcpStore] ${sess.messages.length} messages without token usage data — triggering auto-compaction`,
               );
+              shouldCompact = true;
+            }
+
+            if (shouldCompact) {
               this.compactAgentConversation(
                 sessionId,
                 settingsStore.settings.autoCompactPreserveMessages,
@@ -2640,6 +2654,7 @@ Summary:`;
         console.info(
           "[AcpStore] Suppressing timeout assistant message — surfacing banner instead",
         );
+        const messageCount = session.messages.length;
         telemetry.captureError(new Error("ACP assistant timeout content"), {
           type: "acp_timeout_assistant_content",
           agentType: session.info.agentType,
@@ -2647,8 +2662,13 @@ Summary:`;
           agentSessionId: session.agentSessionId,
           conversationId: session.conversationId,
           timeoutSecs: session.info.timeoutSecs,
+          messageCount,
         });
-        setState("sessions", sessionId, "error", session.streamingContent);
+        const errorMsg =
+          messageCount > 500
+            ? "This conversation has too many messages and responses are timing out. Start a new conversation to continue."
+            : "The response timed out. Try sending your message again.";
+        setState("sessions", sessionId, "error", errorMsg);
         setState("sessions", sessionId, "streamingContent", "");
         setState("sessions", sessionId, "streamingContentTimestamp", undefined);
         setState("sessions", sessionId, "promptStartTime", undefined);
