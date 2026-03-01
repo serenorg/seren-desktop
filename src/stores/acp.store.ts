@@ -16,7 +16,6 @@ import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
   isPromptTooLongError,
   isRateLimitError,
-  isTimeoutAssistantContent,
   isTimeoutError,
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
@@ -49,7 +48,6 @@ import type {
 } from "@/services/acp";
 import * as acpService from "@/services/acp";
 import { sendMessage } from "@/services/chat";
-import { telemetry } from "@/services/telemetry";
 
 // ============================================================================
 // Types
@@ -2032,19 +2030,33 @@ Summary:`;
           "ready" as SessionStatus,
         );
 
-        // Auto-compact check: trigger compaction at 85% of context window
+        // Auto-compact check: trigger compaction at 85% of context window,
+        // or at 850 messages when the agent doesn't report token usage.
         if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
           const sess = state.sessions[sessionId];
-          if (
-            sess?.lastInputTokens &&
-            settingsStore.settings.autoCompactEnabled
-          ) {
-            const usagePercent = sess.lastInputTokens / sess.contextWindowSize;
-            const threshold = settingsStore.settings.autoCompactThreshold / 100;
-            if (usagePercent >= threshold) {
+          if (settingsStore.settings.autoCompactEnabled && sess) {
+            const MESSAGE_COUNT_COMPACT_THRESHOLD = 850;
+            let shouldCompact = false;
+
+            if (sess.lastInputTokens) {
+              const usagePercent =
+                sess.lastInputTokens / sess.contextWindowSize;
+              const threshold =
+                settingsStore.settings.autoCompactThreshold / 100;
+              if (usagePercent >= threshold) {
+                console.info(
+                  `[AcpStore] Context usage at ${Math.round(usagePercent * 100)}% — triggering auto-compaction`,
+                );
+                shouldCompact = true;
+              }
+            } else if (sess.messages.length > MESSAGE_COUNT_COMPACT_THRESHOLD) {
               console.info(
-                `[AcpStore] Context usage at ${Math.round(usagePercent * 100)}% — triggering auto-compaction`,
+                `[AcpStore] ${sess.messages.length} messages without token usage data — triggering auto-compaction`,
               );
+              shouldCompact = true;
+            }
+
+            if (shouldCompact) {
               this.compactAgentConversation(
                 sessionId,
                 settingsStore.settings.autoCompactPreserveMessages,
@@ -2633,27 +2645,6 @@ Summary:`;
 
     // Finalize assistant content if any
     if (session.streamingContent) {
-      if (isTimeoutAssistantContent(session.streamingContent)) {
-        // Some agents emit a timeout string as assistant content even when the
-        // prompt completes successfully. Surface this as a session error banner
-        // instead of adding a misleading assistant message.
-        console.info(
-          "[AcpStore] Suppressing timeout assistant message — surfacing banner instead",
-        );
-        telemetry.captureError(new Error("ACP assistant timeout content"), {
-          type: "acp_timeout_assistant_content",
-          agentType: session.info.agentType,
-          sessionId,
-          agentSessionId: session.agentSessionId,
-          conversationId: session.conversationId,
-          timeoutSecs: session.info.timeoutSecs,
-        });
-        setState("sessions", sessionId, "error", session.streamingContent);
-        setState("sessions", sessionId, "streamingContent", "");
-        setState("sessions", sessionId, "streamingContentTimestamp", undefined);
-        setState("sessions", sessionId, "promptStartTime", undefined);
-        return;
-      }
       // Calculate duration if we have a start time
       const duration = session.promptStartTime
         ? Date.now() - session.promptStartTime
