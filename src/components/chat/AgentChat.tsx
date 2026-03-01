@@ -1211,21 +1211,23 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       </div>
 
       {/* Permission and diff proposal dialogs — rendered outside the scroll
-          container so they stay visible while the agent streams content. */}
+          container so they stay visible while the agent streams content.
+          Filter by the thread-specific session, not the global activeSessionId,
+          to prevent permissions from one session bleeding into another thread. */}
       <Show
         when={
           acpStore.pendingDiffProposals.some(
-            (p) => p.sessionId === acpStore.activeSessionId,
+            (p) => p.sessionId === threadSession()?.info.id,
           ) ||
           acpStore.pendingPermissions.some(
-            (p) => p.sessionId === acpStore.activeSessionId,
+            (p) => p.sessionId === threadSession()?.info.id,
           )
         }
       >
         <div class="border-t border-border bg-background max-h-[40vh] overflow-y-auto">
           <For
             each={acpStore.pendingDiffProposals.filter(
-              (p) => p.sessionId === acpStore.activeSessionId,
+              (p) => p.sessionId === threadSession()?.info.id,
             )}
           >
             {(proposal) => (
@@ -1236,7 +1238,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           </For>
           <For
             each={acpStore.pendingPermissions.filter(
-              (p) => p.sessionId === acpStore.activeSessionId,
+              (p) => p.sessionId === threadSession()?.info.id,
             )}
           >
             {(perm) => (

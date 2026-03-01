@@ -9,6 +9,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { acpStore } from "@/stores/acp.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -81,14 +82,36 @@ export const ThreadTabBar: Component = () => {
               <span class="overflow-hidden text-ellipsis min-w-0">
                 {thread.title}
               </span>
-              <Show when={thread.status === "running"}>
-                <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-success shadow-[0_0_4px_var(--color-success)] animate-[tabPulse_2s_ease-in-out_infinite]" />
+              <Show
+                when={
+                  thread.kind === "agent" &&
+                  thread.id !== threadStore.activeThreadId &&
+                  acpStore.hasPendingApprovals(thread.id)
+                }
+              >
+                <span
+                  class="permission-indicator !w-1.5 !h-1.5"
+                  title="Permission required"
+                />
               </Show>
-              <Show when={thread.status === "waiting-input"}>
-                <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-warning shadow-[0_0_4px_var(--color-warning)] animate-[tabPulse_1.5s_ease-in-out_infinite]" />
-              </Show>
-              <Show when={thread.status === "error"}>
-                <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-destructive" />
+              <Show
+                when={
+                  !(
+                    thread.kind === "agent" &&
+                    thread.id !== threadStore.activeThreadId &&
+                    acpStore.hasPendingApprovals(thread.id)
+                  )
+                }
+              >
+                <Show when={thread.status === "running"}>
+                  <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-success shadow-[0_0_4px_var(--color-success)] animate-[tabPulse_2s_ease-in-out_infinite]" />
+                </Show>
+                <Show when={thread.status === "waiting-input"}>
+                  <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-warning shadow-[0_0_4px_var(--color-warning)] animate-[tabPulse_1.5s_ease-in-out_infinite]" />
+                </Show>
+                <Show when={thread.status === "error"}>
+                  <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-destructive" />
+                </Show>
               </Show>
               <span
                 role="button"

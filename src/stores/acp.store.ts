@@ -466,6 +466,20 @@ export const acpStore = {
   },
 
   /**
+   * Check if a conversation has pending permission requests or diff proposals.
+   * Used by sidebar/tab indicators to show a blinking approval dot.
+   */
+  hasPendingApprovals(conversationId: string): boolean {
+    const session = this.getSessionForConversation(conversationId);
+    if (!session) return false;
+    const sid = session.info.id;
+    return (
+      state.pendingPermissions.some((p) => p.sessionId === sid) ||
+      state.pendingDiffProposals.some((p) => p.sessionId === sid)
+    );
+  },
+
+  /**
    * Get plan entries for the active session.
    */
   get plan(): PlanEntry[] {
