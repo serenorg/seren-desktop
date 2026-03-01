@@ -2654,7 +2654,6 @@ Summary:`;
         console.info(
           "[AcpStore] Suppressing timeout assistant message — surfacing banner instead",
         );
-        const messageCount = session.messages.length;
         telemetry.captureError(new Error("ACP assistant timeout content"), {
           type: "acp_timeout_assistant_content",
           agentType: session.info.agentType,
@@ -2662,13 +2661,8 @@ Summary:`;
           agentSessionId: session.agentSessionId,
           conversationId: session.conversationId,
           timeoutSecs: session.info.timeoutSecs,
-          messageCount,
         });
-        const errorMsg =
-          messageCount > 500
-            ? "This conversation has too many messages and responses are timing out. Start a new conversation to continue."
-            : "The response timed out. Try sending your message again.";
-        setState("sessions", sessionId, "error", errorMsg);
+        setState("sessions", sessionId, "error", session.streamingContent);
         setState("sessions", sessionId, "streamingContent", "");
         setState("sessions", sessionId, "streamingContentTimestamp", undefined);
         setState("sessions", sessionId, "promptStartTime", undefined);
