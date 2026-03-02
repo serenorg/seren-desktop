@@ -1,6 +1,14 @@
-// ABOUTME: MCP tool implementations for stealth browser automation
+// ABOUTME: MCP tool implementations for stealth browser automation.
+// ABOUTME: Includes browser discovery and runtime switching tools.
 
-import { closeBrowser, getPage, resetPage } from "./browser.js";
+import {
+  closeBrowser,
+  getActiveBrowserType,
+  getPage,
+  listInstalledBrowsers,
+  resetPage,
+  setBrowser,
+} from "./browser.js";
 
 export async function navigate(url: string): Promise<string> {
   const page = await getPage();
@@ -87,4 +95,20 @@ export async function close(): Promise<string> {
 export async function reset(): Promise<string> {
   await resetPage();
   return "Page reset";
+}
+
+export function listBrowsers(): string {
+  const installed = listInstalledBrowsers();
+  const active = getActiveBrowserType();
+  const result = installed.map((b) => ({
+    ...b,
+    isActive: b.name === active,
+  }));
+  return JSON.stringify(result, null, 2);
+}
+
+export async function switchBrowser(browser: string): Promise<string> {
+  const info = await setBrowser(browser);
+  const stealth = info.stealthSupported ? "enabled" : "not available";
+  return `Switched to ${info.name} (${info.browserName} engine). Stealth: ${stealth}`;
 }

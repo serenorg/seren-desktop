@@ -8,6 +8,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { getActiveBrowserType } from "./browser.js";
 import * as tools from "./tools.js";
 
 const server = new Server(
@@ -194,6 +195,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {},
         },
       },
+      {
+        name: "playwright_list_browsers",
+        description:
+          "List all browsers installed on this system that can be used for automation. Returns name, engine, executable path, stealth support, and which browser is currently active.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "playwright_set_browser",
+        description:
+          "Switch to a different installed browser. Closes the current browser session and opens a new one with the specified browser. Use playwright_list_browsers first to see available options.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            browser: {
+              type: "string",
+              description:
+                "Browser name from playwright_list_browsers (e.g. 'chromium', 'firefox', 'chrome', 'msedge', 'webkit')",
+            },
+          },
+          required: ["browser"],
+        },
+      },
     ],
   };
 });
@@ -259,6 +285,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "playwright_reset":
         result = await tools.reset();
         break;
+      case "playwright_list_browsers":
+        result = tools.listBrowsers();
+        break;
+      case "playwright_set_browser":
+        result = await tools.switchBrowser(args.browser as string);
+        break;
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -286,6 +318,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+  console.error(
+    `[playwright-stealth] Starting with browser: ${getActiveBrowserType()}`,
+  );
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
