@@ -304,7 +304,7 @@ jobs:
       # Upload macOS DMG immediately (before notarization so we always have an artifact)
       - name: Upload macOS DMG (pre-notarization)
         if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Seren-Desktop-${{ matrix.name }}.dmg
           path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
@@ -430,7 +430,7 @@ jobs:
       # Upload notarized DMG if notarization succeeded (overwrites the pre-notarization artifact)
       - name: Upload macOS DMG (notarized)
         if: matrix.os == 'macos-latest' && steps.notarize.outcome == 'success'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Seren-Desktop-${{ matrix.name }}.dmg
           path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
@@ -526,21 +526,21 @@ jobs:
       # Upload artifacts
       - name: Upload Windows NSIS
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Seren-Desktop-${{ matrix.name }}.exe
           path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
 
       - name: Upload Linux DEB
         if: startsWith(matrix.os, 'ubuntu')
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Seren-Desktop-${{ matrix.name }}.deb
           path: src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
 
       - name: Upload Linux AppImage
         if: startsWith(matrix.os, 'ubuntu')
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: Seren-Desktop-${{ matrix.name }}.AppImage
           path: src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
@@ -579,7 +579,7 @@ jobs:
       # Upload updater artifacts (tar.gz/zip bundles + signatures)
       - name: Upload macOS updater bundle
         if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: update-${{ matrix.updater_platform }}
           path: |
@@ -589,7 +589,7 @@ jobs:
 
       - name: Upload Windows updater bundle
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: update-${{ matrix.updater_platform }}
           path: |
@@ -599,7 +599,7 @@ jobs:
 
       - name: Upload Linux updater bundle
         if: startsWith(matrix.os, 'ubuntu')
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: update-${{ matrix.updater_platform }}
           path: |
