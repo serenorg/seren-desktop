@@ -49,23 +49,20 @@ This MCP server is automatically configured in Seren Desktop. It provides the sa
 
 ### Default Browser (Environment Variable)
 
-Set `BROWSER_TYPE` to choose the default browser at startup:
+The server auto-detects the best system browser (preferring Chrome > Edge > Firefox). Override with `BROWSER_TYPE`:
 
 ```bash
-# Chromium (default)
+# Auto-detect (uses system Chrome if available)
 node dist/index.js
 
-# Firefox
-BROWSER_TYPE=firefox node dist/index.js
-
-# Google Chrome (system install)
+# Explicit: Google Chrome
 BROWSER_TYPE=chrome node dist/index.js
 
-# Microsoft Edge
+# Explicit: Microsoft Edge
 BROWSER_TYPE=msedge node dist/index.js
 
-# WebKit (Safari engine)
-BROWSER_TYPE=webkit node dist/index.js
+# Explicit: Mozilla Firefox
+BROWSER_TYPE=moz-firefox node dist/index.js
 ```
 
 "edge" is accepted as an alias for "msedge".
@@ -77,7 +74,7 @@ Configure the browser in MCP server settings by adding to the server's environme
 ```json
 {
   "env": {
-    "BROWSER_TYPE": "firefox"
+    "BROWSER_TYPE": "moz-firefox"
   }
 }
 ```
@@ -93,17 +90,21 @@ This is useful for A/B testing across browsers or falling back when a site requi
 
 ### Supported Browsers
 
+Only system-installed browsers are used. Playwright's bundled test browsers (`chromium`, `firefox`, `webkit`) are excluded because they are identifiable automation binaries that get flagged by bot detection.
+
 | Name | Engine | Stealth | Notes |
 | ---- | ------ | ------- | ----- |
-| `chromium` | Chromium | Yes | Playwright's bundled Chromium (default) |
-| `chrome` | Chromium | Yes | System Google Chrome |
-| `chrome-beta` | Chromium | Yes | System Google Chrome Beta |
-| `msedge` | Chromium | Yes | System Microsoft Edge |
-| `msedge-beta` | Chromium | Yes | System Microsoft Edge Beta |
-| `firefox` | Firefox | No | Playwright's bundled Firefox |
-| `firefox-beta` | Firefox | No | Playwright's bundled Firefox Beta |
-| `moz-firefox` | Firefox | No | System Mozilla Firefox |
-| `webkit` | WebKit | No | Playwright's bundled WebKit (Safari engine) |
+| `chrome` | Chromium | Yes | Google Chrome |
+| `chrome-beta` | Chromium | Yes | Google Chrome Beta |
+| `chrome-dev` | Chromium | Yes | Google Chrome Dev |
+| `chrome-canary` | Chromium | Yes | Google Chrome Canary |
+| `msedge` | Chromium | Yes | Microsoft Edge |
+| `msedge-beta` | Chromium | Yes | Microsoft Edge Beta |
+| `msedge-dev` | Chromium | Yes | Microsoft Edge Dev |
+| `msedge-canary` | Chromium | Yes | Microsoft Edge Canary |
+| `moz-firefox` | Firefox | No | Mozilla Firefox |
+| `moz-firefox-beta` | Firefox | No | Mozilla Firefox Beta |
+| `moz-firefox-nightly` | Firefox | No | Mozilla Firefox Nightly |
 
 Only browsers actually installed on your system will appear in `playwright_list_browsers`.
 
@@ -111,20 +112,16 @@ Only browsers actually installed on your system will appear in `playwright_list_
 
 The stealth plugin (`puppeteer-extra-plugin-stealth`) targets Chromium internals:
 
-- **Chromium/Chrome/Edge**: Full stealth evasions (webdriver flag, plugins mock, automation flags, etc.)
+- **Chrome/Edge**: Full stealth evasions (webdriver flag, plugins mock, automation flags, etc.)
 - **Firefox**: No stealth evasions. Firefox has different automation detection mechanisms.
-- **WebKit**: No stealth evasions. WebKit/Safari detection works differently.
 
-### Installing Additional Browsers
+### Installing Browsers
 
-```bash
-# Install Playwright's bundled browsers
-npx playwright install chromium
-npx playwright install firefox
-npx playwright install webkit
+System browsers must be installed via their normal installers:
 
-# System browsers (Chrome, Edge) must be installed via their normal installers
-```
+- **Google Chrome**: [google.com/chrome](https://www.google.com/chrome/)
+- **Microsoft Edge**: [microsoft.com/edge](https://www.microsoft.com/edge)
+- **Mozilla Firefox**: [mozilla.org/firefox](https://www.mozilla.org/firefox/)
 
 ## How Stealth Works
 

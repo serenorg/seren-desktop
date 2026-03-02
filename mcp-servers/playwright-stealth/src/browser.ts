@@ -27,17 +27,19 @@ type BrowserEngine = "chromium" | "firefox" | "webkit";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-/** Registry entries to exclude — internal dev/CI tools, not user-facing browsers. */
-const EXCLUDED_NAMES = new Set([
-  "chromium-headless-shell",
-  "chromium-tip-of-tree",
-  "chromium-tip-of-tree-headless-shell",
-  "webkit-wsl",
-  "bidi-chrome-stable",
-  "bidi-chrome-canary",
-  "ffmpeg",
-  "winldd",
-  "android",
+/** System-installed browsers — the only ones we use. */
+const SYSTEM_BROWSERS = new Set([
+  "chrome",
+  "chrome-beta",
+  "chrome-dev",
+  "chrome-canary",
+  "msedge",
+  "msedge-beta",
+  "msedge-dev",
+  "msedge-canary",
+  "moz-firefox",
+  "moz-firefox-beta",
+  "moz-firefox-nightly",
 ]);
 
 /** Default user agents per browser engine. */
@@ -80,7 +82,7 @@ export function listInstalledBrowsers(): InstalledBrowser[] {
 
   for (const exe of registry.registry.executables()) {
     if (!exe.browserName) continue;
-    if (EXCLUDED_NAMES.has(exe.name)) continue;
+    if (!SYSTEM_BROWSERS.has(exe.name)) continue;
 
     let exePath: string;
     try {
@@ -105,6 +107,46 @@ export function listInstalledBrowsers(): InstalledBrowser[] {
 
 // ── Browser Selection ──────────────────────────────────────────────────────────
 
+/**
+ * Preferred system browser order. Playwright-bundled test browsers
+ * ("chromium", "firefox", "webkit") are never used — they get flagged
+ * by bot detection because they are identifiable automation binaries.
+ */
+const SYSTEM_BROWSER_PREFERENCE = [
+  "chrome",
+  "msedge",
+  "moz-firefox",
+  "chrome-beta",
+  "msedge-beta",
+  "moz-firefox-beta",
+  "moz-firefox-nightly",
+  "chrome-dev",
+  "chrome-canary",
+  "msedge-dev",
+  "msedge-canary",
+];
+
+/** Detect the best available system browser. */
+export function detectDefaultBrowser(): string {
+  const installed = listInstalledBrowsers();
+  const installedNames = new Set(installed.map((b) => b.name));
+
+  for (const name of SYSTEM_BROWSER_PREFERENCE) {
+    if (installedNames.has(name)) return name;
+  }
+
+  // No system browser found — log instructions and fall back to chromium
+  if (installed.length > 0) return installed[0].name;
+
+  console.error(
+    "[playwright-stealth] No system browser detected. " +
+      "Install Google Chrome, Microsoft Edge, or Mozilla Firefox " +
+      "for the best stealth experience. " +
+      "Falling back to Playwright's bundled Chromium (may be flagged by bot detection).",
+  );
+  return "chromium";
+}
+
 export function isChromiumBased(browserName: string): boolean {
   return browserName === "chromium";
 }
@@ -122,40 +164,23 @@ export function resolveBrowserName(name: string): BrowserEngine {
   return "chromium";
 }
 
-/** Validate and normalize a browser type string. Falls back to "chromium". */
+/** Validate and normalize a browser type string. Auto-detects if not set. */
 export function parseBrowserType(value: string | undefined): string {
-  if (!value) return "chromium";
+  if (!value) return detectDefaultBrowser();
 
   const normalized = value.toLowerCase().trim();
-  if (!normalized) return "chromium";
+  if (!normalized) return detectDefaultBrowser();
 
   // Accept "edge" as alias for "msedge"
   if (normalized === "edge") return "msedge";
 
-  const known = new Set([
-    "chromium",
-    "firefox",
-    "webkit",
-    "chrome",
-    "chrome-beta",
-    "chrome-dev",
-    "chrome-canary",
-    "msedge",
-    "msedge-beta",
-    "msedge-dev",
-    "msedge-canary",
-    "moz-firefox",
-    "moz-firefox-beta",
-    "moz-firefox-nightly",
-    "firefox-beta",
-  ]);
+  if (SYSTEM_BROWSERS.has(normalized)) return normalized;
 
-  if (known.has(normalized)) return normalized;
-
+  const fallback = detectDefaultBrowser();
   console.error(
-    `[playwright-stealth] Unknown BROWSER_TYPE "${value}". Falling back to chromium.`,
+    `[playwright-stealth] Unknown or unsupported BROWSER_TYPE "${value}". Falling back to ${fallback}.`,
   );
-  return "chromium";
+  return fallback;
 }
 
 /** Get the playwright-extra launcher for a browser engine. */

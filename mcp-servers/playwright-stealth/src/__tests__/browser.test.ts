@@ -3,35 +3,37 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  detectDefaultBrowser,
   isChromiumBased,
   listInstalledBrowsers,
   parseBrowserType,
   resolveBrowserName,
 } from "../browser.js";
 
+describe("detectDefaultBrowser", () => {
+  it("returns a system browser name", () => {
+    const result = detectDefaultBrowser();
+    // Should never return a Playwright-bundled browser when system ones exist
+    expect(["chromium", "firefox", "webkit"]).not.toContain(result);
+  });
+
+  it("returns a string", () => {
+    expect(typeof detectDefaultBrowser()).toBe("string");
+  });
+});
+
 describe("parseBrowserType", () => {
-  it("returns 'chromium' for undefined", () => {
-    expect(parseBrowserType(undefined)).toBe("chromium");
+  it("auto-detects system browser for undefined", () => {
+    const result = parseBrowserType(undefined);
+    expect(result).toBe(detectDefaultBrowser());
   });
 
-  it("returns 'chromium' for empty string", () => {
-    expect(parseBrowserType("")).toBe("chromium");
+  it("auto-detects system browser for empty string", () => {
+    expect(parseBrowserType("")).toBe(detectDefaultBrowser());
   });
 
-  it("returns 'chromium' for whitespace-only string", () => {
-    expect(parseBrowserType("   ")).toBe("chromium");
-  });
-
-  it("returns 'chromium' for 'chromium'", () => {
-    expect(parseBrowserType("chromium")).toBe("chromium");
-  });
-
-  it("returns 'firefox' for 'firefox'", () => {
-    expect(parseBrowserType("firefox")).toBe("firefox");
-  });
-
-  it("returns 'webkit' for 'webkit'", () => {
-    expect(parseBrowserType("webkit")).toBe("webkit");
+  it("auto-detects system browser for whitespace-only string", () => {
+    expect(parseBrowserType("   ")).toBe(detectDefaultBrowser());
   });
 
   it("returns 'chrome' for 'chrome'", () => {
@@ -42,36 +44,50 @@ describe("parseBrowserType", () => {
     expect(parseBrowserType("msedge")).toBe("msedge");
   });
 
+  it("returns 'moz-firefox' for 'moz-firefox'", () => {
+    expect(parseBrowserType("moz-firefox")).toBe("moz-firefox");
+  });
+
   it("maps 'edge' alias to 'msedge'", () => {
     expect(parseBrowserType("edge")).toBe("msedge");
   });
 
   it("is case-insensitive", () => {
-    expect(parseBrowserType("FIREFOX")).toBe("firefox");
     expect(parseBrowserType("Chrome")).toBe("chrome");
     expect(parseBrowserType("MSEDGE")).toBe("msedge");
     expect(parseBrowserType("EDGE")).toBe("msedge");
+    expect(parseBrowserType("MOZ-FIREFOX")).toBe("moz-firefox");
   });
 
   it("trims whitespace", () => {
-    expect(parseBrowserType("  firefox  ")).toBe("firefox");
+    expect(parseBrowserType("  chrome  ")).toBe("chrome");
     expect(parseBrowserType("  edge  ")).toBe("msedge");
   });
 
-  it("returns 'chromium' with stderr warning for unknown value", () => {
+  it("falls back with stderr warning for unknown value", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(parseBrowserType("safari")).toBe("chromium");
+    const result = parseBrowserType("safari");
+    expect(result).toBe(detectDefaultBrowser());
     expect(spy).toHaveBeenCalledWith(
-      expect.stringContaining('Unknown BROWSER_TYPE "safari"'),
+      expect.stringContaining('Unknown or unsupported BROWSER_TYPE "safari"'),
     );
     spy.mockRestore();
   });
 
-  it("accepts channel variants", () => {
+  it("rejects Playwright-bundled browsers with fallback", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = parseBrowserType("chromium");
+    expect(result).toBe(detectDefaultBrowser());
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown or unsupported BROWSER_TYPE "chromium"'),
+    );
+    spy.mockRestore();
+  });
+
+  it("accepts system browser channel variants", () => {
     expect(parseBrowserType("chrome-beta")).toBe("chrome-beta");
     expect(parseBrowserType("msedge-beta")).toBe("msedge-beta");
     expect(parseBrowserType("msedge-dev")).toBe("msedge-dev");
-    expect(parseBrowserType("firefox-beta")).toBe("firefox-beta");
     expect(parseBrowserType("moz-firefox")).toBe("moz-firefox");
   });
 });
@@ -154,20 +170,21 @@ describe("listInstalledBrowsers", () => {
     }
   });
 
-  it("excludes non-browser entries (ffmpeg, winldd, android)", () => {
+  it("only returns system-installed browsers", () => {
     const browsers = listInstalledBrowsers();
     const names = browsers.map((b) => b.name);
+    // Playwright-bundled browsers must never appear
+    expect(names).not.toContain("chromium");
+    expect(names).not.toContain("firefox");
+    expect(names).not.toContain("webkit");
+    expect(names).not.toContain("firefox-beta");
+    // Non-browser entries must never appear
     expect(names).not.toContain("ffmpeg");
     expect(names).not.toContain("winldd");
     expect(names).not.toContain("android");
-  });
-
-  it("excludes internal variants", () => {
-    const browsers = listInstalledBrowsers();
-    const names = browsers.map((b) => b.name);
+    // Internal variants must never appear
     expect(names).not.toContain("chromium-headless-shell");
     expect(names).not.toContain("bidi-chrome-stable");
-    expect(names).not.toContain("bidi-chrome-canary");
     expect(names).not.toContain("webkit-wsl");
   });
 
