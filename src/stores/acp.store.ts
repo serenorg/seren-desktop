@@ -1323,10 +1323,13 @@ Summary:`;
         compactedAt: Date.now(),
       };
 
-      // Capture session details before termination
+      // Capture session details and user-configured settings before termination
       const cwd = session.cwd;
       const agentType = session.info.agentType;
       const conversationId = session.conversationId;
+      const prevModeId = session.currentModeId;
+      const prevModelId = session.currentModelId;
+      const prevConfigOptions = session.configOptions;
 
       // Terminate the old agent session
       await this.terminateSession(sessionId);
@@ -1354,11 +1357,27 @@ Summary:`;
 
       const seedPrompt = `Here is a summary of our prior conversation:\n\n${summary}\n\nContinue from where we left off. The user may send a new message shortly.`;
 
-      // Wait for the new session to be ready, then send the seed prompt
+      // Wait for the new session to be ready, then restore settings and seed
       const readyEntry = sessionReadyPromises.get(newSessionId);
       if (readyEntry) {
         await readyEntry.promise;
       }
+
+      // Restore user-configured settings from the prior session
+      if (prevModeId) {
+        await this.setPermissionMode(prevModeId, newSessionId);
+      }
+      if (prevModelId) {
+        await this.setModel(prevModelId, newSessionId);
+      }
+      if (prevConfigOptions) {
+        for (const opt of prevConfigOptions) {
+          if (opt.type === "select" && opt.currentValue) {
+            await this.setConfigOption(opt.id, opt.currentValue, newSessionId);
+          }
+        }
+      }
+
       await acpService.sendPrompt(newSessionId, seedPrompt);
     } catch (error) {
       console.error("[AcpStore] Failed to compact agent conversation:", error);
