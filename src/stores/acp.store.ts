@@ -133,6 +133,10 @@ export interface ActiveSession {
    *  Set when the session was spawned with restored messages from SQLite,
    *  cleared when the replay phase ends (promptComplete with historyReplay). */
   skipHistoryReplay?: boolean;
+  /** Number of messages restored from SQLite at session start. The message-count
+   *  auto-compaction check subtracts this so that display-only history does not
+   *  re-trigger compaction on every restart. */
+  restoredMessageCount?: number;
   /** Most recent input_tokens from the agent's usage metadata. */
   lastInputTokens?: number;
   /** Context window size for the agent model (tokens). */
@@ -829,6 +833,9 @@ export const acpStore = {
         // pollution (the backend replays the full context including injected
         // skill text as user messages).
         skipHistoryReplay: hasRestoredMessages ? true : undefined,
+        restoredMessageCount: hasRestoredMessages
+          ? opts.restoredMessages.length
+          : undefined,
         contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
       };
 
@@ -1346,9 +1353,16 @@ Summary:`;
         return;
       }
 
-      // Store compacted summary and preserved messages on the new session
+      // Store compacted summary and preserved messages on the new session.
+      // Mark them as restored so the message-count threshold ignores them.
       setState("sessions", newSessionId, "compactedSummary", compactedSummary);
       setState("sessions", newSessionId, "messages", toPreserve);
+      setState(
+        "sessions",
+        newSessionId,
+        "restoredMessageCount",
+        toPreserve.length,
+      );
 
       // Seed the new agent with the summary so it has context
       console.info(
@@ -1579,9 +1593,16 @@ Summary:`;
           localSessionId: session.conversationId,
         });
         if (newSessionId) {
-          // Restore conversation history to the new session
+          // Restore conversation history to the new session.
+          // Mark as restored so the message-count threshold ignores them.
           if (existingMessages.length > 0) {
             setState("sessions", newSessionId, "messages", existingMessages);
+            setState(
+              "sessions",
+              newSessionId,
+              "restoredMessageCount",
+              existingMessages.length,
+            );
           }
 
           // Show recovery indicator so the user knows what happened
@@ -2064,11 +2085,20 @@ Summary:`;
                 );
                 shouldCompact = true;
               }
-            } else if (sess.messages.length > MESSAGE_COUNT_COMPACT_THRESHOLD) {
-              console.info(
-                `[AcpStore] ${sess.messages.length} messages without token usage data — triggering auto-compaction`,
+            } else {
+              // Only count messages added since session start — restored
+              // display-only history from SQLite should not re-trigger
+              // compaction on every app restart.
+              const activeCount = Math.max(
+                0,
+                sess.messages.length - (sess.restoredMessageCount ?? 0),
               );
-              shouldCompact = true;
+              if (activeCount > MESSAGE_COUNT_COMPACT_THRESHOLD) {
+                console.info(
+                  `[AcpStore] ${activeCount} active messages (${sess.messages.length} total) without token usage data — triggering auto-compaction`,
+                );
+                shouldCompact = true;
+              }
             }
 
             if (shouldCompact) {
