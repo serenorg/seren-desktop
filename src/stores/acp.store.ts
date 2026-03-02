@@ -133,6 +133,10 @@ export interface ActiveSession {
    *  Set when the session was spawned with restored messages from SQLite,
    *  cleared when the replay phase ends (promptComplete with historyReplay). */
   skipHistoryReplay?: boolean;
+  /** Number of messages restored from SQLite at session start. The message-count
+   *  auto-compaction check subtracts this so that display-only history does not
+   *  re-trigger compaction on every restart. */
+  restoredMessageCount?: number;
   /** Most recent input_tokens from the agent's usage metadata. */
   lastInputTokens?: number;
   /** Context window size for the agent model (tokens). */
@@ -829,6 +833,9 @@ export const acpStore = {
         // pollution (the backend replays the full context including injected
         // skill text as user messages).
         skipHistoryReplay: hasRestoredMessages ? true : undefined,
+        restoredMessageCount: hasRestoredMessages
+          ? opts.restoredMessages.length
+          : undefined,
         contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
       };
 
@@ -2064,11 +2071,18 @@ Summary:`;
                 );
                 shouldCompact = true;
               }
-            } else if (sess.messages.length > MESSAGE_COUNT_COMPACT_THRESHOLD) {
-              console.info(
-                `[AcpStore] ${sess.messages.length} messages without token usage data — triggering auto-compaction`,
-              );
-              shouldCompact = true;
+            } else {
+              // Only count messages added since session start — restored
+              // display-only history from SQLite should not re-trigger
+              // compaction on every app restart.
+              const activeCount =
+                sess.messages.length - (sess.restoredMessageCount ?? 0);
+              if (activeCount > MESSAGE_COUNT_COMPACT_THRESHOLD) {
+                console.info(
+                  `[AcpStore] ${activeCount} active messages (${sess.messages.length} total) without token usage data — triggering auto-compaction`,
+                );
+                shouldCompact = true;
+              }
             }
 
             if (shouldCompact) {
