@@ -214,7 +214,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             browser: {
               type: "string",
               description:
-                "Browser name from playwright_list_browsers (e.g. 'chromium', 'firefox', 'chrome', 'msedge', 'webkit')",
+                "System browser channel name (e.g. 'chrome', 'msedge', 'moz-firefox'). " +
+                "Also accepts aliases: 'firefox' → 'moz-firefox', 'chromium' → 'chrome', 'edge' → 'msedge'.",
             },
           },
           required: ["browser"],
@@ -288,9 +289,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "playwright_list_browsers":
         result = tools.listBrowsers();
         break;
-      case "playwright_set_browser":
-        result = await tools.switchBrowser(args.browser as string);
+      case "playwright_set_browser": {
+        const browserArg =
+          (args.browser as string | undefined) ??
+          (args.browserName as string | undefined) ??
+          (args.name as string | undefined);
+        if (!browserArg) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Error: Missing required argument 'browser'. Use playwright_list_browsers to see available options.",
+              },
+            ],
+            isError: true,
+          };
+        }
+        result = await tools.switchBrowser(browserArg);
         break;
+      }
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
