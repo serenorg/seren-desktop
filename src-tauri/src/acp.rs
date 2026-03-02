@@ -265,13 +265,82 @@ fn get_seren_mcp_path() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Read enabled local MCP servers from the persisted settings store.
+/// Returns Vec of (name, command, args, env) tuples.
+fn read_local_mcp_servers(
+    app: &AppHandle,
+) -> Result<Vec<(String, String, Vec<String>, Vec<(String, String)>)>, String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app.store("settings.json").map_err(|e| e.to_string())?;
+    let raw = store.get("mcp").ok_or("no mcp settings found")?;
+
+    // The value is stored as a JSON string (via JSON.stringify in frontend)
+    let json_str = raw.as_str().ok_or("mcp settings not a string")?;
+    let settings: serde_json::Value =
+        serde_json::from_str(json_str).map_err(|e| format!("parse error: {}", e))?;
+
+    let servers = settings
+        .get("servers")
+        .and_then(|s| s.as_array())
+        .ok_or("no servers array")?;
+
+    let mut result = Vec::new();
+    for server in servers {
+        let server_type = server.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let enabled = server.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false);
+        if server_type != "local" || !enabled {
+            continue;
+        }
+
+        let name = server
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("")
+            .to_string();
+        let command = server
+            .get("command")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        let args: Vec<String> = server
+            .get("args")
+            .and_then(|a| a.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let env_vars: Vec<(String, String)> = server
+            .get("env")
+            .and_then(|e| e.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if !name.is_empty() && !command.is_empty() {
+            result.push((name, command, args, env_vars));
+        }
+    }
+
+    Ok(result)
+}
+
 /// Build MCP server configurations for a new ACP session.
 ///
-/// If seren-mcp is available and an API key is provided, includes it as a stdio MCP server.
-fn build_mcp_servers(api_key: Option<&str>) -> Vec<McpServer> {
+/// Includes seren-mcp (if binary + API key available) plus all enabled local
+/// MCP servers from the persisted settings store. This ensures agents (both
+/// Claude and Codex) can discover tools from any configured local server
+/// (e.g., playwright-stealth) without hardcoding each one.
+fn build_mcp_servers(app: &AppHandle, api_key: Option<&str>) -> Vec<McpServer> {
     let mut servers = Vec::new();
 
-    // Add seren-mcp if binary is available and we have an API key
+    // Add seren-mcp if binary is available and we have an API key.
+    // Special-cased because it needs API key injection from the auth flow.
     if let (Some(mcp_path), Some(key)) = (get_seren_mcp_path(), api_key) {
         log::info!("[ACP] Adding seren-mcp to session MCP servers");
         let mcp_server = McpServerStdio::new("seren-mcp", mcp_path)
@@ -280,6 +349,34 @@ fn build_mcp_servers(api_key: Option<&str>) -> Vec<McpServer> {
         servers.push(McpServer::Stdio(mcp_server));
     } else if api_key.is_none() {
         log::debug!("[ACP] No API key provided, skipping seren-mcp");
+    }
+
+    // Add all enabled local MCP servers from the settings store.
+    match read_local_mcp_servers(app) {
+        Ok(local_servers) => {
+            for (name, command, args, env_vars) in local_servers {
+                let resolved_cmd = crate::mcp::resolve_command_in_embedded_path(&command);
+                log::info!(
+                    "[ACP] Adding local MCP server '{}' (cmd={})",
+                    name,
+                    resolved_cmd
+                );
+                let mut mcp_server =
+                    McpServerStdio::new(&name, &resolved_cmd).args(args);
+                if !env_vars.is_empty() {
+                    mcp_server = mcp_server.env(
+                        env_vars
+                            .into_iter()
+                            .map(|(k, v)| EnvVariable::new(&k, &v))
+                            .collect(),
+                    );
+                }
+                servers.push(McpServer::Stdio(mcp_server));
+            }
+        }
+        Err(e) => {
+            log::warn!("[ACP] Failed to read MCP settings: {}", e);
+        }
     }
 
     servers
@@ -1883,8 +1980,19 @@ async fn run_session_worker(
     let agent_session_id = {
         let mut did_auth_retry = false;
         loop {
-            let mcp_servers = build_mcp_servers(api_key.as_deref());
-            log::info!("[ACP] MCP servers for session: {:?}", mcp_servers.len());
+            let mcp_servers = build_mcp_servers(&app, api_key.as_deref());
+            log::info!(
+                "[ACP] MCP servers for session ({}): [{}]",
+                mcp_servers.len(),
+                mcp_servers
+                    .iter()
+                    .map(|s| match s {
+                        McpServer::Stdio(s) => s.name.clone(),
+                        _ => "unknown".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
 
             if let Some(ref resume_id) = resume_agent_session_id {
                 log::info!("[ACP] Loading existing agent session: {}", resume_id);
