@@ -164,6 +164,15 @@ export function resolveBrowserName(name: string): BrowserEngine {
   return "chromium";
 }
 
+/** Common aliases → system channel names. */
+const BROWSER_ALIASES: Record<string, string> = {
+  edge: "msedge",
+  firefox: "moz-firefox",
+  "firefox-beta": "moz-firefox-beta",
+  "firefox-nightly": "moz-firefox-nightly",
+  chromium: "chrome",
+};
+
 /** Validate and normalize a browser type string. Auto-detects if not set. */
 export function parseBrowserType(value: string | undefined): string {
   if (!value) return detectDefaultBrowser();
@@ -171,8 +180,8 @@ export function parseBrowserType(value: string | undefined): string {
   const normalized = value.toLowerCase().trim();
   if (!normalized) return detectDefaultBrowser();
 
-  // Accept "edge" as alias for "msedge"
-  if (normalized === "edge") return "msedge";
+  const aliased = BROWSER_ALIASES[normalized];
+  if (aliased) return aliased;
 
   if (SYSTEM_BROWSERS.has(normalized)) return normalized;
 

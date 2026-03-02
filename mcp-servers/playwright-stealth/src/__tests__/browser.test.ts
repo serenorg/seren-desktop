@@ -52,16 +52,35 @@ describe("parseBrowserType", () => {
     expect(parseBrowserType("edge")).toBe("msedge");
   });
 
+  it("maps 'firefox' alias to 'moz-firefox'", () => {
+    expect(parseBrowserType("firefox")).toBe("moz-firefox");
+  });
+
+  it("maps 'firefox-beta' alias to 'moz-firefox-beta'", () => {
+    expect(parseBrowserType("firefox-beta")).toBe("moz-firefox-beta");
+  });
+
+  it("maps 'firefox-nightly' alias to 'moz-firefox-nightly'", () => {
+    expect(parseBrowserType("firefox-nightly")).toBe("moz-firefox-nightly");
+  });
+
+  it("maps 'chromium' alias to 'chrome'", () => {
+    expect(parseBrowserType("chromium")).toBe("chrome");
+  });
+
   it("is case-insensitive", () => {
     expect(parseBrowserType("Chrome")).toBe("chrome");
     expect(parseBrowserType("MSEDGE")).toBe("msedge");
     expect(parseBrowserType("EDGE")).toBe("msedge");
     expect(parseBrowserType("MOZ-FIREFOX")).toBe("moz-firefox");
+    expect(parseBrowserType("Firefox")).toBe("moz-firefox");
+    expect(parseBrowserType("CHROMIUM")).toBe("chrome");
   });
 
   it("trims whitespace", () => {
     expect(parseBrowserType("  chrome  ")).toBe("chrome");
     expect(parseBrowserType("  edge  ")).toBe("msedge");
+    expect(parseBrowserType("  firefox  ")).toBe("moz-firefox");
   });
 
   it("falls back with stderr warning for unknown value", () => {
@@ -70,16 +89,6 @@ describe("parseBrowserType", () => {
     expect(result).toBe(detectDefaultBrowser());
     expect(spy).toHaveBeenCalledWith(
       expect.stringContaining('Unknown or unsupported BROWSER_TYPE "safari"'),
-    );
-    spy.mockRestore();
-  });
-
-  it("rejects Playwright-bundled browsers with fallback", () => {
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = parseBrowserType("chromium");
-    expect(result).toBe(detectDefaultBrowser());
-    expect(spy).toHaveBeenCalledWith(
-      expect.stringContaining('Unknown or unsupported BROWSER_TYPE "chromium"'),
     );
     spy.mockRestore();
   });
