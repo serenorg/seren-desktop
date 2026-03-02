@@ -29,7 +29,7 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
 
   return (
     <footer class="h-6 px-3 bg-surface-0 border-t border-border flex items-center justify-between">
-      <span class="text-xs text-muted-foreground">
+      <span class="text-xs text-muted-foreground truncate min-w-0">
         {agentStatusText() ?? props.message ?? "Ready"}
       </span>
       <div class="flex items-center gap-2 [&_.status-label]:text-muted-foreground">
