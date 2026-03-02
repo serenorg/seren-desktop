@@ -275,10 +275,15 @@ fn read_local_mcp_servers(
     let store = app.store("settings.json").map_err(|e| e.to_string())?;
     let raw = store.get("mcp").ok_or("no mcp settings found")?;
 
-    // The value is stored as a JSON string (via JSON.stringify in frontend)
-    let json_str = raw.as_str().ok_or("mcp settings not a string")?;
-    let settings: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("parse error: {}", e))?;
+    // Accept both string-encoded JSON (from JSON.stringify in frontend)
+    // and direct object values for compatibility.
+    let settings: serde_json::Value = if let Some(json_str) = raw.as_str() {
+        serde_json::from_str(json_str).map_err(|e| format!("parse error: {}", e))?
+    } else if raw.is_object() {
+        raw.clone()
+    } else {
+        return Err("mcp settings: unexpected value type".to_string());
+    };
 
     let servers = settings
         .get("servers")
@@ -375,11 +380,38 @@ fn build_mcp_servers(app: &AppHandle, api_key: Option<&str>) -> Vec<McpServer> {
             }
         }
         Err(e) => {
-            log::warn!("[ACP] Failed to read MCP settings: {}", e);
+            log::warn!("[ACP] Failed to read MCP settings: {}. Using default servers.", e);
+            // Fallback: include default playwright server when settings store
+            // is absent (clean profile) or unparsable.
+            add_default_playwright_server(app, &mut servers);
         }
     }
 
     servers
+}
+
+/// Add the default playwright-stealth MCP server if its script is available.
+/// Used as fallback when the settings store has no MCP config yet (clean profile).
+fn add_default_playwright_server(app: &AppHandle, servers: &mut Vec<McpServer>) {
+    let script_path = crate::mcp::resolve_playwright_mcp_script_path(app.clone());
+    let script_ok = std::path::Path::new(&script_path).is_absolute()
+        && std::path::Path::new(&script_path).exists();
+
+    if script_ok {
+        let node_cmd = crate::mcp::resolve_command_in_embedded_path("node");
+        log::info!(
+            "[ACP] Adding default playwright MCP server (node={}, script={})",
+            node_cmd,
+            script_path
+        );
+        let pw_server = McpServerStdio::new("playwright", node_cmd).args(vec![script_path]);
+        servers.push(McpServer::Stdio(pw_server));
+    } else {
+        log::debug!(
+            "[ACP] Default playwright script not found at {:?}, skipping",
+            script_path
+        );
+    }
 }
 
 /// Information about an ACP session
