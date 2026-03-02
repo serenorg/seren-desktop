@@ -1353,9 +1353,16 @@ Summary:`;
         return;
       }
 
-      // Store compacted summary and preserved messages on the new session
+      // Store compacted summary and preserved messages on the new session.
+      // Mark them as restored so the message-count threshold ignores them.
       setState("sessions", newSessionId, "compactedSummary", compactedSummary);
       setState("sessions", newSessionId, "messages", toPreserve);
+      setState(
+        "sessions",
+        newSessionId,
+        "restoredMessageCount",
+        toPreserve.length,
+      );
 
       // Seed the new agent with the summary so it has context
       console.info(
@@ -1586,9 +1593,16 @@ Summary:`;
           localSessionId: session.conversationId,
         });
         if (newSessionId) {
-          // Restore conversation history to the new session
+          // Restore conversation history to the new session.
+          // Mark as restored so the message-count threshold ignores them.
           if (existingMessages.length > 0) {
             setState("sessions", newSessionId, "messages", existingMessages);
+            setState(
+              "sessions",
+              newSessionId,
+              "restoredMessageCount",
+              existingMessages.length,
+            );
           }
 
           // Show recovery indicator so the user knows what happened
@@ -2075,8 +2089,10 @@ Summary:`;
               // Only count messages added since session start — restored
               // display-only history from SQLite should not re-trigger
               // compaction on every app restart.
-              const activeCount =
-                sess.messages.length - (sess.restoredMessageCount ?? 0);
+              const activeCount = Math.max(
+                0,
+                sess.messages.length - (sess.restoredMessageCount ?? 0),
+              );
               if (activeCount > MESSAGE_COUNT_COMPACT_THRESHOLD) {
                 console.info(
                   `[AcpStore] ${activeCount} active messages (${sess.messages.length} total) without token usage data — triggering auto-compaction`,
