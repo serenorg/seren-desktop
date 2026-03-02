@@ -262,7 +262,7 @@ pub fn resolve_playwright_mcp_script_path(app: tauri::AppHandle) -> String {
 /// only affects the child's environment after exec — the OS uses the PARENT's PATH to
 /// locate the executable for `Command::new("node")`. This function resolves bare names
 /// (like "node") against the embedded PATH so we use an absolute path for spawning.
-fn resolve_command_in_embedded_path(command: &str) -> String {
+pub(crate) fn resolve_command_in_embedded_path(command: &str) -> String {
     // Absolute paths and paths with separators are used as-is.
     if std::path::Path::new(command).is_absolute() || command.contains(std::path::MAIN_SEPARATOR) {
         return command.to_string();
