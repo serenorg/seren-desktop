@@ -1921,15 +1921,12 @@ async fn run_session_worker(
                     .rev()
                     .collect::<Vec<_>>()
             };
-            let mut msg = "Agent initialization timed out after 30 seconds. The agent binary may be hung.".to_string();
-            if let Some(status) = exit_status {
-                msg.push_str(&format!("\nAgent exit status: {status}"));
-            }
-            if !stderr_lines.is_empty() {
-                msg.push_str("\nACP agent stderr (tail):\n");
-                msg.push_str(&stderr_lines.join("\n"));
-            }
-            return Err(msg);
+            log::error!(
+                "[ACP] Agent initialization timed out. exit={:?} stderr={:?}",
+                exit_status,
+                stderr_lines
+            );
+            return Err("Agent took too long to start. Please try again or restart the app.".to_string());
         }
         Ok(result) => match result {
             Ok(resp) => resp,
@@ -1947,15 +1944,13 @@ async fn run_session_worker(
                         .collect::<Vec<_>>()
                 };
 
-                let mut msg = format!("Failed to initialize agent: {}", format_acp_error(&e));
-                if let Some(status) = exit_status {
-                    msg.push_str(&format!("\nAgent exit status: {status}"));
-                }
-                if !stderr_lines.is_empty() {
-                    msg.push_str("\nACP agent stderr (tail):\n");
-                    msg.push_str(&stderr_lines.join("\n"));
-                }
-                return Err(msg);
+                log::error!(
+                    "[ACP] Agent initialization failed: {:?} exit={:?} stderr={:?}",
+                    e,
+                    exit_status,
+                    stderr_lines
+                );
+                return Err("Agent failed to start. Please try again or check Settings.".to_string());
             }
         },
     };
@@ -2122,15 +2117,13 @@ async fn run_session_worker(
                                 .collect::<Vec<_>>()
                         };
 
-                        let mut msg = format!("Failed to create agent session: {}", format_acp_error(&e));
-                        if let Some(status) = exit_status {
-                            msg.push_str(&format!("\nAgent exit status: {status}"));
-                        }
-                        if !stderr_lines.is_empty() {
-                            msg.push_str("\nACP agent stderr (tail):\n");
-                            msg.push_str(&stderr_lines.join("\n"));
-                        }
-                        return Err(msg);
+                        log::error!(
+                            "[ACP] Session creation failed: {:?} exit={:?} stderr={:?}",
+                            e,
+                            exit_status,
+                            stderr_lines
+                        );
+                        return Err("Agent crashed during startup. Please try again or check Settings.".to_string());
                     }
                 }
             }
@@ -3136,15 +3129,13 @@ async fn list_remote_sessions_inner(
                             .collect::<Vec<_>>()
                     };
 
-                    let mut msg = format!("Failed to initialize agent: {}", format_acp_error(&e));
-                    if let Some(status) = exit_status {
-                        msg.push_str(&format!("\nAgent exit status: {status}"));
-                    }
-                    if !stderr_lines.is_empty() {
-                        msg.push_str("\nACP agent stderr (tail):\n");
-                        msg.push_str(&stderr_lines.join("\n"));
-                    }
-                    return Err(msg);
+                    log::error!(
+                        "[ACP] Agent initialization failed: {:?} exit={:?} stderr={:?}",
+                        e,
+                        exit_status,
+                        stderr_lines
+                    );
+                    return Err("Agent failed to start. Please try again or check Settings.".to_string());
                 }
             },
         };
@@ -3239,12 +3230,12 @@ async fn list_remote_sessions_inner(
                             .collect::<Vec<_>>()
                     };
 
-                    let mut msg = format!("Failed to list sessions: {}", format_acp_error(&e));
-                    if !stderr_lines.is_empty() {
-                        msg.push_str("\nACP agent stderr (tail):\n");
-                        msg.push_str(&stderr_lines.join("\n"));
-                    }
-                    return Err(msg);
+                    log::error!(
+                        "[ACP] Failed to list sessions: {:?} stderr={:?}",
+                        e,
+                        stderr_lines
+                    );
+                    return Err("Failed to list agent sessions. Please try again.".to_string());
                 }
             }
         }
