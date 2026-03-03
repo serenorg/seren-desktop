@@ -1,6 +1,7 @@
 // ABOUTME: Parses slash command input and matches against the registry.
-// ABOUTME: Also searches installed skills so they appear in slash command autocomplete.
+// ABOUTME: Also searches installed skills for autocomplete and skill invocation dispatch.
 
+import type { InstalledSkill } from "@/lib/skills";
 import { skillsStore } from "@/stores/skills.store";
 import { registry } from "./registry";
 import type { ParsedCommand, SlashCommand } from "./types";
@@ -53,6 +54,35 @@ export function getCompletions(
   const uniqueSkills = skillResults.filter((s) => !builtinNames.has(s.name));
 
   return [...builtins, ...uniqueSkills];
+}
+
+/**
+ * Match a slash command input against installed skills.
+ * Returns the matched skill and any trailing args, or null.
+ */
+export function matchSkillCommand(
+  input: string,
+): { skill: InstalledSkill; args: string } | null {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/")) return null;
+
+  const spaceIdx = trimmed.indexOf(" ");
+  const name = spaceIdx === -1 ? trimmed.slice(1) : trimmed.slice(1, spaceIdx);
+  const args = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+
+  if (!name) return null;
+
+  const lower = name.toLowerCase();
+  const installed = skillsStore.installed;
+
+  for (const skill of installed) {
+    if (!skill.enabled) continue;
+    if (skill.slug.toLowerCase() === lower) {
+      return { skill, args };
+    }
+  }
+
+  return null;
 }
 
 /**

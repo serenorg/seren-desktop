@@ -21,7 +21,11 @@ import { CompactedMessage } from "@/components/chat/CompactedMessage";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError } from "@/lib/auth-errors";
-import { getCompletions, parseCommand } from "@/lib/commands/parser";
+import {
+  getCompletions,
+  matchSkillCommand,
+  parseCommand,
+} from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { escapeHtml } from "@/lib/escape-html";
 import { openExternalLink } from "@/lib/external-link";
@@ -45,6 +49,7 @@ import {
   type ToolCallEvent,
 } from "@/services/acp";
 import { readDocument } from "@/services/docreader";
+import { skills } from "@/services/skills";
 import {
   type AgentCompactedSummary,
   type AgentMessage,
@@ -518,6 +523,42 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // Check for slash commands first
     if (trimmed.startsWith("/") && images.length === 0) {
       if (executeSlashCommand(trimmed)) return;
+
+      // Check if the slash command matches an installed skill
+      const skillMatch = matchSkillCommand(trimmed);
+      if (skillMatch) {
+        const { skill, args } = skillMatch;
+        console.log("[AgentChat] Skill invocation:", skill.slug, "args:", args);
+
+        setInput("");
+        setHistoryIndex(-1);
+        setSavedInput("");
+        userHasScrolledUp = false;
+
+        let skillContent: string | null = null;
+        try {
+          skillContent = await skills.readContent(skill);
+        } catch (err) {
+          console.warn("[AgentChat] Failed to load skill content:", err);
+        }
+
+        const directive = skillContent
+          ? [
+              `<skill-invocation name="${skill.slug}">`,
+              `The user has invoked the /${skill.slug} skill. Execute it by following the skill instructions below.`,
+              args ? `\nUser request: ${args}` : "",
+              `\n${skillContent}`,
+              `</skill-invocation>`,
+            ].join("\n")
+          : args
+            ? `/${skill.slug} ${args}`
+            : `/${skill.slug}`;
+
+        await acpStore.sendPrompt(directive, undefined, {
+          displayContent: trimmed,
+        });
+        return;
+      }
     }
 
     // If agent is prompting, queue the message instead
