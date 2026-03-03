@@ -314,6 +314,33 @@ const PENDING_SESSION_EVENT_LIMIT = 500;
 const CLAUDE_INIT_RETRY_DELAY_MS = 350;
 const MAX_CLAUDE_INIT_RETRIES = 3;
 
+/** Spawn cascade guard: track recent failures per conversation to prevent infinite loops. */
+const SPAWN_CASCADE_WINDOW_MS = 30_000;
+const SPAWN_CASCADE_MAX_FAILURES = 3;
+const spawnFailureTimestamps = new Map<string, number[]>();
+
+function recordSpawnFailure(conversationId: string): void {
+  const now = Date.now();
+  const timestamps = spawnFailureTimestamps.get(conversationId) ?? [];
+  timestamps.push(now);
+  // Keep only failures within the window
+  const cutoff = now - SPAWN_CASCADE_WINDOW_MS;
+  const recent = timestamps.filter((t) => t >= cutoff);
+  spawnFailureTimestamps.set(conversationId, recent);
+}
+
+function isSpawnCascading(conversationId: string): boolean {
+  const now = Date.now();
+  const timestamps = spawnFailureTimestamps.get(conversationId) ?? [];
+  const cutoff = now - SPAWN_CASCADE_WINDOW_MS;
+  const recent = timestamps.filter((t) => t >= cutoff);
+  return recent.length >= SPAWN_CASCADE_MAX_FAILURES;
+}
+
+function clearSpawnFailures(conversationId: string): void {
+  spawnFailureTimestamps.delete(conversationId);
+}
+
 function isRetryableClaudeInitError(message: string): boolean {
   const lower = message.toLowerCase();
   return (
@@ -1067,6 +1094,20 @@ export const acpStore = {
       return conversationId;
     }
 
+    // Prevent infinite spawn-crash-respawn cascades: if this conversation
+    // has failed too many times in a short window, stop retrying.
+    if (isSpawnCascading(conversationId)) {
+      console.error(
+        `[AcpStore] Spawn cascade detected for ${conversationId} — ${SPAWN_CASCADE_MAX_FAILURES} failures in ${SPAWN_CASCADE_WINDOW_MS / 1000}s. Stopping auto-resume.`,
+      );
+      setState(
+        "error",
+        "Agent failed to start after multiple attempts. Please try again or check Settings.",
+      );
+      setState("isLoading", false);
+      return null;
+    }
+
     setState("error", null);
 
     // Pre-emptively clean up any stale backend session with this conversation id.
@@ -1130,7 +1171,10 @@ export const acpStore = {
         restoredMessages,
       });
       if (freshSessionId) {
+        clearSpawnFailures(conversationId);
         void this.refreshRecentAgentConversations(200).catch(() => {});
+      } else {
+        recordSpawnFailure(conversationId);
       }
       return freshSessionId;
     }
@@ -1178,13 +1222,19 @@ export const acpStore = {
         restoredMessages,
       });
       if (fallbackSessionId) {
+        clearSpawnFailures(conversationId);
         void this.refreshRecentAgentConversations(200).catch(() => {});
+      } else {
+        recordSpawnFailure(conversationId);
       }
       return fallbackSessionId;
     }
 
     if (sessionId) {
+      clearSpawnFailures(conversationId);
       void this.refreshRecentAgentConversations(200).catch(() => {});
+    } else {
+      recordSpawnFailure(conversationId);
     }
     return sessionId;
   },
@@ -2162,6 +2212,12 @@ Summary:`;
         break;
 
       case "error":
+        // Log full error content for diagnostics (helps debug cascade crashes)
+        console.error(
+          `[AcpStore] Error event for session ${sessionId}:`,
+          event.data.error,
+        );
+
         // Clean up any in-flight streaming and tool cards
         this.flushPendingUserMessage(sessionId);
         this.finalizeStreamingContent(sessionId);
