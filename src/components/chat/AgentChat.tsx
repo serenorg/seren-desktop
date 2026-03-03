@@ -1087,13 +1087,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     : cwd
                       ? `${cwd.replace(/\/$/, "")}/${url}`
                       : url;
-                openFileInTab(resolved).catch((err) =>
-                  console.warn(
-                    "[AgentChat] Failed to open file:",
-                    resolved,
-                    err,
-                  ),
-                );
+                openFileInTab(resolved)
+                  .then(() => {
+                    window.dispatchEvent(
+                      new CustomEvent("seren:open-panel", {
+                        detail: "editor",
+                      }),
+                    );
+                  })
+                  .catch((err) =>
+                    console.warn(
+                      "[AgentChat] Failed to open file:",
+                      resolved,
+                      err,
+                    ),
+                  );
               } else {
                 openExternalLink(url);
               }
