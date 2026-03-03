@@ -1369,7 +1369,23 @@ Summary:`;
         `[AcpStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}. Seeding new session.`,
       );
 
-      const seedPrompt = `Here is a summary of our prior conversation:\n\n${summary}\n\nContinue from where we left off. The user may send a new message shortly.`;
+      // Build a condensed representation of preserved messages so the agent
+      // retains awareness of recent work, not just the high-level summary.
+      const MAX_MSG_CHARS = 2000;
+      const preservedContext = toPreserve
+        .filter((m) => m.type === "user" || m.type === "assistant")
+        .map((m) => {
+          const content =
+            m.content.length > MAX_MSG_CHARS
+              ? `${m.content.slice(0, MAX_MSG_CHARS)}... [truncated]`
+              : m.content;
+          return `${m.type.toUpperCase()}: ${content}`;
+        })
+        .join("\n\n");
+
+      const seedPrompt = preservedContext
+        ? `Here is a summary of our prior conversation:\n\n${summary}\n\nHere are the most recent messages:\n\n${preservedContext}\n\nContinue from where we left off. The user may send a new message shortly.`
+        : `Here is a summary of our prior conversation:\n\n${summary}\n\nContinue from where we left off. The user may send a new message shortly.`;
 
       // Wait for the new session to be ready, then restore settings and seed
       const readyEntry = sessionReadyPromises.get(newSessionId);
