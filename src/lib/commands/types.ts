@@ -10,6 +10,8 @@ export interface SlashCommand {
   panels: ("chat" | "agent")[];
   /** Execute the command. Returns true if handled (suppress send). */
   execute: (ctx: CommandContext) => boolean | Promise<boolean>;
+  /** True when this entry represents an installed skill rather than a built-in command. */
+  isSkill?: boolean;
 }
 
 export interface CommandContext {
