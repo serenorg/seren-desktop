@@ -739,14 +739,19 @@ export const acpStore = {
       globalUnsubscribe = await acpService.subscribeToAllEvents((event) => {
         const eventSessionId = event.data.sessionId;
         if (!eventSessionId) return;
-        console.log(
-          "[ACP] Event received - type:",
-          event.type,
-          "sessionId:",
-          eventSessionId,
-          "conversationId:",
-          state.sessions[eventSessionId]?.conversationId,
-        );
+        // Skip logging high-frequency messageChunk events to avoid flooding
+        // DevTools. Other event types (sessionStatus, toolCall, etc.) are
+        // still logged for debugging.
+        if (event.type !== "messageChunk") {
+          console.log(
+            "[ACP] Event received - type:",
+            event.type,
+            "sessionId:",
+            eventSessionId,
+            "conversationId:",
+            state.sessions[eventSessionId]?.conversationId,
+          );
+        }
         if (state.sessions[eventSessionId]) {
           this.handleSessionEvent(eventSessionId, event);
           return;
