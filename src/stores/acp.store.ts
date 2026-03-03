@@ -1807,10 +1807,13 @@ Summary:`;
         return;
       }
 
-      // Skip addErrorMessage for cancellation — the error event handler
-      // already recorded it in chat history. Adding it again here would
-      // create a duplicate banner.
-      if (!message.includes("Task cancelled")) {
+      // Skip addErrorMessage for cancellation and prompt-too-long — the error
+      // event handler already recorded them and triggers the appropriate
+      // recovery flow. Adding them again here would create duplicates.
+      if (
+        !message.includes("Task cancelled") &&
+        !isPromptTooLongError(message)
+      ) {
         this.addErrorMessage(sessionId, message);
       }
     }
@@ -2904,12 +2907,18 @@ Summary:`;
       }
 
       // If the agent's response is a prompt-too-long error (context window full),
-      // flag the session so the UI shows the "Continue in Chat" fallback banner.
+      // automatically switch to Chat mode with history preserved.
       if (isPromptTooLongError(session.streamingContent)) {
         console.info(
-          "[AcpStore] Prompt too long detected in streamed content, flagging session for chat fallback",
+          "[AcpStore] Prompt too long detected in streamed content, switching to Chat mode",
         );
         setState("sessions", sessionId, "promptTooLong", true);
+        this.acceptRateLimitFallback().catch((err) => {
+          console.error(
+            "[AcpStore] Auto-failover from streamed content failed:",
+            err,
+          );
+        });
       }
 
       setState("sessions", sessionId, "streamingContent", "");
