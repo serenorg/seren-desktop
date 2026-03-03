@@ -1789,12 +1789,18 @@ async fn run_session_worker(
 
     // Set the appropriate CLI_PATH env var so the agent can find its CLI directly.
     // Claude uses CLAUDE_CLI_PATH; Codex uses CODEX_CLI_PATH.
-    if let Some(ref bin) = cli_tools_bin {
-        let (env_var, binary_name) = match agent_type {
+    // Check both npm (cli_tools_bin) and native (~/.local/bin) install paths.
+    {
+        let (env_var, npm_name, native_name) = match agent_type {
             AgentType::ClaudeCode => (
                 "CLAUDE_CLI_PATH",
                 if cfg!(target_os = "windows") {
                     "claude.cmd"
+                } else {
+                    "claude"
+                },
+                if cfg!(target_os = "windows") {
+                    "claude.exe"
                 } else {
                     "claude"
                 },
@@ -1806,22 +1812,55 @@ async fn run_session_worker(
                 } else {
                     "codex"
                 },
+                if cfg!(target_os = "windows") {
+                    "codex.exe"
+                } else {
+                    "codex"
+                },
             ),
         };
-        let cli_binary = bin.join(binary_name);
-        if cli_binary.exists() {
-            cmd.env(env_var, &cli_binary);
-            log::info!("[ACP] Set {} to: {}", env_var, cli_binary.display());
-        } else {
+
+        let mut cli_found = false;
+
+        // 1. Check legacy npm install (cli_tools_bin)
+        if let Some(ref bin) = cli_tools_bin {
+            let cli_binary = bin.join(npm_name);
+            if cli_binary.exists() {
+                cmd.env(env_var, &cli_binary);
+                log::info!("[ACP] Set {} to: {}", env_var, cli_binary.display());
+                cli_found = true;
+            }
+        }
+
+        // 2. Check native install (~/.local/bin/claude[.exe])
+        if !cli_found {
+            let home_var = if cfg!(target_os = "windows") {
+                "USERPROFILE"
+            } else {
+                "HOME"
+            };
+            if let Ok(home) = std::env::var(home_var) {
+                let cli_binary = std::path::PathBuf::from(&home)
+                    .join(".local")
+                    .join("bin")
+                    .join(native_name);
+                if cli_binary.exists() {
+                    cmd.env(env_var, &cli_binary);
+                    log::info!(
+                        "[ACP] Set {} to native install: {}",
+                        env_var,
+                        cli_binary.display()
+                    );
+                    cli_found = true;
+                }
+            }
+        }
+
+        if !cli_found {
             log::warn!(
-                "[ACP] Bundled CLI not found at: {}. Agent will fall back to PATH resolution.",
-                cli_binary.display()
+                "[ACP] CLI not found at npm or native location. Agent will fall back to PATH resolution."
             );
         }
-    } else {
-        log::warn!(
-            "[ACP] cli_tools_bin directory not available. Agent will fall back to PATH resolution."
-        );
     }
 
     let mut child = cmd.spawn().map_err(|e| {
@@ -3009,12 +3048,18 @@ async fn list_remote_sessions_inner(
     }
 
     // Set the appropriate CLI_PATH env var based on agent type.
-    if let Some(ref bin) = cli_tools_bin {
-        let (env_var, binary_name) = match agent_type {
+    // Check both npm (cli_tools_bin) and native (~/.local/bin) install paths.
+    {
+        let (env_var, npm_name, native_name) = match agent_type {
             AgentType::ClaudeCode => (
                 "CLAUDE_CLI_PATH",
                 if cfg!(target_os = "windows") {
                     "claude.cmd"
+                } else {
+                    "claude"
+                },
+                if cfg!(target_os = "windows") {
+                    "claude.exe"
                 } else {
                     "claude"
                 },
@@ -3026,12 +3071,45 @@ async fn list_remote_sessions_inner(
                 } else {
                     "codex"
                 },
+                if cfg!(target_os = "windows") {
+                    "codex.exe"
+                } else {
+                    "codex"
+                },
             ),
         };
-        let cli_binary = bin.join(binary_name);
-        if cli_binary.exists() {
-            cmd.env(env_var, &cli_binary);
-            log::info!("[ACP] Set {} to: {}", env_var, cli_binary.display());
+
+        let mut cli_found = false;
+
+        if let Some(ref bin) = cli_tools_bin {
+            let cli_binary = bin.join(npm_name);
+            if cli_binary.exists() {
+                cmd.env(env_var, &cli_binary);
+                log::info!("[ACP] Set {} to: {}", env_var, cli_binary.display());
+                cli_found = true;
+            }
+        }
+
+        if !cli_found {
+            let home_var = if cfg!(target_os = "windows") {
+                "USERPROFILE"
+            } else {
+                "HOME"
+            };
+            if let Ok(home) = std::env::var(home_var) {
+                let cli_binary = std::path::PathBuf::from(&home)
+                    .join(".local")
+                    .join("bin")
+                    .join(native_name);
+                if cli_binary.exists() {
+                    cmd.env(env_var, &cli_binary);
+                    log::info!(
+                        "[ACP] Set {} to native install: {}",
+                        env_var,
+                        cli_binary.display()
+                    );
+                }
+            }
         }
     }
 
@@ -3527,7 +3605,20 @@ static CLI_INSTALL_LOCK: std::sync::LazyLock<Mutex<()>> =
 /// Check well-known locations for the Claude CLI binary.
 /// Returns the parent directory if found at any location.
 fn find_claude_cli(app: &AppHandle) -> Option<String> {
-    // 1. Check native install location (~/.local/bin/claude on macOS/Linux).
+    // Platform-aware binary names: Windows uses .exe for native installs
+    // and .cmd for npm wrappers.
+    let native_binary = if cfg!(target_os = "windows") {
+        "claude.exe"
+    } else {
+        "claude"
+    };
+    let npm_binary = if cfg!(target_os = "windows") {
+        "claude.cmd"
+    } else {
+        "claude"
+    };
+
+    // 1. Check native install location (~/.local/bin/claude[.exe]).
     //    GUI apps don't inherit ~/.local/bin in PATH, so `which` misses this.
     let home_var = if cfg!(target_os = "windows") {
         "USERPROFILE"
@@ -3538,7 +3629,7 @@ fn find_claude_cli(app: &AppHandle) -> Option<String> {
         let native_path = std::path::PathBuf::from(&home)
             .join(".local")
             .join("bin")
-            .join("claude");
+            .join(native_binary);
         if native_path.exists() {
             log::info!(
                 "[ACP] Found Claude CLI at native location: {}",
@@ -3556,7 +3647,7 @@ fn find_claude_cli(app: &AppHandle) -> Option<String> {
 
     // 2. Check app's local npm install (legacy cli-tools location).
     if let Some(bin_dir) = get_cli_tools_bin_dir(app) {
-        let npm_cli = bin_dir.join("claude");
+        let npm_cli = bin_dir.join(npm_binary);
         if npm_cli.exists() {
             log::info!(
                 "[ACP] Found Claude CLI at npm location: {}",
