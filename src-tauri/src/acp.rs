@@ -1725,6 +1725,17 @@ async fn run_session_worker(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+
+    // On Windows, isolate the child from the parent's console process group so that
+    // Ctrl+C signals sent to the Tauri window don't propagate and kill the sidecar
+    // (exit code 0xc000013a / STATUS_CONTROL_C_EXIT).
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+
     cmd.kill_on_drop(true);
 
     // Ensure the agent can find bundled Node/Git and installed CLI tools.
@@ -1926,7 +1937,10 @@ async fn run_session_worker(
                 exit_status,
                 stderr_lines
             );
-            return Err("Agent took too long to start. Please try again or restart the app.".to_string());
+            return Err(
+                "Agent initialization timed out after 30 seconds. The agent binary may be hung or missing."
+                    .to_string(),
+            );
         }
         Ok(result) => match result {
             Ok(resp) => resp,
@@ -1950,7 +1964,8 @@ async fn run_session_worker(
                     exit_status,
                     stderr_lines
                 );
-                return Err("Agent failed to start. Please try again or check Settings.".to_string());
+                let detail = format_acp_error(&e);
+                return Err(format!("Agent failed to start: {detail}"));
             }
         },
     };
@@ -2123,7 +2138,8 @@ async fn run_session_worker(
                             exit_status,
                             stderr_lines
                         );
-                        return Err("Agent crashed during startup. Please try again or check Settings.".to_string());
+                        let detail = format_acp_error(&e);
+                        return Err(format!("Agent session creation failed: {detail}"));
                     }
                 }
             }
@@ -3135,7 +3151,8 @@ async fn list_remote_sessions_inner(
                         exit_status,
                         stderr_lines
                     );
-                    return Err("Agent failed to start. Please try again or check Settings.".to_string());
+                    let detail = format_acp_error(&e);
+                    return Err(format!("Agent failed to start: {detail}"));
                 }
             },
         };
