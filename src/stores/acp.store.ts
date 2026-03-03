@@ -1531,6 +1531,29 @@ Summary:`;
       return;
     }
 
+    // If auto-recovery is in-flight (triggered by another sendPrompt call),
+    // wait for it to complete. Recovery already retries the original prompt,
+    // so proceeding would race and cause "Another prompt is already active".
+    if (recoveryInFlight) {
+      console.info(
+        "[AcpStore] sendPrompt: recovery in-flight, waiting before proceeding...",
+      );
+      await recoveryInFlight;
+      const refreshed = state.sessions[sessionId];
+      if (!refreshed) {
+        console.info(
+          "[AcpStore] sendPrompt: session gone after recovery, aborting",
+        );
+        return;
+      }
+      if (refreshed.info.status === "prompting") {
+        console.info(
+          "[AcpStore] sendPrompt: session already prompting after recovery, aborting duplicate",
+        );
+        return;
+      }
+    }
+
     // Wait for session to be ready before sending prompt
     const readyEntry = sessionReadyPromises.get(sessionId);
     if (readyEntry) {
@@ -1539,6 +1562,21 @@ Summary:`;
       );
       await readyEntry.promise;
       console.info("[AcpStore] sendPrompt: session is now ready");
+    }
+
+    // Re-check after async waits — recovery may have started while we waited.
+    if (recoveryInFlight) {
+      console.info(
+        "[AcpStore] sendPrompt: recovery started during ready-wait, deferring...",
+      );
+      await recoveryInFlight;
+      const refreshed = state.sessions[sessionId];
+      if (!refreshed || refreshed.info.status === "prompting") {
+        console.info(
+          "[AcpStore] sendPrompt: session busy after recovery, aborting duplicate",
+        );
+        return;
+      }
     }
 
     // Optimistically mark as prompting so the UI can show a loading state
@@ -1710,12 +1748,38 @@ Summary:`;
               persistAgentMessage(newConvoId, userMessage);
             }
 
-            // Retry the prompt on the new session
+            // Retry the prompt on the new session, rebuilding skills context
+            // so skill invocations work on the fresh session.
             console.info(
               `[AcpStore] Retrying prompt on new session ${newSessionId}`,
             );
             try {
-              await acpService.sendPrompt(newSessionId, prompt, context);
+              let retryContext: Array<Record<string, string>> = context
+                ? [...context]
+                : [];
+              try {
+                const newSession = state.sessions[newSessionId];
+                const skillsContent = await skillsStore.getThreadSkillsContent(
+                  newSession?.cwd ?? cwd,
+                  newSession?.conversationId ?? newSessionId,
+                );
+                if (skillsContent) {
+                  retryContext = [
+                    { type: "text", text: skillsContent },
+                    ...retryContext,
+                  ];
+                }
+              } catch (skillsError) {
+                console.warn(
+                  "[AcpStore] Failed to load skills for recovery retry:",
+                  skillsError,
+                );
+              }
+              await acpService.sendPrompt(
+                newSessionId,
+                prompt,
+                retryContext.length > 0 ? retryContext : undefined,
+              );
               console.log("[AcpStore] Retry succeeded on new session");
             } catch (retryError) {
               console.error("[AcpStore] Retry failed:", retryError);
