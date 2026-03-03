@@ -137,6 +137,19 @@ export async function orchestrate(
   const messages = conversationStore.getMessagesFor(conversationId);
   let history = serializeHistory(messages);
 
+  // Inject compacted conversation summary so the model retains context
+  // from messages that were compacted away.
+  const compactedSummary = chatStore.compactedSummary;
+  if (compactedSummary) {
+    history = [
+      {
+        role: "system",
+        content: `Here is a summary of the earlier part of this conversation:\n\n${compactedSummary.content}`,
+      },
+      ...history,
+    ];
+  }
+
   // Inject memory context for the default orchestrator path.
   if (settingsStore.get("memoryEnabled") && authStore.isAuthenticated) {
     try {
