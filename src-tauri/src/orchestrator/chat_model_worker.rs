@@ -2,6 +2,7 @@
 // ABOUTME: Streams SSE responses with tool execution loop for function calling.
 
 use async_trait::async_trait;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use futures::StreamExt;
 use log;
 use serde::{Deserialize, Serialize};
@@ -181,12 +182,46 @@ impl ChatModelWorker {
                 "text": prompt
             }));
             for image in images {
-                content_parts.push(serde_json::json!({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": format!("data:{};base64,{}", image.mime_type, image.base64)
+                if image.mime_type.starts_with("image/") {
+                    // Vision-compatible image — send as image_url
+                    content_parts.push(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:{};base64,{}", image.mime_type, image.base64)
+                        }
+                    }));
+                } else if image.mime_type.starts_with("text/")
+                    || image.mime_type == "application/json"
+                    || image.mime_type == "application/xml"
+                {
+                    // Text/code file — decode base64 and inline as text
+                    let decoded = STANDARD
+                        .decode(&image.base64)
+                        .ok()
+                        .and_then(|bytes| String::from_utf8(bytes).ok());
+                    if let Some(text_content) = decoded {
+                        let ext = image
+                            .name
+                            .rsplit('.')
+                            .next()
+                            .unwrap_or("");
+                        content_parts.push(serde_json::json!({
+                            "type": "text",
+                            "text": format!("```{} ({})\n{}\n```", ext, image.name, text_content)
+                        }));
+                    } else {
+                        content_parts.push(serde_json::json!({
+                            "type": "text",
+                            "text": format!("[Could not decode attachment: {}]", image.name)
+                        }));
                     }
-                }));
+                } else {
+                    // Unsupported binary format — note it for the model
+                    content_parts.push(serde_json::json!({
+                        "type": "text",
+                        "text": format!("[Unsupported attachment format: {} ({})]", image.name, image.mime_type)
+                    }));
+                }
             }
             messages.push(serde_json::json!({
                 "role": "user",
