@@ -1766,7 +1766,15 @@ Summary:`;
       await acpService.cancelPrompt(sessionId);
       console.info("[AcpStore] cancelPrompt: backend acknowledged cancel");
     } catch (error) {
-      console.error("[AcpStore] cancelPrompt failed:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("not found")) {
+        console.warn(
+          "[AcpStore] cancelPrompt: stale session, resetting status",
+        );
+        setState("sessions", sessionId, "info", "status", "ready");
+      } else {
+        console.error("[AcpStore] cancelPrompt failed:", error);
+      }
     }
   },
 
