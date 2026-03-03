@@ -675,8 +675,10 @@ async fn execute_multi_task(
 
     // Execute subtasks layer by layer
     let layers = decomposer::dependency_layers(&subtasks);
+    let mut consecutive_failures: u32 = 0;
+    const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
-    for (layer_idx, layer) in layers.iter().enumerate() {
+    'layers: for (layer_idx, layer) in layers.iter().enumerate() {
         log::info!(
             "[Orchestrator] Executing layer {} with {} subtask(s)",
             layer_idx,
@@ -790,11 +792,21 @@ async fn execute_multi_task(
         }
 
         // Wait for all workers in this layer before starting next
+        let mut layer_had_success = false;
+        let mut layer_fatal_error: Option<String> = None;
         for handle in handles {
             match handle.await {
-                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Ok(()))) => {
+                    layer_had_success = true;
+                }
                 Ok(Ok(Err(e))) => {
                     log::error!("[Orchestrator] Worker error in layer {}: {}", layer_idx, e);
+                    // Check for fatal errors that should abort the entire plan
+                    if e.contains("402 Payment Required")
+                        || e.contains("Insufficient prepaid balance")
+                    {
+                        layer_fatal_error = Some(e);
+                    }
                 }
                 Ok(Err(e)) => {
                     log::error!(
@@ -806,6 +818,30 @@ async fn execute_multi_task(
                 Err(e) => {
                     log::error!("[Orchestrator] Join error in layer {}: {}", layer_idx, e);
                 }
+            }
+        }
+
+        // Abort immediately on fatal errors (e.g. no balance)
+        if let Some(ref fatal) = layer_fatal_error {
+            log::error!(
+                "[Orchestrator] Fatal error in layer {}, aborting plan: {}",
+                layer_idx,
+                fatal
+            );
+            break 'layers;
+        }
+
+        // Track consecutive layer failures to detect systemic issues
+        if layer_had_success {
+            consecutive_failures = 0;
+        } else {
+            consecutive_failures += 1;
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                log::error!(
+                    "[Orchestrator] {} consecutive layer failures, aborting plan",
+                    consecutive_failures
+                );
+                break 'layers;
             }
         }
     }

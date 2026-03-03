@@ -1947,7 +1947,7 @@ async fn run_session_worker(
                         .collect::<Vec<_>>()
                 };
 
-                let mut msg = format!("Failed to initialize agent: {:?}", e);
+                let mut msg = format!("Failed to initialize agent: {}", format_acp_error(&e));
                 if let Some(status) = exit_status {
                     msg.push_str(&format!("\nAgent exit status: {status}"));
                 }
@@ -2122,7 +2122,7 @@ async fn run_session_worker(
                                 .collect::<Vec<_>>()
                         };
 
-                        let mut msg = format!("Failed to create agent session: {:?}", e);
+                        let mut msg = format!("Failed to create agent session: {}", format_acp_error(&e));
                         if let Some(status) = exit_status {
                             msg.push_str(&format!("\nAgent exit status: {status}"));
                         }
@@ -2702,7 +2702,7 @@ async fn run_session_worker(
                             next_cursor: resp.next_cursor,
                         }
                     })
-                    .map_err(|e| format!("Failed to list sessions: {:?}", e));
+                    .map_err(|e| format!("Failed to list sessions: {}", format_acp_error(&e)));
                 let _ = response_tx.send(result);
             }
             AcpCommand::Terminate => {
@@ -3136,7 +3136,7 @@ async fn list_remote_sessions_inner(
                             .collect::<Vec<_>>()
                     };
 
-                    let mut msg = format!("Failed to initialize agent: {:?}", e);
+                    let mut msg = format!("Failed to initialize agent: {}", format_acp_error(&e));
                     if let Some(status) = exit_status {
                         msg.push_str(&format!("\nAgent exit status: {status}"));
                     }
@@ -3239,7 +3239,7 @@ async fn list_remote_sessions_inner(
                             .collect::<Vec<_>>()
                     };
 
-                    let mut msg = format!("Failed to list sessions: {:?}", e);
+                    let mut msg = format!("Failed to list sessions: {}", format_acp_error(&e));
                     if !stderr_lines.is_empty() {
                         msg.push_str("\nACP agent stderr (tail):\n");
                         msg.push_str(&stderr_lines.join("\n"));
