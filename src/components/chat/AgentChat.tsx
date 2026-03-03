@@ -762,6 +762,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         const newIndex = Math.min(historyIndex() + 1, history.length - 1);
         setHistoryIndex(newIndex);
         setInput(history[newIndex]);
+        queueMicrotask(() => {
+          textarea.setSelectionRange(
+            textarea.value.length,
+            textarea.value.length,
+          );
+        });
       }
     }
 
@@ -778,6 +784,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         } else {
           setInput(history[newIndex]);
         }
+        queueMicrotask(() => {
+          textarea.setSelectionRange(
+            textarea.value.length,
+            textarea.value.length,
+          );
+        });
       }
     }
 
