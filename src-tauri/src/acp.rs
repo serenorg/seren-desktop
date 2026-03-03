@@ -1725,6 +1725,17 @@ async fn run_session_worker(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+
+    // On Windows, isolate the child from the parent's console process group so that
+    // Ctrl+C signals sent to the Tauri window don't propagate and kill the sidecar
+    // (exit code 0xc000013a / STATUS_CONTROL_C_EXIT).
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+
     cmd.kill_on_drop(true);
 
     // Ensure the agent can find bundled Node/Git and installed CLI tools.
@@ -1921,15 +1932,15 @@ async fn run_session_worker(
                     .rev()
                     .collect::<Vec<_>>()
             };
-            let mut msg = "Agent initialization timed out after 30 seconds. The agent binary may be hung.".to_string();
-            if let Some(status) = exit_status {
-                msg.push_str(&format!("\nAgent exit status: {status}"));
-            }
-            if !stderr_lines.is_empty() {
-                msg.push_str("\nACP agent stderr (tail):\n");
-                msg.push_str(&stderr_lines.join("\n"));
-            }
-            return Err(msg);
+            log::error!(
+                "[ACP] Agent initialization timed out. exit={:?} stderr={:?}",
+                exit_status,
+                stderr_lines
+            );
+            return Err(
+                "Agent initialization timed out after 30 seconds. The agent binary may be hung or missing."
+                    .to_string(),
+            );
         }
         Ok(result) => match result {
             Ok(resp) => resp,
@@ -1947,15 +1958,14 @@ async fn run_session_worker(
                         .collect::<Vec<_>>()
                 };
 
-                let mut msg = format!("Failed to initialize agent: {:?}", e);
-                if let Some(status) = exit_status {
-                    msg.push_str(&format!("\nAgent exit status: {status}"));
-                }
-                if !stderr_lines.is_empty() {
-                    msg.push_str("\nACP agent stderr (tail):\n");
-                    msg.push_str(&stderr_lines.join("\n"));
-                }
-                return Err(msg);
+                log::error!(
+                    "[ACP] Agent initialization failed: {:?} exit={:?} stderr={:?}",
+                    e,
+                    exit_status,
+                    stderr_lines
+                );
+                let detail = format_acp_error(&e);
+                return Err(format!("Agent failed to start: {detail}"));
             }
         },
     };
@@ -2122,15 +2132,14 @@ async fn run_session_worker(
                                 .collect::<Vec<_>>()
                         };
 
-                        let mut msg = format!("Failed to create agent session: {:?}", e);
-                        if let Some(status) = exit_status {
-                            msg.push_str(&format!("\nAgent exit status: {status}"));
-                        }
-                        if !stderr_lines.is_empty() {
-                            msg.push_str("\nACP agent stderr (tail):\n");
-                            msg.push_str(&stderr_lines.join("\n"));
-                        }
-                        return Err(msg);
+                        log::error!(
+                            "[ACP] Session creation failed: {:?} exit={:?} stderr={:?}",
+                            e,
+                            exit_status,
+                            stderr_lines
+                        );
+                        let detail = format_acp_error(&e);
+                        return Err(format!("Agent session creation failed: {detail}"));
                     }
                 }
             }
@@ -2702,7 +2711,7 @@ async fn run_session_worker(
                             next_cursor: resp.next_cursor,
                         }
                     })
-                    .map_err(|e| format!("Failed to list sessions: {:?}", e));
+                    .map_err(|e| format!("Failed to list sessions: {}", format_acp_error(&e)));
                 let _ = response_tx.send(result);
             }
             AcpCommand::Terminate => {
@@ -3136,15 +3145,14 @@ async fn list_remote_sessions_inner(
                             .collect::<Vec<_>>()
                     };
 
-                    let mut msg = format!("Failed to initialize agent: {:?}", e);
-                    if let Some(status) = exit_status {
-                        msg.push_str(&format!("\nAgent exit status: {status}"));
-                    }
-                    if !stderr_lines.is_empty() {
-                        msg.push_str("\nACP agent stderr (tail):\n");
-                        msg.push_str(&stderr_lines.join("\n"));
-                    }
-                    return Err(msg);
+                    log::error!(
+                        "[ACP] Agent initialization failed: {:?} exit={:?} stderr={:?}",
+                        e,
+                        exit_status,
+                        stderr_lines
+                    );
+                    let detail = format_acp_error(&e);
+                    return Err(format!("Agent failed to start: {detail}"));
                 }
             },
         };
@@ -3239,12 +3247,12 @@ async fn list_remote_sessions_inner(
                             .collect::<Vec<_>>()
                     };
 
-                    let mut msg = format!("Failed to list sessions: {:?}", e);
-                    if !stderr_lines.is_empty() {
-                        msg.push_str("\nACP agent stderr (tail):\n");
-                        msg.push_str(&stderr_lines.join("\n"));
-                    }
-                    return Err(msg);
+                    log::error!(
+                        "[ACP] Failed to list sessions: {:?} stderr={:?}",
+                        e,
+                        stderr_lines
+                    );
+                    return Err("Failed to list agent sessions. Please try again.".to_string());
                 }
             }
         }
