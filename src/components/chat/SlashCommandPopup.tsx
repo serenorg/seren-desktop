@@ -50,6 +50,11 @@ export function SlashCommandPopup(props: SlashCommandPopupProps) {
               <span class="font-semibold text-primary shrink-0 font-mono">
                 /{cmd.name}
               </span>
+              {cmd.isSkill && (
+                <span class="text-[10px] font-medium text-accent-foreground bg-accent px-1.5 py-0.5 rounded shrink-0">
+                  skill
+                </span>
+              )}
               <span class="text-muted-foreground flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                 {cmd.description}
               </span>
