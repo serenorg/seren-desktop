@@ -3725,6 +3725,35 @@ fn get_cli_tools_bin_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
 }
 
 /// Check if a CLI version meets the minimum requirement.
+/// Run a CLI binary and capture its output.
+/// On Windows, `.cmd` files are batch wrappers that need `cmd.exe /c` to execute.
+fn run_cli_command(
+    bin: &std::path::Path,
+    args: &[&str],
+    env_path: &str,
+) -> std::io::Result<std::process::Output> {
+    if cfg!(target_os = "windows")
+        && bin
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd"))
+    {
+        let mut cmd = std::process::Command::new("cmd.exe");
+        cmd.arg("/c").arg(bin);
+        for arg in args {
+            cmd.arg(arg);
+        }
+        cmd.env("PATH", env_path);
+        cmd.output()
+    } else {
+        let mut cmd = std::process::Command::new(bin);
+        for arg in args {
+            cmd.arg(arg);
+        }
+        cmd.env("PATH", env_path);
+        cmd.output()
+    }
+}
+
 fn is_version_sufficient(version: &str, min_version: &str) -> bool {
     let parse = |v: &str| -> Option<(u32, u32, u32)> {
         let parts: Vec<&str> = v.trim_start_matches('v').split('.').collect();
@@ -3772,11 +3801,7 @@ pub async fn acp_ensure_codex_cli(app: AppHandle) -> Result<String, String> {
     // Already installed locally? Check version and upgrade if needed.
     if codex_bin.exists() {
         let embedded_path = crate::embedded_runtime::get_embedded_path();
-        if let Ok(output) = std::process::Command::new(&codex_bin)
-            .arg("--version")
-            .env("PATH", embedded_path)
-            .output()
-        {
+        if let Ok(output) = run_cli_command(&codex_bin, &["--version"], &embedded_path) {
             // `codex --version` outputs "codex-cli X.Y.Z"
             let version_str = String::from_utf8_lossy(&output.stdout);
             let version = version_str
@@ -3833,10 +3858,8 @@ pub async fn acp_ensure_codex_cli(app: AppHandle) -> Result<String, String> {
             if let Some(parent) = std::path::Path::new(&path).parent() {
                 // Check version of system-installed codex
                 let embedded_path = crate::embedded_runtime::get_embedded_path();
-                if let Ok(ver_output) = std::process::Command::new(&path)
-                    .arg("--version")
-                    .env("PATH", &embedded_path)
-                    .output()
+                if let Ok(ver_output) =
+                    run_cli_command(std::path::Path::new(&path), &["--version"], &embedded_path)
                 {
                     let version_str = String::from_utf8_lossy(&ver_output.stdout);
                     let version = version_str
