@@ -1347,7 +1347,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   setCommandPopupIndex(0);
                   if (historyIndex() !== -1) {
                     setHistoryIndex(-1);
-                    setSavedInput("");
                   }
                 }}
                 onKeyDown={(event) => {
@@ -1413,6 +1412,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       );
                       setHistoryIndex(newIndex);
                       setInput(history[newIndex]);
+                      queueMicrotask(() => {
+                        textarea.setSelectionRange(
+                          textarea.value.length,
+                          textarea.value.length,
+                        );
+                      });
                     }
                   }
 
@@ -1431,6 +1436,12 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                       } else {
                         setInput(history[newIndex]);
                       }
+                      queueMicrotask(() => {
+                        textarea.setSelectionRange(
+                          textarea.value.length,
+                          textarea.value.length,
+                        );
+                      });
                     }
                   }
 
