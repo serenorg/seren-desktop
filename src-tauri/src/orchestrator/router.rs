@@ -82,12 +82,14 @@ fn select_worker_type(
         return WorkerType::AcpAgent;
     }
 
-    // Task requiring tools + publisher tools available → McpPublisher
+    // Non-file-system tasks requiring tools + a valid gateway publisher → McpPublisher
+    // Note: gateway__ = remote Seren publishers (Firecrawl, Perplexity, etc.)
+    //        mcp__    = local MCP servers (playwright-stealth, etc.) — NOT routable
+    // File-system tasks (code_generation, file_operations) must NOT route here —
+    // publishers cannot satisfy local file operations.
     if classification.requires_tools
-        && capabilities
-            .available_tools
-            .iter()
-            .any(|t| t.starts_with("mcp__"))
+        && !classification.requires_file_system
+        && extract_gateway_slug(capabilities).is_some()
     {
         return WorkerType::McpPublisher;
     }
@@ -96,10 +98,30 @@ fn select_worker_type(
     WorkerType::ChatModel
 }
 
-/// Extract the publisher slug from available MCP tools.
+/// Parse a gateway tool name into its publisher slug.
 ///
-/// MCP tool names follow the pattern `mcp__<publisher-slug>__<tool-name>`.
-/// Returns the first publisher slug found, or None.
+/// Gateway tool names follow the pattern `gateway__<publisher-slug>__<tool-name>`.
+/// Returns the slug only when both separators are present.
+fn parse_gateway_slug(tool_name: &str) -> Option<&str> {
+    let rest = tool_name.strip_prefix("gateway__")?;
+    let slug_end = rest.find("__")?;
+    Some(&rest[..slug_end])
+}
+
+/// Extract the first valid publisher slug from available gateway tools.
+fn extract_gateway_slug(capabilities: &UserCapabilities) -> Option<String> {
+    capabilities
+        .available_tools
+        .iter()
+        .filter_map(|t| parse_gateway_slug(t))
+        .next()
+        .map(String::from)
+}
+
+/// Extract the publisher slug for routing decisions.
+///
+/// Only returns a slug when the worker type is McpPublisher and a valid
+/// `gateway__<slug>__<tool>` tool exists in the capabilities.
 fn extract_publisher_slug(
     worker_type: &WorkerType,
     capabilities: &UserCapabilities,
@@ -107,16 +129,7 @@ fn extract_publisher_slug(
     if *worker_type != WorkerType::McpPublisher {
         return None;
     }
-
-    capabilities
-        .available_tools
-        .iter()
-        .filter_map(|t| {
-            let rest = t.strip_prefix("mcp__")?;
-            let slug_end = rest.find("__")?;
-            Some(rest[..slug_end].to_string())
-        })
-        .next()
+    extract_gateway_slug(capabilities)
 }
 
 /// Select the best available model for the task.
@@ -516,12 +529,12 @@ mod tests {
     }
 
     #[test]
-    fn routes_research_with_mcp_tools_to_mcp_publisher() {
+    fn routes_research_with_gateway_tools_to_mcp_publisher() {
         let classification = make_classification("research", true, false);
         let capabilities = make_capabilities(
             false,
             &["anthropic/claude-sonnet-4"],
-            &["mcp__firecrawl-serenai__scrape"],
+            &["gateway__firecrawl-serenai__scrape"],
         );
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::McpPublisher);
@@ -532,16 +545,92 @@ mod tests {
     }
 
     #[test]
+    fn local_mcp_tools_do_not_trigger_publisher_routing() {
+        let classification = make_classification("research", true, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &["mcp__playwright__click"],
+        );
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
+    }
+
+    #[test]
     fn mcp_publisher_does_not_trigger_without_requires_tools() {
         let classification = make_classification("general_chat", false, false);
         let capabilities = make_capabilities(
             false,
             &["anthropic/claude-sonnet-4"],
-            &["mcp__firecrawl-serenai__scrape"],
+            &["gateway__firecrawl-serenai__scrape"],
         );
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.publisher_slug, None);
+    }
+
+    #[test]
+    fn code_generation_with_gateway_tools_but_no_acp_routes_to_chat_model() {
+        // code_generation + requires_file_system but no ACP session —
+        // must NOT route to McpPublisher even when gateway tools exist
+        let classification = make_classification("code_generation", true, true);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &["gateway__firecrawl-serenai__scrape"],
+        );
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
+    }
+
+    #[test]
+    fn file_operations_with_gateway_tools_routes_to_chat_model() {
+        // file_operations requires_file_system — publishers cannot satisfy this
+        let classification = make_classification("file_operations", true, true);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &["gateway__firecrawl-serenai__scrape"],
+        );
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
+    }
+
+    #[test]
+    fn malformed_gateway_tool_does_not_trigger_publisher_routing() {
+        // gateway__badtool (no second __) should not route to McpPublisher
+        let classification = make_classification("research", true, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &["gateway__badtool"],
+        );
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
+    }
+
+    #[test]
+    fn multiple_gateway_publishers_extracts_first_valid_slug() {
+        let classification = make_classification("research", true, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &[
+                "gateway__firecrawl-serenai__scrape",
+                "gateway__perplexity-serenai__search",
+            ],
+        );
+        let decision = route(&classification, &capabilities);
+        assert_eq!(decision.worker_type, WorkerType::McpPublisher);
+        // Deterministic: picks first valid gateway slug in tool order
+        assert_eq!(
+            decision.publisher_slug,
+            Some("firecrawl-serenai".to_string())
+        );
     }
 
     // =========================================================================
