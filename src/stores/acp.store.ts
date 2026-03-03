@@ -267,6 +267,9 @@ const [state, setState] = createStore<AcpState>({
 
 let globalUnsubscribe: UnlistenFn | null = null;
 const pendingSessionEvents = new Map<string, AcpEvent[]>();
+
+/** Guard against concurrent auto-recovery spawns in sendPrompt. */
+let recoveryInFlight: Promise<string | null> | null = null;
 const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
 
 // Chunk accumulation buffers — plain JS, not reactive.
@@ -1585,6 +1588,16 @@ Summary:`;
         isForceStop ||
         (!message.includes("Task cancelled") && isDeadSession)
       ) {
+        // If another recovery is already in-flight, wait for it instead of
+        // spawning a duplicate session.
+        if (recoveryInFlight) {
+          console.info(
+            "[AcpStore] Recovery already in-flight, waiting for it...",
+          );
+          await recoveryInFlight;
+          return;
+        }
+
         console.info(
           "[AcpStore] Session appears dead, attempting auto-recovery...",
         );
@@ -1604,66 +1617,74 @@ Summary:`;
         // Clean up the dead session
         await this.terminateSession(sessionId);
 
-        // Spawn a fresh session
-        const newSessionId = await this.spawnSession(cwd, agentType, {
-          localSessionId: session.conversationId,
+        // Guard against concurrent recoveries: set the in-flight promise
+        // before spawning so any parallel sendPrompt calls will wait.
+        const doRecovery = async (): Promise<string | null> => {
+          const newSessionId = await this.spawnSession(cwd, agentType, {
+            localSessionId: session.conversationId,
+          });
+          if (newSessionId) {
+            // Restore conversation history to the new session.
+            // Mark as restored so the message-count threshold ignores them.
+            if (existingMessages.length > 0) {
+              setState("sessions", newSessionId, "messages", existingMessages);
+              setState(
+                "sessions",
+                newSessionId,
+                "restoredMessageCount",
+                existingMessages.length,
+              );
+            }
+
+            // Show recovery indicator so the user knows what happened
+            const recoveryMsg: AgentMessage = {
+              id: crypto.randomUUID(),
+              type: "assistant",
+              content:
+                "Agent session restarted due to inactivity timeout. Retrying your message...",
+              timestamp: Date.now(),
+            };
+            setState("sessions", newSessionId, "messages", (msgs) => [
+              ...msgs,
+              recoveryMsg,
+              userMessage,
+            ]);
+            const newConvoId = state.sessions[newSessionId]?.conversationId;
+            if (newConvoId) {
+              persistAgentMessage(newConvoId, recoveryMsg);
+              persistAgentMessage(newConvoId, userMessage);
+            }
+
+            // Retry the prompt on the new session
+            console.info(
+              `[AcpStore] Retrying prompt on new session ${newSessionId}`,
+            );
+            try {
+              await acpService.sendPrompt(newSessionId, prompt, context);
+              console.log("[AcpStore] Retry succeeded on new session");
+            } catch (retryError) {
+              console.error("[AcpStore] Retry failed:", retryError);
+              const retryMessage =
+                retryError instanceof Error
+                  ? retryError.message
+                  : String(retryError);
+              this.addErrorMessage(
+                newSessionId,
+                `Recovery failed: ${retryMessage}. Please try sending your message again.`,
+              );
+            }
+          }
+          return newSessionId;
+        };
+
+        recoveryInFlight = doRecovery().finally(() => {
+          recoveryInFlight = null;
         });
-        if (newSessionId) {
-          // Restore conversation history to the new session.
-          // Mark as restored so the message-count threshold ignores them.
-          if (existingMessages.length > 0) {
-            setState("sessions", newSessionId, "messages", existingMessages);
-            setState(
-              "sessions",
-              newSessionId,
-              "restoredMessageCount",
-              existingMessages.length,
-            );
-          }
 
-          // Show recovery indicator so the user knows what happened
-          const recoveryMsg: AgentMessage = {
-            id: crypto.randomUUID(),
-            type: "assistant",
-            content:
-              "Agent session restarted due to inactivity timeout. Retrying your message...",
-            timestamp: Date.now(),
-          };
-          setState("sessions", newSessionId, "messages", (msgs) => [
-            ...msgs,
-            recoveryMsg,
-            userMessage,
-          ]);
-          const newConvoId = state.sessions[newSessionId]?.conversationId;
-          if (newConvoId) {
-            persistAgentMessage(newConvoId, recoveryMsg);
-            persistAgentMessage(newConvoId, userMessage);
-          }
-
-          // Retry the prompt on the new session
-          console.info(
-            `[AcpStore] Retrying prompt on new session ${newSessionId}`,
-          );
-          try {
-            await acpService.sendPrompt(newSessionId, prompt, context);
-            console.log("[AcpStore] Retry succeeded on new session");
-            return;
-          } catch (retryError) {
-            console.error("[AcpStore] Retry failed:", retryError);
-            const retryMessage =
-              retryError instanceof Error
-                ? retryError.message
-                : String(retryError);
-            this.addErrorMessage(
-              newSessionId,
-              `Recovery failed: ${retryMessage}. Please try sending your message again.`,
-            );
-            return;
-          }
+        const newSessionId = await recoveryInFlight;
+        if (!newSessionId) {
+          setState("error", "Session died and could not be restarted.");
         }
-
-        // Spawn failed, show original error
-        setState("error", "Session died and could not be restarted.");
         return;
       }
 
