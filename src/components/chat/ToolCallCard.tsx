@@ -3,6 +3,10 @@
 
 import type { Component } from "solid-js";
 import { createSignal, Show } from "solid-js";
+import {
+  isDirectoryListing,
+  summarizeDirectoryListing,
+} from "@/lib/directory-listing";
 import type { ToolCallEvent } from "@/services/acp";
 
 interface ToolCallCardProps {
@@ -107,6 +111,17 @@ function extractSummary(toolCall: ToolCallEvent): string {
 
 export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   const [isExpanded, setIsExpanded] = createSignal(false);
+  const [isResultExpanded, setIsResultExpanded] = createSignal(false);
+
+  const resultIsListing = () => {
+    const result = props.toolCall.result;
+    return result ? isDirectoryListing(result) : false;
+  };
+
+  const resultSummary = () => {
+    const result = props.toolCall.result;
+    return result ? summarizeDirectoryListing(result) : "";
+  };
 
   const summary = () => extractSummary(props.toolCall);
 
@@ -415,9 +430,32 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
               <div class="text-muted-foreground/70 font-medium mb-1">
                 Result:
               </div>
-              <div class="bg-background border border-success/70 rounded p-2 text-success max-h-48 overflow-auto">
-                {props.toolCall.result}
-              </div>
+              <Show
+                when={resultIsListing()}
+                fallback={
+                  <div class="bg-background border border-success/70 rounded p-2 text-success max-h-48 overflow-auto">
+                    {props.toolCall.result}
+                  </div>
+                }
+              >
+                <div class="bg-background border border-success/70 rounded p-2 text-success">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm">{resultSummary()}</span>
+                    <button
+                      type="button"
+                      class="text-xs text-muted-foreground hover:text-foreground shrink-0 ml-2"
+                      onClick={() => setIsResultExpanded(!isResultExpanded())}
+                    >
+                      {isResultExpanded() ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                  <Show when={isResultExpanded()}>
+                    <pre class="mt-2 text-xs whitespace-pre-wrap max-h-48 overflow-auto border-t border-surface-2 pt-2">
+                      {props.toolCall.result}
+                    </pre>
+                  </Show>
+                </div>
+              </Show>
             </div>
           </Show>
 
