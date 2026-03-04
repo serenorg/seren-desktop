@@ -1638,7 +1638,10 @@ pub async fn acp_spawn(
                 }
             }
 
-            // Clean up session from map when worker exits (prevents ghost sessions)
+            // Clean up session from map when worker exits (prevents ghost sessions).
+            // Only remove if the map still holds THIS worker's session Arc — a recovery
+            // spawn may have already replaced the entry with a new session under the
+            // same key, and we must not clobber it.
             let cleanup_session_id = session_id_clone.clone();
             let state = app_handle.state::<AcpState>();
 
@@ -1659,8 +1662,19 @@ pub async fn acp_spawn(
             }
 
             let mut sessions = state.sessions.write().await;
-            sessions.remove(&cleanup_session_id);
-            log::info!("[ACP] Session {} removed from map after worker exit", cleanup_session_id);
+            let should_remove = sessions
+                .get(&cleanup_session_id)
+                .map(|current| Arc::ptr_eq(current, &session_arc_for_worker))
+                .unwrap_or(false);
+            if should_remove {
+                sessions.remove(&cleanup_session_id);
+                log::info!("[ACP] Session {} removed from map after worker exit", cleanup_session_id);
+            } else {
+                log::info!(
+                    "[ACP] Session {} was replaced by recovery spawn — skipping removal",
+                    cleanup_session_id
+                );
+            }
         });
     });
 
