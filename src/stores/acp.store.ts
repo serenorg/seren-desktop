@@ -2846,6 +2846,18 @@ Summary:`;
         sessionReadyPromises.delete(sessionId);
       }
     }
+
+    // When a session is terminated (force-stopped, permission timeout, etc.),
+    // resolve any pending ready promise so sendPrompt unblocks instead of
+    // hanging forever. sendPrompt will then detect the dead session and
+    // trigger recovery.
+    if (status === "terminated") {
+      const entry = sessionReadyPromises.get(sessionId);
+      if (entry) {
+        entry.resolve();
+        sessionReadyPromises.delete(sessionId);
+      }
+    }
   },
 
   finalizeStreamingContent(sessionId: string) {
