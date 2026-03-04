@@ -453,6 +453,25 @@ export const threadStore = {
   },
 
   /**
+   * Fork an agent thread from a specific message.
+   * Creates a new conversation with the forked CLI session and switches to it.
+   */
+  async forkAgentThread(
+    fromConversationId: string,
+    fromMessageId: string,
+  ): Promise<string | null> {
+    const newConversationId = await acpStore.forkConversation(
+      fromConversationId,
+      fromMessageId,
+    );
+    if (!newConversationId) return null;
+
+    await acpStore.refreshRecentAgentConversations(200);
+    this.selectThread(newConversationId, "agent");
+    return newConversationId;
+  },
+
+  /**
    * Sync thread state from underlying stores. Call after auth or on mount.
    */
   async refresh() {

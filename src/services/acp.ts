@@ -287,6 +287,14 @@ export async function terminateSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * Fork an ACP agent session, creating a new CLI session with the same
+ * conversation history.  Returns the new remote agent session ID.
+ */
+export async function forkSession(sessionId: string): Promise<string> {
+  return invoke<string>("acp_fork_session", { sessionId });
+}
+
+/**
  * List all active ACP sessions.
  */
 export async function listSessions(): Promise<AcpSessionInfo[]> {
