@@ -2928,6 +2928,94 @@ Summary:`;
     }
   },
 
+  // ============================================================================
+  // Fork
+  // ============================================================================
+
+  /**
+   * Fork the current agent conversation from a specific message.
+   *
+   * Creates a new agent session with the same conversation history (via the ACP
+   * fork_session capability) and a new local conversation containing messages up
+   * to `fromMessageId`.  Returns the new local conversation ID.
+   */
+  async forkConversation(
+    conversationId: string,
+    fromMessageId: string,
+  ): Promise<string | null> {
+    const session = state.sessions[conversationId];
+    if (!session) {
+      console.error("[AcpStore] forkConversation: session not found");
+      return null;
+    }
+
+    const agentType = session.info.agentType;
+    const cwd = session.cwd;
+
+    // 1. Ask the sidecar to fork the CLI session.
+    let newAgentSessionId: string;
+    try {
+      newAgentSessionId = await acpService.forkSession(conversationId);
+    } catch (err) {
+      console.error("[AcpStore] forkConversation: fork failed:", err);
+      this.addErrorMessage(
+        conversationId,
+        `Fork failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+
+    // 2. Collect messages up to the fork point.
+    const allMessages = session.messages;
+    const forkIndex = allMessages.findIndex((m) => m.id === fromMessageId);
+    if (forkIndex === -1) {
+      console.error("[AcpStore] forkConversation: message not found");
+      return null;
+    }
+    const forkedMessages = allMessages.slice(0, forkIndex + 1);
+
+    // 3. Create a new local conversation in SQLite.
+    const newConversationId = crypto.randomUUID();
+    const forkTitle = `Fork of ${session.title ?? "Agent"}`;
+    try {
+      await createAgentConversation(
+        newConversationId,
+        forkTitle,
+        agentType,
+        cwd,
+        null,
+        newAgentSessionId,
+      );
+
+      // Persist forked messages to the new conversation.
+      for (const msg of forkedMessages) {
+        persistAgentMessage(newConversationId, msg);
+      }
+    } catch (err) {
+      console.error("[AcpStore] forkConversation: DB error:", err);
+      return null;
+    }
+
+    // 4. Spawn a new sidecar session that resumes the forked CLI session.
+    const newSessionId = await this.spawnSession(cwd, agentType, {
+      localSessionId: newConversationId,
+      resumeAgentSessionId: newAgentSessionId,
+      conversationTitle: forkTitle,
+      restoredMessages: forkedMessages,
+    });
+
+    if (!newSessionId) {
+      console.error("[AcpStore] forkConversation: spawn failed");
+      return null;
+    }
+
+    console.info(
+      `[AcpStore] Forked conversation ${conversationId} -> ${newConversationId} (agent session: ${newAgentSessionId})`,
+    );
+
+    return newConversationId;
+  },
+
   addErrorMessage(sessionId: string, error: string) {
     const message: AgentMessage = {
       id: crypto.randomUUID(),

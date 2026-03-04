@@ -5,8 +5,9 @@ use agent_client_protocol::{Agent, Client, ClientSideConnection, Result as AcpRe
 use agent_client_protocol::{
     AuthMethod, AuthenticateRequest, CancelNotification, ClientCapabilities, ContentBlock,
     CreateTerminalRequest, CreateTerminalResponse, EnvVariable, ExtNotification, ExtRequest,
-    ExtResponse, ImageContent, Implementation, InitializeRequest, KillTerminalCommandRequest,
-    KillTerminalCommandResponse, ListSessionsRequest, LoadSessionRequest, McpServer,
+    ExtResponse, ForkSessionRequest, ImageContent, Implementation, InitializeRequest,
+    KillTerminalCommandRequest, KillTerminalCommandResponse, ListSessionsRequest,
+    LoadSessionRequest, McpServer,
     McpServerStdio, ModelId, NewSessionRequest, PromptRequest, ProtocolVersion,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionRequest, RequestPermissionResponse, SessionModeId, SessionNotification,
@@ -484,6 +485,11 @@ pub(crate) enum AcpCommand {
         cwd: String,
         cursor: Option<String>,
         response_tx: oneshot::Sender<Result<AcpRemoteSessionsPage, String>>,
+    },
+    /// Fork the current agent session, creating a new session with the same
+    /// conversation history.  Returns the new agent session ID.
+    Fork {
+        response_tx: oneshot::Sender<Result<String, String>>,
     },
     Terminate,
 }
@@ -2406,6 +2412,9 @@ async fn run_session_worker(
                                     Some(AcpCommand::ListRemoteSessions { response_tx: tx, .. }) => {
                                         let _ = tx.send(Err("Cannot list sessions while cancellation is pending".to_string()));
                                     }
+                                    Some(AcpCommand::Fork { response_tx: tx }) => {
+                                        let _ = tx.send(Err("Cannot fork while cancellation is pending".to_string()));
+                                    }
                                     None => {
                                         let _ = response_tx.send(Err("Command channel closed".to_string()));
                                         return Ok(());
@@ -2495,6 +2504,9 @@ async fn run_session_worker(
                                     }
                                     Some(AcpCommand::ListRemoteSessions { response_tx: tx, .. }) => {
                                         let _ = tx.send(Err("Cannot list sessions while prompt is active".to_string()));
+                                    }
+                                    Some(AcpCommand::Fork { response_tx: tx }) => {
+                                        let _ = tx.send(Err("Cannot fork while prompt is active".to_string()));
                                     }
                                     Some(other) => {
                                         log::info!("[ACP] Rejecting command while prompt is active");
@@ -2753,6 +2765,26 @@ async fn run_session_worker(
                     .map_err(|e| format!("Failed to list sessions: {}", format_acp_error(&e)));
                 let _ = response_tx.send(result);
             }
+            AcpCommand::Fork { response_tx } => {
+                let mcp_servers = build_mcp_servers(&app, api_key.as_deref());
+                let fork_req = ForkSessionRequest::new(agent_session_id.clone(), &cwd)
+                    .mcp_servers(mcp_servers);
+                match connection.fork_session(fork_req).await {
+                    Ok(resp) => {
+                        let new_id = resp.session_id.0.to_string();
+                        log::info!(
+                            "[ACP] Forked session {} -> {}",
+                            agent_session_id,
+                            new_id
+                        );
+                        let _ = response_tx.send(Ok(new_id));
+                    }
+                    Err(e) => {
+                        log::error!("[ACP] Fork session failed: {:?}", e);
+                        let _ = response_tx.send(Err(format_acp_error(&e)));
+                    }
+                }
+            }
             AcpCommand::Terminate => {
                 break;
             }
@@ -2867,6 +2899,37 @@ pub async fn acp_terminate(state: State<'_, AcpState>, session_id: String) -> Re
     }
 
     Ok(())
+}
+
+/// Fork the agent session, creating a new CLI session with the same conversation
+/// history.  Returns the new remote agent session ID.
+#[tauri::command]
+pub async fn acp_fork_session(
+    state: State<'_, AcpState>,
+    session_id: String,
+) -> Result<String, String> {
+    let command_tx = {
+        let sessions = state.sessions.read().await;
+        let session_arc = sessions
+            .get(&session_id)
+            .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+        let session = session_arc.lock().await;
+        session
+            .command_tx
+            .clone()
+            .ok_or_else(|| "Session not initialized".to_string())?
+    };
+
+    let (response_tx, response_rx) = oneshot::channel();
+
+    command_tx
+        .send(AcpCommand::Fork { response_tx })
+        .await
+        .map_err(|_| "Failed to send fork command".to_string())?;
+
+    response_rx
+        .await
+        .map_err(|_| "Worker thread dropped".to_string())?
 }
 
 /// List all ACP sessions

@@ -761,6 +761,8 @@ pub fn run() {
             #[cfg(feature = "acp")]
             acp::acp_terminate,
             #[cfg(feature = "acp")]
+            acp::acp_fork_session,
+            #[cfg(feature = "acp")]
             acp::acp_list_sessions,
             #[cfg(feature = "acp")]
             acp::acp_list_remote_sessions,
