@@ -2210,6 +2210,21 @@ Summary:`;
         this.finalizeStreamingContent(sessionId);
         if (!isHistoryReplay) {
           this.markPendingToolCallsComplete(sessionId);
+
+          // Mark any remaining in-progress plan entries as completed.
+          // Plan entry status is set by planUpdate events from the backend,
+          // but a final planUpdate may not arrive after the last tool finishes.
+          const plan = state.sessions[sessionId]?.plan;
+          if (plan?.some((e) => e.status === "in_progress")) {
+            setState(
+              "sessions",
+              sessionId,
+              "plan",
+              plan.map((e) =>
+                e.status === "in_progress" ? { ...e, status: "completed" } : e,
+              ),
+            );
+          }
         }
 
         // Track agent usage metadata for compaction decisions
