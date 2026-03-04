@@ -42,14 +42,36 @@ const PROMPT_TOO_LONG_PATTERNS = [
   "content too large",
   "exceeds the model",
   "ran out of room",
+  "too many tokens",
+  "exceeds the maximum",
+  "number of input tokens",
+  "reduce your prompt",
+  "reduce the number of messages",
 ];
 
 /**
  * Check whether a message indicates the agent's context window is full.
+ *
+ * Also catches the CLI's raw API error form:
+ *   `API Error: 400 {"type":"error","error":{"type":"invalid_request_error",...}}`
+ * which wraps the Anthropic error without always including recognizable keywords.
  */
 export function isPromptTooLongError(message: string): boolean {
   const lower = message.toLowerCase();
-  return PROMPT_TOO_LONG_PATTERNS.some((pattern) => lower.includes(pattern));
+  if (PROMPT_TOO_LONG_PATTERNS.some((pattern) => lower.includes(pattern))) {
+    return true;
+  }
+  // The Claude CLI sometimes returns the raw API error as assistant content.
+  // A 400 invalid_request_error during an active agent session is almost always
+  // a context-length issue — other 400 causes (bad params, missing fields) don't
+  // happen mid-session.
+  if (
+    lower.includes("api error: 400") &&
+    lower.includes("invalid_request_error")
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
