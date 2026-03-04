@@ -806,14 +806,10 @@ export const acpStore = {
       // Get Seren API key to enable MCP tools for the agent
       const apiKey = await getSerenApiKey();
 
-      // Determine timeout based on enabled skills:
-      // - Long-running skills (trading bots) get unlimited timeout
-      // - Other sessions get default 300s timeout
-      const longRunningSkills = ["polymarket-bot", "kraken-grid-trader"];
-      const hasLongRunningSkill = skillsStore.installed.some(
-        (skill) => skill.enabled && longRunningSkills.includes(skill.slug),
-      );
-      const timeoutSecs = hasLongRunningSkill ? undefined : 300;
+      // No inactivity timeout — agent sessions wait indefinitely.
+      // The agent may be waiting for tool approval, thinking, or the user
+      // may have stepped away. Killing the session is never the right call.
+      const timeoutSecs = undefined;
 
       // Codex defaults to "on-failure" (auto-approve safe ops) regardless of
       // the global agentApprovalPolicy setting, which applies to Claude Code.
