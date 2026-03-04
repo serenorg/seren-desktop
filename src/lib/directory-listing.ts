@@ -1,5 +1,5 @@
-// ABOUTME: Detects Unix directory listing output and provides collapse utilities.
-// ABOUTME: Used to suppress verbose ls output in chat and agent chat panels.
+// ABOUTME: Detects verbose file-listing output and provides collapse utilities.
+// ABOUTME: Catches ls -l, find, path listings, and traversal errors in chat panels.
 
 /** Unix ls -l permission format: drwxr-xr-x, -rw-r--r--, etc. */
 const LS_LINE = /^[dlcbps-][rwxsStT-]{9}\s/;
@@ -7,12 +7,41 @@ const LS_LINE = /^[dlcbps-][rwxsStT-]{9}\s/;
 /** Total line header from ls -l output */
 const TOTAL_LINE = /^total \d+$/;
 
+/** Absolute Unix path: starts with / followed by at least one path segment */
+const UNIX_PATH = /^\/[\w.@~+-]/;
+
+/** Absolute Windows path: C:\ or similar */
+const WIN_PATH = /^[A-Za-z]:[/\\]/;
+
+/** Path followed by an error: /path/to/dir: Operation not permitted (os error 1) */
+const PATH_ERROR =
+  /^\/[\w.@~+-].*:\s+(Operation not permitted|Permission denied|No such file|Is a directory|Not a directory)/;
+
+/** find-style error: find: '/path': Permission denied */
+const FIND_ERROR = /^(find|ls|stat):\s/;
+
+/** tree-style lines: ├── file.txt, └── dir/, │ */
+const TREE_LINE = /^[│├└─\s]{2,}/;
+
 /** Minimum consecutive matching lines to trigger detection */
 const MIN_CONSECUTIVE = 5;
 
+/** Returns true if a line looks like file-listing output. */
+function isListingLine(trimmed: string): boolean {
+  return (
+    LS_LINE.test(trimmed) ||
+    TOTAL_LINE.test(trimmed) ||
+    PATH_ERROR.test(trimmed) ||
+    FIND_ERROR.test(trimmed) ||
+    TREE_LINE.test(trimmed) ||
+    UNIX_PATH.test(trimmed) ||
+    WIN_PATH.test(trimmed)
+  );
+}
+
 /**
- * Returns true if the text is predominantly a Unix directory listing.
- * Detects `ls -l` style output with permission bits.
+ * Returns true if the text is predominantly a file listing.
+ * Detects `ls -l`, `find`, bare path listings, and traversal errors.
  */
 export function isDirectoryListing(text: string): boolean {
   const lines = text.split("\n");
@@ -20,7 +49,7 @@ export function isDirectoryListing(text: string): boolean {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    if (LS_LINE.test(trimmed) || TOTAL_LINE.test(trimmed)) {
+    if (isListingLine(trimmed)) {
       consecutive++;
       if (consecutive >= MIN_CONSECUTIVE) return true;
     } else {
@@ -31,16 +60,29 @@ export function isDirectoryListing(text: string): boolean {
 }
 
 /**
- * Returns a one-line summary of a directory listing.
- * Counts lines matching ls -l format.
+ * Returns a one-line summary of a file listing.
+ * Counts lines matching any listing pattern.
  */
 export function summarizeDirectoryListing(text: string): string {
   const lines = text.split("\n");
   let count = 0;
+  let hasErrors = false;
   for (const line of lines) {
-    if (LS_LINE.test(line.trim())) count++;
+    const trimmed = line.trim();
+    if (isListingLine(trimmed)) {
+      count++;
+      if (
+        !hasErrors &&
+        (PATH_ERROR.test(trimmed) || FIND_ERROR.test(trimmed))
+      ) {
+        hasErrors = true;
+      }
+    }
   }
-  return `Directory listing (${count} ${count === 1 ? "entry" : "entries"})`;
+  if (hasErrors) {
+    return `File listing with errors (${count} ${count === 1 ? "line" : "lines"})`;
+  }
+  return `File listing (${count} ${count === 1 ? "entry" : "entries"})`;
 }
 
 /** Decode basic HTML entities for detection in rendered HTML. */
@@ -54,7 +96,7 @@ function decodeBasicHtmlEntities(html: string): string {
 }
 
 /**
- * Post-processes rendered HTML to collapse directory listing blocks.
+ * Post-processes rendered HTML to collapse file listing blocks.
  * Wraps detected blocks in native <details><summary> elements.
  */
 export function collapseDirectoryListings(html: string): string {
