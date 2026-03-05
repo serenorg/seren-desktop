@@ -13,6 +13,9 @@ const UNIX_PATH = /^\/[\w.@~+-]/;
 /** Absolute Windows path: C:\ or similar */
 const WIN_PATH = /^[A-Za-z]:[/\\]/;
 
+/** Relative path with at least two segments: src/lib/file.ts, artifacts/bot/script.py */
+const RELATIVE_PATH = /^[\w.@~+-][\w.@~+-]*\/[\w.@~+-]/;
+
 /** Path followed by an error: /path/to/dir: Operation not permitted (os error 1) */
 const PATH_ERROR =
   /^\/[\w.@~+-].*:\s+(Operation not permitted|Permission denied|No such file|Is a directory|Not a directory)/;
@@ -35,7 +38,8 @@ function isListingLine(trimmed: string): boolean {
     FIND_ERROR.test(trimmed) ||
     TREE_LINE.test(trimmed) ||
     UNIX_PATH.test(trimmed) ||
-    WIN_PATH.test(trimmed)
+    WIN_PATH.test(trimmed) ||
+    RELATIVE_PATH.test(trimmed)
   );
 }
 
