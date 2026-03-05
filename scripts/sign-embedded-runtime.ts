@@ -54,9 +54,12 @@ function findSignableFiles(dir: string): string[] {
     const fullPath = path.join(dir, entry.name);
 
     if (entry.isDirectory()) {
-      // .app bundles are directories — sign as a unit, don't recurse into them
+      // .app bundles are directories — sign as a unit, don't recurse into them.
+      // Skip fake .app dirs inside node_modules (e.g., puppeteer-stealth evasions/chrome.app).
       if (entry.name.endsWith(".app")) {
-        files.push(fullPath);
+        if (!fullPath.includes("node_modules")) {
+          files.push(fullPath);
+        }
       } else {
         files.push(...findSignableFiles(fullPath));
       }
