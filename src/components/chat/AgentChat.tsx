@@ -22,7 +22,6 @@ import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError } from "@/lib/auth-errors";
 import { collapseBuildOutput } from "@/lib/build-output";
-import { collapseVerboseOutput } from "@/lib/verbose-output";
 import {
   getCompletions,
   matchSkillCommand,
@@ -30,6 +29,7 @@ import {
 } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { collapseDirectoryListings } from "@/lib/directory-listing";
+import { createDragDrop } from "@/lib/drag-drop";
 import { escapeHtml } from "@/lib/escape-html";
 import { openExternalLink } from "@/lib/external-link";
 import { openFileInTab } from "@/lib/files/service";
@@ -45,6 +45,7 @@ import {
 } from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
+import { collapseVerboseOutput } from "@/lib/verbose-output";
 import {
   type AgentType,
   type DiffEvent,
@@ -82,6 +83,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const [input, setInput] = createSignal("");
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
+  const { isDragging } = createDragDrop((files) =>
+    setAttachedImages((prev) => [...prev, ...files]),
+  );
   const [commandStatus, setCommandStatus] = createSignal<string | null>(null);
   const [commandPopupIndex, setCommandPopupIndex] = createSignal(0);
   const [historyIndex, setHistoryIndex] = createSignal(-1);
@@ -1050,7 +1054,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   return (
-    <div class="flex-1 flex flex-col min-h-0">
+    <div class="relative flex-1 flex flex-col min-h-0">
+      <Show when={isDragging()}>
+        <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
+          <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">
+            Drop files to attach
+          </span>
+        </div>
+      </Show>
       {/* Plan Header */}
       <PlanHeader />
 

@@ -65,7 +65,7 @@ const TEXT_EXTENSIONS = [
   "proto",
 ];
 
-const ALL_EXTENSIONS = [
+export const ALL_EXTENSIONS = [
   ...IMAGE_EXTENSIONS,
   ...DOCUMENT_EXTENSIONS,
   ...DOCREADER_EXTENSIONS,
