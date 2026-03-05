@@ -1821,6 +1821,19 @@ Summary:`;
       ) {
         this.addErrorMessage(sessionId, message);
       }
+
+      // Ensure the session is not stuck in "prompting" after any error.
+      // The promptComplete event never fires when sendPrompt rejects, so
+      // without this the input stays locked forever.
+      if (state.sessions[sessionId]?.info.status === "prompting") {
+        setState(
+          "sessions",
+          sessionId,
+          "info",
+          "status",
+          "ready" as SessionStatus,
+        );
+      }
     }
   },
 
@@ -2411,6 +2424,17 @@ Summary:`;
           setState("sessions", sessionId, "promptTooLong", true);
           this.addErrorMessage(sessionId, event.data.error);
 
+          // Reset to "ready" so the UI unfreezes — promptComplete never
+          // fires after this error so the session would stay stuck in
+          // "prompting" forever without this.
+          setState(
+            "sessions",
+            sessionId,
+            "info",
+            "status",
+            "ready" as SessionStatus,
+          );
+
           // Automatically trigger failover without user interaction
           this.acceptRateLimitFallback().catch((err) => {
             console.error("[AcpStore] Auto-failover failed:", err);
@@ -2422,6 +2446,15 @@ Summary:`;
           );
           setState("sessions", sessionId, "rateLimitHit", true);
           this.addErrorMessage(sessionId, event.data.error);
+
+          // Reset to "ready" so the UI unfreezes (same reason as above).
+          setState(
+            "sessions",
+            sessionId,
+            "info",
+            "status",
+            "ready" as SessionStatus,
+          );
 
           // Automatically trigger failover without user interaction
           this.acceptRateLimitFallback().catch((err) => {
