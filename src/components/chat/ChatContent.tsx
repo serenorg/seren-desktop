@@ -19,7 +19,6 @@ import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { DepositModal } from "@/components/wallet/DepositModal";
 import { isAuthError } from "@/lib/auth-errors";
 import { collapseBuildOutput } from "@/lib/build-output";
-import { collapseVerboseOutput } from "@/lib/verbose-output";
 import {
   getCompletions,
   matchSkillCommand,
@@ -27,6 +26,7 @@ import {
 } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
 import { collapseDirectoryListings } from "@/lib/directory-listing";
+import { createDragDrop } from "@/lib/drag-drop";
 import { openExternalLink } from "@/lib/external-link";
 import { openFileInTab } from "@/lib/files/service";
 import { formatDurationWithVerb } from "@/lib/format-duration";
@@ -35,6 +35,7 @@ import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
+import { collapseVerboseOutput } from "@/lib/verbose-output";
 import type { ToolCallEvent } from "@/services/acp";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -196,6 +197,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [showDepositFromError, setShowDepositFromError] = createSignal(false);
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [isAttaching, setIsAttaching] = createSignal(false);
+  const { isDragging } = createDragDrop((files) =>
+    setAttachedImages((prev) => [...prev, ...files]),
+  );
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -857,7 +861,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   return (
-    <section class="flex flex-col h-full bg-background text-foreground border-l border-surface-2">
+    <section class="relative flex flex-col h-full bg-background text-foreground border-l border-surface-2">
+      <Show when={isDragging()}>
+        <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
+          <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">
+            Drop files to attach
+          </span>
+        </div>
+      </Show>
       <Show when={showSignInPrompt()}>
         <div class="flex-1 flex flex-col items-center justify-center gap-6 p-6">
           <div class="text-center max-w-[280px]">
