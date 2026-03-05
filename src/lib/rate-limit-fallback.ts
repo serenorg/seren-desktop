@@ -275,6 +275,7 @@ export async function performAgentFallback(
   const { conversationStore } = await import("@/stores/conversation.store");
   const { acpStore } = await import("@/stores/acp.store");
   const { providerStore } = await import("@/stores/provider.store");
+  const { threadStore } = await import("@/stores/thread.store");
 
   const chatModelId = mapAgentModelToChat(agentModelId, agentType);
   const modelDisplayName = getModelDisplayName(chatModelId);
@@ -316,7 +317,10 @@ export async function performAgentFallback(
     providerStore.setActiveProvider("seren");
     providerStore.setActiveModel(chatModelId);
 
-    // Switch UI from Agent → Chat
+    // Switch UI from Agent → Chat: navigate to the new chat thread so
+    // AgentChat unmounts and subsequent messages go to the chat orchestrator,
+    // not the already-full ACP session.
+    threadStore.selectThread(conversation.id, "chat");
     acpStore.setAgentModeEnabled(false);
 
     console.info(
