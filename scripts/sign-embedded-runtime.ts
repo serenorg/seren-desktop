@@ -1,5 +1,5 @@
-// ABOUTME: Signs all native binaries in embedded-runtime for macOS notarization
-// ABOUTME: Runs automatically when APPLE_SIGNING_IDENTITY env var is set
+// ABOUTME: Signs all native binaries in embedded-runtime and mcp-servers for macOS notarization.
+// ABOUTME: Runs automatically when APPLE_SIGNING_IDENTITY env var is set.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -54,7 +54,12 @@ function findSignableFiles(dir: string): string[] {
     const fullPath = path.join(dir, entry.name);
 
     if (entry.isDirectory()) {
-      files.push(...findSignableFiles(fullPath));
+      // .app bundles are directories — sign as a unit, don't recurse into them
+      if (entry.name.endsWith(".app")) {
+        files.push(fullPath);
+      } else {
+        files.push(...findSignableFiles(fullPath));
+      }
     } else if (entry.isFile() && isSignable(fullPath)) {
       files.push(fullPath);
     }
@@ -78,10 +83,14 @@ function main(): void {
 
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(scriptDir, "..");
-  const embeddedRuntimeDir = path.join(repoRoot, "src-tauri", "embedded-runtime");
   const entitlementsPath = path.join(repoRoot, "src-tauri", ENTITLEMENTS_PLIST);
 
-  console.log(`[sign-embedded-runtime] Scanning: ${embeddedRuntimeDir}`);
+  // Directories containing native binaries that must be signed for notarization
+  const scanDirs = [
+    path.join(repoRoot, "src-tauri", "embedded-runtime"),
+    path.join(repoRoot, "src-tauri", "mcp-servers"),
+  ];
+
   console.log(`[sign-embedded-runtime] Identity: ${signingIdentity.slice(0, 20)}...`);
 
   if (!existsSync(entitlementsPath)) {
@@ -90,7 +99,15 @@ function main(): void {
   }
   console.log(`[sign-embedded-runtime] Entitlements: ${ENTITLEMENTS_PLIST}`);
 
-  const files = findSignableFiles(embeddedRuntimeDir);
+  const files: string[] = [];
+  for (const dir of scanDirs) {
+    if (!existsSync(dir)) {
+      console.log(`[sign-embedded-runtime] Skipping (not found): ${dir}`);
+      continue;
+    }
+    console.log(`[sign-embedded-runtime] Scanning: ${dir}`);
+    files.push(...findSignableFiles(dir));
+  }
 
   if (files.length === 0) {
     console.log("[sign-embedded-runtime] No signable files found.");
@@ -103,10 +120,11 @@ function main(): void {
   let failed = 0;
 
   for (const file of files) {
-    const relativePath = path.relative(embeddedRuntimeDir, file);
+    const relativePath = path.relative(path.join(repoRoot, "src-tauri"), file);
     process.stdout.write(`  Signing: ${relativePath}... `);
 
-    const success = run("codesign", [
+    const isAppBundle = file.endsWith(".app");
+    const args = [
       "--sign",
       signingIdentity,
       "--options",
@@ -115,8 +133,14 @@ function main(): void {
       entitlementsPath,
       "--timestamp",
       "--force",
-      file,
-    ]);
+    ];
+    // .app bundles are directories — sign their contents recursively
+    if (isAppBundle) {
+      args.push("--deep");
+    }
+    args.push(file);
+
+    const success = run("codesign", args);
 
     if (success) {
       console.log("OK");
