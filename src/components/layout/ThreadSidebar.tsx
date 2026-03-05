@@ -345,7 +345,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               />
             </svg>
           </Show>
-          {spawning() ? "Starting..." : "New Agent"}
+          {spawning() ? (acpStore.installStatus ?? "Starting...") : "New Agent"}
         </button>
 
         <Show when={showLauncher()}>
@@ -373,7 +373,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   setShowLauncher(false);
                   const cwd = fileTreeState.rootPath;
                   if (!cwd) return;
-                  await threadStore.createAgentThread("claude-code", cwd);
+                  setSpawning(true);
+                  try {
+                    await threadStore.createAgentThread("claude-code", cwd);
+                  } finally {
+                    setSpawning(false);
+                  }
                 }}
               >
                 <span class="text-[14px]">{"\u{1F916}"}</span>
@@ -394,7 +399,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   setShowLauncher(false);
                   const cwd = fileTreeState.rootPath;
                   if (!cwd) return;
-                  await threadStore.createAgentThread("codex", cwd);
+                  setSpawning(true);
+                  try {
+                    await threadStore.createAgentThread("codex", cwd);
+                  } finally {
+                    setSpawning(false);
+                  }
                 }}
               >
                 <span class="text-[14px]">{"\u26A1"}</span>

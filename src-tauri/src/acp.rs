@@ -1996,6 +1996,16 @@ async fn run_session_worker(
                 exit_status,
                 stderr_lines
             );
+
+            // Check if the process already exited with an auth error
+            let stderr_combined = stderr_lines.join("\n");
+            if is_auth_error(&stderr_combined) {
+                if agent_type != AgentType::Codex {
+                    launch_agent_login(agent_type);
+                }
+                return Err(auth_error_message(agent_type));
+            }
+
             return Err(
                 "Agent initialization timed out after 30 seconds. The agent binary may be hung or missing."
                     .to_string(),
@@ -2023,7 +2033,23 @@ async fn run_session_worker(
                     exit_status,
                     stderr_lines
                 );
+
+                // Check stderr for auth errors — the CLI may have exited before
+                // producing any ACP protocol response.
+                let stderr_combined = stderr_lines.join("\n");
+                if is_auth_error(&stderr_combined) {
+                    if agent_type != AgentType::Codex {
+                        launch_agent_login(agent_type);
+                    }
+                    return Err(auth_error_message(agent_type));
+                }
+
+                // Include stderr context if the ACP error is generic
                 let detail = format_acp_error(&e);
+                if !stderr_combined.is_empty() {
+                    let tail: String = stderr_lines.iter().rev().take(5).cloned().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+                    return Err(format!("Agent failed to start: {detail}\n\nAgent output:\n{tail}"));
+                }
                 return Err(format!("Agent failed to start: {detail}"));
             }
         },
@@ -3839,18 +3865,19 @@ pub async fn acp_ensure_claude_cli(app: AppHandle) -> Result<String, String> {
                 return Ok(dir);
             }
 
-            // Fallback: return the expected installation location
-            let home = if cfg!(target_os = "windows") {
-                std::env::var("USERPROFILE")
-                    .unwrap_or_else(|_| String::from("C:\\Users\\Default"))
-            } else {
-                std::env::var("HOME").unwrap_or_else(|_| String::from("/root"))
-            };
-            Ok(std::path::PathBuf::from(home)
-                .join(".local")
-                .join("bin")
-                .to_string_lossy()
-                .to_string())
+            // Installation reported success but binary still not found
+            let error_msg = "Claude CLI installer succeeded but binary not found. Please install manually: https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview";
+            log::error!("[ACP] {}", error_msg);
+
+            let _ = app.emit(
+                "acp://cli-install-progress",
+                serde_json::json!({
+                    "stage": "error",
+                    "message": error_msg
+                }),
+            );
+
+            Err(error_msg.to_string())
         }
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
