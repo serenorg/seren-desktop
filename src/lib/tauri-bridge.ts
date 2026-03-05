@@ -708,6 +708,20 @@ export async function setAgentConversationSessionId(
 }
 
 /**
+ * Update the title of a persisted agent conversation.
+ */
+export async function setAgentConversationTitle(
+  id: string,
+  title: string,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("set_agent_conversation_title", { id, title });
+}
+
+/**
  * Update the selected model id for a persisted agent conversation.
  */
 export async function setAgentConversationModelId(
