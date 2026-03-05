@@ -421,6 +421,22 @@ pub async fn set_agent_conversation_session_id(
 }
 
 #[tauri::command]
+pub async fn set_agent_conversation_title(
+    app: AppHandle,
+    id: String,
+    title: String,
+) -> Result<(), String> {
+    run_db(app, move |conn| {
+        conn.execute(
+            "UPDATE conversations SET title = ?1 WHERE id = ?2 AND kind = 'agent'",
+            params![title, id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn set_agent_conversation_model_id(
     app: AppHandle,
     id: String,

@@ -689,6 +689,7 @@ pub fn run() {
             commands::chat::get_agent_conversations,
             commands::chat::get_agent_conversation,
             commands::chat::set_agent_conversation_session_id,
+            commands::chat::set_agent_conversation_title,
             commands::chat::set_agent_conversation_model_id,
             commands::chat::archive_agent_conversation,
             // Message commands

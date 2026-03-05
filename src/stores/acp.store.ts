@@ -31,6 +31,7 @@ import {
   saveMessage,
   setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
+  setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
 import type {
   AcpEvent,
@@ -1634,6 +1635,14 @@ Summary:`;
               return `${sp > 10 ? t.slice(0, sp) : t}\u2026`;
             })();
       setState("sessions", sessionId, "title", title);
+
+      // Persist derived title to DB so it survives app restarts
+      const convoId = state.sessions[sessionId]?.conversationId;
+      if (convoId) {
+        setAgentConversationTitleDb(convoId, title).catch((err) => {
+          console.warn("[AcpStore] Failed to persist title:", err);
+        });
+      }
     }
 
     console.log("[AcpStore] Calling acpService.sendPrompt...");
