@@ -4,7 +4,11 @@
 import { createStore } from "solid-js/store";
 import { type InstalledSkill, parseSkillMd } from "@/lib/skills";
 import { archiveAgentConversation } from "@/lib/tauri-bridge";
-import type { AgentType, SessionStatus } from "@/services/acp";
+import {
+  type AgentType,
+  listSessions,
+  type SessionStatus,
+} from "@/services/acp";
 import { skills as skillsService } from "@/services/skills";
 import { acpStore } from "@/stores/acp.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -308,7 +312,28 @@ export const threadStore = {
         liveSession?.info.id,
       );
       if (liveSession) {
-        acpStore.setActiveSession(liveSession.info.id);
+        // Verify the session actually exists in the Rust backend.
+        // After an app restart the JS store may hold stale sessions
+        // whose backend process is gone.
+        void listSessions().then((backendSessions) => {
+          const alive = backendSessions.some(
+            (s) => s.id === liveSession.info.id,
+          );
+          if (alive) {
+            acpStore.setActiveSession(liveSession.info.id);
+          } else {
+            console.warn(
+              "[Thread] Session",
+              liveSession.info.id,
+              "exists in store but not in backend — resuming",
+            );
+            acpStore.terminateSession(liveSession.info.id);
+            const cwd = thread?.projectRoot || fileTreeState.rootPath;
+            if (cwd) {
+              void acpStore.resumeAgentConversation(id, cwd);
+            }
+          }
+        });
       } else {
         // No live session — clear active and auto-resume the agent conversation.
         // The spawn lock in the Rust backend prevents SIGKILL collisions.

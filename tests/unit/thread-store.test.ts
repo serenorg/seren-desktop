@@ -75,6 +75,12 @@ vi.mock("@/stores/conversation.store", () => ({
   },
 }));
 
+// Mock ACP service (listSessions)
+const mockBackendSessions: Array<{ id: string }> = [];
+vi.mock("@/services/acp", () => ({
+  listSessions: vi.fn(async () => mockBackendSessions),
+}));
+
 // Mock ACP store
 const mockSessions: Record<
   string,
@@ -108,6 +114,7 @@ vi.mock("@/stores/acp.store", () => ({
     setActiveSession: vi.fn(),
     setSelectedAgentType: vi.fn(),
     resumeAgentConversation: vi.fn(),
+    terminateSession: vi.fn(),
     spawnSession: vi.fn(),
     refreshRecentAgentConversations: vi.fn(),
   },
@@ -127,6 +134,7 @@ describe("threadStore", () => {
     mockFileTreeState.rootPath = "/Users/dev/project-a";
     Object.keys(mockSessions).forEach((k) => delete mockSessions[k]);
     mockAgentConversations.length = 0;
+    mockBackendSessions.length = 0;
 
     // Reset thread store internal state
     threadStore.clear();
@@ -284,7 +292,7 @@ describe("threadStore", () => {
       );
     });
 
-    it("selects an agent thread with live session", () => {
+    it("selects an agent thread with live session", async () => {
       mockAgentConversations.push({
         id: "agent-1",
         title: "Agent",
@@ -301,11 +309,48 @@ describe("threadStore", () => {
         conversationId: "agent-1",
         info: { id: "sess-1", status: "ready", agentType: "claude-code" },
       };
+      // Backend confirms session is alive
+      mockBackendSessions.push({ id: "sess-1" });
 
       threadStore.selectThread("agent-1", "agent");
+      // Wait for async listSessions check
+      await vi.waitFor(() => {
+        expect(acpStore.setActiveSession).toHaveBeenCalledWith("sess-1");
+      });
 
       expect(threadStore.activeThreadKind).toBe("agent");
-      expect(acpStore.setActiveSession).toHaveBeenCalledWith("sess-1");
+    });
+
+    it("resumes stale session not present in backend", async () => {
+      mockAgentConversations.push({
+        id: "agent-1",
+        title: "Agent",
+        created_at: 1000,
+        agent_type: "claude-code",
+        agent_session_id: "sess-1",
+        agent_cwd: "/dev",
+        agent_model_id: null,
+        project_id: null,
+        project_root: "/Users/dev/project-a",
+        is_archived: false,
+      });
+      mockSessions["sess-1"] = {
+        conversationId: "agent-1",
+        info: { id: "sess-1", status: "ready", agentType: "claude-code" },
+      };
+      // Backend does NOT have this session (stale after restart)
+      // mockBackendSessions is empty
+
+      threadStore.selectThread("agent-1", "agent");
+      // Wait for async listSessions check to trigger resume
+      await vi.waitFor(() => {
+        expect(acpStore.terminateSession).toHaveBeenCalledWith("sess-1");
+      });
+
+      expect(acpStore.resumeAgentConversation).toHaveBeenCalledWith(
+        "agent-1",
+        "/Users/dev/project-a",
+      );
     });
 
     it("auto-resumes agent thread without live session", () => {
