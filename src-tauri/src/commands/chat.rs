@@ -1,11 +1,11 @@
 // ABOUTME: Tauri commands for chat persistence and conversation management.
 // ABOUTME: Handles CRUD operations for conversations and messages in SQLite.
 
-use crate::services::database::init_db;
+use crate::services::database::{DbPool, init_db};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 const MAX_MESSAGES_PER_CONVERSATION: i32 = 1000;
 
@@ -573,14 +573,20 @@ pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
 
 async fn run_db<T>(
     app: AppHandle,
-    task: impl FnOnce(Connection) -> rusqlite::Result<T> + Send + 'static,
+    task: impl FnOnce(&Connection) -> rusqlite::Result<T> + Send + 'static,
 ) -> Result<T, String>
 where
     T: Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(move || {
-        let conn = init_db(&app).map_err(|err| err.to_string())?;
-        task(conn).map_err(|err| err.to_string())
+        // Use the shared connection pool if available (normal runtime),
+        // fall back to opening a fresh connection (tests / early startup).
+        if let Some(pool) = app.try_state::<DbPool>() {
+            pool.with_connection(|conn| task(conn))
+        } else {
+            let conn = init_db(&app).map_err(|err| err.to_string())?;
+            task(&conn).map_err(|err| err.to_string())
+        }
     })
     .await
     .map_err(|err| err.to_string())?

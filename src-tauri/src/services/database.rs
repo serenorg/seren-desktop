@@ -1,11 +1,34 @@
-// ABOUTME: SQLite database initialization for chat persistence.
+// ABOUTME: SQLite database initialization and shared connection pool for chat persistence.
 // ABOUTME: Creates conversations and messages tables with migration support.
 
 use rusqlite::{Connection, Result};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
+
+/// Shared SQLite connection pool managed as Tauri state.
+/// Serializes all DB operations through a single connection to prevent
+/// "database is locked" errors from concurrent connection opens.
+pub struct DbPool(Mutex<Connection>);
+
+impl DbPool {
+    /// Create a new pool by opening and configuring the database connection.
+    pub fn new(app: &AppHandle) -> std::result::Result<Self, String> {
+        let conn = init_db(app).map_err(|e| e.to_string())?;
+        Ok(Self(Mutex::new(conn)))
+    }
+
+    /// Run a closure with exclusive access to the shared connection.
+    pub fn with_connection<T, F>(&self, f: F) -> std::result::Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T>,
+    {
+        let conn = self.0.lock().map_err(|e| format!("DB mutex poisoned: {}", e))?;
+        f(&conn).map_err(|e| e.to_string())
+    }
+}
 
 pub fn get_db_path(app: &AppHandle) -> PathBuf {
     app.path()
