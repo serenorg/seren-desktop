@@ -30,9 +30,6 @@ const CONNECT_TIMEOUT_SECS: u64 = 30;
 /// Allows for long-running agent requests with multiple tool execution rounds.
 const REQUEST_TIMEOUT_SECS: u64 = 600;
 
-/// Timeout for waiting on frontend tool execution (5 minutes).
-const TOOL_EXECUTION_TIMEOUT_SECS: u64 = 300;
-
 /// Maximum size (in bytes) of a single tool result when appended to the LLM
 /// conversation context.  Results larger than this are truncated to prevent the
 /// accumulated messages payload from growing large enough to cause upstream
@@ -973,7 +970,7 @@ impl ChatModelWorker {
     /// Route a non-local tool call to the frontend for execution via the tool bridge.
     ///
     /// Emits an `orchestrator://tool-request` event, then waits for the frontend to
-    /// call `submit_tool_result` with the result. Times out after 5 minutes.
+    /// call `submit_tool_result` with the result.
     async fn execute_frontend_tool(
         app: &tauri::AppHandle,
         tool_call_id: &str,
@@ -1009,13 +1006,12 @@ impl ChatModelWorker {
             return (format!("Failed to request tool execution: {}", e), true);
         }
         log::debug!(
-            "[ChatModelWorker] Tool request emitted, waiting for frontend result (timeout: {}s)",
-            TOOL_EXECUTION_TIMEOUT_SECS
+            "[ChatModelWorker] Tool request emitted, waiting for frontend result (no timeout)"
         );
 
-        // Wait for the frontend to submit the result
-        match tokio::time::timeout(Duration::from_secs(TOOL_EXECUTION_TIMEOUT_SECS), rx).await {
-            Ok(Ok(result)) => {
+        // Wait for the frontend to submit the result (no timeout — user may need time to review)
+        match rx.await {
+            Ok(result) => {
                 log::info!(
                     "[ChatModelWorker] Frontend tool completed: {} (is_error={}, result_len={})",
                     name,
@@ -1024,28 +1020,13 @@ impl ChatModelWorker {
                 );
                 (result.content, result.is_error)
             }
-            Ok(Err(_)) => {
+            Err(_) => {
                 // Sender was dropped (bridge cleaned up or cancelled)
                 log::warn!(
                     "[ChatModelWorker] Tool result channel closed for {} — bridge cleaned up or cancelled",
                     name
                 );
                 ("Tool execution was cancelled".to_string(), true)
-            }
-            Err(_) => {
-                log::error!(
-                    "[ChatModelWorker] TIMEOUT ({}/{}s) waiting for frontend tool execution: {}",
-                    TOOL_EXECUTION_TIMEOUT_SECS,
-                    TOOL_EXECUTION_TIMEOUT_SECS,
-                    name
-                );
-                (
-                    format!(
-                        "Tool '{}' timed out waiting for execution ({}s)",
-                        name, TOOL_EXECUTION_TIMEOUT_SECS
-                    ),
-                    true,
-                )
             }
         }
     }

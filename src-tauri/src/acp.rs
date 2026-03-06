@@ -726,36 +726,28 @@ impl Client for ClientDelegate {
             );
         }
 
-        // Wait for user response (5-minute timeout)
+        // Wait for user response (no timeout — user may need time to review)
         log::debug!("[ACP] Waiting for permission response {} ...", request_id);
-        let option_id_str =
-            match tokio::time::timeout(std::time::Duration::from_secs(300), response_rx).await {
-                Ok(Ok(id)) => {
-                    log::info!(
-                        "[ACP] Permission {} responded with option: {}",
-                        request_id,
-                        id
-                    );
+        let option_id_str = match response_rx.await {
+            Ok(id) => {
+                log::info!(
+                    "[ACP] Permission {} responded with option: {}",
+                    request_id,
                     id
-                }
-                Ok(Err(_)) => {
-                    log::warn!(
-                        "[ACP] Permission {} channel dropped (session may have been cleaned up)",
-                        request_id
-                    );
-                    self.pending_permissions.lock().await.remove(&request_id);
-                    return Err(agent_client_protocol::Error::internal_error().data(
-                        serde_json::Value::String("Permission request cancelled".into()),
-                    ));
-                }
-                Err(_) => {
-                    log::warn!("[ACP] Permission {} timed out after 5 minutes", request_id);
-                    self.pending_permissions.lock().await.remove(&request_id);
-                    return Err(agent_client_protocol::Error::internal_error().data(
-                        serde_json::Value::String("Permission request timed out".into()),
-                    ));
-                }
-            };
+                );
+                id
+            }
+            Err(_) => {
+                log::warn!(
+                    "[ACP] Permission {} channel dropped (session may have been cleaned up)",
+                    request_id
+                );
+                self.pending_permissions.lock().await.remove(&request_id);
+                return Err(agent_client_protocol::Error::internal_error().data(
+                    serde_json::Value::String("Permission request cancelled".into()),
+                ));
+            }
+        };
 
         self.pending_permissions.lock().await.remove(&request_id);
 
@@ -798,27 +790,18 @@ impl Client for ClientDelegate {
             }),
         );
 
-        // Wait for user response (5-minute timeout)
-        let accepted =
-            match tokio::time::timeout(std::time::Duration::from_secs(300), response_rx).await {
-                Ok(Ok(accepted)) => accepted,
-                Ok(Err(_)) => {
-                    self.pending_diff_proposals
-                        .lock()
-                        .await
-                        .remove(&proposal_id);
-                    return Err(agent_client_protocol::Error::internal_error()
-                        .data(serde_json::Value::String("Diff proposal dismissed".into())));
-                }
-                Err(_) => {
-                    self.pending_diff_proposals
-                        .lock()
-                        .await
-                        .remove(&proposal_id);
-                    return Err(agent_client_protocol::Error::internal_error()
-                        .data(serde_json::Value::String("Diff proposal timed out".into())));
-                }
-            };
+        // Wait for user response (no timeout — user may need time to review)
+        let accepted = match response_rx.await {
+            Ok(accepted) => accepted,
+            Err(_) => {
+                self.pending_diff_proposals
+                    .lock()
+                    .await
+                    .remove(&proposal_id);
+                return Err(agent_client_protocol::Error::internal_error()
+                    .data(serde_json::Value::String("Diff proposal dismissed".into())));
+            }
+        };
 
         self.pending_diff_proposals
             .lock()
