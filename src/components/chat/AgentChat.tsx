@@ -78,6 +78,9 @@ interface AgentChatProps {
   onViewDiff?: (diff: DiffEvent) => void;
 }
 
+// Per-thread input drafts so switching threads doesn't leak text between them.
+const agentDrafts = new Map<string, string>();
+
 export const AgentChat: Component<AgentChatProps> = (props) => {
   const [input, setInput] = createSignal("");
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
@@ -97,6 +100,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let userHasScrolledUp = false;
+  let prevThreadId: string | null = null;
 
   // Off-thread markdown rendering: finalized assistant messages are sent to a
   // Web Worker so renderMarkdown (marked + hljs) never blocks the main thread.
@@ -122,6 +126,23 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const thread = threadStore.activeThread;
     if (!thread || thread.kind !== "agent") return null;
     return thread;
+  });
+
+  // Save/restore per-thread input drafts when switching agent threads
+  createEffect(() => {
+    const currentId = activeAgentThread()?.id ?? null;
+    if (currentId !== prevThreadId) {
+      if (prevThreadId) {
+        const currentInput = untrack(input);
+        if (currentInput) {
+          agentDrafts.set(prevThreadId, currentInput);
+        } else {
+          agentDrafts.delete(prevThreadId);
+        }
+      }
+      setInput(currentId ? (agentDrafts.get(currentId) ?? "") : "");
+      prevThreadId = currentId;
+    }
   });
 
   // Get messages for THIS thread's conversation ID, not the active session
