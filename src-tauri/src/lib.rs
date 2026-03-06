@@ -629,6 +629,13 @@ pub fn run() {
                 });
             }
 
+            // Initialize shared SQLite connection pool to prevent "database is locked" errors.
+            {
+                let pool = services::database::DbPool::new(&app.handle())
+                    .expect("failed to initialize database pool");
+                app.manage(pool);
+            }
+
             // Initialize memory state for cloud + local cache operations.
             // Token is read fresh from the auth store on each request.
             {
