@@ -71,6 +71,67 @@ describe("isCodeLine", () => {
     expect(isCodeLine("* Handle error cases", false)).toBe(false);
     expect(isCodeLine("* This is a bullet", false)).toBe(false);
   });
+
+  it("recognises Python declarations", () => {
+    expect(isCodeLine("def test_happy_path() -> None:", false)).toBe(true);
+    expect(isCodeLine("async def fetch_data():", false)).toBe(true);
+    expect(isCodeLine("class MyTestCase(unittest.TestCase):", false)).toBe(
+      true,
+    );
+    expect(isCodeLine('from future import annotations', false)).toBe(true);
+    expect(isCodeLine("from pathlib import Path", false)).toBe(true);
+    expect(isCodeLine("import json", false)).toBe(true);
+    expect(isCodeLine("import subprocess", false)).toBe(true);
+  });
+
+  it("recognises Python keywords", () => {
+    expect(isCodeLine('assert payload["status"] == "ok"', false)).toBe(true);
+    expect(isCodeLine("return json.load(f)", false)).toBe(true);
+    expect(isCodeLine("raise ValueError('bad')", false)).toBe(true);
+    expect(isCodeLine("yield item", false)).toBe(true);
+    expect(isCodeLine("pass", false)).toBe(true);
+    expect(isCodeLine("if condition:", false)).toBe(false); // no trailing content+colon
+  });
+
+  it("recognises Python control flow with trailing colon", () => {
+    expect(isCodeLine("if x > 0:", false)).toBe(true);
+    expect(isCodeLine("for item in items:", false)).toBe(true);
+    expect(isCodeLine("while True:", false)).toBe(true);
+    expect(isCodeLine("with open(f) as fh:", false)).toBe(true);
+    expect(isCodeLine("except ValueError:", false)).toBe(true);
+    expect(isCodeLine("else:", false)).toBe(true);
+    expect(isCodeLine("elif x:", false)).toBe(true);
+  });
+
+  it("recognises Python decorators", () => {
+    expect(isCodeLine("@pytest.fixture", false)).toBe(true);
+    expect(isCodeLine("@staticmethod", false)).toBe(true);
+  });
+
+  it("recognises Rust declarations", () => {
+    expect(isCodeLine("fn main() {", false)).toBe(true);
+    expect(isCodeLine("pub fn new() -> Self {", false)).toBe(true);
+    expect(isCodeLine("struct Config {", false)).toBe(true);
+    expect(isCodeLine("let mut count = 0;", false)).toBe(true);
+    expect(isCodeLine("use std::io;", false)).toBe(true);
+  });
+
+  it("recognises Go declarations", () => {
+    expect(isCodeLine("func main() {", false)).toBe(true);
+    expect(isCodeLine("func (s *Server) Start() error {", false)).toBe(true);
+    expect(isCodeLine("package main", false)).toBe(true);
+  });
+
+  it("recognises closing paren and bracket lines", () => {
+    expect(isCodeLine(")", false)).toBe(true);
+    expect(isCodeLine("),", false)).toBe(true);
+    expect(isCodeLine("]", false)).toBe(true);
+  });
+
+  it("recognises shebangs", () => {
+    expect(isCodeLine("#!/usr/bin/env python3", false)).toBe(true);
+    expect(isCodeLine("#!/bin/bash", false)).toBe(true);
+  });
 });
 
 describe("wrapCodeIslands", () => {
@@ -85,7 +146,7 @@ describe("wrapCodeIslands", () => {
     ].join("\n");
 
     const result = wrapCodeIslands(input);
-    expect(result).toContain("```typescript");
+    expect(result).toContain("```");
     expect(result).toContain("/**");
     expect(result).toContain("branch_id: string;");
     expect(result).toContain("```");
@@ -118,7 +179,7 @@ describe("wrapCodeIslands", () => {
 
     const result = wrapCodeIslands(input);
     // Code section must be in a fence
-    expect(result).toContain("```typescript");
+    expect(result).toContain("```");
     // Prose must be outside the fence
     const lastFence = result.lastIndexOf("```");
     expect(result.indexOf("I have enough")).toBeGreaterThan(lastFence);
@@ -129,11 +190,11 @@ describe("wrapCodeIslands", () => {
     const input = "export type Foo = string;\n\nSome prose here.";
     const result = wrapCodeIslands(input);
     // Single code line — should NOT be wrapped
-    expect(result).not.toContain("```typescript");
+    expect(result).not.toContain("```");
   });
 
   it("leaves existing fenced blocks untouched", () => {
-    const input = "```typescript\nconst x = 1;\n```\nSome prose.";
+    const input = "```\nconst x = 1;\n```\nSome prose.";
     const result = wrapCodeIslands(input);
     // Should still have exactly one fence pair — no extra wrapping
     const fenceCount = (result.match(/```/g) ?? []).length;
@@ -158,12 +219,35 @@ describe("wrapCodeIslands", () => {
     ].join("\n");
 
     const result = wrapCodeIslands(input);
-    expect(result).toContain("```typescript");
+    expect(result).toContain("```");
     expect(result).toContain("This is prose after a blank line.");
     // Blank line should appear after the closing fence
     const closingFence = result.lastIndexOf("```");
     const proseIdx = result.indexOf("This is prose");
     expect(proseIdx).toBeGreaterThan(closingFence);
+  });
+
+  it("wraps unfenced Python code in a code fence", () => {
+    const input = [
+      "from future import annotations",
+      "import json",
+      "import os",
+      "",
+      "def test_happy_path() -> None:",
+      '    payload = read_fixture("happy_path.json")',
+      '    assert payload["status"] == "ok"',
+      "",
+      "Here is the explanation.",
+    ].join("\n");
+
+    const result = wrapCodeIslands(input);
+    expect(result).toContain("```");
+    expect(result).toContain("import json");
+    // Prose should be outside the fence
+    const lastFence = result.lastIndexOf("```");
+    expect(result.indexOf("Here is the explanation")).toBeGreaterThan(
+      lastFence,
+    );
   });
 
   it("does not wrap real markdown bullet lists as code", () => {
@@ -176,6 +260,6 @@ describe("wrapCodeIslands", () => {
     ].join("\n");
 
     const result = wrapCodeIslands(input);
-    expect(result).not.toContain("```typescript");
+    expect(result).not.toContain("```");
   });
 });
