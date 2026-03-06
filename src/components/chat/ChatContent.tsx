@@ -180,6 +180,9 @@ interface ChatContentProps {
   onSignInClick?: () => void;
 }
 
+// Per-thread input drafts so switching threads doesn't leak text between them.
+const chatDrafts = new Map<string, string>();
+
 export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [input, setInput] = createSignal("");
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
@@ -202,6 +205,26 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   let inputRef: HTMLTextAreaElement | undefined;
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let prevConversationId: string | null = null;
+
+  // Save/restore per-thread input drafts when switching conversations
+  createEffect(() => {
+    const currentId = conversationStore.activeConversationId;
+    if (currentId !== prevConversationId) {
+      // Save draft for the thread we're leaving
+      if (prevConversationId) {
+        const currentInput = input();
+        if (currentInput) {
+          chatDrafts.set(prevConversationId, currentInput);
+        } else {
+          chatDrafts.delete(prevConversationId);
+        }
+      }
+      // Restore draft for the thread we're entering (or clear)
+      setInput(currentId ? (chatDrafts.get(currentId) ?? "") : "");
+      prevConversationId = currentId;
+    }
+  });
 
   // Click handler for copy buttons and external links (event delegation)
   const handleCopyClick = (event: MouseEvent) => {
