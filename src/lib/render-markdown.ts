@@ -60,8 +60,9 @@ marked.setOptions({
 });
 
 /**
- * Returns true when a line (already trimmed) looks like TypeScript/JavaScript
- * code rather than prose. Used by wrapCodeIslands to detect unfenced code.
+ * Returns true when a line (already trimmed) looks like code rather than
+ * prose. Used by wrapCodeIslands to detect unfenced code from agents.
+ * Covers TypeScript/JS, Python, Rust, Go, and Shell patterns.
  */
 export function isCodeLine(trimmed: string, inCComment: boolean): boolean {
   if (!trimmed) return false;
@@ -72,7 +73,10 @@ export function isCodeLine(trimmed: string, inCComment: boolean): boolean {
   // C-style comment closers and continuations – only inside an open comment
   if (inCComment && /^(\*\/|\*\s)/.test(trimmed)) return true;
 
-  // TypeScript/JS typed declarations
+  // Shebangs
+  if (/^#!\//.test(trimmed)) return true;
+
+  // TypeScript/JS declarations
   if (/^(export\s+)?(type|interface)\s+\w/.test(trimmed)) return true;
   if (/^(export\s+)?(abstract\s+)?class\s+\w/.test(trimmed)) return true;
   if (/^(export\s+)?(async\s+)?function\s+\w/.test(trimmed)) return true;
@@ -80,13 +84,42 @@ export function isCodeLine(trimmed: string, inCComment: boolean): boolean {
   if (/^(export\s+)?enum\s+\w/.test(trimmed)) return true;
   if (/^import\s+(type\s+)?(\{|\*|[\w_$])/.test(trimmed)) return true;
 
+  // Python declarations and keywords
+  if (/^(async\s+)?def\s+\w/.test(trimmed)) return true;
+  if (/^class\s+\w+[:(]/.test(trimmed)) return true;
+  if (/^from\s+\S+\s+import\s/.test(trimmed)) return true;
+  if (/^(assert|raise|yield|return|pass)\b/.test(trimmed)) return true;
+  // Python control flow — unambiguous keywords
+  if (/^(for|while|with|try|except)\s.*:\s*$/.test(trimmed)) return true;
+  if (/^(elif|else|except|finally):\s*$/.test(trimmed)) return true;
+  if (/^elif\s.*:\s*$/.test(trimmed)) return true;
+  // Python if — require at least two tokens after `if` to avoid
+  // false-positiving on prose like "if condition:"
+  if (/^if\s+\S+\s+\S.*:\s*$/.test(trimmed)) return true;
+  if (/^@\w/.test(trimmed)) return true; // decorators
+
+  // Rust declarations
+  if (
+    /^(pub(\(.+?\))?\s+)?(fn|struct|enum|trait|impl|mod|use|type)\s/.test(
+      trimmed,
+    )
+  )
+    return true;
+  if (/^let\s+(mut\s+)?\w/.test(trimmed)) return true;
+
+  // Go declarations
+  if (/^func\s+[\w(]/.test(trimmed)) return true;
+  if (/^package\s+\w/.test(trimmed)) return true;
+
   // Lines ending with ; — strong code signal. Exclude obvious prose sentences
   // (capital letter followed by a lowercase word, e.g. "This returns a value;")
   if (/;\s*$/.test(trimmed) && !/^[A-Z][a-z]+\s+[a-z]/.test(trimmed))
     return true;
 
-  // Closing brace/bracket lines common in TypeScript
+  // Closing brace/bracket/paren lines
   if (/^\}[;,]?\s*$/.test(trimmed)) return true;
+  if (/^\)[;,]?\s*$/.test(trimmed)) return true;
+  if (/^\]\s*$/.test(trimmed)) return true;
 
   // HTTP/OpenAPI status-code type entries: `404: unknown;`
   if (/^\d{3,4}:\s+\w/.test(trimmed)) return true;
@@ -95,10 +128,10 @@ export function isCodeLine(trimmed: string, inCComment: boolean): boolean {
 }
 
 /**
- * Wrap consecutive "code island" lines outside existing fences in a
- * ```typescript fence. Codex frequently outputs TypeScript type definitions
- * and JSDoc comments as plain text without code fences, causing * lines to
- * render as markdown bullets and declarations to appear as unstyled paragraphs.
+ * Wrap consecutive "code island" lines outside existing fences in a bare
+ * ``` fence (hljs auto-detects the language). Agents frequently output code
+ * as plain text without fences, causing declarations to appear as unstyled
+ * paragraphs.
  *
  * A run of 2+ consecutive code-like lines is wrapped. Single isolated lines
  * are left alone to avoid false positives.
@@ -118,7 +151,7 @@ export function wrapCodeIslands(text: string): string {
         blankBuf.unshift(codeBuf.pop() as string);
       }
       if (codeBuf.length >= 2) {
-        out.push("```typescript", ...codeBuf, "```");
+        out.push("```", ...codeBuf, "```");
         codeBuf.length = 0;
         return;
       }
@@ -180,9 +213,9 @@ export function wrapCodeIslands(text: string): string {
  * in-progress paragraph at these block-level elements when no blank line
  * separates them — common in Codex/agent output that omits blank lines.
  *
- * Also detects unfenced TypeScript/JSDoc "code islands" and wraps them in
- * fenced code blocks so they render with syntax highlighting rather than
- * as markdown bullets and plain paragraphs.
+ * Also detects unfenced code islands (TypeScript, Python, Rust, Go, etc.)
+ * and wraps them in fenced code blocks so they render with syntax
+ * highlighting rather than as markdown bullets and plain paragraphs.
  */
 function normalizeAgentMarkdown(markdown: string): string {
   let result = markdown.replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2");
