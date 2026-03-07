@@ -2,7 +2,7 @@
 // ABOUTME: Runs automatically when APPLE_SIGNING_IDENTITY env var is set.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -71,6 +71,28 @@ function findSignableFiles(dir: string): string[] {
   return files;
 }
 
+/**
+ * Delete fake .app directories inside node_modules that break Apple notarization.
+ * These are not real macOS bundles — just directories like puppeteer-stealth's
+ * evasions/chrome.app that mimic Chrome's app path for fingerprint spoofing.
+ * Apple's notary rejects the entire DMG if it finds an unsigned .app bundle.
+ */
+function removeFakeAppBundles(dir: string): void {
+  if (!existsSync(dir)) return;
+
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const fullPath = path.join(dir, entry.name);
+
+    if (entry.name.endsWith(".app") && fullPath.includes("node_modules")) {
+      console.log(`[sign-embedded-runtime] Removing fake .app bundle: ${fullPath}`);
+      rmSync(fullPath, { recursive: true, force: true });
+    } else {
+      removeFakeAppBundles(fullPath);
+    }
+  }
+}
+
 function main(): void {
   const signingIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim();
 
@@ -93,6 +115,11 @@ function main(): void {
     path.join(repoRoot, "src-tauri", "embedded-runtime"),
     path.join(repoRoot, "src-tauri", "mcp-servers"),
   ];
+
+  // Remove fake .app directories that break Apple notarization
+  for (const dir of scanDirs) {
+    removeFakeAppBundles(dir);
+  }
 
   console.log(`[sign-embedded-runtime] Identity: ${signingIdentity.slice(0, 20)}...`);
 
