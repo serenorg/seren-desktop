@@ -150,6 +150,9 @@ export interface ActiveSession {
   lastUserPrompt?: string;
   /** Set after a compact-and-retry attempt so we only try once per prompt. */
   compactRetryAttempted?: boolean;
+  /** Set when the user explicitly requested a cancel — suppresses auto-retry
+   *  in the unresponsive-agent recovery path. */
+  cancelRequested?: boolean;
 }
 
 // ============================================================================
@@ -1655,6 +1658,8 @@ Summary:`;
 
     // Track when the prompt started for duration calculation
     setState("sessions", sessionId, "promptStartTime", Date.now());
+    // Clear any prior cancel flag — user is submitting a new prompt.
+    setState("sessions", sessionId, "cancelRequested", undefined);
     // Store the prompt so we can retry after compaction if needed
     setState("sessions", sessionId, "lastUserPrompt", prompt);
     setState("sessions", sessionId, "compactRetryAttempted", false);
@@ -1781,6 +1786,8 @@ Summary:`;
         );
         const cwd = session.cwd;
         const agentType = session.info.agentType;
+        // Snapshot cancel intent before cleanup clears session state.
+        const wasUserCancel = session.cancelRequested === true;
 
         // Clean up the dead session
         await this.terminateSession(sessionId);
@@ -1804,68 +1811,91 @@ Summary:`;
               );
             }
 
-            // Show recovery indicator so the user knows what happened
-            const recoveryMsg: AgentMessage = {
-              id: crypto.randomUUID(),
-              type: "assistant",
-              content:
-                "Agent session restarted due to inactivity timeout. Retrying your message...",
-              timestamp: Date.now(),
-            };
-            setState("sessions", newSessionId, "messages", (msgs) => [
-              ...msgs,
-              recoveryMsg,
-              userMessage,
-            ]);
-            const newConvoId = state.sessions[newSessionId]?.conversationId;
-            if (newConvoId) {
-              persistAgentMessage(newConvoId, recoveryMsg);
-              persistAgentMessage(newConvoId, userMessage);
-            }
+            if (wasUserCancel) {
+              // The user explicitly cancelled — don't retry. Just show a
+              // neutral message so they know the session was restarted.
+              console.info(
+                "[AcpStore] Agent unresponsive after cancel — spawned fresh session, skipping retry",
+              );
+              const cancelMsg: AgentMessage = {
+                id: crypto.randomUUID(),
+                type: "assistant",
+                content: "Session restarted after cancellation.",
+                timestamp: Date.now(),
+              };
+              setState("sessions", newSessionId, "messages", (msgs) => [
+                ...msgs,
+                cancelMsg,
+              ]);
+              const newConvoId = state.sessions[newSessionId]?.conversationId;
+              if (newConvoId) {
+                persistAgentMessage(newConvoId, cancelMsg);
+              }
+            } else {
+              // Show recovery indicator so the user knows what happened
+              const recoveryMsg: AgentMessage = {
+                id: crypto.randomUUID(),
+                type: "assistant",
+                content:
+                  "Agent session restarted due to inactivity timeout. Retrying your message...",
+                timestamp: Date.now(),
+              };
+              setState("sessions", newSessionId, "messages", (msgs) => [
+                ...msgs,
+                recoveryMsg,
+                userMessage,
+              ]);
+              const newConvoId = state.sessions[newSessionId]?.conversationId;
+              if (newConvoId) {
+                persistAgentMessage(newConvoId, recoveryMsg);
+                persistAgentMessage(newConvoId, userMessage);
+              }
 
-            // Retry the prompt on the new session, rebuilding skills context
-            // so skill invocations work on the fresh session.
-            console.info(
-              `[AcpStore] Retrying prompt on new session ${newSessionId}`,
-            );
-            try {
-              let retryContext: Array<Record<string, string>> = context
-                ? [...context]
-                : [];
+              // Retry the prompt on the new session, rebuilding skills context
+              // so skill invocations work on the fresh session.
+              console.info(
+                `[AcpStore] Retrying prompt on new session ${newSessionId}`,
+              );
               try {
-                const newSession = state.sessions[newSessionId];
-                const skillsContent = await skillsStore.getThreadSkillsContent(
-                  newSession?.cwd ?? cwd,
-                  newSession?.conversationId ?? newSessionId,
-                );
-                if (skillsContent) {
-                  retryContext = [
-                    { type: "text", text: skillsContent },
-                    ...retryContext,
-                  ];
+                let retryContext: Array<Record<string, string>> = context
+                  ? [...context]
+                  : [];
+                try {
+                  const newSession = state.sessions[newSessionId];
+                  const skillsContent =
+                    await skillsStore.getThreadSkillsContent(
+                      newSession?.cwd ?? cwd,
+                      newSession?.conversationId ?? newSessionId,
+                    );
+                  if (skillsContent) {
+                    retryContext = [
+                      { type: "text", text: skillsContent },
+                      ...retryContext,
+                    ];
+                  }
+                } catch (skillsError) {
+                  console.warn(
+                    "[AcpStore] Failed to load skills for recovery retry:",
+                    skillsError,
+                  );
                 }
-              } catch (skillsError) {
-                console.warn(
-                  "[AcpStore] Failed to load skills for recovery retry:",
-                  skillsError,
+                await acpService.sendPrompt(
+                  newSessionId,
+                  prompt,
+                  retryContext.length > 0 ? retryContext : undefined,
+                );
+                console.log("[AcpStore] Retry succeeded on new session");
+              } catch (retryError) {
+                console.error("[AcpStore] Retry failed:", retryError);
+                const retryMessage =
+                  retryError instanceof Error
+                    ? retryError.message
+                    : String(retryError);
+                this.addErrorMessage(
+                  newSessionId,
+                  `Recovery failed: ${retryMessage}. Please try sending your message again.`,
                 );
               }
-              await acpService.sendPrompt(
-                newSessionId,
-                prompt,
-                retryContext.length > 0 ? retryContext : undefined,
-              );
-              console.log("[AcpStore] Retry succeeded on new session");
-            } catch (retryError) {
-              console.error("[AcpStore] Retry failed:", retryError);
-              const retryMessage =
-                retryError instanceof Error
-                  ? retryError.message
-                  : String(retryError);
-              this.addErrorMessage(
-                newSessionId,
-                `Recovery failed: ${retryMessage}. Please try sending your message again.`,
-              );
             }
           }
           return newSessionId;
@@ -1921,6 +1951,8 @@ Summary:`;
     console.info(
       `[AcpStore] cancelPrompt: session=${sessionId}, status=${session?.info.status}`,
     );
+
+    setState("sessions", sessionId, "cancelRequested", true);
 
     try {
       await acpService.cancelPrompt(sessionId);
