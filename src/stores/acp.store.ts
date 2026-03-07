@@ -1518,6 +1518,17 @@ Summary:`;
       }
 
       const [newSessionId] = newEntry;
+
+      // If compaction was skipped (e.g. not enough messages to compact),
+      // the search returns the original session — retrying on the same
+      // full session would fail again and falsely signal success.
+      if (newSessionId === sessionId) {
+        console.warn(
+          "[AcpStore] compactAndRetry: compaction was skipped, cannot retry",
+        );
+        return false;
+      }
+
       console.info(
         `[AcpStore] Compaction complete, retrying prompt on session ${newSessionId}`,
       );
