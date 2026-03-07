@@ -72,23 +72,31 @@ function findSignableFiles(dir: string): string[] {
 }
 
 /**
- * Delete fake .app directories inside node_modules that break Apple notarization.
- * These are not real macOS bundles — just directories like puppeteer-stealth's
- * evasions/chrome.app that mimic Chrome's app path for fingerprint spoofing.
- * Apple's notary rejects the entire DMG if it finds an unsigned .app bundle.
+ * Remove files and directories from node_modules that break Apple notarization.
+ *
+ * 1. Fake .app directories (e.g., puppeteer-stealth evasions/chrome.app) —
+ *    Apple notary rejects unsigned .app bundles even though they're just JS.
+ * 2. node_modules/.bin directories — these contain CLI shims (esbuild, tsc, etc.)
+ *    that may include native binaries. Signing them before Tauri bundles is
+ *    ineffective because Tauri resolves symlinks into fresh copies, stripping
+ *    the code signature. The .bin shims are never used at runtime.
  */
-function removeFakeAppBundles(dir: string): void {
+function removeNotarizationBlockers(dir: string): void {
   if (!existsSync(dir)) return;
 
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const fullPath = path.join(dir, entry.name);
 
-    if (entry.name.endsWith(".app") && fullPath.includes("node_modules")) {
-      console.log(`[sign-embedded-runtime] Removing fake .app bundle: ${fullPath}`);
+    const isInsideNodeModules = fullPath.includes("node_modules");
+    const isFakeApp = entry.name.endsWith(".app") && isInsideNodeModules;
+    const isBinDir = entry.name === ".bin" && isInsideNodeModules;
+
+    if (isFakeApp || isBinDir) {
+      console.log(`[sign-embedded-runtime] Removing notarization blocker: ${fullPath}`);
       rmSync(fullPath, { recursive: true, force: true });
     } else {
-      removeFakeAppBundles(fullPath);
+      removeNotarizationBlockers(fullPath);
     }
   }
 }
@@ -116,9 +124,9 @@ function main(): void {
     path.join(repoRoot, "src-tauri", "mcp-servers"),
   ];
 
-  // Remove fake .app directories that break Apple notarization
+  // Remove files that break Apple notarization (.app dirs, .bin shims)
   for (const dir of scanDirs) {
-    removeFakeAppBundles(dir);
+    removeNotarizationBlockers(dir);
   }
 
   console.log(`[sign-embedded-runtime] Identity: ${signingIdentity.slice(0, 20)}...`);
