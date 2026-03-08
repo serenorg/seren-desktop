@@ -15,6 +15,10 @@ import { runtimeHasCapability } from "@/lib/runtime";
 export type AgentType = "claude-code" | "codex";
 export type UnlistenFn = () => void;
 
+export function supportsSessionFork(_agentType: AgentType): boolean {
+  return false;
+}
+
 export type SessionStatus =
   | "initializing"
   | "ready"

@@ -383,7 +383,7 @@ function stringifyToolResultContent(content) {
 
 function emitToolCall(emit, session, toolName, input, toolUseId, status = "in_progress") {
   const title = resolveToolTitle(toolName, input);
-  emit("acp://tool-call", {
+  emit("provider://tool-call", {
     sessionId: session.id,
     toolCallId: toolUseId,
     title,
@@ -394,7 +394,7 @@ function emitToolCall(emit, session, toolName, input, toolUseId, status = "in_pr
 }
 
 function emitToolResult(emit, session, toolUseId, content, isError = false) {
-  emit("acp://tool-result", {
+  emit("provider://tool-result", {
     sessionId: session.id,
     toolCallId: toolUseId,
     status: isError ? "failed" : "completed",
@@ -651,7 +651,7 @@ function handlePermissionRequest(emit, session, payload) {
     toolUseId,
   });
 
-  emit("acp://permission-request", {
+  emit("provider://permission-request", {
     sessionId: session.id,
     requestId,
     toolCall: buildPermissionToolCall(toolName, toolInput, toolUseId),
@@ -692,7 +692,7 @@ function handleSystemMessage(emit, session, payload) {
       session.currentModelId =
         session.currentModelId ??
         inferCurrentModelId(payload.model, session.availableModelRecords);
-      emit("acp://session-status", buildSessionStatus(session));
+      emit("provider://session-status", buildSessionStatus(session));
       return;
     }
 
@@ -728,7 +728,7 @@ function handleAssistantMessage(emit, session, payload) {
       case "text":
         if (!sawStreamedAssistant && typeof block.text === "string" && block.text.length > 0) {
           session.currentPromptHasChunks = true;
-          emit("acp://message-chunk", {
+          emit("provider://message-chunk", {
             sessionId: session.id,
             text: block.text,
           });
@@ -742,7 +742,7 @@ function handleAssistantMessage(emit, session, payload) {
           block.thinking.length > 0
         ) {
           session.currentPromptHasChunks = true;
-          emit("acp://message-chunk", {
+          emit("provider://message-chunk", {
             sessionId: session.id,
             text: block.thinking,
             isThought: true,
@@ -791,7 +791,7 @@ function handleStreamEvent(emit, session, payload) {
       const delta = event.delta ?? {};
       if (delta.type === "text_delta" && typeof delta.text === "string") {
         session.currentPromptHasChunks = true;
-        emit("acp://message-chunk", {
+        emit("provider://message-chunk", {
           sessionId: session.id,
           text: delta.text,
         });
@@ -800,7 +800,7 @@ function handleStreamEvent(emit, session, payload) {
         typeof delta.thinking === "string"
       ) {
         session.currentPromptHasChunks = true;
-        emit("acp://message-chunk", {
+        emit("provider://message-chunk", {
           sessionId: session.id,
           text: delta.thinking,
           isThought: true,
@@ -817,19 +817,19 @@ function handleStreamEvent(emit, session, payload) {
 function handleResult(emit, session, payload) {
   session.status = "ready";
 
-  emit("acp://prompt-complete", {
+  emit("provider://prompt-complete", {
     sessionId: session.id,
     stopReason: payload?.stop_reason ?? (payload?.is_error ? "error" : "end_turn"),
     ...buildPromptMeta(payload),
   });
-  emit("acp://session-status", buildSessionStatus(session, "ready"));
+  emit("provider://session-status", buildSessionStatus(session, "ready"));
 
   if (payload?.is_error) {
     const message =
       payload?.result ??
       payload?.error ??
       "Claude Code request failed.";
-    emit("acp://error", {
+    emit("provider://error", {
       sessionId: session.id,
       error: isAuthError(message)
         ? "Agent authentication required. Run the login flow and try again."
@@ -903,14 +903,14 @@ function attachProcessListeners(emit, sessions, session) {
         session,
         new Error("Claude Code stopped while prompt was active."),
       );
-      emit("acp://error", {
+      emit("provider://error", {
         sessionId: session.id,
         error: "Claude Code stopped while prompt was active.",
       });
     }
 
     session.status = "terminated";
-    emit("acp://session-status", {
+    emit("provider://session-status", {
       sessionId: session.id,
       status: "terminated",
       agentSessionId: session.agentSessionId,
@@ -991,7 +991,7 @@ export function createClaudeRuntime({ emit }) {
         session.currentModelId;
       session.status = "ready";
 
-      emit("acp://session-status", buildSessionStatus(session, "ready"));
+      emit("provider://session-status", buildSessionStatus(session, "ready"));
 
       return {
         id: session.id,
@@ -1006,7 +1006,7 @@ export function createClaudeRuntime({ emit }) {
       const message = error instanceof Error ? error.message : String(error);
       sessions.delete(sessionId);
       killChildTree(processHandle);
-      emit("acp://error", {
+      emit("provider://error", {
         sessionId,
         error: isAuthError(message)
           ? "Agent authentication required. Run the login flow and try again."
@@ -1028,7 +1028,7 @@ export function createClaudeRuntime({ emit }) {
     const combinedPrompt = combinePrompt(prompt, context);
     session.status = "prompting";
     session.currentPromptHasChunks = false;
-    emit("acp://session-status", {
+    emit("provider://session-status", {
       sessionId,
       status: "prompting",
       agentSessionId: session.agentSessionId,
@@ -1073,11 +1073,11 @@ export function createClaudeRuntime({ emit }) {
     });
 
     session.status = "ready";
-    emit("acp://error", {
+    emit("provider://error", {
       sessionId,
       error: "Task cancelled",
     });
-    emit("acp://session-status", buildSessionStatus(session, "ready"));
+    emit("provider://session-status", buildSessionStatus(session, "ready"));
     rejectCurrentPrompt(session, new Error("Task cancelled"));
   }
 
@@ -1095,7 +1095,7 @@ export function createClaudeRuntime({ emit }) {
     rejectCurrentPrompt(session, new Error("Session terminated."));
     session.output.close();
     killChildTree(session.process);
-    emit("acp://session-status", {
+    emit("provider://session-status", {
       sessionId,
       status: "terminated",
       agentSessionId: session.agentSessionId,
@@ -1157,7 +1157,7 @@ export function createClaudeRuntime({ emit }) {
       // Best-effort sync only.
     });
 
-    emit("acp://session-status", buildSessionStatus(session));
+    emit("provider://session-status", buildSessionStatus(session));
   }
 
   async function respondToPermission({ sessionId, requestId, optionId }) {
@@ -1219,7 +1219,7 @@ export function createClaudeRuntime({ emit }) {
     );
 
     session.currentModelId = targetModel.modelId;
-    emit("acp://session-status", buildSessionStatus(session));
+    emit("provider://session-status", buildSessionStatus(session));
   }
 
   async function setConfigOption() {

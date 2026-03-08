@@ -3183,7 +3183,15 @@ Summary:`;
     const agentType = session.info.agentType;
     const cwd = session.cwd;
 
-    // 1. Ask the sidecar to fork the CLI session.
+    if (!providerService.supportsSessionFork(agentType)) {
+      this.addErrorMessage(
+        conversationId,
+        `Forking ${agentType} conversations is not supported yet in the local provider runtime.`,
+      );
+      return null;
+    }
+
+    // 1. Ask the provider runtime to fork the CLI session.
     let newAgentSessionId: string;
     try {
       newAgentSessionId = await providerService.forkSession(conversationId);
@@ -3227,7 +3235,7 @@ Summary:`;
       return null;
     }
 
-    // 4. Spawn a new sidecar session that resumes the forked CLI session.
+    // 4. Spawn a new local session that resumes the forked CLI session.
     const newSessionId = await this.spawnSession(cwd, agentType, {
       localSessionId: newConversationId,
       resumeAgentSessionId: newAgentSessionId,

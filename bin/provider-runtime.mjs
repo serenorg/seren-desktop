@@ -93,7 +93,6 @@ function registerProviderHandlers() {
   );
   registerHandler("provider_ensure_agent_cli", providerHandlers.ensureAgentCli);
   registerHandler("provider_launch_login", providerHandlers.launchLogin);
-  registerHandler("provider_load_session", providerHandlers.loadSession);
   registerHandler("provider_fork_session", providerHandlers.forkSession);
   registerHandler(
     "provider_set_session_model",

@@ -61,7 +61,7 @@ async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
     return command;
   }
 
-  emit("acp://cli-install-progress", {
+  emit("provider://cli-install-progress", {
     stage: "installing",
     message: `Installing ${label} CLI...`,
   });
@@ -81,7 +81,7 @@ async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
     );
   });
 
-  emit("acp://cli-install-progress", {
+  emit("provider://cli-install-progress", {
     stage: "complete",
     message: `${label} CLI installed successfully`,
   });

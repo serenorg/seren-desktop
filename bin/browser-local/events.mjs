@@ -8,14 +8,6 @@ function eventAliases(method) {
     return [];
   }
 
-  if (method.startsWith("acp://")) {
-    return [method, `provider://${method.slice("acp://".length)}`];
-  }
-
-  if (method.startsWith("provider://")) {
-    return [method, `acp://${method.slice("provider://".length)}`];
-  }
-
   return [method];
 }
 

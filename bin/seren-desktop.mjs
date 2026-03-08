@@ -259,12 +259,8 @@ function registerBrowserLocalHandlers() {
     providerHandlers.checkAgentAvailable,
   );
   registerHandler(
-    "provider_ensure_claude_cli",
-    providerHandlers.ensureClaudeCli,
-  );
-  registerHandler(
-    "provider_ensure_codex_cli",
-    providerHandlers.ensureCodexCli,
+    "provider_ensure_agent_cli",
+    providerHandlers.ensureAgentCli,
   );
   registerHandler("provider_launch_login", providerHandlers.launchLogin);
   registerHandler(
@@ -272,46 +268,17 @@ function registerBrowserLocalHandlers() {
     providerHandlers.listRemoteSessions,
   );
   registerHandler("provider_fork_session", providerHandlers.forkSession);
-  registerHandler("provider_set_model", providerHandlers.setModel);
   registerHandler(
-    "provider_set_config_option",
-    providerHandlers.setConfigOption,
-  );
-
-  registerHandler("acp_spawn", providerHandlers.spawnSession);
-  registerHandler("acp_prompt", providerHandlers.sendPrompt);
-  registerHandler("acp_cancel", providerHandlers.cancelPrompt);
-  registerHandler("acp_terminate", providerHandlers.terminateSession);
-  registerHandler("acp_list_sessions", providerHandlers.listSessions);
-  registerHandler("acp_set_permission_mode", providerHandlers.setPermissionMode);
-  registerHandler(
-    "acp_respond_to_permission",
-    providerHandlers.respondToPermission,
+    "provider_set_session_model",
+    providerHandlers.setSessionModel,
   );
   registerHandler(
-    "acp_respond_to_diff_proposal",
-    providerHandlers.respondToDiffProposal,
+    "provider_set_session_mode",
+    providerHandlers.setSessionMode,
   );
   registerHandler(
-    "acp_get_available_agents",
-    providerHandlers.getAvailableAgents,
-  );
-  registerHandler(
-    "acp_check_agent_available",
-    providerHandlers.checkAgentAvailable,
-  );
-  registerHandler("acp_ensure_claude_cli", providerHandlers.ensureClaudeCli);
-  registerHandler("acp_ensure_codex_cli", providerHandlers.ensureCodexCli);
-  registerHandler("acp_launch_login", providerHandlers.launchLogin);
-  registerHandler(
-    "acp_list_remote_sessions",
-    providerHandlers.listRemoteSessions,
-  );
-  registerHandler("acp_fork_session", providerHandlers.forkSession);
-  registerHandler("acp_set_model", providerHandlers.setModel);
-  registerHandler(
-    "acp_set_config_option",
-    providerHandlers.setConfigOption,
+    "provider_update_session_config_option",
+    providerHandlers.updateSessionConfigOption,
   );
 }
 

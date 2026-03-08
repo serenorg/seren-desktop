@@ -49,6 +49,7 @@ import {
   type AgentType,
   type DiffEvent,
   launchLogin,
+  supportsSessionFork,
   type ToolCallEvent,
 } from "@/services/providers";
 import { readDocument } from "@/services/docreader";
@@ -233,6 +234,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const thread = activeAgentThread();
     if (!thread) return agentStore.activeSession;
     return agentStore.getSessionForConversation(thread.id);
+  });
+
+  const forkSupported = createMemo(() => {
+    const session = threadSession();
+    if (!session) return false;
+    return supportsSessionFork(session.info.agentType);
   });
 
   const hasSession = () => threadSession() !== null;
@@ -934,24 +941,26 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               class="text-sm leading-relaxed text-foreground whitespace-pre-wrap"
               innerHTML={escapeHtmlWithLinks(message.content)}
             />
-            <button
-              type="button"
-              class="absolute top-2 right-2 hidden group-hover/msg:inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-2 border border-border text-muted-foreground cursor-pointer transition-all hover:bg-surface-3 hover:text-foreground"
-              onClick={() => handleForkFromMessage(message.id)}
-              title="Fork conversation from here"
-            >
-              <svg
-                aria-hidden="true"
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                class="shrink-0"
+            <Show when={forkSupported()}>
+              <button
+                type="button"
+                class="absolute top-2 right-2 hidden group-hover/msg:inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-2 border border-border text-muted-foreground cursor-pointer transition-all hover:bg-surface-3 hover:text-foreground"
+                onClick={() => handleForkFromMessage(message.id)}
+                title="Fork conversation from here"
               >
-                <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM2.75 3.25a1.5 1.5 0 0 0 2.75.8v4.9a1.5 1.5 0 1 0-1.5 0v-4.9a1.5 1.5 0 0 0-1.25-.8Zm8.5 0a1.5 1.5 0 0 1-1.25.8v2.7a.75.75 0 0 1-1.5 0v-2.7a1.5 1.5 0 1 1 2.75-.8Z" />
-              </svg>
-              Fork
-            </button>
+                <svg
+                  aria-hidden="true"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  class="shrink-0"
+                >
+                  <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM2.75 3.25a1.5 1.5 0 0 0 2.75.8v4.9a1.5 1.5 0 1 0-1.5 0v-4.9a1.5 1.5 0 0 0-1.25-.8Zm8.5 0a1.5 1.5 0 0 1-1.25.8v2.7a.75.75 0 0 1-1.5 0v-2.7a1.5 1.5 0 1 1 2.75-.8Z" />
+                </svg>
+                Fork
+              </button>
+            </Show>
           </article>
         );
 
@@ -981,24 +990,26 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 );
               })()}
             </Show>
-            <button
-              type="button"
-              class="absolute top-2 right-2 hidden group-hover/msg:inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-2 border border-border text-muted-foreground cursor-pointer transition-all hover:bg-surface-3 hover:text-foreground"
-              onClick={() => handleForkFromMessage(message.id)}
-              title="Fork conversation from here"
-            >
-              <svg
-                aria-hidden="true"
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                class="shrink-0"
+            <Show when={forkSupported()}>
+              <button
+                type="button"
+                class="absolute top-2 right-2 hidden group-hover/msg:inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-2 border border-border text-muted-foreground cursor-pointer transition-all hover:bg-surface-3 hover:text-foreground"
+                onClick={() => handleForkFromMessage(message.id)}
+                title="Fork conversation from here"
               >
-                <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM2.75 3.25a1.5 1.5 0 0 0 2.75.8v4.9a1.5 1.5 0 1 0-1.5 0v-4.9a1.5 1.5 0 0 0-1.25-.8Zm8.5 0a1.5 1.5 0 0 1-1.25.8v2.7a.75.75 0 0 1-1.5 0v-2.7a1.5 1.5 0 1 1 2.75-.8Z" />
-              </svg>
-              Fork
-            </button>
+                <svg
+                  aria-hidden="true"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  class="shrink-0"
+                >
+                  <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM2.75 3.25a1.5 1.5 0 0 0 2.75.8v4.9a1.5 1.5 0 1 0-1.5 0v-4.9a1.5 1.5 0 0 0-1.25-.8Zm8.5 0a1.5 1.5 0 0 1-1.25.8v2.7a.75.75 0 0 1-1.5 0v-2.7a1.5 1.5 0 1 1 2.75-.8Z" />
+                </svg>
+                Fork
+              </button>
+            </Show>
           </article>
         );
 

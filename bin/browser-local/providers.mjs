@@ -234,7 +234,7 @@ function emitToolCall(emit, session, item, statusOverride) {
           ? "Web search"
           : "Tool call");
 
-  emit("acp://tool-call", {
+  emit("provider://tool-call", {
     sessionId: session.id,
     toolCallId,
     title,
@@ -264,7 +264,7 @@ function emitToolResult(emit, session, item) {
       ? undefined
       : rawResult;
 
-  emit("acp://tool-result", {
+  emit("provider://tool-result", {
     sessionId: session.id,
     toolCallId,
     status: item.status ?? "completed",
@@ -435,7 +435,7 @@ function handleServerRequest(emit, session, payload) {
 
   session.pendingPermissions.set(requestId, pendingPermission);
 
-  emit("acp://permission-request", {
+  emit("provider://permission-request", {
     sessionId: session.id,
     requestId,
     toolCall: buildApprovalToolCall(method, payload.params ?? {}),
@@ -484,7 +484,7 @@ function handleNotification(emit, session, payload) {
     }
 
     case "item/agentMessage/delta":
-      emit("acp://message-chunk", {
+      emit("provider://message-chunk", {
         sessionId: session.id,
         text: params.delta ?? "",
       });
@@ -492,7 +492,7 @@ function handleNotification(emit, session, payload) {
 
     case "item/reasoning/textDelta":
     case "item/reasoning/summaryTextDelta":
-      emit("acp://message-chunk", {
+      emit("provider://message-chunk", {
         sessionId: session.id,
         text: params.delta ?? "",
         isThought: true,
@@ -530,7 +530,7 @@ function handleNotification(emit, session, payload) {
         return;
       }
 
-      emit("acp://plan-update", {
+      emit("provider://plan-update", {
         sessionId: session.id,
         entries: rawEntries.map((entry) => ({
           content:
@@ -563,7 +563,7 @@ function handleNotification(emit, session, payload) {
           turn.error?.message ??
           turn.error ??
           "Codex turn failed.";
-        emit("acp://error", {
+        emit("provider://error", {
           sessionId: session.id,
           error: message,
         });
@@ -571,12 +571,12 @@ function handleNotification(emit, session, payload) {
         return;
       }
 
-      emit("acp://prompt-complete", {
+      emit("provider://prompt-complete", {
         sessionId: session.id,
         stopReason: turn.stopReason ?? "end_turn",
         ...(session.latestTurnUsage ? { meta: session.latestTurnUsage } : {}),
       });
-      emit("acp://session-status", buildSessionStatus(session, "ready"));
+      emit("provider://session-status", buildSessionStatus(session, "ready"));
       resolveCurrentPrompt(session);
       return;
     }
@@ -586,7 +586,7 @@ function handleNotification(emit, session, payload) {
         params.error?.message ??
         params.message ??
         "Codex App Server error.";
-      emit("acp://error", {
+      emit("provider://error", {
         sessionId: session.id,
         error: message,
       });
@@ -648,14 +648,14 @@ function attachProcessListeners(emit, sessions, session) {
         session,
         new Error("Worker thread dropped while prompt was active."),
       );
-      emit("acp://error", {
+      emit("provider://error", {
         sessionId: session.id,
         error: "Worker thread dropped while prompt was active.",
       });
     }
 
     session.status = "terminated";
-    emit("acp://session-status", {
+    emit("provider://session-status", {
       sessionId: session.id,
       status: "terminated",
       agentSessionId: session.agentSessionId,
@@ -796,7 +796,7 @@ export function createProviderHandlers({ emit }) {
         "medium";
       session.status = "ready";
 
-      emit("acp://session-status", buildSessionStatus(session, "ready"));
+      emit("provider://session-status", buildSessionStatus(session, "ready"));
 
       return {
         id: session.id,
@@ -811,7 +811,7 @@ export function createProviderHandlers({ emit }) {
       const message = error instanceof Error ? error.message : String(error);
       sessions.delete(sessionId);
       killChildTree(processHandle);
-      emit("acp://error", {
+      emit("provider://error", {
         sessionId,
         error: isAuthError(message)
           ? "Agent authentication required. Run the login flow and try again."
@@ -840,7 +840,7 @@ export function createProviderHandlers({ emit }) {
 
     session.status = "prompting";
     session.latestTurnUsage = undefined;
-    emit("acp://session-status", {
+    emit("provider://session-status", {
       sessionId,
       status: "prompting",
       agentSessionId: session.agentSessionId,
@@ -912,11 +912,11 @@ export function createProviderHandlers({ emit }) {
     });
 
     session.status = "ready";
-    emit("acp://error", {
+    emit("provider://error", {
       sessionId,
       error: "Task cancelled",
     });
-    emit("acp://session-status", buildSessionStatus(session, "ready"));
+    emit("provider://session-status", buildSessionStatus(session, "ready"));
     rejectCurrentPrompt(session, new Error("Task cancelled"));
   }
 
@@ -934,7 +934,7 @@ export function createProviderHandlers({ emit }) {
     rejectCurrentPrompt(session, new Error("Session terminated."));
     session.output.close();
     killChildTree(session.process);
-    emit("acp://session-status", {
+    emit("provider://session-status", {
       sessionId,
       status: "terminated",
       agentSessionId: session.agentSessionId,
@@ -963,7 +963,7 @@ export function createProviderHandlers({ emit }) {
     }
 
     session.currentModeId = mode === "ask" ? "ask" : "auto";
-    emit("acp://session-status", buildSessionStatus(session));
+    emit("provider://session-status", buildSessionStatus(session));
   }
 
   async function respondToPermission({ sessionId, requestId, optionId }) {
@@ -999,12 +999,8 @@ export function createProviderHandlers({ emit }) {
     return agentRegistry.checkAgentAvailable(agentType);
   }
 
-  async function ensureClaudeCli() {
-    return agentRegistry.ensureAgentCli("claude-code");
-  }
-
-  async function ensureCodexCli() {
-    return agentRegistry.ensureAgentCli("codex");
+  async function ensureAgentCli({ agentType }) {
+    return agentRegistry.ensureAgentCli(agentType);
   }
 
   async function launchLogin({ agentType }) {
@@ -1032,7 +1028,7 @@ export function createProviderHandlers({ emit }) {
     );
   }
 
-  async function setModel({ sessionId, modelId }) {
+  async function setSessionModel({ sessionId, modelId }) {
     const session = sessions.get(sessionId);
     if (!session) {
       return claudeRuntime.setModel({ sessionId, modelId });
@@ -1053,14 +1049,18 @@ export function createProviderHandlers({ emit }) {
       session.reasoningEffort = targetModel.defaultReasoningEffort ?? "medium";
     }
 
-    emit("acp://session-status", buildSessionStatus(session));
-    emit("acp://config-options-update", {
+    emit("provider://session-status", buildSessionStatus(session));
+    emit("provider://config-options-update", {
       sessionId,
       configOptions: buildConfigOptions(session),
     });
   }
 
-  async function setConfigOption({ sessionId, configId, valueId }) {
+  async function setSessionMode({ sessionId, mode }) {
+    return setPermissionMode({ sessionId, mode });
+  }
+
+  async function updateSessionConfigOption({ sessionId, configId, valueId }) {
     const session = sessions.get(sessionId);
     if (!session) {
       return claudeRuntime.setConfigOption({ sessionId, configId, valueId });
@@ -1078,7 +1078,7 @@ export function createProviderHandlers({ emit }) {
     }
 
     session.reasoningEffort = valueId;
-    emit("acp://config-options-update", {
+    emit("provider://config-options-update", {
       sessionId,
       configOptions: buildConfigOptions(session),
     });
@@ -1096,12 +1096,12 @@ export function createProviderHandlers({ emit }) {
     respondToDiffProposal,
     getAvailableAgents,
     checkAgentAvailable,
-    ensureClaudeCli,
-    ensureCodexCli,
+    ensureAgentCli,
     launchLogin,
     listRemoteSessions,
     forkSession,
-    setModel,
-    setConfigOption,
+    setSessionModel,
+    setSessionMode,
+    updateSessionConfigOption,
   };
 }
