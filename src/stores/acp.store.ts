@@ -3235,7 +3235,46 @@ Summary:`;
       `[AcpStore] Forked conversation ${conversationId} -> ${newConversationId} (agent session: ${newAgentSessionId})`,
     );
 
+    // Seed the forked agent with a summary of the forked conversation so it
+    // has context of the prior work. Same pattern as compaction seeding.
+    void this.seedForkedSession(newSessionId, forkedMessages);
+
     return newConversationId;
+  },
+
+  async seedForkedSession(
+    sessionId: string,
+    messages: AgentMessage[],
+  ): Promise<void> {
+    const summaryPrompt = `Please provide a concise summary of the following AI coding agent conversation. Focus on: what tasks were requested, what files were modified, key decisions made, and current state of the work. Keep the summary under 500 words.
+
+Conversation to summarize:
+${messages
+  .filter((m) => m.type === "user" || m.type === "assistant")
+  .map((m) => `${m.type.toUpperCase()}: ${m.content}`)
+  .join("\n\n")}
+
+Summary:`;
+
+    try {
+      const summary = await sendMessage(
+        summaryPrompt,
+        "anthropic/claude-sonnet-4",
+      );
+
+      const readyEntry = sessionReadyPromises.get(sessionId);
+      if (readyEntry) {
+        await readyEntry.promise;
+      }
+
+      const seedPrompt = `Here is a summary of the conversation up to the fork point:\n\n${summary}\n\nContinue from where we left off. The user may send a new message shortly.`;
+      await acpService.sendPrompt(sessionId, seedPrompt);
+      console.info(
+        "[AcpStore] Forked session seeded with conversation summary",
+      );
+    } catch (error) {
+      console.warn("[AcpStore] Failed to seed forked session:", error);
+    }
   },
 
   addErrorMessage(sessionId: string, error: string) {
