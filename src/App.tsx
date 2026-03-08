@@ -10,12 +10,16 @@ import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval";
 import { ShellApproval } from "@/components/shell/ShellApproval";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
+import {
+  connectBrowserLocalRuntime,
+  disconnectBrowserLocalRuntime,
+} from "@/lib/browser-local-runtime";
 import { getRuntimeConfig } from "@/lib/runtime";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
 import { telemetry } from "@/services/telemetry";
-import { acpStore } from "@/stores/acp.store";
+import { agentStore } from "@/stores/agent.store";
 import {
   authStore,
   checkAuth,
@@ -51,6 +55,10 @@ function App() {
   let destroyOpenclawStoreFn: (() => void) | null = null;
 
   onMount(async () => {
+    if (runtime.mode === "browser-local") {
+      await connectBrowserLocalRuntime();
+    }
+
     await initAuthRuntimeBindings();
     checkAuth();
 
@@ -90,8 +98,8 @@ function App() {
     }
 
     // Detect available agents (Claude, Codex)
-    if (runtime.capabilities.acp) {
-      await acpStore.initialize();
+    if (runtime.capabilities.agents) {
+      await agentStore.initialize();
     }
 
     // Load skills and threads after auth check completes
@@ -112,6 +120,9 @@ function App() {
     shortcuts.destroy();
     stopOpenClawAgentFn?.();
     destroyOpenclawStoreFn?.();
+    if (runtime.mode === "browser-local") {
+      disconnectBrowserLocalRuntime();
+    }
   });
 
   // Reload installed skill inventory when project root changes.

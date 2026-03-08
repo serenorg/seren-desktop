@@ -9,6 +9,7 @@ export type SerenRuntimeMode =
   | "browser-hosted";
 
 export interface SerenRuntimeCapabilities {
+  agents: boolean;
   acp: boolean;
   localFiles: boolean;
   localMcp: boolean;
@@ -23,6 +24,7 @@ export interface SerenRuntimeConfig {
   capabilities: SerenRuntimeCapabilities;
   apiBaseUrl?: string;
   wsBaseUrl?: string;
+  localProjectRoot?: string;
 }
 
 declare global {
@@ -34,6 +36,7 @@ declare global {
 const QUERY_MODE_KEY = "seren_runtime";
 
 const DESKTOP_CAPABILITIES: SerenRuntimeCapabilities = {
+  agents: true,
   acp: true,
   localFiles: true,
   localMcp: true,
@@ -44,8 +47,9 @@ const DESKTOP_CAPABILITIES: SerenRuntimeCapabilities = {
 };
 
 const BROWSER_LOCAL_CAPABILITIES: SerenRuntimeCapabilities = {
-  acp: false,
-  localFiles: false,
+  agents: true,
+  acp: true,
+  localFiles: true,
   localMcp: false,
   openclaw: false,
   terminal: false,
@@ -54,6 +58,7 @@ const BROWSER_LOCAL_CAPABILITIES: SerenRuntimeCapabilities = {
 };
 
 const BROWSER_HOSTED_CAPABILITIES: SerenRuntimeCapabilities = {
+  agents: false,
   acp: false,
   localFiles: false,
   localMcp: false,
@@ -115,9 +120,15 @@ function readCapabilities(mode: SerenRuntimeMode): SerenRuntimeCapabilities {
     return defaults;
   }
 
+  const agents =
+    injected.agents ?? injected.acp ?? defaults.agents ?? defaults.acp;
+  const acp = injected.acp ?? injected.agents ?? defaults.acp ?? defaults.agents;
+
   return {
     ...defaults,
     ...injected,
+    agents,
+    acp,
   };
 }
 
@@ -133,6 +144,7 @@ export function getRuntimeConfig(): SerenRuntimeConfig {
     capabilities: readCapabilities(mode),
     apiBaseUrl: injected?.apiBaseUrl,
     wsBaseUrl: injected?.wsBaseUrl,
+    localProjectRoot: injected?.localProjectRoot,
   };
 
   return cachedConfig;

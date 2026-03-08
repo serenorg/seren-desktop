@@ -35,7 +35,7 @@ import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
-import type { ToolCallEvent } from "@/services/acp";
+import type { ToolCallEvent } from "@/services/providers";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
   CHAT_MAX_RETRIES,

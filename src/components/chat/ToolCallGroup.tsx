@@ -3,7 +3,7 @@
 
 import type { Component } from "solid-js";
 import { createSignal, For, Show } from "solid-js";
-import type { ToolCallEvent } from "@/services/acp";
+import type { ToolCallEvent } from "@/services/providers";
 import { ToolCallCard } from "./ToolCallCard";
 
 interface ToolCallGroupProps {

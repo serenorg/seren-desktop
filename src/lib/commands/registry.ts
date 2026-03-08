@@ -1,7 +1,7 @@
 // ABOUTME: Central registry of all slash commands with their handlers.
 // ABOUTME: Commands are organized by tier and registered at module load.
 
-import { acpStore } from "@/stores/acp.store";
+import { agentStore } from "@/stores/agent.store";
 import { promptLogin } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -144,7 +144,7 @@ registry.register({
   execute: (ctx) => {
     let lastContent: string | undefined;
     if (ctx.panel === "agent") {
-      const last = [...acpStore.messages]
+      const last = [...agentStore.messages]
         .reverse()
         .find((m) => m.type === "assistant");
       lastContent = last?.content;

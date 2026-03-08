@@ -1,11 +1,11 @@
 // ABOUTME: Routes to the correct content view based on the active thread type.
 // ABOUTME: Shows ChatContent for chat threads, AgentChat for agent threads, or empty state.
 
-import { open } from "@tauri-apps/plugin-dialog";
 import { type Component, Match, Show, Switch } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
-import { fileTreeState, setRootPath } from "@/stores/fileTree";
+import { openFolder } from "@/lib/files/service";
+import { fileTreeState } from "@/stores/fileTree";
 import { threadStore } from "@/stores/thread.store";
 
 interface ThreadContentProps {
@@ -31,10 +31,7 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
 
 function EmptyState() {
   const handleOpenFolder = async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (selected && typeof selected === "string") {
-      setRootPath(selected);
-    }
+    await openFolder();
   };
 
   return (

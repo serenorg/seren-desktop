@@ -1,4 +1,4 @@
-// ABOUTME: Unified thread facade over conversation and ACP stores.
+// ABOUTME: Unified thread facade over conversation and agent runtime stores.
 // ABOUTME: Presents chats and agent sessions as a single sorted thread list filtered by project.
 
 import { createStore } from "solid-js/store";
@@ -8,9 +8,9 @@ import {
   type AgentType,
   listSessions,
   type SessionStatus,
-} from "@/services/acp";
+} from "@/services/providers";
 import { skills as skillsService } from "@/services/skills";
-import { acpStore } from "@/stores/acp.store";
+import { agentStore } from "@/stores/agent.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
@@ -87,7 +87,7 @@ function mapSessionStatusToThread(status: SessionStatus): ThreadStatus {
 /**
  * Auto-detect the best available agent.
  * If preferChat is set, always returns chat.
- * Otherwise respects `acpStore.selectedAgentType` as the user's preference,
+ * Otherwise respects `agentStore.selectedAgentType` as the user's preference,
  * then falls back to availability order: claude-code > codex > chat.
  */
 function getBestAgent():
@@ -95,11 +95,11 @@ function getBestAgent():
   | { kind: "chat" } {
   if (state.preferChat) return { kind: "chat" };
 
-  const agents = acpStore.availableAgents;
+  const agents = agentStore.availableAgents;
 
   // Prefer the user's selected agent type if available
   const preferred = agents.find(
-    (a) => a.type === acpStore.selectedAgentType && a.available,
+    (a) => a.type === agentStore.selectedAgentType && a.available,
   );
   if (preferred) {
     return { kind: "agent", agentType: preferred.type as AgentType };
@@ -158,7 +158,7 @@ export const threadStore = {
   /**
    * All threads, sorted by most recent first.
    * Combines chat conversations from conversationStore and agent conversations
-   * from acpStore into a single unified list.
+   * from agentStore into a single unified list.
    */
   get threads(): Thread[] {
     // Chat conversations → Thread
@@ -175,10 +175,10 @@ export const threadStore = {
       }));
 
     // Agent conversations → Thread
-    const agentThreads: Thread[] = acpStore.recentAgentConversations
+    const agentThreads: Thread[] = agentStore.recentAgentConversations
       .filter((a) => !a.is_archived)
       .map((a) => {
-        const liveSession = Object.values(acpStore.sessions).find(
+        const liveSession = Object.values(agentStore.sessions).find(
           (s) => s.conversationId === a.id,
         );
         return {
@@ -296,13 +296,13 @@ export const threadStore = {
     } else {
       if (
         thread?.agentType &&
-        thread.agentType !== acpStore.selectedAgentType
+        thread.agentType !== agentStore.selectedAgentType
       ) {
-        acpStore.setSelectedAgentType(thread.agentType);
+        agentStore.setSelectedAgentType(thread.agentType);
       }
 
       // For agent threads, set active session if one exists
-      const liveSession = Object.values(acpStore.sessions).find(
+      const liveSession = Object.values(agentStore.sessions).find(
         (s) => s.conversationId === id,
       );
       console.log(
@@ -320,27 +320,27 @@ export const threadStore = {
             (s) => s.id === liveSession.info.id,
           );
           if (alive) {
-            acpStore.setActiveSession(liveSession.info.id);
+            agentStore.setActiveSession(liveSession.info.id);
           } else {
             console.warn(
               "[Thread] Session",
               liveSession.info.id,
               "exists in store but not in backend — resuming",
             );
-            acpStore.terminateSession(liveSession.info.id);
+            agentStore.terminateSession(liveSession.info.id);
             const cwd = thread?.projectRoot || fileTreeState.rootPath;
             if (cwd) {
-              void acpStore.resumeAgentConversation(id, cwd);
+              void agentStore.resumeAgentConversation(id, cwd);
             }
           }
         });
       } else {
         // No live session — clear active and auto-resume the agent conversation.
         // The spawn lock in the Rust backend prevents SIGKILL collisions.
-        acpStore.setActiveSession(null);
+        agentStore.setActiveSession(null);
         const cwd = thread?.projectRoot || fileTreeState.rootPath;
         if (cwd) {
-          void acpStore.resumeAgentConversation(id, cwd);
+          void agentStore.resumeAgentConversation(id, cwd);
         }
       }
     }
@@ -366,11 +366,11 @@ export const threadStore = {
     agentType: AgentType,
     cwd: string,
   ): Promise<string | null> {
-    const sessionId = await acpStore.spawnSession(cwd, agentType);
+    const sessionId = await agentStore.spawnSession(cwd, agentType);
     if (sessionId) {
       // Refresh conversation list so the new thread appears in the tab bar
-      await acpStore.refreshRecentAgentConversations(200);
-      const session = acpStore.sessions[sessionId];
+      await agentStore.refreshRecentAgentConversations(200);
+      const session = agentStore.sessions[sessionId];
       if (session) {
         this.selectThread(session.conversationId, "agent");
         return session.conversationId;
@@ -468,7 +468,7 @@ export const threadStore = {
       await conversationStore.archiveConversation(id);
     } else {
       await archiveAgentConversation(id);
-      await acpStore.refreshRecentAgentConversations(200);
+      await agentStore.refreshRecentAgentConversations(200);
     }
 
     // Clear selection if this was active
@@ -485,13 +485,13 @@ export const threadStore = {
     fromConversationId: string,
     fromMessageId: string,
   ): Promise<string | null> {
-    const newConversationId = await acpStore.forkConversation(
+    const newConversationId = await agentStore.forkConversation(
       fromConversationId,
       fromMessageId,
     );
     if (!newConversationId) return null;
 
-    await acpStore.refreshRecentAgentConversations(200);
+    await agentStore.refreshRecentAgentConversations(200);
     this.selectThread(newConversationId, "agent");
     return newConversationId;
   },
@@ -501,7 +501,7 @@ export const threadStore = {
    */
   async refresh() {
     await conversationStore.loadHistory();
-    await acpStore.refreshRecentAgentConversations(200);
+    await agentStore.refreshRecentAgentConversations(200);
   },
 
   /**

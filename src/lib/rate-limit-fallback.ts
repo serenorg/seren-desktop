@@ -1,8 +1,8 @@
 // ABOUTME: Detects agent rate-limit and prompt-too-long errors, orchestrates fallback to Chat mode.
 // ABOUTME: Converts agent messages to unified format and creates a chat conversation.
 
-import type { AgentType } from "@/services/acp";
-import type { AgentMessage } from "@/stores/acp.store";
+import type { AgentType } from "@/services/providers";
+import type { AgentMessage } from "@/stores/agent.store";
 import type { UnifiedMessage } from "@/types/conversation";
 
 /** Patterns that indicate an agent has hit a rate limit. */
@@ -273,7 +273,7 @@ export async function performAgentFallback(
 ): Promise<string | null> {
   // Lazy imports to avoid circular dependency between stores
   const { conversationStore } = await import("@/stores/conversation.store");
-  const { acpStore } = await import("@/stores/acp.store");
+  const { agentStore } = await import("@/stores/agent.store");
   const { providerStore } = await import("@/stores/provider.store");
   const { threadStore } = await import("@/stores/thread.store");
 
@@ -321,7 +321,7 @@ export async function performAgentFallback(
     // AgentChat unmounts and subsequent messages go to the chat orchestrator,
     // not the already-full ACP session.
     threadStore.selectThread(conversation.id, "chat");
-    acpStore.setAgentModeEnabled(false);
+    agentStore.setAgentModeEnabled(false);
 
     console.info(
       `[AgentFallback] Switched to chat: conversation=${conversation.id}, model=${chatModelId}, reason=${reason} (from agent model ${agentModelId ?? "unknown"})`,

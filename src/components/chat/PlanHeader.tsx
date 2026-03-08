@@ -3,11 +3,11 @@
 
 import type { Component } from "solid-js";
 import { createSignal, For, Show } from "solid-js";
-import { acpStore } from "@/stores/acp.store";
+import { agentStore } from "@/stores/agent.store";
 
 export const PlanHeader: Component = () => {
   const [isExpanded, setIsExpanded] = createSignal(true);
-  const plan = () => acpStore.plan;
+  const plan = () => agentStore.plan;
   const hasPlan = () => plan().length > 0;
 
   const getStatusIcon = (status: string) => {

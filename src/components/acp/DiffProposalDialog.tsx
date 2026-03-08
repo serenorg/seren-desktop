@@ -5,8 +5,8 @@ import type * as Monaco from "monaco-editor";
 import type { Component } from "solid-js";
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { getMonaco } from "@/lib/editor";
-import type { DiffProposalEvent } from "@/stores/acp.store";
-import { acpStore } from "@/stores/acp.store";
+import type { DiffProposalEvent } from "@/stores/agent.store";
+import { agentStore } from "@/stores/agent.store";
 
 export interface DiffProposalDialogProps {
   proposal: DiffProposalEvent;
@@ -117,11 +117,11 @@ export const DiffProposalDialog: Component<DiffProposalDialogProps> = (
   });
 
   function handleAccept() {
-    acpStore.respondToDiffProposal(props.proposal.proposalId, true);
+    agentStore.respondToDiffProposal(props.proposal.proposalId, true);
   }
 
   function handleReject() {
-    acpStore.respondToDiffProposal(props.proposal.proposalId, false);
+    agentStore.respondToDiffProposal(props.proposal.proposalId, false);
   }
 
   return (

@@ -1,6 +1,21 @@
-import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import {
+  isBrowserLocalRuntime,
+  runtimeInvoke,
+} from "@/lib/browser-local-runtime";
 import { createSkillsSymlink } from "@/lib/skills/paths";
+import {
+  createDirectory as createDirectoryBridge,
+  createFile as createFileBridge,
+  deletePath as deletePathBridge,
+  isDirectory as isDirectoryBridge,
+  isTauriRuntime,
+  listDirectory as listDirectoryBridge,
+  pathExists as pathExistsBridge,
+  readFile as readFileBridge,
+  renamePath as renamePathBridge,
+  revealInFileManager as revealInFileManagerBridge,
+  writeFile as writeFileBridge,
+} from "@/lib/tauri-bridge";
 import { type FileNode, setNodes, setRootPath } from "@/stores/fileTree";
 import { openTab, setTabDirty } from "@/stores/tabs";
 
@@ -14,35 +29,35 @@ export interface FileEntry {
  * Read the contents of a file.
  */
 export async function readFile(path: string): Promise<string> {
-  return invoke<string>("read_file", { path });
+  return readFileBridge(path);
 }
 
 /**
  * Write content to a file.
  */
 export async function writeFile(path: string, content: string): Promise<void> {
-  return invoke("write_file", { path, content });
+  return writeFileBridge(path, content);
 }
 
 /**
  * List entries in a directory.
  */
 export async function listDirectory(path: string): Promise<FileEntry[]> {
-  return invoke<FileEntry[]>("list_directory", { path });
+  return listDirectoryBridge(path);
 }
 
 /**
  * Check if a path exists.
  */
 export async function pathExists(path: string): Promise<boolean> {
-  return invoke<boolean>("path_exists", { path });
+  return pathExistsBridge(path);
 }
 
 /**
  * Check if a path is a directory.
  */
 export async function isDirectory(path: string): Promise<boolean> {
-  return invoke<boolean>("is_directory", { path });
+  return isDirectoryBridge(path);
 }
 
 /**
@@ -52,21 +67,21 @@ export async function createFile(
   path: string,
   content?: string,
 ): Promise<void> {
-  return invoke("create_file", { path, content });
+  return createFileBridge(path, content);
 }
 
 /**
  * Create a new directory.
  */
 export async function createDirectory(path: string): Promise<void> {
-  return invoke("create_directory", { path });
+  return createDirectoryBridge(path);
 }
 
 /**
  * Delete a file or empty directory.
  */
 export async function deletePath(path: string): Promise<void> {
-  return invoke("delete_path", { path });
+  return deletePathBridge(path);
 }
 
 /**
@@ -76,18 +91,61 @@ export async function renamePath(
   oldPath: string,
   newPath: string,
 ): Promise<void> {
-  return invoke("rename_path", { oldPath, newPath });
+  return renamePathBridge(oldPath, newPath);
+}
+
+/**
+ * Reveal a path in the system file manager.
+ */
+export async function revealInFileManager(path: string): Promise<void> {
+  return revealInFileManagerBridge(path);
+}
+
+async function openDialog(
+  options: Record<string, unknown>,
+): Promise<string | string[] | null> {
+  if (isTauriRuntime()) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    return open(options);
+  }
+
+  if (isBrowserLocalRuntime()) {
+    return runtimeInvoke<string | null>("open_file_dialog", options);
+  }
+
+  return null;
+}
+
+async function saveDialog(
+  options: Record<string, unknown>,
+): Promise<string | null> {
+  if (isTauriRuntime()) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    return save(options);
+  }
+
+  if (isBrowserLocalRuntime()) {
+    return runtimeInvoke<string | null>("save_file_dialog", options);
+  }
+
+  return null;
 }
 
 /**
  * Open a folder picker dialog and load the selected folder into the file tree.
  */
 export async function openFolder(): Promise<string | null> {
-  const selected = await open({
-    directory: true,
-    multiple: false,
-    title: "Open Folder",
-  });
+  let selected: string | string[] | null = null;
+
+  if (isTauriRuntime()) {
+    selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: "Open Folder",
+    });
+  } else if (isBrowserLocalRuntime()) {
+    selected = await runtimeInvoke<string | null>("open_folder_dialog");
+  }
 
   if (selected && typeof selected === "string") {
     await loadFolder(selected);
@@ -166,7 +224,7 @@ export async function saveTab(
  * Open a file picker dialog.
  */
 export async function openFilePicker(): Promise<string | null> {
-  const selected = await open({
+  const selected = await openDialog({
     multiple: false,
     title: "Open File",
   });
@@ -185,7 +243,7 @@ export async function openFilePicker(): Promise<string | null> {
 export async function saveFileDialog(
   defaultPath?: string,
 ): Promise<string | null> {
-  const selected = await save({
+  const selected = await saveDialog({
     defaultPath,
     title: "Save File",
   });

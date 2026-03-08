@@ -1,10 +1,33 @@
 #!/usr/bin/env node
 
+import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import http from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { WebSocketServer } from "ws";
+import { createProviderHandlers } from "./browser-local/providers.mjs";
+import {
+  openFileDialog,
+  openFolderDialog,
+  revealInFileManager,
+  saveFileDialog,
+} from "./browser-local/dialogs.mjs";
+import { addClient, emit, removeClient } from "./browser-local/events.mjs";
+import {
+  createDirectory,
+  createFile,
+  deletePath,
+  isDirectory,
+  listDirectory,
+  pathExists,
+  readFile,
+  readFileBase64,
+  renamePath,
+  writeFile,
+} from "./browser-local/fs.mjs";
+import { handleRpcMessage, registerHandler } from "./browser-local/rpc.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const rootDir = resolve(__dirname, "..");
@@ -13,15 +36,16 @@ const indexHtmlPath = join(distDir, "index.html");
 
 function usage() {
   console.log(`
-Usage: seren-desktop [--host <address>] [--port <number>] [--no-browser]
+Usage: seren-desktop [--host <address>] [--port <number>] [--project <path>] [--no-browser]
 
-Starts Seren Desktop in browser-local mode using a lightweight local HTTP server.
+Starts Seren Desktop in browser-local mode using a local HTTP + WebSocket runtime.
 
 Options:
-  --host <address>  Bind address. Default: 127.0.0.1
-  --port <number>   HTTP port. Default: 4310
-  --no-browser      Do not open the browser automatically
-  --help, -h        Show this help message
+  --host <address>   Bind address. Default: 127.0.0.1
+  --port <number>    HTTP port. Default: 4310
+  --project <path>   Initial project root. Default: current working directory
+  --no-browser       Do not open the browser automatically
+  --help, -h         Show this help message
 `);
 }
 
@@ -29,6 +53,7 @@ function parseArgs(argv) {
   const config = {
     host: "127.0.0.1",
     port: 4310,
+    projectRoot: process.cwd(),
     openBrowser: true,
   };
 
@@ -48,6 +73,11 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (arg === "--project") {
+      config.projectRoot = resolve(argv[i + 1] ?? "");
+      i += 1;
+      continue;
+    }
     if (arg === "--no-browser") {
       config.openBrowser = false;
       continue;
@@ -62,15 +92,19 @@ function parseArgs(argv) {
   return config;
 }
 
-function run(cmd, args, cwd) {
-  const result = spawnSync(cmd, args, {
+function run(command, args, cwd) {
+  const result = spawnSync(command, args, {
     cwd,
     env: process.env,
     stdio: "inherit",
   });
-  if (result.error) throw result.error;
+  if (result.error) {
+    throw result.error;
+  }
   if (result.status !== 0) {
-    throw new Error(`${cmd} ${args.join(" ")} failed with exit ${result.status}`);
+    throw new Error(
+      `${command} ${args.join(" ")} failed with exit ${result.status}`,
+    );
   }
 }
 
@@ -115,13 +149,13 @@ function contentTypeForPath(pathname) {
   }
 }
 
-function injectRuntimeConfig(html, origin) {
-  const wsOrigin = origin.replace(/^http/i, "ws");
+function injectRuntimeConfig(html, origin, projectRoot) {
   const runtimeConfig = {
     mode: "browser-local",
     capabilities: {
-      acp: false,
-      localFiles: false,
+      agents: true,
+      acp: true,
+      localFiles: true,
       localMcp: false,
       openclaw: false,
       terminal: false,
@@ -129,7 +163,8 @@ function injectRuntimeConfig(html, origin) {
       remoteSerenAgent: true,
     },
     apiBaseUrl: origin,
-    wsBaseUrl: wsOrigin,
+    wsBaseUrl: origin.replace(/^http/i, "ws"),
+    localProjectRoot: projectRoot,
   };
 
   const injection = `<script>window.__SEREN_RUNTIME_CONFIG__ = ${JSON.stringify(runtimeConfig)};</script>`;
@@ -164,20 +199,146 @@ function openBrowser(url) {
     return;
   }
   if (process.platform === "win32") {
-    spawnSync("cmd", ["/c", "start", "", url], { stdio: "ignore", shell: false });
+    spawnSync("cmd", ["/c", "start", "", url], {
+      stdio: "ignore",
+      shell: false,
+    });
     return;
   }
   spawnSync("xdg-open", [url], { stdio: "ignore" });
 }
 
+function isLoopbackAddress(address) {
+  return (
+    address === "127.0.0.1" ||
+    address === "::1" ||
+    address === "::ffff:127.0.0.1"
+  );
+}
+
+function registerBrowserLocalHandlers() {
+  registerHandler("list_directory", listDirectory);
+  registerHandler("read_file", readFile);
+  registerHandler("read_file_base64", readFileBase64);
+  registerHandler("write_file", writeFile);
+  registerHandler("path_exists", pathExists);
+  registerHandler("is_directory", isDirectory);
+  registerHandler("create_file", createFile);
+  registerHandler("create_directory", createDirectory);
+  registerHandler("delete_path", deletePath);
+  registerHandler("rename_path", renamePath);
+  registerHandler("open_folder_dialog", openFolderDialog);
+  registerHandler("open_file_dialog", openFileDialog);
+  registerHandler("save_file_dialog", saveFileDialog);
+  registerHandler("reveal_in_file_manager", revealInFileManager);
+
+  const providerHandlers = createProviderHandlers({ emit });
+
+  registerHandler("provider_spawn", providerHandlers.spawnSession);
+  registerHandler("provider_prompt", providerHandlers.sendPrompt);
+  registerHandler("provider_cancel", providerHandlers.cancelPrompt);
+  registerHandler("provider_terminate", providerHandlers.terminateSession);
+  registerHandler("provider_list_sessions", providerHandlers.listSessions);
+  registerHandler(
+    "provider_set_permission_mode",
+    providerHandlers.setPermissionMode,
+  );
+  registerHandler(
+    "provider_respond_to_permission",
+    providerHandlers.respondToPermission,
+  );
+  registerHandler(
+    "provider_respond_to_diff_proposal",
+    providerHandlers.respondToDiffProposal,
+  );
+  registerHandler(
+    "provider_get_available_agents",
+    providerHandlers.getAvailableAgents,
+  );
+  registerHandler(
+    "provider_check_agent_available",
+    providerHandlers.checkAgentAvailable,
+  );
+  registerHandler(
+    "provider_ensure_claude_cli",
+    providerHandlers.ensureClaudeCli,
+  );
+  registerHandler(
+    "provider_ensure_codex_cli",
+    providerHandlers.ensureCodexCli,
+  );
+  registerHandler("provider_launch_login", providerHandlers.launchLogin);
+  registerHandler(
+    "provider_list_remote_sessions",
+    providerHandlers.listRemoteSessions,
+  );
+  registerHandler("provider_fork_session", providerHandlers.forkSession);
+  registerHandler("provider_set_model", providerHandlers.setModel);
+  registerHandler(
+    "provider_set_config_option",
+    providerHandlers.setConfigOption,
+  );
+
+  registerHandler("acp_spawn", providerHandlers.spawnSession);
+  registerHandler("acp_prompt", providerHandlers.sendPrompt);
+  registerHandler("acp_cancel", providerHandlers.cancelPrompt);
+  registerHandler("acp_terminate", providerHandlers.terminateSession);
+  registerHandler("acp_list_sessions", providerHandlers.listSessions);
+  registerHandler("acp_set_permission_mode", providerHandlers.setPermissionMode);
+  registerHandler(
+    "acp_respond_to_permission",
+    providerHandlers.respondToPermission,
+  );
+  registerHandler(
+    "acp_respond_to_diff_proposal",
+    providerHandlers.respondToDiffProposal,
+  );
+  registerHandler(
+    "acp_get_available_agents",
+    providerHandlers.getAvailableAgents,
+  );
+  registerHandler(
+    "acp_check_agent_available",
+    providerHandlers.checkAgentAvailable,
+  );
+  registerHandler("acp_ensure_claude_cli", providerHandlers.ensureClaudeCli);
+  registerHandler("acp_ensure_codex_cli", providerHandlers.ensureCodexCli);
+  registerHandler("acp_launch_login", providerHandlers.launchLogin);
+  registerHandler(
+    "acp_list_remote_sessions",
+    providerHandlers.listRemoteSessions,
+  );
+  registerHandler("acp_fork_session", providerHandlers.forkSession);
+  registerHandler("acp_set_model", providerHandlers.setModel);
+  registerHandler(
+    "acp_set_config_option",
+    providerHandlers.setConfigOption,
+  );
+}
+
 function main() {
   ensureBuiltAssets();
-  const { host, port, openBrowser: shouldOpenBrowser } = parseArgs(process.argv.slice(2));
+  registerBrowserLocalHandlers();
+
+  const {
+    host,
+    port,
+    projectRoot,
+    openBrowser: shouldOpenBrowser,
+  } = parseArgs(process.argv.slice(2));
+
   const rawIndexHtml = readFileSync(indexHtmlPath, "utf8");
   const origin = `http://${host}:${port}`;
-  const indexHtml = injectRuntimeConfig(rawIndexHtml, origin);
+  const authToken = randomBytes(32).toString("hex");
+  const indexHtml = injectRuntimeConfig(rawIndexHtml, origin, projectRoot);
 
   const server = http.createServer((req, res) => {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+      res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Forbidden");
+      return;
+    }
+
     const url = new URL(req.url ?? "/", origin);
 
     if (url.pathname === "/__seren/health") {
@@ -185,11 +346,22 @@ function main() {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-cache",
       });
-      res.end(JSON.stringify({ ok: true, mode: "browser-local" }));
+      res.end(
+        JSON.stringify({
+          ok: true,
+          mode: "browser-local",
+          token: authToken,
+          projectRoot,
+        }),
+      );
       return;
     }
 
-    if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/vite.svg") || url.pathname.startsWith("/tauri.svg")) {
+    if (
+      url.pathname.startsWith("/assets/") ||
+      url.pathname.startsWith("/vite.svg") ||
+      url.pathname.startsWith("/tauri.svg")
+    ) {
       const assetPath = safeResolveAsset(url.pathname);
       if (!assetPath || !existsSync(assetPath) || !statSync(assetPath).isFile()) {
         res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
@@ -207,17 +379,82 @@ function main() {
     res.end(indexHtml);
   });
 
+  const authenticatedSockets = new WeakSet();
+  const wss = new WebSocketServer({ server });
+
+  wss.on("connection", (ws, req) => {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+      ws.close(4003, "Forbidden");
+      return;
+    }
+
+    const originHeader = req.headers.origin;
+    if (originHeader && originHeader !== origin) {
+      ws.close(4003, "Forbidden origin");
+      return;
+    }
+
+    const authTimeout = setTimeout(() => {
+      if (!authenticatedSockets.has(ws)) {
+        ws.close(4001, "Authentication timeout");
+      }
+    }, 5_000);
+
+    ws.on("message", async (data) => {
+      const raw = String(data);
+
+      if (!authenticatedSockets.has(ws)) {
+        try {
+          const authMessage = JSON.parse(raw);
+          if (
+            authMessage.method === "auth" &&
+            authMessage.params?.token === authToken
+          ) {
+            authenticatedSockets.add(ws);
+            addClient(ws);
+            clearTimeout(authTimeout);
+            ws.send(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                result: { authenticated: true },
+                id: authMessage.id ?? null,
+              }),
+            );
+            return;
+          }
+        } catch {
+          // fall through to close
+        }
+
+        ws.close(4002, "Invalid auth token");
+        return;
+      }
+
+      const response = await handleRpcMessage(raw);
+      if (response) {
+        ws.send(response);
+      }
+    });
+
+    ws.on("close", () => {
+      clearTimeout(authTimeout);
+      removeClient(ws);
+    });
+  });
+
   server.listen(port, host, () => {
     console.log(`[seren-desktop] Browser-local server running at ${origin}`);
-    console.log("[seren-desktop] ACP bridge is not wired yet; browser-local currently runs in remote-agent-only mode.");
+    console.log(`[seren-desktop] Project root: ${projectRoot}`);
     if (shouldOpenBrowser) {
       openBrowser(origin);
     }
   });
 
   const shutdown = () => {
-    server.close(() => {
-      process.exit(0);
+    wss.close(() => {
+      server.close(() => {
+        process.exit(0);
+      });
     });
   };
 
@@ -228,9 +465,7 @@ function main() {
 try {
   main();
 } catch (error) {
-  console.error(
-    error instanceof Error ? error.message : String(error),
-  );
+  console.error(error instanceof Error ? error.message : String(error));
   usage();
   process.exit(1);
 }

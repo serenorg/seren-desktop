@@ -7,7 +7,7 @@ import type { Attachment, ToolDefinition } from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
 import { storeAssistantResponse } from "@/services/memory";
-import { acpStore } from "@/stores/acp.store";
+import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -642,10 +642,10 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
   const tools = getAllTools();
 
   return {
-    has_acp_agent: acpStore.availableAgents.length > 0,
-    agent_type: acpStore.selectedAgentType ?? null,
-    active_acp_session_id: acpStore.agentModeEnabled
-      ? (acpStore.activeSessionId ?? null)
+    has_acp_agent: agentStore.availableAgents.length > 0,
+    agent_type: agentStore.selectedAgentType ?? null,
+    active_acp_session_id: agentStore.agentModeEnabled
+      ? (agentStore.activeSessionId ?? null)
       : null,
     selected_model:
       providerStore.activeModel === AUTO_MODEL_ID
