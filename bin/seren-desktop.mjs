@@ -267,7 +267,10 @@ function registerBrowserLocalHandlers() {
     "provider_list_remote_sessions",
     providerHandlers.listRemoteSessions,
   );
-  registerHandler("provider_fork_session", providerHandlers.forkSession);
+  registerHandler(
+    "provider_native_fork_session",
+    providerHandlers.nativeForkSession,
+  );
   registerHandler(
     "provider_set_session_model",
     providerHandlers.setSessionModel,

@@ -1279,13 +1279,13 @@ export function createProviderHandlers({ emit }) {
     });
   }
 
-  async function forkSession({ sessionId }) {
+  async function nativeForkSession({ sessionId }) {
     if (claudeRuntime.hasSession(sessionId)) {
       return claudeRuntime.forkSession({ sessionId });
     }
 
     throw new Error(
-      "Forking direct Codex sessions is not supported in browser-local mode yet.",
+      "Native provider forking is only supported for Claude sessions.",
     );
   }
 
@@ -1360,7 +1360,7 @@ export function createProviderHandlers({ emit }) {
     ensureAgentCli,
     launchLogin,
     listRemoteSessions,
-    forkSession,
+    nativeForkSession,
     setSessionModel,
     setSessionMode,
     updateSessionConfigOption,

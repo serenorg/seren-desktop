@@ -15,8 +15,12 @@ import { runtimeHasCapability } from "@/lib/runtime";
 export type AgentType = "claude-code" | "codex";
 export type UnlistenFn = () => void;
 
-export function supportsSessionFork(_agentType: AgentType): boolean {
+export function supportsConversationFork(_agentType: AgentType): boolean {
   return true;
+}
+
+export function supportsNativeProviderFork(agentType: AgentType): boolean {
+  return agentType === "claude-code";
 }
 
 export type SessionStatus =
@@ -320,11 +324,11 @@ export async function terminateSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Fork an agent runtime session, creating a new CLI session with the same
- * conversation history.  Returns the new remote agent session ID.
+ * Use a provider-native fork primitive when the agent runtime exposes one.
+ * Returns the new remote agent session ID.
  */
-export async function forkSession(sessionId: string): Promise<string> {
-  return invokeProvider<string>("provider_fork_session", { sessionId });
+export async function nativeForkSession(sessionId: string): Promise<string> {
+  return invokeProvider<string>("provider_native_fork_session", { sessionId });
 }
 
 /**

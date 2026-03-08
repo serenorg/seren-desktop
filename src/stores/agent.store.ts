@@ -3297,8 +3297,7 @@ Summary:`;
     const forkedMessages = allMessages.slice(0, forkIndex + 1);
     const isHeadFork = forkIndex === allMessages.length - 1;
     const useNativeFork =
-      providerService.supportsSessionFork(agentType) &&
-      agentType === "claude-code" &&
+      providerService.supportsNativeProviderFork(agentType) &&
       isHeadFork;
 
     let newAgentSessionId: string | undefined;
@@ -3306,7 +3305,9 @@ Summary:`;
 
     if (useNativeFork) {
       try {
-        newAgentSessionId = await providerService.forkSession(conversationId);
+        newAgentSessionId = await providerService.nativeForkSession(
+          conversationId,
+        );
       } catch (err) {
         console.error("[AgentStore] forkConversation: native fork failed:", err);
         this.addErrorMessage(

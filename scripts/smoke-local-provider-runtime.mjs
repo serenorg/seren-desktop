@@ -171,7 +171,7 @@ async function smokeRuntime({ label, wsUrl, token }) {
     );
     await assertMethodExists(
       ws,
-      "provider_fork_session",
+      "provider_native_fork_session",
       { sessionId: "missing-session" },
       null,
     );

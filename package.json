@@ -32,6 +32,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:runtime-smoke": "node ./scripts/smoke-local-provider-runtime.mjs",
+    "test:runtime-e2e": "node ./scripts/e2e-local-provider-runtime.mjs",
     "prepare:runtime": "tsx build/darwin/prepare-embedded-runtime.ts",
     "prepare:runtime:darwin-x64": "tsx build/darwin/prepare-embedded-runtime.ts x64",
     "prepare:runtime:darwin-arm64": "tsx build/darwin/prepare-embedded-runtime.ts arm64",

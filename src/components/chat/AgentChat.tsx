@@ -49,7 +49,7 @@ import {
   type AgentType,
   type DiffEvent,
   launchLogin,
-  supportsSessionFork,
+  supportsConversationFork,
   type ToolCallEvent,
 } from "@/services/providers";
 import { readDocument } from "@/services/docreader";
@@ -239,7 +239,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const forkSupported = createMemo(() => {
     const session = threadSession();
     if (!session) return false;
-    return supportsSessionFork(session.info.agentType);
+    return supportsConversationFork(session.info.agentType);
   });
 
   const hasSession = () => threadSession() !== null;
