@@ -94,7 +94,6 @@ pub struct RoutingDecision {
 #[serde(rename_all = "snake_case")]
 pub enum WorkerType {
     ChatModel,
-    #[serde(rename = "local_agent", alias = "acp_agent")]
     LocalAgent,
     McpPublisher,
 }
@@ -117,12 +116,11 @@ pub struct ImageAttachment {
 /// User capabilities passed from the frontend per-request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserCapabilities {
-    #[serde(alias = "has_acp_agent")]
     pub has_local_agent: bool,
     pub agent_type: Option<String>,
     /// The active local agent session ID, if one exists. Enables the local-agent fast-path
     /// to skip classification/decomposition when routing to the agent.
-    #[serde(default, alias = "active_acp_session_id")]
+    #[serde(default)]
     pub active_agent_session_id: Option<String>,
     /// The model the user explicitly selected in the UI.
     #[serde(default)]

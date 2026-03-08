@@ -116,8 +116,7 @@ function readCapabilities(mode: SerenRuntimeMode): SerenRuntimeCapabilities {
     return defaults;
   }
 
-  const legacyAgentsFlag = (injected as Partial<{ acp: boolean }>).acp;
-  const agents = injected.agents ?? legacyAgentsFlag ?? defaults.agents;
+  const agents = injected.agents ?? defaults.agents;
 
   return {
     ...defaults,

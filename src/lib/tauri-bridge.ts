@@ -618,6 +618,7 @@ export interface AgentConversation {
   agent_session_id: string | null;
   agent_cwd: string | null;
   agent_model_id: string | null;
+  agent_metadata: string | null;
   project_id: string | null;
   project_root: string | null;
   is_archived: boolean;
@@ -718,6 +719,7 @@ export async function createAgentConversation(
   agentCwd?: string,
   projectRoot?: string,
   agentSessionId?: string,
+  agentMetadata?: string,
 ): Promise<AgentConversation> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -730,6 +732,7 @@ export async function createAgentConversation(
     agentCwd,
     projectRoot,
     agentSessionId,
+    agentMetadata: agentMetadata ?? null,
   });
 }
 
@@ -805,6 +808,20 @@ export async function setAgentConversationModelId(
     throw new Error("Conversation operations require Tauri runtime");
   }
   await invoke("set_agent_conversation_model_id", { id, agentModelId });
+}
+
+export async function setAgentConversationMetadata(
+  id: string,
+  agentMetadata?: string | null,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("set_agent_conversation_metadata", {
+    id,
+    agentMetadata: agentMetadata ?? null,
+  });
 }
 
 /**

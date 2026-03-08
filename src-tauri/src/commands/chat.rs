@@ -46,6 +46,7 @@ pub struct AgentConversation {
     pub agent_session_id: Option<String>,
     pub agent_cwd: Option<String>,
     pub agent_model_id: Option<String>,
+    pub agent_metadata: Option<String>,
     pub project_id: Option<String>,
     pub project_root: Option<String>,
     pub is_archived: bool,
@@ -259,6 +260,7 @@ pub async fn create_agent_conversation(
     agent_cwd: Option<String>,
     project_root: Option<String>,
     agent_session_id: Option<String>,
+    agent_metadata: Option<String>,
 ) -> Result<AgentConversation, String> {
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -279,6 +281,7 @@ pub async fn create_agent_conversation(
         agent_session_id: agent_session_id.clone(),
         agent_cwd: agent_cwd.clone(),
         agent_model_id: None,
+        agent_metadata: agent_metadata.clone(),
         project_id: project_id.clone(),
         project_root: normalized_project_root.clone(),
         is_archived: false,
@@ -295,14 +298,16 @@ pub async fn create_agent_conversation(
                 agent_type,
                 agent_session_id,
                 agent_cwd,
+                agent_metadata,
                 project_id,
                 project_root
-            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6, ?7, ?8)
+            ) VALUES (?1, ?2, ?3, 0, 'agent', ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                 is_archived = 0,
                 agent_type = excluded.agent_type,
                 agent_session_id = COALESCE(excluded.agent_session_id, conversations.agent_session_id),
                 agent_cwd = COALESCE(conversations.agent_cwd, excluded.agent_cwd),
+                agent_metadata = COALESCE(excluded.agent_metadata, conversations.agent_metadata),
                 project_id = COALESCE(conversations.project_id, excluded.project_id),
                 project_root = COALESCE(conversations.project_root, excluded.project_root)",
             params![
@@ -312,6 +317,7 @@ pub async fn create_agent_conversation(
                 agent_type,
                 agent_session_id,
                 agent_cwd,
+                agent_metadata,
                 project_id,
                 normalized_project_root
             ],
@@ -334,7 +340,7 @@ pub async fn get_agent_conversations(
 
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, project_id, project_root, is_archived
+            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, agent_metadata, project_id, project_root, is_archived
              FROM conversations
              WHERE kind = 'agent' AND is_archived = 0
                AND ((?1 IS NULL AND ?2 IS NULL)
@@ -358,9 +364,10 @@ pub async fn get_agent_conversations(
                     agent_session_id: row.get(4)?,
                     agent_cwd: row.get(5)?,
                     agent_model_id: row.get(6)?,
-                    project_id: row.get(7)?,
-                    project_root: row.get(8)?,
-                    is_archived: row.get::<_, i32>(9)? != 0,
+                    agent_metadata: row.get(7)?,
+                    project_id: row.get(8)?,
+                    project_root: row.get(9)?,
+                    is_archived: row.get::<_, i32>(10)? != 0,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -377,7 +384,7 @@ pub async fn get_agent_conversation(
 ) -> Result<Option<AgentConversation>, String> {
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, project_id, project_root, is_archived
+            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, agent_metadata, project_id, project_root, is_archived
              FROM conversations
              WHERE id = ?1 AND kind = 'agent'",
         )?;
@@ -392,9 +399,10 @@ pub async fn get_agent_conversation(
                     agent_session_id: row.get(4)?,
                     agent_cwd: row.get(5)?,
                     agent_model_id: row.get(6)?,
-                    project_id: row.get(7)?,
-                    project_root: row.get(8)?,
-                    is_archived: row.get::<_, i32>(9)? != 0,
+                    agent_metadata: row.get(7)?,
+                    project_id: row.get(8)?,
+                    project_root: row.get(9)?,
+                    is_archived: row.get::<_, i32>(10)? != 0,
                 })
             })
             .optional()?;
@@ -446,6 +454,22 @@ pub async fn set_agent_conversation_model_id(
         conn.execute(
             "UPDATE conversations SET agent_model_id = ?1 WHERE id = ?2 AND kind = 'agent'",
             params![agent_model_id, id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_agent_conversation_metadata(
+    app: AppHandle,
+    id: String,
+    agent_metadata: Option<String>,
+) -> Result<(), String> {
+    run_db(app, move |conn| {
+        conn.execute(
+            "UPDATE conversations SET agent_metadata = ?1 WHERE id = ?2 AND kind = 'agent'",
+            params![agent_metadata, id],
         )?;
         Ok(())
     })

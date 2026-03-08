@@ -16,7 +16,7 @@ export type AgentType = "claude-code" | "codex";
 export type UnlistenFn = () => void;
 
 export function supportsSessionFork(_agentType: AgentType): boolean {
-  return false;
+  return true;
 }
 
 export type SessionStatus =

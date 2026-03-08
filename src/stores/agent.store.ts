@@ -34,9 +34,10 @@ import {
   getSerenApiKey,
   type StoredMessage,
   saveMessage,
-  setAgentConversationModelId as setAgentConversationModelIdDb,
-  setAgentConversationSessionId as setAgentConversationSessionIdDb,
-  setAgentConversationTitle as setAgentConversationTitleDb,
+    setAgentConversationModelId as setAgentConversationModelIdDb,
+  setAgentConversationMetadata as setAgentConversationMetadataDb,
+    setAgentConversationSessionId as setAgentConversationSessionIdDb,
+    setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
 import type {
   AgentEvent,
@@ -64,6 +65,10 @@ export interface AgentCompactedSummary {
   content: string;
   originalMessageCount: number;
   compactedAt: number;
+}
+
+interface AgentConversationMetadata {
+  pendingBootstrapPromptContext?: string;
 }
 
 export interface AgentMessage {
@@ -156,6 +161,8 @@ export interface ActiveSession {
   lastUserPrompt?: string;
   /** Set after a compact-and-retry attempt so we only try once per prompt. */
   compactRetryAttempted?: boolean;
+  /** Transcript bootstrap injected into the first real prompt of a forked branch. */
+  bootstrapPromptContext?: string;
   /** Set when the user explicitly requested a cancel — suppresses auto-retry
    *  in the unresponsive-agent recovery path. */
   cancelRequested?: boolean;
@@ -164,6 +171,98 @@ export interface ActiveSession {
 // ============================================================================
 // Agent message persistence helpers
 // ============================================================================
+
+const FORK_BOOTSTRAP_MAX_MSG_CHARS = 2_000;
+
+function truncateBootstrapText(content: string): string {
+  return content.length > FORK_BOOTSTRAP_MAX_MSG_CHARS
+    ? `${content.slice(0, FORK_BOOTSTRAP_MAX_MSG_CHARS)}... [truncated]`
+    : content;
+}
+
+function formatForkBootstrapMessage(message: AgentMessage): string | null {
+  const content = message.content.trim();
+
+  switch (message.type) {
+    case "user":
+      return content ? `USER: ${truncateBootstrapText(content)}` : null;
+    case "assistant":
+      return content ? `ASSISTANT: ${truncateBootstrapText(content)}` : null;
+    case "error":
+      return content ? `SYSTEM: ${truncateBootstrapText(content)}` : null;
+    case "tool": {
+      const label = message.toolCall?.status
+        ? `TOOL (${message.toolCall.status})`
+        : "TOOL";
+      return content ? `${label}: ${truncateBootstrapText(content)}` : null;
+    }
+    case "diff": {
+      const path = message.diff?.path;
+      const summary = path ? `Modified ${path}` : content;
+      return summary ? `DIFF: ${truncateBootstrapText(summary)}` : null;
+    }
+    case "thought":
+      return null;
+  }
+}
+
+function buildForkBootstrapContext(
+  session: ActiveSession,
+  messages: AgentMessage[],
+): string | null {
+  const summary = session.compactedSummary?.content.trim();
+  const transcript = messages
+    .map(formatForkBootstrapMessage)
+    .filter((line): line is string => Boolean(line))
+    .join("\n\n");
+
+  if (!summary && !transcript) {
+    return null;
+  }
+
+  const sections = [
+    "This prompt continues a forked branch of an earlier coding-agent conversation.",
+    "Treat the summary and transcript below as the authoritative history for this branch.",
+    "Anything that happened after the branch point is not part of this branch.",
+  ];
+
+  if (summary) {
+    sections.push(`Earlier summary:\n${summary}`);
+  }
+
+  if (transcript) {
+    sections.push(`Branch transcript:\n${transcript}`);
+  }
+
+  sections.push(
+    "Continue from the branch transcript's final message. Do not mention this bootstrap unless it helps answer the user.",
+  );
+
+  return sections.join("\n\n");
+}
+
+function parseAgentConversationMetadata(
+  raw: string | null | undefined,
+): AgentConversationMetadata {
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as AgentConversationMetadata;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function serializeAgentConversationMetadata(
+  metadata: AgentConversationMetadata,
+): string | null {
+  return metadata.pendingBootstrapPromptContext
+    ? JSON.stringify(metadata)
+    : null;
+}
 
 /** Serialize an AgentMessage to the shape expected by the save_message Tauri command. */
 function agentMessageToStored(
@@ -706,6 +805,7 @@ export const agentStore = {
       initRetryAttempt?: number;
       reclaimedIdleClaude?: boolean;
       restoredMessages?: AgentMessage[];
+      bootstrapPromptContext?: string;
     },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
@@ -888,6 +988,9 @@ export const agentStore = {
           cwd,
           cwd,
           resumeAgentSessionId ?? undefined,
+          serializeAgentConversationMetadata({
+            pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
+          }) ?? undefined,
         );
       } catch (error) {
         console.warn("Failed to persist agent conversation", error);
@@ -915,6 +1018,7 @@ export const agentStore = {
           ? opts?.restoredMessages?.length
           : undefined,
         contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
+        bootstrapPromptContext: opts?.bootstrapPromptContext,
       };
 
       setState("sessions", info.id, session);
@@ -1181,6 +1285,9 @@ export const agentStore = {
       convo.agent_type === "codex" || convo.agent_type === "claude-code"
         ? (convo.agent_type as AgentType)
         : state.selectedAgentType;
+    const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);
+    const pendingBootstrapPromptContext =
+      convoMetadata.pendingBootstrapPromptContext;
 
     // Load persisted messages from SQLite so the user sees full history immediately.
     let restoredMessages: AgentMessage[] = [];
@@ -1217,6 +1324,7 @@ export const agentStore = {
         localSessionId: conversationId,
         conversationTitle: convo.title,
         restoredMessages,
+        bootstrapPromptContext: pendingBootstrapPromptContext,
       });
       if (freshSessionId) {
         clearSpawnFailures(conversationId);
@@ -1253,6 +1361,7 @@ export const agentStore = {
       resumeAgentSessionId: remoteSessionId,
       conversationTitle: convo.title,
       restoredMessages,
+      bootstrapPromptContext: pendingBootstrapPromptContext,
     });
 
     // Legacy Claude conversations can reference session IDs that no longer
@@ -1268,6 +1377,7 @@ export const agentStore = {
         localSessionId: conversationId,
         conversationTitle: convo.title,
         restoredMessages,
+        bootstrapPromptContext: pendingBootstrapPromptContext,
       });
       if (fallbackSessionId) {
         clearSpawnFailures(conversationId);
@@ -1320,6 +1430,89 @@ export const agentStore = {
       void this.refreshRecentAgentConversations(200).catch(() => {});
     }
     return sessionId;
+  },
+
+  async buildPromptContext(
+    sessionId: string,
+    context?: Array<Record<string, string>>,
+  ): Promise<Array<Record<string, string>> | undefined> {
+    const session = state.sessions[sessionId];
+    if (!session) {
+      return context && context.length > 0 ? [...context] : undefined;
+    }
+
+    let mergedContext = context ? [...context] : [];
+
+    if (session.bootstrapPromptContext) {
+      mergedContext = [
+        { type: "text", text: session.bootstrapPromptContext },
+        ...mergedContext,
+      ];
+    }
+
+    try {
+      const skillsContent = await skillsStore.getThreadSkillsContent(
+        session.cwd,
+        session.conversationId,
+      );
+      if (skillsContent) {
+        mergedContext = [{ type: "text", text: skillsContent }, ...mergedContext];
+      }
+    } catch (error) {
+      console.warn("[AgentStore] Failed to load skills for agent prompt:", error);
+    }
+
+    return mergedContext.length > 0 ? mergedContext : undefined;
+  },
+
+  setBootstrapPromptContext(
+    sessionId: string,
+    bootstrapPromptContext?: string,
+  ) {
+    if (!state.sessions[sessionId]) {
+      return;
+    }
+
+    setState(
+      "sessions",
+      sessionId,
+      "bootstrapPromptContext",
+      bootstrapPromptContext,
+    );
+    const conversationId = state.sessions[sessionId]?.conversationId;
+    if (conversationId) {
+      void setAgentConversationMetadataDb(
+        conversationId,
+        serializeAgentConversationMetadata({
+          pendingBootstrapPromptContext: bootstrapPromptContext,
+        }),
+      ).catch((error) => {
+        console.warn("Failed to persist agent bootstrap context", error);
+      });
+    }
+  },
+
+  clearBootstrapPromptContext(sessionId: string) {
+    this.setBootstrapPromptContext(sessionId, undefined);
+  },
+
+  async restoreSessionSettings(
+    sourceSession: ActiveSession,
+    targetSessionId: string,
+  ) {
+    if (sourceSession.currentModeId) {
+      await this.setPermissionMode(sourceSession.currentModeId, targetSessionId);
+    }
+    if (sourceSession.currentModelId) {
+      await this.setModel(sourceSession.currentModelId, targetSessionId);
+    }
+    if (sourceSession.configOptions) {
+      for (const opt of sourceSession.configOptions) {
+        if (opt.type === "select" && opt.currentValue) {
+          await this.setConfigOption(opt.id, opt.currentValue, targetSessionId);
+        }
+      }
+    }
   },
 
   /**
@@ -1435,10 +1628,6 @@ Summary:`;
       const cwd = session.cwd;
       const agentType = session.info.agentType;
       const conversationId = session.conversationId;
-      const prevModeId = session.currentModeId;
-      const prevModelId = session.currentModelId;
-      const prevConfigOptions = session.configOptions;
-
       // Terminate the old agent session
       await this.terminateSession(sessionId);
 
@@ -1495,19 +1684,7 @@ Summary:`;
       }
 
       // Restore user-configured settings from the prior session
-      if (prevModeId) {
-        await this.setPermissionMode(prevModeId, newSessionId);
-      }
-      if (prevModelId) {
-        await this.setModel(prevModelId, newSessionId);
-      }
-      if (prevConfigOptions) {
-        for (const opt of prevConfigOptions) {
-          if (opt.type === "select" && opt.currentValue) {
-            await this.setConfigOption(opt.id, opt.currentValue, newSessionId);
-          }
-        }
-      }
+      await this.restoreSessionSettings(session, newSessionId);
 
       await providerService.sendPrompt(newSessionId, seedPrompt);
     } catch (error) {
@@ -1772,30 +1949,13 @@ Summary:`;
 
     console.log("[AgentStore] Calling providerService.sendPrompt...");
     try {
-      let mergedContext = context ? [...context] : [];
-      try {
-        const skillsContent = await skillsStore.getThreadSkillsContent(
-          session.cwd,
-          session.conversationId,
-        );
-        if (skillsContent) {
-          mergedContext = [
-            { type: "text", text: skillsContent },
-            ...mergedContext,
-          ];
-        }
-      } catch (error) {
-        console.warn(
-          "[AgentStore] Failed to load skills for agent prompt:",
-          error,
-        );
-      }
-
+      const mergedContext = await this.buildPromptContext(sessionId, context);
       await providerService.sendPrompt(
         sessionId,
         prompt,
-        mergedContext.length > 0 ? mergedContext : undefined,
+        mergedContext,
       );
+      this.clearBootstrapPromptContext(sessionId);
       console.log("[AgentStore] sendPrompt completed successfully");
     } catch (error) {
       console.error("[AgentStore] sendPrompt error:", error);
@@ -1850,8 +2010,11 @@ Summary:`;
         const doRecovery = async (): Promise<string | null> => {
           const newSessionId = await this.spawnSession(cwd, agentType, {
             localSessionId: session.conversationId,
+            bootstrapPromptContext: session.bootstrapPromptContext,
           });
           if (newSessionId) {
+            await this.restoreSessionSettings(session, newSessionId);
+
             // Restore conversation history to the new session.
             // Mark as restored so the message-count threshold ignores them.
             if (existingMessages.length > 0) {
@@ -1910,33 +2073,16 @@ Summary:`;
                 `[AgentStore] Retrying prompt on new session ${newSessionId}`,
               );
               try {
-                let retryContext: Array<Record<string, string>> = context
-                  ? [...context]
-                  : [];
-                try {
-                  const newSession = state.sessions[newSessionId];
-                  const skillsContent =
-                    await skillsStore.getThreadSkillsContent(
-                      newSession?.cwd ?? cwd,
-                      newSession?.conversationId ?? newSessionId,
-                    );
-                  if (skillsContent) {
-                    retryContext = [
-                      { type: "text", text: skillsContent },
-                      ...retryContext,
-                    ];
-                  }
-                } catch (skillsError) {
-                  console.warn(
-                    "[AgentStore] Failed to load skills for recovery retry:",
-                    skillsError,
-                  );
-                }
+                const retryContext = await this.buildPromptContext(
+                  newSessionId,
+                  context,
+                );
                 await providerService.sendPrompt(
                   newSessionId,
                   prompt,
-                  retryContext.length > 0 ? retryContext : undefined,
+                  retryContext,
                 );
+                this.clearBootstrapPromptContext(newSessionId);
                 console.log("[AgentStore] Retry succeeded on new session");
               } catch (retryError) {
                 console.error("[AgentStore] Retry failed:", retryError);
@@ -3166,9 +3312,11 @@ Summary:`;
   /**
    * Fork the current agent conversation from a specific message.
    *
-   * Creates a new agent session with the same conversation history via the
-   * provider runtime fork capability and a new local conversation containing
-   * messages up to `fromMessageId`. Returns the new local conversation ID.
+   * Creates a new local conversation containing messages up to `fromMessageId`.
+   * When the fork point is the latest message in a Claude session, we can use
+   * the provider's native session fork. Otherwise we branch to a fresh runtime
+   * session and bootstrap the exact transcript on the next prompt so the
+   * selected fork point is authoritative.
    */
   async forkConversation(
     conversationId: string,
@@ -3183,28 +3331,7 @@ Summary:`;
     const agentType = session.info.agentType;
     const cwd = session.cwd;
 
-    if (!providerService.supportsSessionFork(agentType)) {
-      this.addErrorMessage(
-        conversationId,
-        `Forking ${agentType} conversations is not supported yet in the local provider runtime.`,
-      );
-      return null;
-    }
-
-    // 1. Ask the provider runtime to fork the CLI session.
-    let newAgentSessionId: string;
-    try {
-      newAgentSessionId = await providerService.forkSession(conversationId);
-    } catch (err) {
-      console.error("[AgentStore] forkConversation: fork failed:", err);
-      this.addErrorMessage(
-        conversationId,
-        `Fork failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return null;
-    }
-
-    // 2. Collect messages up to the fork point.
+    // 1. Collect messages up to the fork point.
     const allMessages = session.messages;
     const forkIndex = allMessages.findIndex((m) => m.id === fromMessageId);
     if (forkIndex === -1) {
@@ -3212,8 +3339,32 @@ Summary:`;
       return null;
     }
     const forkedMessages = allMessages.slice(0, forkIndex + 1);
+    const isHeadFork = forkIndex === allMessages.length - 1;
+    const useNativeFork =
+      providerService.supportsSessionFork(agentType) &&
+      agentType === "claude-code" &&
+      isHeadFork;
 
-    // 3. Create a new local conversation in SQLite.
+    let newAgentSessionId: string | undefined;
+    let bootstrapPromptContext: string | undefined;
+
+    if (useNativeFork) {
+      try {
+        newAgentSessionId = await providerService.forkSession(conversationId);
+      } catch (err) {
+        console.error("[AgentStore] forkConversation: native fork failed:", err);
+        this.addErrorMessage(
+          conversationId,
+          `Fork failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      }
+    } else {
+      bootstrapPromptContext =
+        buildForkBootstrapContext(session, forkedMessages) ?? undefined;
+    }
+
+    // 2. Create a new local conversation in SQLite.
     const newConversationId = crypto.randomUUID();
     const forkTitle = `Fork of ${session.title ?? "Agent"}`;
     try {
@@ -3223,7 +3374,10 @@ Summary:`;
         agentType,
         cwd,
         null,
-        newAgentSessionId,
+        newAgentSessionId ?? undefined,
+        serializeAgentConversationMetadata({
+          pendingBootstrapPromptContext: bootstrapPromptContext,
+        }) ?? undefined,
       );
 
       // Persist forked messages to the new conversation.
@@ -3235,12 +3389,13 @@ Summary:`;
       return null;
     }
 
-    // 4. Spawn a new local session that resumes the forked CLI session.
+    // 3. Spawn a new local session for the fork.
     const newSessionId = await this.spawnSession(cwd, agentType, {
       localSessionId: newConversationId,
       resumeAgentSessionId: newAgentSessionId,
       conversationTitle: forkTitle,
       restoredMessages: forkedMessages,
+      bootstrapPromptContext,
     });
 
     if (!newSessionId) {
@@ -3248,8 +3403,10 @@ Summary:`;
       return null;
     }
 
+    await this.restoreSessionSettings(session, newSessionId);
+
     console.info(
-      `[AgentStore] Forked conversation ${conversationId} -> ${newConversationId} (agent session: ${newAgentSessionId})`,
+      `[AgentStore] Forked conversation ${conversationId} -> ${newConversationId}${newAgentSessionId ? ` (agent session: ${newAgentSessionId})` : " (bootstrap branch)"}`,
     );
 
     return newConversationId;

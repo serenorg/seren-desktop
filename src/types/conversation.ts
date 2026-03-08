@@ -156,10 +156,7 @@ export function deserializeMetadata(
     }
     const result: Partial<UnifiedMessage> = {};
     if (typeof meta.worker_type === "string") {
-      result.workerType =
-        meta.worker_type === "acp_agent"
-          ? "local_agent"
-          : (meta.worker_type as WorkerType);
+      result.workerType = meta.worker_type as WorkerType;
     }
     if (meta.model_id) result.modelId = meta.model_id as string;
     if (meta.task_type) result.taskType = meta.task_type as string;

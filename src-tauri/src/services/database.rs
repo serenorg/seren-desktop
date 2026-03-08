@@ -67,6 +67,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             agent_session_id TEXT,
             agent_cwd TEXT,
             agent_model_id TEXT,
+            agent_metadata TEXT,
             project_id TEXT,
             project_root TEXT
         )",
@@ -166,6 +167,17 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         .ok();
     }
 
+    let has_agent_metadata: bool = conn
+        .prepare("SELECT agent_metadata FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_agent_metadata {
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN agent_metadata TEXT",
+            [],
+        )
+        .ok();
+    }
+
     let has_project_id: bool = conn
         .prepare("SELECT project_id FROM conversations LIMIT 1")
         .is_ok();
@@ -250,6 +262,29 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         )
         .ok();
     }
+
+    // Normalize legacy ACP worker_type metadata to the provider-runtime naming.
+    conn.execute(
+        "UPDATE messages
+         SET metadata = REPLACE(metadata, '\"worker_type\":\"acp_agent\"', '\"worker_type\":\"local_agent\"')
+         WHERE metadata LIKE '%\"worker_type\":\"acp_agent\"%'",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "UPDATE eval_signals
+         SET worker_type = 'local_agent'
+         WHERE worker_type = 'acp_agent'",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "UPDATE plan_subtasks
+         SET worker_type = 'local_agent'
+         WHERE worker_type = 'acp_agent'",
+        [],
+    )
+    .ok();
 
     // Create eval_signals table for satisfaction feedback
     conn.execute(
@@ -381,6 +416,65 @@ mod tests {
 
         assert!(metadata.is_some());
         assert!(metadata.unwrap().contains("\"v\":1"));
+    }
+
+    #[test]
+    fn migration_adds_agent_metadata_column() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat',
+                agent_type TEXT,
+                agent_session_id TEXT,
+                agent_cwd TEXT,
+                agent_model_id TEXT,
+                project_id TEXT,
+                project_root TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type, agent_metadata)
+             VALUES ('a1', 'Agent', 1000, 'agent', 'codex', '{\"pendingBootstrapPromptContext\":\"seed\"}')",
+            [],
+        )
+        .unwrap();
+
+        let agent_metadata: Option<String> = conn
+            .query_row(
+                "SELECT agent_metadata FROM conversations WHERE id = 'a1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(
+            agent_metadata,
+            Some("{\"pendingBootstrapPromptContext\":\"seed\"}".to_string())
+        );
     }
 
     #[test]

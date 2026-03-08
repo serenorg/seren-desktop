@@ -920,6 +920,39 @@ function attachProcessListeners(emit, sessions, session) {
 
 export function createClaudeRuntime({ emit }) {
   const sessions = new Map();
+  const silentEmit = () => {};
+
+  function createSessionRecord({
+    sessionId,
+    cwd,
+    processHandle,
+    timeoutSecs,
+    agentSessionId,
+    currentModelId = null,
+    currentModeId = "default",
+  }) {
+    return {
+      id: sessionId,
+      agentType: "claude-code",
+      cwd,
+      status: "initializing",
+      createdAt: new Date().toISOString(),
+      process: processHandle,
+      output: readline.createInterface({ input: processHandle.stdout }),
+      pendingControlRequests: new Map(),
+      nextControlRequestId: 1,
+      pendingPermissions: new Map(),
+      currentPrompt: null,
+      currentPromptHasChunks: false,
+      allowedTools: new Set(),
+      agentSessionId,
+      timeoutSecs: timeoutSecs ?? undefined,
+      claudeVersion: null,
+      availableModelRecords: [],
+      currentModelId,
+      currentModeId,
+    };
+  }
 
   async function spawnSession(params) {
     const {
@@ -947,27 +980,13 @@ export function createClaudeRuntime({ emit }) {
       },
     );
 
-    const session = {
-      id: sessionId,
-      agentType: "claude-code",
+    const session = createSessionRecord({
+      sessionId,
       cwd,
-      status: "initializing",
-      createdAt: new Date().toISOString(),
-      process: processHandle,
-      output: readline.createInterface({ input: processHandle.stdout }),
-      pendingControlRequests: new Map(),
-      nextControlRequestId: 1,
-      pendingPermissions: new Map(),
-      currentPrompt: null,
-      currentPromptHasChunks: false,
-      allowedTools: new Set(),
+      processHandle,
+      timeoutSecs,
       agentSessionId: remoteSessionId,
-      timeoutSecs: timeoutSecs ?? undefined,
-      claudeVersion: null,
-      availableModelRecords: [],
-      currentModelId: null,
-      currentModeId: "default",
-    };
+    });
 
     sessions.set(sessionId, session);
     attachProcessListeners(emit, sessions, session);
@@ -1242,9 +1261,71 @@ export function createClaudeRuntime({ emit }) {
       throw new Error(`Claude session not found: ${sourceAgentSessionId}`);
     }
 
-    throw new Error(
-      "Forking Claude browser-local sessions is not supported yet. Use resume from existing sessions instead.",
+    const forkedAgentSessionId = randomUUID();
+    const tempLocalSessionId = randomUUID();
+    const processHandle = spawn(
+      "claude",
+      buildClaudeArgs({
+        sessionId: forkedAgentSessionId,
+        resumeSessionId: sourceAgentSessionId,
+        forkSession: true,
+        preferredModel: session.currentModelId,
+      }),
+      {
+        cwd: session.cwd,
+        env: { ...process.env },
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: process.platform === "win32",
+      },
     );
+
+    const tempSession = createSessionRecord({
+      sessionId: tempLocalSessionId,
+      cwd: session.cwd,
+      processHandle,
+      timeoutSecs: session.timeoutSecs,
+      agentSessionId: forkedAgentSessionId,
+      currentModelId: session.currentModelId,
+      currentModeId: session.currentModeId,
+    });
+    const tempSessions = new Map([[tempSession.id, tempSession]]);
+    attachProcessListeners(silentEmit, tempSessions, tempSession);
+
+    try {
+      const initResult = await sendControlRequest(
+        tempSession,
+        {
+          subtype: "initialize",
+          hooks: null,
+        },
+        20_000,
+      );
+
+      tempSession.availableModelRecords = normalizeModelRecords(initResult);
+      tempSession.currentModelId =
+        inferCurrentModelId(
+          initResult?.model ?? null,
+          tempSession.availableModelRecords,
+        ) ?? tempSession.currentModelId;
+
+      if (!tempSession.agentSessionId) {
+        throw new Error("Claude fork did not return a resumable session id.");
+      }
+
+      return tempSession.agentSessionId;
+    } finally {
+      tempSessions.delete(tempSession.id);
+      rejectPendingControlRequests(
+        tempSession,
+        new Error("Fork helper session terminated."),
+      );
+      rejectCurrentPrompt(
+        tempSession,
+        new Error("Fork helper session terminated."),
+      );
+      tempSession.output.close();
+      killChildTree(processHandle);
+    }
   }
 
   return {
