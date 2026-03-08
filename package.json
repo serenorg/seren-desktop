@@ -2,11 +2,15 @@
   "name": "seren-desktop",
   "version": "0.1.0",
   "description": "Open source AI-powered desktop IDE with integrated chat, code completion, and MCP integration",
+  "bin": {
+    "seren-desktop": "./bin/seren-desktop.mjs"
+  },
   "type": "module",
   "scripts": {
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "browser:local": "node ./bin/seren-desktop.mjs",
     "serve": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "pnpm tauri dev",

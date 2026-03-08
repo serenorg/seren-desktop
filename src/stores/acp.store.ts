@@ -3,6 +3,7 @@
 
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
+import { runtimeHasCapability } from "@/lib/runtime";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 
@@ -459,6 +460,10 @@ export const acpStore = {
     return state.agentModeEnabled;
   },
 
+  get supportsAcp() {
+    return runtimeHasCapability("acp");
+  },
+
   /**
    * Get messages for the active session.
    */
@@ -565,6 +570,15 @@ export const acpStore = {
    * Initialize the ACP store by loading available agents.
    */
   async initialize() {
+    if (!runtimeHasCapability("acp")) {
+      setState("availableAgents", []);
+      setState("agentModeEnabled", false);
+      setState("remoteSessions", []);
+      setState("remoteSessionsNextCursor", null);
+      setState("remoteSessionsError", null);
+      return;
+    }
+
     try {
       const agents = await acpService.getAvailableAgents();
       setState("availableAgents", agents);
@@ -2180,7 +2194,7 @@ Summary:`;
    * Set the selected agent type for new sessions.
    */
   setAgentModeEnabled(enabled: boolean) {
-    setState("agentModeEnabled", enabled);
+    setState("agentModeEnabled", runtimeHasCapability("acp") && enabled);
   },
 
   setSelectedAgentType(agentType: AgentType) {

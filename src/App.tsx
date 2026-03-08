@@ -10,30 +10,26 @@ import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
 import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval";
 import { ShellApproval } from "@/components/shell/ShellApproval";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
+import { getRuntimeConfig } from "@/lib/runtime";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
-import {
-  startOpenClawAgent,
-  stopOpenClawAgent,
-} from "@/services/openclaw-agent";
 import { telemetry } from "@/services/telemetry";
 import { acpStore } from "@/stores/acp.store";
 import {
   authStore,
   checkAuth,
+  initAuthRuntimeBindings,
   logout,
   setAuthenticated,
 } from "@/stores/auth.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
 import { fileTreeState, initDefaultRootIfNeeded } from "@/stores/fileTree";
-import { openclawStore } from "@/stores/openclaw.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
-import { updaterStore } from "@/stores/updater.store";
 import {
   checkDailyClaim,
   resetWalletState,
@@ -50,9 +46,18 @@ function App() {
     return <Phase3Playground />;
   }
 
+  const runtime = getRuntimeConfig();
+  let stopOpenClawAgentFn: (() => void) | null = null;
+  let destroyOpenclawStoreFn: (() => void) | null = null;
+
   onMount(async () => {
+    await initAuthRuntimeBindings();
     checkAuth();
-    updaterStore.initUpdater();
+
+    if (runtime.capabilities.updater) {
+      const { updaterStore } = await import("@/stores/updater.store");
+      void updaterStore.initUpdater();
+    }
 
     // Load all settings including app settings (chatDefaultModel, etc.) and MCP settings
     await loadAllSettings();
@@ -66,17 +71,28 @@ function App() {
     // Initialize keyboard shortcuts
     shortcuts.init();
 
-    // Initialize OpenClaw store (load setup state + event listeners) before agent
-    openclawStore.init();
+    if (runtime.capabilities.openclaw) {
+      const [{ openclawStore }, openClawAgent] = await Promise.all([
+        import("@/stores/openclaw.store"),
+        import("@/services/openclaw-agent"),
+      ]);
 
-    // Start OpenClaw message agent
-    startOpenClawAgent();
+      // Initialize OpenClaw store (load setup state + event listeners) before agent
+      await openclawStore.init();
+      openClawAgent.startOpenClawAgent();
+      stopOpenClawAgentFn = openClawAgent.stopOpenClawAgent;
+      destroyOpenclawStoreFn = () => openclawStore.destroy();
+    }
 
     // Set default project root if none is open
-    await initDefaultRootIfNeeded();
+    if (runtime.capabilities.localFiles) {
+      await initDefaultRootIfNeeded();
+    }
 
     // Detect available agents (Claude, Codex)
-    await acpStore.initialize();
+    if (runtime.capabilities.acp) {
+      await acpStore.initialize();
+    }
 
     // Load skills and threads after auth check completes
     await skillsStore.refresh();
@@ -94,8 +110,8 @@ function App() {
   onCleanup(() => {
     clearInterval(skillsRefreshTimer);
     shortcuts.destroy();
-    stopOpenClawAgent();
-    openclawStore.destroy();
+    stopOpenClawAgentFn?.();
+    destroyOpenclawStoreFn?.();
   });
 
   // Reload installed skill inventory when project root changes.
@@ -175,10 +191,18 @@ function App() {
       <LowBalanceModal />
       <DailyClaimPopup />
       <X402PaymentApproval />
-      <GatewayToolApproval />
-      <ShellApproval />
-      <OpenClawApprovalManager />
-      <AboutDialog />
+      <Show when={runtime.capabilities.localMcp}>
+        <GatewayToolApproval />
+      </Show>
+      <Show when={runtime.capabilities.terminal}>
+        <ShellApproval />
+      </Show>
+      <Show when={runtime.capabilities.openclaw}>
+        <OpenClawApprovalManager />
+      </Show>
+      <Show when={runtime.mode === "desktop-native"}>
+        <AboutDialog />
+      </Show>
     </Show>
   );
 }

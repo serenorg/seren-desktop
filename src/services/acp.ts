@@ -1,14 +1,15 @@
 // ABOUTME: ACP (Agent Client Protocol) service for spawning and communicating with AI coding agents.
-// ABOUTME: Wraps Tauri commands and provides event subscriptions for agent interactions.
+// ABOUTME: Resolves the active runtime transport dynamically so browser modes can degrade cleanly.
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { runtimeHasCapability } from "@/lib/runtime";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export type AgentType = "claude-code" | "codex";
+export type UnlistenFn = () => void;
 
 export type SessionStatus =
   | "initializing"
@@ -219,6 +220,35 @@ export type AcpEvent =
   | { type: "userMessage"; data: UserMessageEvent }
   | { type: "error"; data: ErrorEvent };
 
+type InvokeFn = typeof import("@tauri-apps/api/core").invoke;
+type ListenFn = typeof import("@tauri-apps/api/event").listen;
+
+async function getAcpInvoke(): Promise<InvokeFn> {
+  if (!runtimeHasCapability("acp")) {
+    throw new Error("ACP is not supported in this runtime.");
+  }
+
+  if (isTauriRuntime()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke;
+  }
+
+  throw new Error("ACP browser-local bridge is not configured yet.");
+}
+
+async function getAcpListen(): Promise<ListenFn> {
+  if (!runtimeHasCapability("acp")) {
+    throw new Error("ACP is not supported in this runtime.");
+  }
+
+  if (isTauriRuntime()) {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen;
+  }
+
+  throw new Error("ACP browser-local bridge is not configured yet.");
+}
+
 // ============================================================================
 // Tauri Command Wrappers
 // ============================================================================
@@ -247,6 +277,7 @@ export async function spawnAgent(
   resumeAgentSessionId?: string,
   timeoutSecs?: number,
 ): Promise<AcpSessionInfo> {
+  const invoke = await getAcpInvoke();
   return invoke<AcpSessionInfo>("acp_spawn", {
     agentType,
     cwd,
@@ -269,6 +300,7 @@ export async function sendPrompt(
   prompt: string,
   context?: Array<Record<string, string>>,
 ): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_prompt", { sessionId, prompt, context });
 }
 
@@ -276,6 +308,7 @@ export async function sendPrompt(
  * Cancel an ongoing prompt in an ACP session.
  */
 export async function cancelPrompt(sessionId: string): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_cancel", { sessionId });
 }
 
@@ -283,6 +316,7 @@ export async function cancelPrompt(sessionId: string): Promise<void> {
  * Terminate an ACP session.
  */
 export async function terminateSession(sessionId: string): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_terminate", { sessionId });
 }
 
@@ -291,6 +325,7 @@ export async function terminateSession(sessionId: string): Promise<void> {
  * conversation history.  Returns the new remote agent session ID.
  */
 export async function forkSession(sessionId: string): Promise<string> {
+  const invoke = await getAcpInvoke();
   return invoke<string>("acp_fork_session", { sessionId });
 }
 
@@ -298,6 +333,7 @@ export async function forkSession(sessionId: string): Promise<string> {
  * List all active ACP sessions.
  */
 export async function listSessions(): Promise<AcpSessionInfo[]> {
+  const invoke = await getAcpInvoke();
   return invoke<AcpSessionInfo[]>("acp_list_sessions");
 }
 
@@ -309,6 +345,7 @@ export async function listRemoteSessions(
   cwd: string,
   cursor?: string,
 ): Promise<RemoteSessionsPage> {
+  const invoke = await getAcpInvoke();
   return invoke<RemoteSessionsPage>("acp_list_remote_sessions", {
     agentType,
     cwd,
@@ -323,6 +360,7 @@ export async function setModel(
   sessionId: string,
   modelId: string,
 ): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_set_model", { sessionId, modelId });
 }
 
@@ -334,6 +372,7 @@ export async function setConfigOption(
   configId: string,
   valueId: string,
 ): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_set_config_option", { sessionId, configId, valueId });
 }
 
@@ -344,6 +383,7 @@ export async function setPermissionMode(
   sessionId: string,
   mode: string,
 ): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_set_permission_mode", { sessionId, mode });
 }
 
@@ -355,6 +395,7 @@ export async function respondToPermission(
   requestId: string,
   optionId: string,
 ): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_respond_to_permission", {
     sessionId,
     requestId,
@@ -370,6 +411,7 @@ export async function respondToDiffProposal(
   proposalId: string,
   accepted: boolean,
 ): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_respond_to_diff_proposal", {
     sessionId,
     proposalId,
@@ -381,6 +423,7 @@ export async function respondToDiffProposal(
  * Get list of available agents and their status.
  */
 export async function getAvailableAgents(): Promise<AgentInfo[]> {
+  const invoke = await getAcpInvoke();
   return invoke<AgentInfo[]>("acp_get_available_agents");
 }
 
@@ -389,6 +432,7 @@ export async function getAvailableAgents(): Promise<AgentInfo[]> {
  * Returns the bin directory path containing the claude binary.
  */
 export async function ensureClaudeCli(): Promise<string> {
+  const invoke = await getAcpInvoke();
   return invoke<string>("acp_ensure_claude_cli");
 }
 
@@ -398,6 +442,7 @@ export async function ensureClaudeCli(): Promise<string> {
  * Returns the bin directory path containing the codex binary.
  */
 export async function ensureCodexCli(): Promise<string> {
+  const invoke = await getAcpInvoke();
   return invoke<string>("acp_ensure_codex_cli");
 }
 
@@ -407,6 +452,7 @@ export async function ensureCodexCli(): Promise<string> {
 export async function checkAgentAvailable(
   agentType: AgentType,
 ): Promise<boolean> {
+  const invoke = await getAcpInvoke();
   return invoke<boolean>("acp_check_agent_available", {
     agentType,
   });
@@ -417,6 +463,7 @@ export async function checkAgentAvailable(
  * For Claude, this opens a terminal running `claude login`.
  */
 export async function launchLogin(agentType: AgentType): Promise<void> {
+  const invoke = await getAcpInvoke();
   return invoke("acp_launch_login", { agentType });
 }
 
@@ -450,6 +497,7 @@ export async function subscribeToEvent<T extends { sessionId: string }>(
   callback: (data: T) => void,
 ): Promise<UnlistenFn> {
   const channel = EVENT_CHANNELS[eventType];
+  const listen = await getAcpListen();
   return listen<T>(channel, (event) => {
     callback(event.payload);
   });
