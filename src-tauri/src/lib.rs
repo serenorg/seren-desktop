@@ -35,6 +35,7 @@ mod oauth_callback_server;
 mod openclaw;
 mod orchestrator;
 mod polymarket;
+mod provider_runtime;
 mod sandbox;
 mod shell;
 mod skills;
@@ -469,6 +470,7 @@ pub fn run() {
         .manage(orchestrator::service::OrchestratorState::new())
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
+        .manage(provider_runtime::ProviderRuntimeState::new())
         .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
             as polymarket::commands::PolymarketWsState);
 
@@ -733,6 +735,8 @@ pub fn run() {
             polymarket::commands::subscribe_polymarket_market,
             polymarket::commands::subscribe_polymarket_user,
             embedded_runtime::get_embedded_runtime_info,
+            provider_runtime::provider_runtime_get_config,
+            provider_runtime::provider_runtime_stop,
             // CLI installer commands
             commands::cli_installer::check_cli_installed,
             commands::cli_installer::install_cli_tool,

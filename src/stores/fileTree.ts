@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import {
-  getBrowserLocalProjectRoot,
+  getLocalProviderProjectRoot,
   isBrowserLocalRuntime,
 } from "@/lib/browser-local-runtime";
 import {
@@ -153,7 +153,7 @@ export async function initDefaultRootIfNeeded(): Promise<void> {
     let defaultDir: string | null = null;
 
     if (isBrowserLocalRuntime()) {
-      defaultDir = getBrowserLocalProjectRoot();
+      defaultDir = getLocalProviderProjectRoot();
     } else if (isTauriRuntime()) {
       const { invoke } = await import("@tauri-apps/api/core");
       defaultDir = await invoke<string>("get_default_project_dir");

@@ -3,9 +3,11 @@
 
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
-import { onRuntimeEvent } from "@/lib/browser-local-runtime";
+import {
+  isLocalProviderRuntime,
+  onRuntimeEvent,
+} from "@/lib/browser-local-runtime";
 import { runtimeHasCapability } from "@/lib/runtime";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 
@@ -816,23 +818,22 @@ export const agentStore = {
       if (ensureFn) {
         let progressUnsub: UnlistenFn = () => {};
 
-        if (isTauriRuntime()) {
-          const { listen } = await import("@tauri-apps/api/event");
-          progressUnsub = await listen<{ stage: string; message: string }>(
-            "acp://cli-install-progress",
-            (event) => {
-              setState("installStatus", event.payload.message);
-            },
+        if (!isLocalProviderRuntime()) {
+          setState(
+            "error",
+            "Local provider runtime is not configured for agent installation.",
           );
-        } else {
-          progressUnsub = onRuntimeEvent(
-            "provider://cli-install-progress",
-            (payload) => {
-              const event = payload as { stage?: string; message?: string };
-              setState("installStatus", event.message ?? null);
-            },
-          );
+          setState("isLoading", false);
+          return null;
         }
+
+        progressUnsub = onRuntimeEvent(
+          "provider://cli-install-progress",
+          (payload) => {
+            const event = payload as { stage?: string; message?: string };
+            setState("installStatus", event.message ?? null);
+          },
+        );
 
         try {
           await ensureFn();

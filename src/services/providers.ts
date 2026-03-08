@@ -2,12 +2,11 @@
 // ABOUTME: Resolves the active runtime transport dynamically so browser modes can degrade cleanly.
 
 import {
-  isBrowserLocalRuntime,
+  isLocalProviderRuntime,
   onRuntimeEvent,
   runtimeInvoke,
 } from "@/lib/browser-local-runtime";
 import { runtimeHasCapability } from "@/lib/runtime";
-import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 // ============================================================================
 // Types
@@ -34,9 +33,6 @@ export interface AgentSessionInfo {
   /** Prompt timeout in seconds. Undefined means unlimited (no timeout). */
   timeoutSecs?: number;
 }
-
-// Legacy compatibility alias retained while ACP-named imports are removed.
-export type AcpSessionInfo = AgentSessionInfo;
 
 export interface AgentInfo {
   type: AgentType;
@@ -228,37 +224,20 @@ export type AgentEvent =
   | { type: "userMessage"; data: UserMessageEvent }
   | { type: "error"; data: ErrorEvent };
 
-// Legacy compatibility alias retained while ACP-named imports are removed.
-export type AcpEvent = AgentEvent;
-
-type InvokeFn = <T>(
+async function invokeProvider<T>(
   command: string,
   args?: Record<string, unknown>,
-) => Promise<T>;
-
-function browserLocalMethod(command: string): string {
-  if (!command.startsWith("acp_")) {
-    return command;
-  }
-  return `provider_${command.slice(4)}`;
-}
-
-async function getAgentInvoke(): Promise<InvokeFn> {
+  options?: { timeoutMs?: number | null },
+): Promise<T> {
   if (!runtimeHasCapability("agents")) {
     throw new Error("Agent runtime is not supported in this runtime.");
   }
 
-  if (isTauriRuntime()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke;
+  if (isLocalProviderRuntime()) {
+    return runtimeInvoke<T>(command, args, options);
   }
 
-  if (isBrowserLocalRuntime()) {
-    return <T>(command: string, args?: Record<string, unknown>) =>
-      runtimeInvoke<T>(browserLocalMethod(command), args);
-  }
-
-  throw new Error("browser-local agent bridge is not configured yet.");
+  throw new Error("Local provider runtime is not configured.");
 }
 
 // ============================================================================
@@ -289,38 +268,22 @@ export async function spawnAgent(
   resumeAgentSessionId?: string,
   timeoutSecs?: number,
 ): Promise<AgentSessionInfo> {
-  if (isBrowserLocalRuntime()) {
-    return runtimeInvoke<AgentSessionInfo>(
-      browserLocalMethod("acp_spawn"),
-      {
-        agentType,
-        cwd,
-        localSessionId: localSessionId ?? null,
-        resumeAgentSessionId: resumeAgentSessionId ?? null,
-        sandboxMode: sandboxMode ?? null,
-        apiKey: apiKey ?? null,
-        approvalPolicy: approvalPolicy ?? null,
-        searchEnabled: searchEnabled ?? null,
-        networkEnabled: networkEnabled ?? null,
-        timeoutSecs: timeoutSecs ?? null,
-      },
-      { timeoutMs: 120_000 },
-    );
-  }
-
-  const invoke = await getAgentInvoke();
-  return invoke<AgentSessionInfo>("acp_spawn", {
-    agentType,
-    cwd,
-    localSessionId: localSessionId ?? null,
+  return invokeProvider<AgentSessionInfo>(
+    "provider_spawn",
+    {
+      agentType,
+      cwd,
+      localSessionId: localSessionId ?? null,
     resumeAgentSessionId: resumeAgentSessionId ?? null,
     sandboxMode: sandboxMode ?? null,
     apiKey: apiKey ?? null,
     approvalPolicy: approvalPolicy ?? null,
-    searchEnabled: searchEnabled ?? null,
-    networkEnabled: networkEnabled ?? null,
-    timeoutSecs: timeoutSecs ?? null,
-  });
+      searchEnabled: searchEnabled ?? null,
+      networkEnabled: networkEnabled ?? null,
+      timeoutSecs: timeoutSecs ?? null,
+    },
+    { timeoutMs: 120_000 },
+  );
 }
 
 /**
@@ -331,32 +294,25 @@ export async function sendPrompt(
   prompt: string,
   context?: Array<Record<string, string>>,
 ): Promise<void> {
-  if (isBrowserLocalRuntime()) {
-    return runtimeInvoke(
-      browserLocalMethod("acp_prompt"),
-      { sessionId, prompt, context },
-      { timeoutMs: null },
-    );
-  }
-
-  const invoke = await getAgentInvoke();
-  return invoke("acp_prompt", { sessionId, prompt, context });
+  return invokeProvider(
+    "provider_prompt",
+    { sessionId, prompt, context },
+    { timeoutMs: null },
+  );
 }
 
 /**
  * Cancel an ongoing prompt in an agent runtime session.
  */
 export async function cancelPrompt(sessionId: string): Promise<void> {
-  const invoke = await getAgentInvoke();
-  return invoke("acp_cancel", { sessionId });
+  return invokeProvider("provider_cancel", { sessionId });
 }
 
 /**
  * Terminate an agent runtime session.
  */
 export async function terminateSession(sessionId: string): Promise<void> {
-  const invoke = await getAgentInvoke();
-  return invoke("acp_terminate", { sessionId });
+  return invokeProvider("provider_terminate", { sessionId });
 }
 
 /**
@@ -364,16 +320,14 @@ export async function terminateSession(sessionId: string): Promise<void> {
  * conversation history.  Returns the new remote agent session ID.
  */
 export async function forkSession(sessionId: string): Promise<string> {
-  const invoke = await getAgentInvoke();
-  return invoke<string>("acp_fork_session", { sessionId });
+  return invokeProvider<string>("provider_fork_session", { sessionId });
 }
 
 /**
  * List all active agent runtime sessions.
  */
 export async function listSessions(): Promise<AgentSessionInfo[]> {
-  const invoke = await getAgentInvoke();
-  return invoke<AgentSessionInfo[]>("acp_list_sessions");
+  return invokeProvider<AgentSessionInfo[]>("provider_list_sessions");
 }
 
 /**
@@ -384,8 +338,7 @@ export async function listRemoteSessions(
   cwd: string,
   cursor?: string,
 ): Promise<RemoteSessionsPage> {
-  const invoke = await getAgentInvoke();
-  return invoke<RemoteSessionsPage>("acp_list_remote_sessions", {
+  return invokeProvider<RemoteSessionsPage>("provider_list_remote_sessions", {
     agentType,
     cwd,
     cursor: cursor ?? null,
@@ -399,8 +352,7 @@ export async function setModel(
   sessionId: string,
   modelId: string,
 ): Promise<void> {
-  const invoke = await getAgentInvoke();
-  return invoke("acp_set_model", { sessionId, modelId });
+  return invokeProvider("provider_set_session_model", { sessionId, modelId });
 }
 
 /**
@@ -411,8 +363,11 @@ export async function setConfigOption(
   configId: string,
   valueId: string,
 ): Promise<void> {
-  const invoke = await getAgentInvoke();
-  return invoke("acp_set_config_option", { sessionId, configId, valueId });
+  return invokeProvider("provider_update_session_config_option", {
+    sessionId,
+    configId,
+    valueId,
+  });
 }
 
 /**
@@ -422,8 +377,7 @@ export async function setPermissionMode(
   sessionId: string,
   mode: string,
 ): Promise<void> {
-  const invoke = await getAgentInvoke();
-  return invoke("acp_set_permission_mode", { sessionId, mode });
+  return invokeProvider("provider_set_permission_mode", { sessionId, mode });
 }
 
 /**
@@ -434,8 +388,7 @@ export async function respondToPermission(
   requestId: string,
   optionId: string,
 ): Promise<void> {
-  const invoke = await getAgentInvoke();
-  return invoke("acp_respond_to_permission", {
+  return invokeProvider("provider_respond_to_permission", {
     sessionId,
     requestId,
     optionId,
@@ -450,8 +403,7 @@ export async function respondToDiffProposal(
   proposalId: string,
   accepted: boolean,
 ): Promise<void> {
-  const invoke = await getAgentInvoke();
-  return invoke("acp_respond_to_diff_proposal", {
+  return invokeProvider("provider_respond_to_diff_proposal", {
     sessionId,
     proposalId,
     accepted,
@@ -462,8 +414,7 @@ export async function respondToDiffProposal(
  * Get list of available agents and their status.
  */
 export async function getAvailableAgents(): Promise<AgentInfo[]> {
-  const invoke = await getAgentInvoke();
-  return invoke<AgentInfo[]>("acp_get_available_agents");
+  return invokeProvider<AgentInfo[]>("provider_get_available_agents");
 }
 
 /**
@@ -471,18 +422,9 @@ export async function getAvailableAgents(): Promise<AgentInfo[]> {
  * Returns the bin directory path containing the claude binary.
  */
 export async function ensureClaudeCli(): Promise<string> {
-  if (isBrowserLocalRuntime()) {
-    return runtimeInvoke<string>(
-      browserLocalMethod("acp_ensure_claude_cli"),
-      undefined,
-      {
-        timeoutMs: 120_000,
-      },
-    );
-  }
-
-  const invoke = await getAgentInvoke();
-  return invoke<string>("acp_ensure_claude_cli");
+  return invokeProvider<string>("provider_ensure_agent_cli", {
+    agentType: "claude-code",
+  });
 }
 
 /**
@@ -491,18 +433,9 @@ export async function ensureClaudeCli(): Promise<string> {
  * Returns the bin directory path containing the codex binary.
  */
 export async function ensureCodexCli(): Promise<string> {
-  if (isBrowserLocalRuntime()) {
-    return runtimeInvoke<string>(
-      browserLocalMethod("acp_ensure_codex_cli"),
-      undefined,
-      {
-        timeoutMs: 120_000,
-      },
-    );
-  }
-
-  const invoke = await getAgentInvoke();
-  return invoke<string>("acp_ensure_codex_cli");
+  return invokeProvider<string>("provider_ensure_agent_cli", {
+    agentType: "codex",
+  });
 }
 
 /**
@@ -511,8 +444,7 @@ export async function ensureCodexCli(): Promise<string> {
 export async function checkAgentAvailable(
   agentType: AgentType,
 ): Promise<boolean> {
-  const invoke = await getAgentInvoke();
-  return invoke<boolean>("acp_check_agent_available", {
+  return invokeProvider<boolean>("provider_check_agent_available", {
     agentType,
   });
 }
@@ -522,8 +454,7 @@ export async function checkAgentAvailable(
  * For Claude, this opens a terminal running `claude login`.
  */
 export async function launchLogin(agentType: AgentType): Promise<void> {
-  const invoke = await getAgentInvoke();
-  return invoke("acp_launch_login", { agentType });
+  return invokeProvider("provider_launch_login", { agentType });
 }
 
 // ============================================================================
@@ -549,9 +480,7 @@ type EventType = keyof typeof EVENT_SUFFIXES;
 
 function eventChannelForRuntime(eventType: EventType): string {
   const suffix = EVENT_SUFFIXES[eventType];
-  return isBrowserLocalRuntime()
-    ? `provider://${suffix}`
-    : `acp://${suffix}`;
+  return `provider://${suffix}`;
 }
 
 /**
@@ -562,21 +491,14 @@ export async function subscribeToEvent<T extends { sessionId: string }>(
   eventType: EventType,
   callback: (data: T) => void,
 ): Promise<UnlistenFn> {
+  if (!isLocalProviderRuntime()) {
+    throw new Error("Local provider runtime is not configured.");
+  }
+
   const channel = eventChannelForRuntime(eventType);
-  if (isTauriRuntime()) {
-    const { listen } = await import("@tauri-apps/api/event");
-    return listen<T>(channel, (event) => {
-      callback(event.payload);
-    });
-  }
-
-  if (isBrowserLocalRuntime()) {
-    return onRuntimeEvent(channel, (payload) => {
-      callback(payload as T);
-    });
-  }
-
-  throw new Error("browser-local agent bridge is not configured yet.");
+  return onRuntimeEvent(channel, (payload) => {
+    callback(payload as T);
+  });
 }
 
 /**

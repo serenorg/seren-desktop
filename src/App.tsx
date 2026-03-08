@@ -11,8 +11,8 @@ import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval"
 import { ShellApproval } from "@/components/shell/ShellApproval";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import {
-  connectBrowserLocalRuntime,
-  disconnectBrowserLocalRuntime,
+  connectLocalProviderRuntime,
+  disconnectLocalProviderRuntime,
 } from "@/lib/browser-local-runtime";
 import { getRuntimeConfig } from "@/lib/runtime";
 import { shortcuts } from "@/lib/shortcuts";
@@ -55,8 +55,11 @@ function App() {
   let destroyOpenclawStoreFn: (() => void) | null = null;
 
   onMount(async () => {
-    if (runtime.mode === "browser-local") {
-      await connectBrowserLocalRuntime();
+    if (
+      runtime.capabilities.agents &&
+      (runtime.mode === "browser-local" || runtime.mode === "desktop-native")
+    ) {
+      await connectLocalProviderRuntime();
     }
 
     await initAuthRuntimeBindings();
@@ -120,8 +123,11 @@ function App() {
     shortcuts.destroy();
     stopOpenClawAgentFn?.();
     destroyOpenclawStoreFn?.();
-    if (runtime.mode === "browser-local") {
-      disconnectBrowserLocalRuntime();
+    if (
+      runtime.capabilities.agents &&
+      (runtime.mode === "browser-local" || runtime.mode === "desktop-native")
+    ) {
+      disconnectLocalProviderRuntime();
     }
   });
 

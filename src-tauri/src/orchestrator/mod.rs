@@ -6,12 +6,10 @@ pub mod classifier;
 pub mod decomposer;
 pub mod eval;
 pub mod mcp_publisher_worker;
+pub mod provider_worker;
 pub mod router;
 pub mod service;
 pub mod tool_bridge;
 pub mod trust;
 pub mod types;
 pub mod worker;
-
-#[cfg(feature = "acp")]
-pub mod acp_worker;
