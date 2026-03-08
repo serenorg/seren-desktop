@@ -153,6 +153,10 @@ export interface ActiveSession {
   /** Set when the user explicitly requested a cancel — suppresses auto-retry
    *  in the unresponsive-agent recovery path. */
   cancelRequested?: boolean;
+  /** Config option values to restore on the next configOptionsUpdate event.
+   *  Set after compaction so user-configured values survive the agent's
+   *  initial configOptionsUpdate (which would otherwise overwrite them). */
+  pendingConfigRestore?: Record<string, string>;
 }
 
 // ============================================================================
@@ -1462,11 +1466,19 @@ Summary:`;
       if (prevModelId) {
         await this.setModel(prevModelId, newSessionId);
       }
+      // Queue select-type config options for restoration on the next
+      // configOptionsUpdate event. The new session will emit that event
+      // with default values shortly after startup — setting values now
+      // would just get overwritten.
       if (prevConfigOptions) {
+        const restore: Record<string, string> = {};
         for (const opt of prevConfigOptions) {
           if (opt.type === "select" && opt.currentValue) {
-            await this.setConfigOption(opt.id, opt.currentValue, newSessionId);
+            restore[opt.id] = opt.currentValue;
           }
+        }
+        if (Object.keys(restore).length > 0) {
+          setState("sessions", newSessionId, "pendingConfigRestore", restore);
         }
       }
 
@@ -2427,14 +2439,26 @@ Summary:`;
         break;
       }
 
-      case "configOptionsUpdate":
-        setState(
-          "sessions",
-          sessionId,
-          "configOptions",
-          event.data.configOptions,
-        );
+      case "configOptionsUpdate": {
+        const restore = state.sessions[sessionId]?.pendingConfigRestore;
+        const incoming = event.data.configOptions;
+        const merged = restore
+          ? incoming.map((opt) =>
+              opt.type === "select" && restore[opt.id]
+                ? { ...opt, currentValue: restore[opt.id] }
+                : opt,
+            )
+          : incoming;
+        setState("sessions", sessionId, "configOptions", merged);
+        if (restore) {
+          setState("sessions", sessionId, "pendingConfigRestore", undefined);
+          // Apply restored values to the agent so it is aware of them
+          for (const [id, value] of Object.entries(restore)) {
+            void this.setConfigOption(id, value, sessionId);
+          }
+        }
         break;
+      }
       case "sessionStatus":
         this.handleStatusChange(sessionId, event.data.status, event.data);
         break;
