@@ -100,6 +100,16 @@ async function assertMethodExists(ws, method, params, expectedMessagePart) {
   }
 }
 
+function isAuthRequiredError(message) {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("authentication required") ||
+    lower.includes("auth required") ||
+    lower.includes("login flow") ||
+    lower.includes("not logged in")
+  );
+}
+
 async function smokeRuntime({ label, wsUrl, token }) {
   const ws = await connectRuntime(wsUrl, token);
   try {
@@ -118,6 +128,29 @@ async function smokeRuntime({ label, wsUrl, token }) {
     });
     if (typeof codexAvailable !== "boolean") {
       throw new Error(`${label}: provider_check_agent_available did not return a boolean`);
+    }
+
+    if (codexAvailable) {
+      try {
+        const remoteSessions = await rpcCall(ws, "provider_list_remote_sessions", {
+          agentType: "codex",
+          cwd: process.cwd(),
+        });
+        if (
+          !remoteSessions ||
+          !Array.isArray(remoteSessions.sessions) ||
+          !("nextCursor" in remoteSessions)
+        ) {
+          throw new Error(
+            `${label}: provider_list_remote_sessions returned an invalid Codex payload`,
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!isAuthRequiredError(message)) {
+          throw error;
+        }
+      }
     }
 
     await assertMethodExists(

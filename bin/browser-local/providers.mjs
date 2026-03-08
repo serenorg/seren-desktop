@@ -101,6 +101,47 @@ function buildInitializeParams() {
   };
 }
 
+function spawnCodexProcess(cwd) {
+  return spawn("codex", ["app-server"], {
+    cwd,
+    env: { ...process.env },
+    stdio: ["pipe", "pipe", "pipe"],
+    shell: process.platform === "win32",
+  });
+}
+
+function createCodexSessionRecord({
+  sessionId,
+  cwd,
+  processHandle,
+  timeoutSecs,
+  currentModeId,
+}) {
+  return {
+    id: sessionId,
+    agentType: "codex",
+    cwd,
+    status: "initializing",
+    createdAt: new Date().toISOString(),
+    process: processHandle,
+    output: readline.createInterface({ input: processHandle.stdout }),
+    pendingRequests: new Map(),
+    nextRequestId: 1,
+    pendingPermissions: new Map(),
+    toolOutputs: new Map(),
+    currentPrompt: null,
+    activeTurnId: null,
+    agentSessionId: undefined,
+    timeoutSecs: timeoutSecs ?? undefined,
+    codexVersion: null,
+    availableModelRecords: [],
+    currentModelId: null,
+    currentModeId,
+    reasoningEffort: "medium",
+    latestTurnUsage: undefined,
+  };
+}
+
 function normalizeModelRecords(result) {
   const data = Array.isArray(result?.data) ? result.data : [];
   return data
@@ -202,6 +243,143 @@ function buildSessionStatus(session, status = session.status) {
     modes: codexModes(),
     configOptions: buildConfigOptions(session),
   };
+}
+
+function replayChunkMeta(item) {
+  const messageId =
+    typeof item?.id === "string" && item.id.length > 0 ? item.id : undefined;
+  const rawTimestamp = item?.timestamp ?? item?.createdAt ?? item?.created_at;
+  const timestamp =
+    typeof rawTimestamp === "number"
+      ? rawTimestamp
+      : typeof rawTimestamp === "string" && rawTimestamp.length > 0
+        ? Date.parse(rawTimestamp)
+        : undefined;
+
+  return {
+    messageId,
+    timestamp:
+      typeof timestamp === "number" && Number.isFinite(timestamp)
+        ? timestamp
+        : undefined,
+  };
+}
+
+function replayUserMessage(emit, session, item) {
+  const content = Array.isArray(item?.content) ? item.content : [];
+  const { messageId, timestamp } = replayChunkMeta(item);
+
+  for (const block of content) {
+    if (block?.type !== "text" || typeof block?.text !== "string") {
+      continue;
+    }
+
+    emit("provider://user-message", {
+      sessionId: session.id,
+      text: block.text,
+      messageId,
+      timestamp,
+      replay: true,
+    });
+  }
+}
+
+function replayAgentMessage(emit, session, item) {
+  const { messageId, timestamp } = replayChunkMeta(item);
+  const text =
+    typeof item?.text === "string"
+      ? item.text
+      : Array.isArray(item?.content)
+        ? item.content
+            .map((part) =>
+              typeof part === "string"
+                ? part
+                : typeof part?.text === "string"
+                  ? part.text
+                  : "",
+            )
+            .filter(Boolean)
+            .join("")
+        : "";
+  if (!text) {
+    return;
+  }
+
+  emit("provider://message-chunk", {
+    sessionId: session.id,
+    text,
+    messageId,
+    timestamp,
+    replay: true,
+  });
+}
+
+function replayReasoning(emit, session, item) {
+  const { messageId, timestamp } = replayChunkMeta(item);
+  const text = Array.isArray(item?.content)
+    ? item.content
+        .map((part) =>
+          typeof part === "string"
+            ? part
+            : typeof part?.text === "string"
+              ? part.text
+              : "",
+        )
+        .filter(Boolean)
+        .join("")
+    : typeof item?.text === "string"
+      ? item.text
+      : "";
+  if (!text) {
+    return;
+  }
+
+  emit("provider://message-chunk", {
+    sessionId: session.id,
+    text,
+    isThought: true,
+    messageId,
+    timestamp,
+    replay: true,
+  });
+}
+
+function replayToolLikeItem(emit, session, item) {
+  if (!isToolLikeItem(item)) {
+    return;
+  }
+
+  emitToolCall(emit, session, item, item?.status ?? "completed");
+  emitToolResult(emit, session, item);
+}
+
+function replayThreadItems(emit, session, thread) {
+  const turns = Array.isArray(thread?.turns) ? thread.turns : [];
+  for (const turn of turns) {
+    const items = Array.isArray(turn?.items) ? turn.items : [];
+    for (const item of items) {
+      switch (item?.type) {
+        case "userMessage":
+          replayUserMessage(emit, session, item);
+          break;
+        case "agentMessage":
+          replayAgentMessage(emit, session, item);
+          break;
+        case "reasoning":
+          replayReasoning(emit, session, item);
+          break;
+        default:
+          replayToolLikeItem(emit, session, item);
+          break;
+      }
+    }
+  }
+
+  emit("provider://prompt-complete", {
+    sessionId: session.id,
+    stopReason: "HistoryReplay",
+    historyReplay: true,
+  });
 }
 
 function isToolLikeItem(item) {
@@ -668,6 +846,42 @@ export function createProviderHandlers({ emit }) {
   const agentRegistry = createBrowserLocalAgentRegistry({ emit });
   const claudeRuntime = createClaudeRuntime({ emit });
 
+  async function withTemporaryCodexSession(cwd, callback) {
+    const processHandle = spawnCodexProcess(cwd);
+    const session = createCodexSessionRecord({
+      sessionId: randomUUID(),
+      cwd,
+      processHandle,
+      currentModeId: "auto",
+    });
+    const tempSessions = new Map([[session.id, session]]);
+    attachProcessListeners(() => {}, tempSessions, session);
+
+    try {
+      await sendRequest(session, "initialize", buildInitializeParams(), 15_000);
+      writeMessage(session, {
+        jsonrpc: "2.0",
+        method: "initialized",
+      });
+      return await callback(session);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        isAuthError(message)
+          ? "Agent authentication required. Run the login flow and try again."
+          : message,
+      );
+    } finally {
+      tempSessions.delete(session.id);
+      try {
+        session.output.close();
+      } catch {
+        // Ignore duplicate-close races during cleanup.
+      }
+      killChildTree(processHandle);
+    }
+  }
+
   async function spawnSession(params) {
     const {
       agentType,
@@ -691,36 +905,14 @@ export function createProviderHandlers({ emit }) {
     const sessionId = localSessionId ?? randomUUID();
     const resolvedMode = modeFromApprovalPolicy(approvalPolicy);
     const resolvedSandbox = sandboxFromMode(sandboxMode, networkEnabled);
-    const processHandle = spawn("codex", ["app-server"], {
+    const processHandle = spawnCodexProcess(cwd);
+    const session = createCodexSessionRecord({
+      sessionId,
       cwd,
-      env: { ...process.env },
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32",
-    });
-
-    const session = {
-      id: sessionId,
-      agentType: "codex",
-      cwd,
-      status: "initializing",
-      createdAt: new Date().toISOString(),
-      process: processHandle,
-      output: readline.createInterface({ input: processHandle.stdout }),
-      pendingRequests: new Map(),
-      nextRequestId: 1,
-      pendingPermissions: new Map(),
-      toolOutputs: new Map(),
-      currentPrompt: null,
-      activeTurnId: null,
-      agentSessionId: undefined,
-      timeoutSecs: timeoutSecs ?? undefined,
-      codexVersion: null,
-      availableModelRecords: [],
-      currentModelId: null,
+      processHandle,
+      timeoutSecs,
       currentModeId: resolvedMode,
-      reasoningEffort: "medium",
-      latestTurnUsage: undefined,
-    };
+    });
 
     sessions.set(sessionId, session);
     attachProcessListeners(emit, sessions, session);
@@ -749,6 +941,7 @@ export function createProviderHandlers({ emit }) {
       };
 
       let threadResult;
+      let resumedExistingThread = false;
       if (resumeAgentSessionId) {
         try {
           threadResult = await sendRequest(
@@ -760,6 +953,7 @@ export function createProviderHandlers({ emit }) {
             },
             20_000,
           );
+          resumedExistingThread = true;
         } catch (error) {
           if (!isRecoverableResumeError(error instanceof Error ? error.message : error)) {
             throw error;
@@ -794,6 +988,27 @@ export function createProviderHandlers({ emit }) {
         threadResult?.reasoningEffort ??
         getSelectedModelRecord(session)?.defaultReasoningEffort ??
         "medium";
+
+      if (resumedExistingThread && session.agentSessionId) {
+        let replayThread = threadResult?.thread;
+        if (!Array.isArray(replayThread?.turns)) {
+          const threadRead = await sendRequest(
+            session,
+            "thread/read",
+            {
+              threadId: session.agentSessionId,
+              includeTurns: true,
+            },
+            20_000,
+          );
+          replayThread = threadRead?.thread ?? threadRead;
+        }
+
+        if (replayThread) {
+          replayThreadItems(emit, session, replayThread);
+        }
+      }
+
       session.status = "ready";
 
       emit("provider://session-status", buildSessionStatus(session, "ready"));
@@ -1012,10 +1227,56 @@ export function createProviderHandlers({ emit }) {
       return claudeRuntime.listRemoteSessions({ cwd, cursor });
     }
 
-    return {
-      sessions: [],
-      nextCursor: null,
-    };
+    return withTemporaryCodexSession(cwd, async (session) => {
+      const raw = await sendRequest(
+        session,
+        "thread/list",
+        {
+          cursor: cursor ?? undefined,
+          limit: 25,
+          sortKey: "updated_at",
+          archived: false,
+        },
+        20_000,
+      );
+      const entries = Array.isArray(raw?.data) ? raw.data : [];
+
+      return {
+        sessions: entries
+          .filter((entry) => {
+            const entryCwd = entry?.cwd;
+            return typeof entryCwd === "string" && entryCwd === cwd;
+          })
+          .map((entry) => ({
+            sessionId: entry.id,
+            cwd: entry.cwd,
+            title:
+              (typeof entry.preview === "string" && entry.preview.length > 0
+                ? entry.preview
+                : null) ?? null,
+            updatedAt:
+              (typeof entry.updatedAt === "string" && entry.updatedAt.length > 0
+                ? entry.updatedAt
+                : typeof entry.updated_at === "string" &&
+                    entry.updated_at.length > 0
+                  ? entry.updated_at
+                  : null) ?? null,
+          }))
+          .filter(
+            (entry) =>
+              typeof entry.sessionId === "string" &&
+              entry.sessionId.length > 0 &&
+              typeof entry.cwd === "string" &&
+              entry.cwd.length > 0,
+          ),
+        nextCursor:
+          (typeof raw?.nextCursor === "string" && raw.nextCursor.length > 0
+            ? raw.nextCursor
+            : typeof raw?.next_cursor === "string" && raw.next_cursor.length > 0
+              ? raw.next_cursor
+              : null) ?? null,
+      };
+    });
   }
 
   async function forkSession({ sessionId }) {

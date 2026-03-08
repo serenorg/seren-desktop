@@ -30,10 +30,7 @@ import {
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
   getAgentConversations,
-  getMessages,
   getSerenApiKey,
-  type StoredMessage,
-  saveMessage,
     setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationMetadata as setAgentConversationMetadataDb,
     setAgentConversationSessionId as setAgentConversationSessionIdDb,
@@ -69,6 +66,7 @@ export interface AgentCompactedSummary {
 
 interface AgentConversationMetadata {
   pendingBootstrapPromptContext?: string;
+  pendingBootstrapMessages?: AgentMessage[];
 }
 
 export interface AgentMessage {
@@ -259,70 +257,25 @@ function parseAgentConversationMetadata(
 function serializeAgentConversationMetadata(
   metadata: AgentConversationMetadata,
 ): string | null {
-  return metadata.pendingBootstrapPromptContext
+  return metadata.pendingBootstrapPromptContext ||
+    (metadata.pendingBootstrapMessages &&
+      metadata.pendingBootstrapMessages.length > 0)
     ? JSON.stringify(metadata)
     : null;
 }
 
-/** Serialize an AgentMessage to the shape expected by the save_message Tauri command. */
-function agentMessageToStored(
-  conversationId: string,
-  msg: AgentMessage,
-): {
-  id: string;
-  conversationId: string;
-  role: string;
-  content: string;
-  model: string | null;
-  timestamp: number;
-  metadata: string | null;
-} {
-  const meta: Record<string, unknown> = { agentMsgType: msg.type };
-  if (msg.toolCallId) meta.toolCallId = msg.toolCallId;
-  if (msg.toolCall) meta.toolCall = msg.toolCall;
-  if (msg.diff) meta.diff = msg.diff;
-  if (msg.cost != null) meta.cost = msg.cost;
-  if (msg.duration != null) meta.duration = msg.duration;
-  return {
-    id: msg.id,
-    conversationId,
-    role: msg.type,
-    content: msg.content,
-    model: null,
-    timestamp: msg.timestamp,
-    metadata: JSON.stringify(meta),
-  };
+/**
+ * Provider-owned agent transcripts are not stored in Seren SQLite.
+ * We keep only in-memory session messages plus narrow bootstrap metadata for
+ * exact local forks that have not materialized provider history yet.
+ */
+function persistAgentMessage(_conversationId: string, _msg: AgentMessage): void {
+  // Intentionally no-op.
 }
 
-/** Deserialize a StoredMessage from SQLite back into an AgentMessage. */
-function storedToAgentMessage(stored: StoredMessage): AgentMessage {
-  const meta = stored.metadata ? JSON.parse(stored.metadata) : {};
-  return {
-    id: stored.id,
-    type: (meta.agentMsgType ?? stored.role) as AgentMessage["type"],
-    content: stored.content,
-    timestamp: stored.timestamp,
-    toolCallId: meta.toolCallId,
-    toolCall: meta.toolCall,
-    diff: meta.diff,
-    cost: meta.cost,
-    duration: meta.duration,
-  };
-}
-
-/** Fire-and-forget persist of a single agent message to SQLite. */
-function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
-  const s = agentMessageToStored(conversationId, msg);
-  saveMessage(
-    s.id,
-    s.conversationId,
-    s.role,
-    s.content,
-    s.model,
-    s.timestamp,
-    s.metadata,
-  ).catch((err) =>
-    console.error("[AgentStore] Failed to persist agent message:", err),
+function clearLegacyAgentTranscript(conversationId: string): void {
+  clearConversationHistory(conversationId).catch((error) =>
+    console.warn("[AgentStore] Failed to clear legacy provider transcript:", error),
   );
 }
 
@@ -990,6 +943,9 @@ export const agentStore = {
           resumeAgentSessionId ?? undefined,
           serializeAgentConversationMetadata({
             pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
+            pendingBootstrapMessages: opts?.bootstrapPromptContext
+              ? opts?.restoredMessages
+              : undefined,
           }) ?? undefined,
         );
       } catch (error) {
@@ -1009,10 +965,9 @@ export const agentStore = {
         pendingUserMessage: "",
         cwd,
         conversationId: info.id,
-        // When we already have persisted messages from SQLite, skip the
-        // backend's history replay to avoid duplicates and skill-content
-        // pollution (the backend replays the full context including injected
-        // skill text as user messages).
+        // When we already have a pending local bootstrap snapshot, skip the
+        // provider's replay to avoid duplicates until that bootstrap state is
+        // cleared and provider history becomes authoritative.
         skipHistoryReplay: hasRestoredMessages ? true : undefined,
         restoredMessageCount: hasRestoredMessages
           ? opts?.restoredMessages?.length
@@ -1233,8 +1188,8 @@ export const agentStore = {
   /**
    * Resume a persisted agent conversation by loading its remote agent session.
    *
-   * This relies on the agent sidecar supporting `load_session` and having access
-   * to the underlying session store (e.g., local Codex threads).
+   * Provider sessions own transcript history; Seren only restores local
+   * bootstrap snapshots for forks that have not materialized provider history yet.
    */
   async resumeAgentConversation(
     conversationId: string,
@@ -1288,21 +1243,11 @@ export const agentStore = {
     const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);
     const pendingBootstrapPromptContext =
       convoMetadata.pendingBootstrapPromptContext;
-
-    // Load persisted messages from SQLite so the user sees full history immediately.
-    let restoredMessages: AgentMessage[] = [];
-    try {
-      const stored = await getMessages(conversationId, 1000);
-      restoredMessages = stored.map(storedToAgentMessage);
-      if (restoredMessages.length > 0) {
-        console.log(
-          `[AgentStore] Restored ${restoredMessages.length} persisted messages for conversation`,
-          conversationId,
-        );
-      }
-    } catch (err) {
-      console.warn("[AgentStore] Failed to load persisted agent messages:", err);
-    }
+    const restoredMessages = Array.isArray(
+      convoMetadata.pendingBootstrapMessages,
+    )
+      ? convoMetadata.pendingBootstrapMessages
+      : [];
 
     const remoteSessionId = convo.agent_session_id?.trim();
     if (!remoteSessionId) {
@@ -1389,6 +1334,9 @@ export const agentStore = {
     }
 
     if (sessionId) {
+      if (!pendingBootstrapPromptContext) {
+        clearLegacyAgentTranscript(conversationId);
+      }
       clearSpawnFailures(conversationId);
       void this.refreshRecentAgentConversations(200).catch(() => {});
     } else {
@@ -1469,7 +1417,8 @@ export const agentStore = {
     sessionId: string,
     bootstrapPromptContext?: string,
   ) {
-    if (!state.sessions[sessionId]) {
+    const session = state.sessions[sessionId];
+    if (!session) {
       return;
     }
 
@@ -1479,12 +1428,15 @@ export const agentStore = {
       "bootstrapPromptContext",
       bootstrapPromptContext,
     );
-    const conversationId = state.sessions[sessionId]?.conversationId;
+    const conversationId = session.conversationId;
     if (conversationId) {
       void setAgentConversationMetadataDb(
         conversationId,
         serializeAgentConversationMetadata({
           pendingBootstrapPromptContext: bootstrapPromptContext,
+          pendingBootstrapMessages: bootstrapPromptContext
+            ? session.messages
+            : undefined,
         }),
       ).catch((error) => {
         console.warn("Failed to persist agent bootstrap context", error);
@@ -1494,6 +1446,10 @@ export const agentStore = {
 
   clearBootstrapPromptContext(sessionId: string) {
     this.setBootstrapPromptContext(sessionId, undefined);
+    const conversationId = state.sessions[sessionId]?.conversationId;
+    if (conversationId) {
+      clearLegacyAgentTranscript(conversationId);
+    }
   },
 
   async restoreSessionSettings(
@@ -3377,13 +3333,11 @@ Summary:`;
         newAgentSessionId ?? undefined,
         serializeAgentConversationMetadata({
           pendingBootstrapPromptContext: bootstrapPromptContext,
+          pendingBootstrapMessages: bootstrapPromptContext
+            ? forkedMessages
+            : undefined,
         }) ?? undefined,
       );
-
-      // Persist forked messages to the new conversation.
-      for (const msg of forkedMessages) {
-        persistAgentMessage(newConversationId, msg);
-      }
     } catch (err) {
       console.error("[AgentStore] forkConversation: DB error:", err);
       return null;

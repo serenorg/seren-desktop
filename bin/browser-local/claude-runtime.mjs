@@ -519,6 +519,151 @@ function buildPromptMeta(result) {
   };
 }
 
+function replayMetaFromHistoryEntry(entry) {
+  const messageId =
+    typeof entry?.uuid === "string" && entry.uuid.length > 0
+      ? entry.uuid
+      : undefined;
+  const rawTimestamp = entry?.timestamp;
+  const timestamp =
+    typeof rawTimestamp === "number"
+      ? rawTimestamp
+      : typeof rawTimestamp === "string" && rawTimestamp.length > 0
+        ? Date.parse(rawTimestamp)
+        : undefined;
+
+  return {
+    messageId,
+    timestamp:
+      typeof timestamp === "number" && Number.isFinite(timestamp)
+        ? timestamp
+        : undefined,
+  };
+}
+
+function replayClaudeHistoryEntry(emit, session, entry) {
+  const type = entry?.type;
+  if (type !== "user" && type !== "assistant") {
+    return;
+  }
+
+  const blocks = Array.isArray(entry?.message?.content) ? entry.message.content : [];
+  const { messageId, timestamp } = replayMetaFromHistoryEntry(entry);
+
+  for (const block of blocks) {
+    switch (block?.type) {
+      case "text":
+        if (typeof block.text !== "string" || block.text.length === 0) {
+          break;
+        }
+        if (type === "user") {
+          emit("provider://user-message", {
+            sessionId: session.id,
+            text: block.text,
+            messageId,
+            timestamp,
+            replay: true,
+          });
+        } else {
+          emit("provider://message-chunk", {
+            sessionId: session.id,
+            text: block.text,
+            messageId,
+            timestamp,
+            replay: true,
+          });
+        }
+        break;
+
+      case "thinking":
+        if (type !== "assistant") {
+          break;
+        }
+        if (typeof block.thinking !== "string" || block.thinking.length === 0) {
+          break;
+        }
+        emit("provider://message-chunk", {
+          sessionId: session.id,
+          text: block.thinking,
+          isThought: true,
+          messageId,
+          timestamp,
+          replay: true,
+        });
+        break;
+
+      case "tool_use":
+        if (type !== "assistant") {
+          break;
+        }
+        if (typeof block.id !== "string" || typeof block.name !== "string") {
+          break;
+        }
+        emitToolCall(
+          emit,
+          session,
+          block.name,
+          block.input ?? {},
+          block.id,
+          "completed",
+        );
+        break;
+
+      case "tool_result":
+        if (type !== "user" || typeof block.tool_use_id !== "string") {
+          break;
+        }
+        emitToolResult(
+          emit,
+          session,
+          block.tool_use_id,
+          block.content ?? null,
+          block.is_error === true,
+        );
+        break;
+
+      default:
+        break;
+    }
+  }
+}
+
+async function replayClaudeHistoryBestEffort(emit, session, cwd, sessionId) {
+  const historyPath = await findSessionJsonlPath(cwd, sessionId);
+  if (!historyPath) {
+    return;
+  }
+
+  let bytes;
+  try {
+    bytes = await fs.readFile(historyPath, "utf8");
+  } catch {
+    return;
+  }
+
+  for (const line of bytes.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    let entry;
+    try {
+      entry = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+
+    replayClaudeHistoryEntry(emit, session, entry);
+  }
+
+  emit("provider://prompt-complete", {
+    sessionId: session.id,
+    stopReason: "HistoryReplay",
+    historyReplay: true,
+  });
+}
+
 function handleControlResponse(session, payload) {
   const requestId = payload?.response?.request_id;
   if (typeof requestId !== "string") {
@@ -1008,6 +1153,16 @@ export function createClaudeRuntime({ emit }) {
           session.availableModelRecords,
         ) ??
         session.currentModelId;
+
+      if (resumeAgentSessionId) {
+        await replayClaudeHistoryBestEffort(
+          emit,
+          session,
+          cwd,
+          resumeAgentSessionId,
+        );
+      }
+
       session.status = "ready";
 
       emit("provider://session-status", buildSessionStatus(session, "ready"));
