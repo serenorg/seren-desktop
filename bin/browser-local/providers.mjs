@@ -5,6 +5,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import readline from "node:readline";
 import { createBrowserLocalAgentRegistry } from "./agent-registry.mjs";
+import { createClaudeRuntime } from "./claude-runtime.mjs";
 
 function isAuthError(message) {
   const lower = String(message).toLowerCase();
@@ -632,6 +633,11 @@ function attachProcessListeners(emit, sessions, session) {
   });
 
   session.process.on("exit", () => {
+    const wasTracked = sessions.delete(session.id);
+    if (!wasTracked) {
+      return;
+    }
+
     rejectPendingRequests(
       session,
       new Error("Codex App Server stopped before request completed."),
@@ -649,7 +655,6 @@ function attachProcessListeners(emit, sessions, session) {
     }
 
     session.status = "terminated";
-    sessions.delete(session.id);
     emit("acp://session-status", {
       sessionId: session.id,
       status: "terminated",
@@ -661,6 +666,7 @@ function attachProcessListeners(emit, sessions, session) {
 export function createProviderHandlers({ emit }) {
   const sessions = new Map();
   const agentRegistry = createBrowserLocalAgentRegistry({ emit });
+  const claudeRuntime = createClaudeRuntime({ emit });
 
   async function spawnSession(params) {
     const {
@@ -674,10 +680,12 @@ export function createProviderHandlers({ emit }) {
       timeoutSecs,
     } = params;
 
+    if (agentType === "claude-code") {
+      return claudeRuntime.spawnSession(params);
+    }
+
     if (agentType !== "codex") {
-      throw new Error(
-        "Browser-local currently supports Codex only. Claude browser-local integration is not implemented yet.",
-      );
+      throw new Error(`Unsupported browser-local agent type: ${agentType}`);
     }
 
     const sessionId = localSessionId ?? randomUUID();
@@ -816,7 +824,7 @@ export function createProviderHandlers({ emit }) {
   async function sendPrompt({ sessionId, prompt, context }) {
     const session = sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      return claudeRuntime.sendPrompt({ sessionId, prompt, context });
     }
     if (session.currentPrompt) {
       throw new Error("Another prompt is already active for this session.");
@@ -885,7 +893,7 @@ export function createProviderHandlers({ emit }) {
   async function cancelPrompt({ sessionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      return claudeRuntime.cancelPrompt({ sessionId });
     }
     if (!session.activeTurnId) {
       return;
@@ -915,7 +923,7 @@ export function createProviderHandlers({ emit }) {
   async function terminateSession({ sessionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      return claudeRuntime.terminateSession({ sessionId });
     }
 
     sessions.delete(sessionId);
@@ -934,21 +942,24 @@ export function createProviderHandlers({ emit }) {
   }
 
   async function listSessions() {
-    return Array.from(sessions.values()).map((session) => ({
-      id: session.id,
-      agentType: session.agentType,
-      cwd: session.cwd,
-      status: session.status,
-      createdAt: session.createdAt,
-      agentSessionId: session.agentSessionId,
-      timeoutSecs: session.timeoutSecs,
-    }));
+    return [
+      ...Array.from(sessions.values()).map((session) => ({
+        id: session.id,
+        agentType: session.agentType,
+        cwd: session.cwd,
+        status: session.status,
+        createdAt: session.createdAt,
+        agentSessionId: session.agentSessionId,
+        timeoutSecs: session.timeoutSecs,
+      })),
+      ...(await claudeRuntime.listSessions()),
+    ];
   }
 
   async function setPermissionMode({ sessionId, mode }) {
     const session = sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      return claudeRuntime.setPermissionMode({ sessionId, mode });
     }
 
     session.currentModeId = mode === "ask" ? "ask" : "auto";
@@ -958,7 +969,7 @@ export function createProviderHandlers({ emit }) {
   async function respondToPermission({ sessionId, requestId, optionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      return claudeRuntime.respondToPermission({ sessionId, requestId, optionId });
     }
 
     const pending = session.pendingPermissions.get(requestId);
@@ -1000,14 +1011,22 @@ export function createProviderHandlers({ emit }) {
     agentRegistry.launchLogin(agentType);
   }
 
-  async function listRemoteSessions() {
+  async function listRemoteSessions({ agentType, cwd, cursor }) {
+    if (agentType === "claude-code") {
+      return claudeRuntime.listRemoteSessions({ cwd, cursor });
+    }
+
     return {
       sessions: [],
       nextCursor: null,
     };
   }
 
-  async function forkSession() {
+  async function forkSession({ sessionId }) {
+    if (claudeRuntime.hasSession(sessionId)) {
+      return claudeRuntime.forkSession({ sessionId });
+    }
+
     throw new Error(
       "Forking direct Codex sessions is not supported in browser-local mode yet.",
     );
@@ -1016,7 +1035,7 @@ export function createProviderHandlers({ emit }) {
   async function setModel({ sessionId, modelId }) {
     const session = sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      return claudeRuntime.setModel({ sessionId, modelId });
     }
 
     const targetModel =
@@ -1044,7 +1063,7 @@ export function createProviderHandlers({ emit }) {
   async function setConfigOption({ sessionId, configId, valueId }) {
     const session = sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      return claudeRuntime.setConfigOption({ sessionId, configId, valueId });
     }
     if (configId !== "reasoning_effort") {
       return null;

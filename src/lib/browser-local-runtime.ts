@@ -1,5 +1,5 @@
 // ABOUTME: Browser-local runtime client for the localhost launcher.
-// ABOUTME: Connects to the bundled WebSocket JSON-RPC bridge for ACP and file access.
+// ABOUTME: Connects to the bundled WebSocket JSON-RPC bridge for provider agents and local file access.
 
 import type { SerenRuntimeConfig } from "@/lib/runtime";
 

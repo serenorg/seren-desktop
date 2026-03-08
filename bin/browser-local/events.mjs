@@ -3,6 +3,22 @@
 
 const authenticatedClients = new Set();
 
+function eventAliases(method) {
+  if (typeof method !== "string") {
+    return [];
+  }
+
+  if (method.startsWith("acp://")) {
+    return [method, `provider://${method.slice("acp://".length)}`];
+  }
+
+  if (method.startsWith("provider://")) {
+    return [method, `acp://${method.slice("provider://".length)}`];
+  }
+
+  return [method];
+}
+
 export function addClient(ws) {
   authenticatedClients.add(ws);
   ws.on("close", () => authenticatedClients.delete(ws));
@@ -13,15 +29,17 @@ export function removeClient(ws) {
 }
 
 export function emit(method, params = null) {
-  const payload = JSON.stringify({
-    jsonrpc: "2.0",
-    method,
-    params,
-  });
+  for (const eventMethod of eventAliases(method)) {
+    const payload = JSON.stringify({
+      jsonrpc: "2.0",
+      method: eventMethod,
+      params,
+    });
 
-  for (const client of authenticatedClients) {
-    if (client.readyState === client.OPEN) {
-      client.send(payload);
+    for (const client of authenticatedClients) {
+      if (client.readyState === client.OPEN) {
+        client.send(payload);
+      }
     }
   }
 }

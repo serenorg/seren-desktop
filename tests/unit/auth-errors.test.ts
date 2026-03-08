@@ -13,6 +13,10 @@ describe("isAuthError", () => {
     expect(isAuthError("does not have access")).toBe(true);
     expect(isAuthError("Run claude login to authenticate")).toBe(true);
     expect(isAuthError("please login again")).toBe(true);
+    expect(isAuthError("Failed to authenticate. API Error: 403")).toBe(true);
+    expect(
+      isAuthError("Your session has expired. Run claude login to re-authenticate."),
+    ).toBe(true);
   });
 
   it("returns false for null/undefined/empty", () => {
@@ -49,6 +53,9 @@ describe("isLikelyAuthError", () => {
     expect(isLikelyAuthError("token expired")).toBe(true);
     expect(isLikelyAuthError("authentication_error: invalid")).toBe(true);
     expect(isLikelyAuthError("not logged in")).toBe(true);
+    expect(isLikelyAuthError("Failed to authenticate. API Error: 403")).toBe(
+      true,
+    );
   });
 
   it("returns false for null/undefined/empty", () => {

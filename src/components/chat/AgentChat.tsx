@@ -15,8 +15,8 @@ import {
   untrack,
 } from "solid-js";
 import { createStore } from "solid-js/store";
-import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
-import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
+import { AgentPermissionDialog } from "@/components/agent/AgentPermissionDialog";
+import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
 import { CompactedMessage } from "@/components/chat/CompactedMessage";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
@@ -596,7 +596,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
 
-    // Split attachments: images go as ACP context blocks; docreader files get extracted to text
+    // Split attachments: images go as agent context blocks; docreader files get extracted to text
     const imageAttachments = images.filter((a) => !isDocreaderMime(a.mimeType));
     const docAttachments = images.filter((a) => isDocreaderMime(a.mimeType));
     console.log("[AgentChat] Attachment split:", {
@@ -669,7 +669,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         : undefined;
 
     console.log(
-      "[AgentChat] Sending prompt to ACP, context blocks:",
+      "[AgentChat] Sending prompt to agent runtime, context blocks:",
       context?.length ?? 0,
     );
     const docNames =
@@ -1402,7 +1402,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           >
             {(perm) => (
               <div class="px-5 py-2">
-                <AcpPermissionDialog permission={perm} />
+                <AgentPermissionDialog permission={perm} />
               </div>
             )}
           </For>

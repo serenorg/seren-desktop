@@ -35,6 +35,7 @@ export interface AgentSessionInfo {
   timeoutSecs?: number;
 }
 
+// Legacy compatibility alias retained while ACP-named imports are removed.
 export type AcpSessionInfo = AgentSessionInfo;
 
 export interface AgentInfo {
@@ -227,6 +228,7 @@ export type AgentEvent =
   | { type: "userMessage"; data: UserMessageEvent }
   | { type: "error"; data: ErrorEvent };
 
+// Legacy compatibility alias retained while ACP-named imports are removed.
 export type AcpEvent = AgentEvent;
 
 type InvokeFn = <T>(
@@ -528,22 +530,29 @@ export async function launchLogin(agentType: AgentType): Promise<void> {
 // Event Subscription
 // ============================================================================
 
-const EVENT_CHANNELS = {
-  messageChunk: "acp://message-chunk",
-  toolCall: "acp://tool-call",
-  toolResult: "acp://tool-result",
-  diff: "acp://diff",
-  planUpdate: "acp://plan-update",
-  promptComplete: "acp://prompt-complete",
-  permissionRequest: "acp://permission-request",
-  diffProposal: "acp://diff-proposal",
-  sessionStatus: "acp://session-status",
-  configOptionsUpdate: "acp://config-options-update",
-  userMessage: "acp://user-message",
-  error: "acp://error",
+const EVENT_SUFFIXES = {
+  messageChunk: "message-chunk",
+  toolCall: "tool-call",
+  toolResult: "tool-result",
+  diff: "diff",
+  planUpdate: "plan-update",
+  promptComplete: "prompt-complete",
+  permissionRequest: "permission-request",
+  diffProposal: "diff-proposal",
+  sessionStatus: "session-status",
+  configOptionsUpdate: "config-options-update",
+  userMessage: "user-message",
+  error: "error",
 } as const;
 
-type EventType = keyof typeof EVENT_CHANNELS;
+type EventType = keyof typeof EVENT_SUFFIXES;
+
+function eventChannelForRuntime(eventType: EventType): string {
+  const suffix = EVENT_SUFFIXES[eventType];
+  return isBrowserLocalRuntime()
+    ? `provider://${suffix}`
+    : `acp://${suffix}`;
+}
 
 /**
  * Subscribe to a specific agent runtime event type.
@@ -553,7 +562,7 @@ export async function subscribeToEvent<T extends { sessionId: string }>(
   eventType: EventType,
   callback: (data: T) => void,
 ): Promise<UnlistenFn> {
-  const channel = EVENT_CHANNELS[eventType];
+  const channel = eventChannelForRuntime(eventType);
   if (isTauriRuntime()) {
     const { listen } = await import("@tauri-apps/api/event");
     return listen<T>(channel, (event) => {

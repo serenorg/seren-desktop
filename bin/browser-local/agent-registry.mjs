@@ -56,10 +56,37 @@ async function isCommandAvailable(command) {
   }
 }
 
-function unsupportedClaudeError() {
-  return new Error(
-    "Claude browser-local integration is not implemented yet.",
-  );
+async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
+  if (await isCommandAvailable(command)) {
+    return command;
+  }
+
+  emit("acp://cli-install-progress", {
+    stage: "installing",
+    message: `Installing ${label} CLI...`,
+  });
+
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  await new Promise((resolvePromise, rejectPromise) => {
+    execFile(
+      npmCommand,
+      ["install", "-g", packageName],
+      (error, stdout, stderr) => {
+        if (error) {
+          rejectPromise(new Error(stderr || error.message));
+          return;
+        }
+        resolvePromise(stdout.trim());
+      },
+    );
+  });
+
+  emit("acp://cli-install-progress", {
+    stage: "complete",
+    message: `${label} CLI installed successfully`,
+  });
+
+  return command;
 }
 
 export function createBrowserLocalAgentRegistry({ emit }) {
@@ -89,36 +116,12 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return true;
       },
       async ensureCli() {
-        if (await isCommandAvailable("codex")) {
-          return "codex";
-        }
-
-        emit("acp://cli-install-progress", {
-          stage: "installing",
-          message: "Installing Codex CLI...",
+        return ensureGlobalNpmPackage({
+          emit,
+          command: "codex",
+          packageName: "@openai/codex",
+          label: "Codex",
         });
-
-        const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-        const result = await new Promise((resolvePromise, rejectPromise) => {
-          execFile(
-            npmCommand,
-            ["install", "-g", "@openai/codex"],
-            (error, stdout, stderr) => {
-              if (error) {
-                rejectPromise(new Error(stderr || error.message));
-                return;
-              }
-              resolvePromise(stdout.trim());
-            },
-          );
-        });
-
-        emit("acp://cli-install-progress", {
-          stage: "complete",
-          message: "Codex CLI installed successfully",
-        });
-
-        return result || "codex";
       },
       launchLogin() {
         launchLoginCommand("codex");
@@ -130,21 +133,31 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       description: "Anthropic Claude Code via direct provider runtime",
       command: "claude",
       async getAvailability() {
+        const installed = await isCommandAvailable("claude");
         return {
           type: "claude-code",
           name: "Claude Code",
           description: "Anthropic Claude Code via direct provider runtime",
           command: "claude",
-          available: false,
-          unavailableReason:
-            "Claude browser-local integration is not implemented yet.",
+          available: true,
+          ...(installed
+            ? {}
+            : {
+                unavailableReason:
+                  "Claude Code CLI is not installed yet. Seren can install it automatically on first launch.",
+              }),
         };
       },
       async canSpawn() {
-        return false;
+        return true;
       },
       async ensureCli() {
-        throw unsupportedClaudeError();
+        return ensureGlobalNpmPackage({
+          emit,
+          command: "claude",
+          packageName: "@anthropic-ai/claude-code",
+          label: "Claude Code",
+        });
       },
       launchLogin() {
         launchLoginCommand("claude");

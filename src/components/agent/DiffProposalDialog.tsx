@@ -1,4 +1,4 @@
-// ABOUTME: Diff proposal review dialog for agent file edits.
+// ABOUTME: Review dialog for agent file edits before writing to disk.
 // ABOUTME: Shows Monaco diff editor with accept/reject buttons before writing to disk.
 
 import type * as Monaco from "monaco-editor";

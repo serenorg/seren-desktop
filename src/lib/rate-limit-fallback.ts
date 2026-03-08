@@ -319,7 +319,7 @@ export async function performAgentFallback(
 
     // Switch UI from Agent → Chat: navigate to the new chat thread so
     // AgentChat unmounts and subsequent messages go to the chat orchestrator,
-    // not the already-full ACP session.
+    // not the already-full agent session.
     threadStore.selectThread(conversation.id, "chat");
     agentStore.setAgentModeEnabled(false);
 

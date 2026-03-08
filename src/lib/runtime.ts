@@ -10,6 +10,7 @@ export type SerenRuntimeMode =
 
 export interface SerenRuntimeCapabilities {
   agents: boolean;
+  // Legacy alias for `agents` kept during the ACP migration.
   acp: boolean;
   localFiles: boolean;
   localMcp: boolean;

@@ -766,7 +766,7 @@ export async function getAgentConversation(
 }
 
 /**
- * Update the remote ACP session id (e.g., Codex thread id) for a persisted agent conversation.
+ * Update the remote agent session id (e.g., Codex thread id) for a persisted agent conversation.
  */
 export async function setAgentConversationSessionId(
   id: string,

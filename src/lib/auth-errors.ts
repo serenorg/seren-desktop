@@ -8,6 +8,7 @@ const AUTH_ERROR_PATTERNS = [
   /not logged in/i,
   /authentication required/i,
   /authentication_error/i,
+  /failed to authenticate/i,
   /auth required/i,
   /oauth token has expired/i,
   /token has expired/i,
@@ -19,6 +20,7 @@ const AUTH_ERROR_PATTERNS = [
   /please sign in/i,
   /does not have access/i,
   /please login again/i,
+  /re-authenticate/i,
 ];
 
 /**

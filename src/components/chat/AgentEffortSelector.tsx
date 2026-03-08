@@ -1,4 +1,4 @@
-// ABOUTME: Dropdown component for selecting agent reasoning effort (ACP config option).
+// ABOUTME: Dropdown component for selecting agent reasoning effort.
 // ABOUTME: Currently targets Codex's `reasoning_effort` session config option when available.
 
 import type { Component } from "solid-js";

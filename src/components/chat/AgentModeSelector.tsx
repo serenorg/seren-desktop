@@ -1,5 +1,5 @@
 // ABOUTME: Dropdown component for selecting the permission mode in an agent session.
-// ABOUTME: Shows available modes reported by the ACP agent and sends set_mode commands.
+// ABOUTME: Shows available modes reported by the active agent runtime and sends set_mode commands.
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";

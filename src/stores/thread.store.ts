@@ -29,7 +29,7 @@ export interface Thread {
   status: ThreadStatus;
   projectRoot: string | null;
   timestamp: number;
-  /** Whether this thread has an active in-memory ACP session. */
+  /** Whether this thread has an active in-memory agent runtime session. */
   isLive: boolean;
 }
 
@@ -279,7 +279,7 @@ export const threadStore = {
   // --------------------------------------------------------------------------
 
   /**
-   * Select a thread by ID. Updates the underlying store (conversation or ACP)
+   * Select a thread by ID. Updates the underlying store (conversation or agent)
    * to match.
    */
   selectThread(id: string, kind: "chat" | "agent") {
@@ -360,7 +360,7 @@ export const threadStore = {
   },
 
   /**
-   * Create a new agent thread by spawning an ACP session.
+   * Create a new agent thread by spawning an agent session.
    */
   async createAgentThread(
     agentType: AgentType,

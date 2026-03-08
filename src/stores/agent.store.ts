@@ -112,9 +112,9 @@ export interface ActiveSession {
   cwd: string;
   /** Local persisted conversation id (SQLite). */
   conversationId: string;
-  /** Remote ACP session id (e.g., Codex thread id). */
+  /** Remote agent runtime session id (e.g., Codex thread id). */
   agentSessionId?: string;
-  /** Session configuration options reported by the agent (unstable ACP surface). */
+  /** Session configuration options reported by the agent runtime. */
   configOptions?: SessionConfigOption[];
   /** Timestamp when the current prompt started */
   promptStartTime?: number;
@@ -229,7 +229,7 @@ function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
 // State
 // ============================================================================
 
-interface AcpState {
+interface AgentState {
   /** Available agents and their status */
   availableAgents: AgentInfo[];
   /** Active sessions keyed by session ID */
@@ -240,7 +240,7 @@ interface AcpState {
   selectedAgentType: AgentType;
   /** Recent persisted agent conversations for resuming. */
   recentAgentConversations: DbAgentConversation[];
-  /** Remote sessions listed from the agent's underlying session store (ACP listSessions). */
+  /** Remote sessions listed from the agent's underlying session store. */
   remoteSessions: RemoteSessionInfo[];
   remoteSessionsNextCursor: string | null;
   remoteSessionsLoading: boolean;
@@ -259,7 +259,7 @@ interface AcpState {
   agentModeEnabled: boolean;
 }
 
-const [state, setState] = createStore<AcpState>({
+const [state, setState] = createStore<AgentState>({
   availableAgents: [],
   sessions: {},
   activeSessionId: null,
@@ -570,7 +570,7 @@ export const agentStore = {
   // ============================================================================
 
   /**
-   * Initialize the ACP store by loading available agents.
+   * Initialize the agent store by loading available agents.
    */
   async initialize() {
     if (!runtimeHasCapability("agents")) {
@@ -771,7 +771,7 @@ export const agentStore = {
         },
       );
 
-    // Subscribe once to all ACP events before spawning, so early replay events
+    // Subscribe once to all agent runtime events before spawning, so early replay events
     // from load_session are buffered instead of dropped.
     if (!globalUnsubscribe) {
       globalUnsubscribe = await providerService.subscribeToAllEvents((event) => {
@@ -782,7 +782,7 @@ export const agentStore = {
         // still logged for debugging.
         if (event.type !== "messageChunk") {
           console.log(
-            "[ACP] Event received - type:",
+            "[AgentRuntime] Event received - type:",
             event.type,
             "sessionId:",
             eventSessionId,
@@ -826,7 +826,7 @@ export const agentStore = {
           );
         } else {
           progressUnsub = onRuntimeEvent(
-            "acp://cli-install-progress",
+            "provider://cli-install-progress",
             (payload) => {
               const event = payload as { stage?: string; message?: string };
               setState("installStatus", event.message ?? null);
@@ -1130,7 +1130,7 @@ export const agentStore = {
   },
 
   /**
-   * Resume a persisted agent conversation by loading its remote ACP session.
+   * Resume a persisted agent conversation by loading its remote agent session.
    *
    * This relies on the agent sidecar supporting `load_session` and having access
    * to the underlying session store (e.g., local Codex threads).
@@ -1290,7 +1290,7 @@ export const agentStore = {
     return sessionId;
   },
   /**
-   * Resume a remote agent session (ACP session id from listSessions).
+   * Resume a remote agent session from the provider's stored session list.
    *
    * If a local persisted conversation already exists for this remote session,
    * we resume that; otherwise we create a new local conversation and resume it.
@@ -1370,7 +1370,7 @@ export const agentStore = {
    */
   setActiveSession(sessionId: string | null) {
     console.log(
-      "[ACP] setActiveSession - old:",
+      "[AgentRuntime] setActiveSession - old:",
       state.activeSessionId,
       "new:",
       sessionId,
@@ -1727,7 +1727,7 @@ Summary:`;
     };
 
     console.log(
-      "[ACP] Adding user message to session:",
+      "[AgentRuntime] Adding user message to session:",
       sessionId,
       "conversationId:",
       state.sessions[sessionId]?.conversationId,
@@ -1788,7 +1788,10 @@ Summary:`;
           ];
         }
       } catch (error) {
-        console.warn("[AgentStore] Failed to load skills for ACP prompt:", error);
+        console.warn(
+          "[AgentStore] Failed to load skills for agent prompt:",
+          error,
+        );
       }
 
       await providerService.sendPrompt(
@@ -3114,7 +3117,7 @@ Summary:`;
         duration,
       };
       console.log(
-        "[ACP] Adding assistant message to session:",
+        "[AgentRuntime] Adding assistant message to session:",
         sessionId,
         "conversationId:",
         session.conversationId,
@@ -3166,9 +3169,9 @@ Summary:`;
   /**
    * Fork the current agent conversation from a specific message.
    *
-   * Creates a new agent session with the same conversation history (via the ACP
-   * fork_session capability) and a new local conversation containing messages up
-   * to `fromMessageId`.  Returns the new local conversation ID.
+   * Creates a new agent session with the same conversation history via the
+   * provider runtime fork capability and a new local conversation containing
+   * messages up to `fromMessageId`. Returns the new local conversation ID.
    */
   async forkConversation(
     conversationId: string,
@@ -3276,6 +3279,7 @@ Summary:`;
   },
 };
 
+// Legacy compatibility alias retained while ACP-named imports are removed.
 export const acpStore = agentStore;
 
 export type {
