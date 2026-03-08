@@ -928,6 +928,14 @@ export const acpStore = {
             "status",
             "ready" as SessionStatus,
           );
+          // The ready event may have fired before sessionReadyPromises was
+          // created (buffered in pendingSessionEvents and drained before the
+          // entry existed). Resolve it now so sendPrompt doesn't hang forever.
+          const pendingReadyEntry = sessionReadyPromises.get(info.id);
+          if (pendingReadyEntry) {
+            pendingReadyEntry.resolve();
+            sessionReadyPromises.delete(info.id);
+          }
         }
       } catch (raceError) {
         const message =
