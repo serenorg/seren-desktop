@@ -6,6 +6,7 @@ import {
   onRuntimeEvent,
   runtimeInvoke,
 } from "@/lib/browser-local-runtime";
+import type { McpServerConfig } from "@/lib/mcp/types";
 import { runtimeHasCapability } from "@/lib/runtime";
 
 // ============================================================================
@@ -275,6 +276,7 @@ export async function spawnAgent(
   localSessionId?: string,
   resumeAgentSessionId?: string,
   timeoutSecs?: number,
+  mcpServers?: McpServerConfig[],
 ): Promise<AgentSessionInfo> {
   return invokeProvider<AgentSessionInfo>(
     "provider_spawn",
@@ -282,13 +284,14 @@ export async function spawnAgent(
       agentType,
       cwd,
       localSessionId: localSessionId ?? null,
-    resumeAgentSessionId: resumeAgentSessionId ?? null,
-    sandboxMode: sandboxMode ?? null,
-    apiKey: apiKey ?? null,
-    approvalPolicy: approvalPolicy ?? null,
+      resumeAgentSessionId: resumeAgentSessionId ?? null,
+      sandboxMode: sandboxMode ?? null,
+      apiKey: apiKey ?? null,
+      approvalPolicy: approvalPolicy ?? null,
       searchEnabled: searchEnabled ?? null,
       networkEnabled: networkEnabled ?? null,
       timeoutSecs: timeoutSecs ?? null,
+      mcpServers: mcpServers ?? null,
     },
     { timeoutMs: 120_000 },
   );

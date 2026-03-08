@@ -8,7 +8,10 @@ import {
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
 import { runtimeHasCapability } from "@/lib/runtime";
-import { settingsStore } from "@/stores/settings.store";
+import {
+  getEnabledMcpServers,
+  settingsStore,
+} from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 
 /** Per-session ready promises — resolved when backend emits "ready" status */
@@ -376,6 +379,45 @@ function clearChunkBuf(sessionId: string): void {
   }
   chunkBufs.delete(sessionId);
 }
+
+function disposeAgentStoreRuntimeBindings(): void {
+  if (globalUnsubscribe) {
+    globalUnsubscribe();
+    globalUnsubscribe = null;
+  }
+  pendingSessionEvents.clear();
+  sessionReadyPromises.clear();
+  recoveryInFlight = null;
+  for (const timer of chunkFlushTimers.values()) {
+    clearTimeout(timer);
+  }
+  chunkFlushTimers.clear();
+  chunkBufs.clear();
+}
+
+const agentStoreHot =
+  (import.meta as ImportMeta & {
+    hot?: { dispose: (callback: () => void) => void };
+  }).hot ?? null;
+
+if (agentStoreHot) {
+  const globalScope = globalThis as typeof globalThis & {
+    __serenAgentStoreHmrDispose__?: (() => void) | undefined;
+  };
+
+  globalScope.__serenAgentStoreHmrDispose__?.();
+
+  const dispose = () => {
+    disposeAgentStoreRuntimeBindings();
+    if (globalScope.__serenAgentStoreHmrDispose__ === dispose) {
+      delete globalScope.__serenAgentStoreHmrDispose__;
+    }
+  };
+
+  globalScope.__serenAgentStoreHmrDispose__ = dispose;
+  agentStoreHot.dispose(dispose);
+}
+
 const PENDING_SESSION_EVENT_LIMIT = 500;
 const CLAUDE_INIT_RETRY_DELAY_MS = 350;
 const MAX_CLAUDE_INIT_RETRIES = 3;
@@ -905,6 +947,7 @@ export const agentStore = {
 
       // Get Seren API key to enable MCP tools for the agent
       const apiKey = await getSerenApiKey();
+      const enabledMcpServers = getEnabledMcpServers();
 
       // No inactivity timeout — agent sessions wait indefinitely.
       // The agent may be waiting for tool approval, thinking, or the user
@@ -929,6 +972,7 @@ export const agentStore = {
         localSessionId,
         resumeAgentSessionId,
         timeoutSecs,
+        enabledMcpServers,
       );
       console.log("[AgentStore] Spawn result:", info);
 
@@ -996,6 +1040,14 @@ export const agentStore = {
         resolve: () => readyResolve(),
       };
       sessionReadyPromises.set(info.id, readyPromiseObj);
+
+      // Buffered resume events can mark the session ready before this gate is
+      // installed. If that already happened, don't leave sendPrompt blocked on
+      // a promise that will never resolve.
+      if (state.sessions[info.id]?.info.status === "ready") {
+        readyPromiseObj.resolve();
+        sessionReadyPromises.delete(info.id);
+      }
 
       // Wait for ready event with timeout (agent initialization can take a moment)
       const timeoutPromise = new Promise<string>((_, reject) => {
@@ -1754,8 +1806,9 @@ Summary:`;
     prompt: string,
     context?: Array<Record<string, string>>,
     options?: { displayContent?: string; docNames?: string[] },
+    forSessionId?: string,
   ) {
-    const sessionId = state.activeSessionId;
+    const sessionId = forSessionId ?? state.activeSessionId;
     console.log("[AgentStore] sendPrompt called:", {
       sessionId,
       prompt: prompt.slice(0, 50),
@@ -1806,7 +1859,7 @@ Summary:`;
 
     // Wait for session to be ready before sending prompt
     const readyEntry = sessionReadyPromises.get(sessionId);
-    if (readyEntry) {
+    if (readyEntry && state.sessions[sessionId]?.info.status !== "ready") {
       console.info(
         `[AgentStore] sendPrompt: waiting for session ${sessionId} to be ready...`,
       );
@@ -2095,8 +2148,8 @@ Summary:`;
   /**
    * Cancel the current prompt in the active session.
    */
-  async cancelPrompt() {
-    const sessionId = state.activeSessionId;
+  async cancelPrompt(forSessionId?: string) {
+    const sessionId = forSessionId ?? state.activeSessionId;
     if (!sessionId) {
       console.warn("[AgentStore] cancelPrompt: no active session");
       return;

@@ -315,7 +315,7 @@ export const threadStore = {
         // Verify the session actually exists in the Rust backend.
         // After an app restart the JS store may hold stale sessions
         // whose backend process is gone.
-        void listSessions().then((backendSessions) => {
+        void listSessions().then(async (backendSessions) => {
           const alive = backendSessions.some(
             (s) => s.id === liveSession.info.id,
           );
@@ -327,7 +327,8 @@ export const threadStore = {
               liveSession.info.id,
               "exists in store but not in backend — resuming",
             );
-            agentStore.terminateSession(liveSession.info.id);
+            agentStore.setActiveSession(null);
+            await agentStore.terminateSession(liveSession.info.id);
             const cwd = thread?.projectRoot || fileTreeState.rootPath;
             if (cwd) {
               void agentStore.resumeAgentConversation(id, cwd);

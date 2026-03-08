@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { buildProviderMcpConfig } from "./mcp-config.mjs";
 
 function isAuthError(message) {
   const lower = String(message).toLowerCase();
@@ -467,6 +468,7 @@ function buildClaudeArgs({
   resumeSessionId,
   forkSession,
   preferredModel,
+  mcpConfigJson,
 }) {
   const args = [
     "--output-format",
@@ -477,6 +479,10 @@ function buildClaudeArgs({
     "--include-partial-messages",
     "--replay-user-messages",
   ];
+
+  if (mcpConfigJson) {
+    args.push("--mcp-config", mcpConfigJson, "--strict-mcp-config");
+  }
 
   if (resumeSessionId) {
     args.push("--resume", resumeSessionId);
@@ -1075,6 +1081,8 @@ export function createClaudeRuntime({ emit }) {
     agentSessionId,
     currentModelId = null,
     currentModeId = "default",
+    mcpConfigJson = null,
+    spawnEnv = {},
   }) {
     return {
       id: sessionId,
@@ -1096,6 +1104,8 @@ export function createClaudeRuntime({ emit }) {
       availableModelRecords: [],
       currentModelId,
       currentModeId,
+      mcpConfigJson,
+      spawnEnv,
     };
   }
 
@@ -1104,11 +1114,14 @@ export function createClaudeRuntime({ emit }) {
       cwd,
       localSessionId,
       resumeAgentSessionId,
+      apiKey,
+      mcpServers,
       timeoutSecs,
     } = params;
 
     const sessionId = localSessionId ?? randomUUID();
     const remoteSessionId = resumeAgentSessionId ?? randomUUID();
+    const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
     const processHandle = spawn(
       "claude",
       buildClaudeArgs({
@@ -1116,10 +1129,14 @@ export function createClaudeRuntime({ emit }) {
         resumeSessionId: resumeAgentSessionId ?? null,
         forkSession: false,
         preferredModel: null,
+        mcpConfigJson: mcpConfig.claudeMcpConfigJson,
       }),
       {
         cwd,
-        env: { ...process.env },
+        env: {
+          ...process.env,
+          ...mcpConfig.childEnv,
+        },
         stdio: ["pipe", "pipe", "pipe"],
         shell: process.platform === "win32",
       },
@@ -1131,6 +1148,8 @@ export function createClaudeRuntime({ emit }) {
       processHandle,
       timeoutSecs,
       agentSessionId: remoteSessionId,
+      mcpConfigJson: mcpConfig.claudeMcpConfigJson,
+      spawnEnv: mcpConfig.childEnv,
     });
 
     sessions.set(sessionId, session);
@@ -1425,10 +1444,14 @@ export function createClaudeRuntime({ emit }) {
         resumeSessionId: sourceAgentSessionId,
         forkSession: true,
         preferredModel: session.currentModelId,
+        mcpConfigJson: session.mcpConfigJson,
       }),
       {
         cwd: session.cwd,
-        env: { ...process.env },
+        env: {
+          ...process.env,
+          ...(session.spawnEnv ?? {}),
+        },
         stdio: ["pipe", "pipe", "pipe"],
         shell: process.platform === "win32",
       },
@@ -1442,6 +1465,8 @@ export function createClaudeRuntime({ emit }) {
       agentSessionId: forkedAgentSessionId,
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
+      mcpConfigJson: session.mcpConfigJson,
+      spawnEnv: session.spawnEnv,
     });
     const tempSessions = new Map([[tempSession.id, tempSession]]);
     attachProcessListeners(silentEmit, tempSessions, tempSession);

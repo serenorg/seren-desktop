@@ -235,6 +235,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (!thread) return agentStore.activeSession;
     return agentStore.getSessionForConversation(thread.id);
   });
+  const threadSessionId = createMemo(() => threadSession()?.info.id ?? null);
+
+  createEffect(() => {
+    const sessionId = threadSessionId();
+    if (sessionId && agentStore.activeSessionId !== sessionId) {
+      agentStore.setActiveSession(sessionId);
+    }
+  });
 
   const forkSupported = createMemo(() => {
     const session = threadSession();
@@ -469,7 +477,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     );
     if (!confirmClear) return;
 
-    const session = agentStore.activeSession;
+    const session = threadSession();
     if (!session) return;
 
     // Clear messages in the active session
@@ -477,7 +485,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const compactConversation = async (preserveCount: number) => {
-    const session = agentStore.activeSession;
+    const session = threadSession();
     if (!session) return;
 
     const messages = threadMessages();
@@ -588,9 +596,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             ? `/${skill.slug} ${args}`
             : `/${skill.slug}`;
 
-        await agentStore.sendPrompt(directive, undefined, {
-          displayContent: trimmed,
-        });
+        await agentStore.sendPrompt(
+          directive,
+          undefined,
+          {
+            displayContent: trimmed,
+          },
+          threadSessionId() ?? undefined,
+        );
         return;
       }
     }
@@ -681,10 +694,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     );
     const docNames =
       docAttachments.length > 0 ? docAttachments.map((d) => d.name) : undefined;
-    await agentStore.sendPrompt(promptWithDocs, context, {
-      displayContent: trimmed,
-      docNames,
-    });
+    await agentStore.sendPrompt(
+      promptWithDocs,
+      context,
+      {
+        displayContent: trimmed,
+        docNames,
+      },
+      threadSessionId() ?? undefined,
+    );
   };
 
   // Guard flag prevents concurrent queue processing
@@ -701,7 +719,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     console.log("[AgentChat] Processing queued message:", nextMessage);
 
     try {
-      await agentStore.sendPrompt(nextMessage);
+      await agentStore.sendPrompt(
+        nextMessage,
+        undefined,
+        undefined,
+        threadSessionId() ?? undefined,
+      );
     } catch (error) {
       console.error("[AgentChat] Queued message failed:", error);
     }
@@ -728,13 +751,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const handleCancel = async () => {
     // Clear queued messages so they don't auto-send after cancellation
     setMessageQueue([]);
-    await agentStore.cancelPrompt();
+    await agentStore.cancelPrompt(threadSessionId() ?? undefined);
   };
 
   const [forking, setForking] = createSignal(false);
 
   const handleForkFromMessage = async (messageId: string) => {
-    const session = agentStore.activeSession;
+    const session = threadSession();
     if (!session || forking()) return;
 
     setForking(true);
@@ -1057,10 +1080,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110 flex-shrink-0"
                     onClick={async () => {
                       const agentType =
-                        agentStore.activeSession?.info.agentType ??
+                        threadSession()?.info.agentType ??
                         agentStore.selectedAgentType;
                       launchLogin(agentType);
-                      const sid = agentStore.activeSessionId;
+                      const sid = threadSessionId();
                       if (sid) {
                         await agentStore.terminateSession(sid);
                       }
@@ -1104,14 +1127,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 settingsStore.get("autoCompactPreserveMessages"),
               )
             }
-            disabled={agentStore.activeSession?.isCompacting}
+            disabled={threadSession()?.isCompacting}
             title={
-              agentStore.activeSession?.isCompacting
+              threadSession()?.isCompacting
                 ? "Compacting..."
                 : "Compact older messages"
             }
           >
-            {agentStore.activeSession?.isCompacting ? "Compacting..." : "Compact"}
+            {threadSession()?.isCompacting ? "Compacting..." : "Compact"}
           </button>
           <button
             type="button"
@@ -1495,10 +1518,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110"
                   onClick={async () => {
                     const agentType =
-                      agentStore.activeSession?.info.agentType ??
+                      threadSession()?.info.agentType ??
                       agentStore.selectedAgentType;
                     launchLogin(agentType);
-                    const sid = agentStore.activeSessionId;
+                    const sid = threadSessionId();
                     if (sid) {
                       await agentStore.terminateSession(sid);
                     }
@@ -1512,14 +1535,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <Show
                 when={
                   !isAuthError(sessionError()) &&
-                  agentStore.activeSession?.info.status === "error"
+                  threadSession()?.info.status === "error"
                 }
               >
                 <button
                   type="button"
                   class="text-xs underline hover:no-underline"
                   onClick={async () => {
-                    const sid = agentStore.activeSessionId;
+                    const sid = threadSessionId();
                     if (sid) {
                       await agentStore.terminateSession(sid);
                     }

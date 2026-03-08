@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import readline from "node:readline";
 import { createBrowserLocalAgentRegistry } from "./agent-registry.mjs";
 import { createClaudeRuntime } from "./claude-runtime.mjs";
+import { buildProviderMcpConfig } from "./mcp-config.mjs";
 
 function isAuthError(message) {
   const lower = String(message).toLowerCase();
@@ -101,10 +102,19 @@ function buildInitializeParams() {
   };
 }
 
-function spawnCodexProcess(cwd) {
-  return spawn("codex", ["app-server"], {
+function spawnCodexProcess(cwd, { apiKey, mcpServers } = {}) {
+  const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
+  const args = ["app-server"];
+  if (mcpConfig.codexMcpConfigOverride) {
+    args.push("-c", mcpConfig.codexMcpConfigOverride);
+  }
+
+  return spawn("codex", args, {
     cwd,
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      ...mcpConfig.childEnv,
+    },
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",
   });
@@ -888,6 +898,8 @@ export function createProviderHandlers({ emit }) {
       cwd,
       localSessionId,
       resumeAgentSessionId,
+      apiKey,
+      mcpServers,
       approvalPolicy,
       sandboxMode,
       networkEnabled,
@@ -905,7 +917,7 @@ export function createProviderHandlers({ emit }) {
     const sessionId = localSessionId ?? randomUUID();
     const resolvedMode = modeFromApprovalPolicy(approvalPolicy);
     const resolvedSandbox = sandboxFromMode(sandboxMode, networkEnabled);
-    const processHandle = spawnCodexProcess(cwd);
+    const processHandle = spawnCodexProcess(cwd, { apiKey, mcpServers });
     const session = createCodexSessionRecord({
       sessionId,
       cwd,

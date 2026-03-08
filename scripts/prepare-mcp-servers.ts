@@ -9,6 +9,7 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const SOURCE = path.join(ROOT, "mcp-servers", "playwright-stealth");
 const DEST_PARENT = path.join(ROOT, "src-tauri", "mcp-servers");
 const DEST = path.join(DEST_PARENT, "playwright-stealth");
+const RM_RETRY_OPTS = { recursive: true, force: true, maxRetries: 10, retryDelay: 100 } as const;
 
 // Main
 console.log("Preparing MCP servers...");
@@ -17,7 +18,7 @@ console.log("Preparing MCP servers...");
 const nodeModules = path.join(SOURCE, "node_modules");
 if (fs.existsSync(nodeModules)) {
 	console.log("Cleaning existing node_modules...");
-	fs.rmSync(nodeModules, { recursive: true, force: true });
+	fs.rmSync(nodeModules, RM_RETRY_OPTS);
 }
 
 // 2. Install with node-linker=hoisted to create flat node_modules WITHOUT symlinks
@@ -32,7 +33,7 @@ execSync("pnpm build", { cwd: SOURCE, stdio: "inherit" });
 // 3. Clean destination
 if (fs.existsSync(DEST_PARENT)) {
 	console.log("Cleaning destination...");
-	fs.rmSync(DEST_PARENT, { recursive: true, force: true });
+	fs.rmSync(DEST_PARENT, RM_RETRY_OPTS);
 }
 
 // 4. Simple copy - no symlink handling needed since hoisted mode creates real files
