@@ -198,7 +198,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     )
     .ok();
 
-    // Migration cleanup: early Claude ACP builds stored local placeholders like
+    // Migration cleanup: early Claude local-agent builds stored local placeholders like
     // "session-0" instead of real Claude session ids. These are not resumable.
     conn.execute(
         "UPDATE conversations

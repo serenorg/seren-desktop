@@ -910,9 +910,9 @@ fn create_worker(
         WorkerType::ChatModel => Arc::new(ChatModelWorker::with_tools(
             capabilities.tool_definitions.clone(),
         )),
-        WorkerType::AcpAgent => Arc::new(super::provider_worker::ProviderRuntimeWorker::new(
+        WorkerType::LocalAgent => Arc::new(super::provider_worker::ProviderRuntimeWorker::new(
             _app.clone(),
-            capabilities.active_acp_session_id.clone(),
+            capabilities.active_agent_session_id.clone(),
         )),
         WorkerType::McpPublisher => Arc::new(McpPublisherWorker::new()),
     }

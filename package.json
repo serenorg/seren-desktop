@@ -18,10 +18,7 @@
     "build:provider-runtime": "tsx scripts/build-provider-runtime.ts",
     "build:openclaw": "tsx scripts/build-openclaw.ts",
     "build:openclaw:optional": "tsx scripts/build-openclaw.ts --optional",
-    "build:sidecar": "tsx scripts/build-sidecar.ts",
-    "build:sidecar:release": "tsx scripts/build-sidecar.ts release",
     "sign:embedded-runtime": "tsx scripts/sign-embedded-runtime.ts",
-    "sidecar:update": "tsx scripts/update-sidecar.ts",
     "generate:api": "openapi-ts -f openapi/openapi-ts.config.ts",
     "lint": "biome lint",
     "lint:fix": "biome lint --fix",
@@ -81,29 +78,5 @@
     "vite-plugin-solid": "^2.11.0",
     "vitest": "^4.0.18"
   },
-  "publisherVersion": "v1.0.0",
-  "sidecars": {
-    "seren-acp-claude": {
-      "name": "Claude Code",
-      "git": "https://github.com/serenorg/seren-acp-claude",
-      "branch": "main",
-      "bin": "seren-acp-claude",
-      "dest": "seren-acp-claude"
-    },
-    "seren-acp-codex": {
-      "name": "Codex",
-      "git": "https://github.com/serenorg/seren-acp-codex",
-      "branch": "main",
-      "bin": "seren-acp-codex",
-      "dest": "seren-acp-codex"
-    },
-    "seren-mcp": {
-      "name": "Seren MCP",
-      "git": "https://github.com/serenorg/seren",
-      "tag": "v0.4.0",
-      "package": "seren-mcp",
-      "bin": "seren-mcp",
-      "dest": "seren-mcp"
-    }
-  }
+  "publisherVersion": "v1.0.0"
 }

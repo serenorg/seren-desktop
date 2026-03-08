@@ -154,7 +154,6 @@ function injectRuntimeConfig(html, origin, projectRoot) {
     mode: "browser-local",
     capabilities: {
       agents: true,
-      acp: true,
       localFiles: true,
       localMcp: false,
       openclaw: false,

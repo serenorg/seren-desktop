@@ -10,8 +10,6 @@ export type SerenRuntimeMode =
 
 export interface SerenRuntimeCapabilities {
   agents: boolean;
-  // Legacy alias for `agents` kept during the ACP migration.
-  acp: boolean;
   localFiles: boolean;
   localMcp: boolean;
   openclaw: boolean;
@@ -38,7 +36,6 @@ const QUERY_MODE_KEY = "seren_runtime";
 
 const DESKTOP_CAPABILITIES: SerenRuntimeCapabilities = {
   agents: true,
-  acp: true,
   localFiles: true,
   localMcp: true,
   openclaw: true,
@@ -49,7 +46,6 @@ const DESKTOP_CAPABILITIES: SerenRuntimeCapabilities = {
 
 const BROWSER_LOCAL_CAPABILITIES: SerenRuntimeCapabilities = {
   agents: true,
-  acp: true,
   localFiles: true,
   localMcp: false,
   openclaw: false,
@@ -60,7 +56,6 @@ const BROWSER_LOCAL_CAPABILITIES: SerenRuntimeCapabilities = {
 
 const BROWSER_HOSTED_CAPABILITIES: SerenRuntimeCapabilities = {
   agents: false,
-  acp: false,
   localFiles: false,
   localMcp: false,
   openclaw: false,
@@ -121,15 +116,13 @@ function readCapabilities(mode: SerenRuntimeMode): SerenRuntimeCapabilities {
     return defaults;
   }
 
-  const agents =
-    injected.agents ?? injected.acp ?? defaults.agents ?? defaults.acp;
-  const acp = injected.acp ?? injected.agents ?? defaults.acp ?? defaults.agents;
+  const legacyAgentsFlag = (injected as Partial<{ acp: boolean }>).acp;
+  const agents = injected.agents ?? legacyAgentsFlag ?? defaults.agents;
 
   return {
     ...defaults,
     ...injected,
     agents,
-    acp,
   };
 }
 

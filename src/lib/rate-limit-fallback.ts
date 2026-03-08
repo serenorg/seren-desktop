@@ -205,7 +205,7 @@ export function agentMessagesToUnified(
         content: msg.content,
         timestamp: msg.timestamp,
         status: "complete",
-        workerType: "acp_agent",
+        workerType: "local_agent",
       });
     } else if (msg.type === "assistant") {
       unified.push({
@@ -215,7 +215,7 @@ export function agentMessagesToUnified(
         content: msg.content,
         timestamp: msg.timestamp,
         status: "complete",
-        workerType: "acp_agent",
+        workerType: "local_agent",
         duration: msg.duration,
         cost: msg.cost,
       });

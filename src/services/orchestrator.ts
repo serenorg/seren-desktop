@@ -73,9 +73,9 @@ type WorkerEvent =
 
 /** Capabilities payload sent to the Rust orchestrator. */
 interface UserCapabilities {
-  has_acp_agent: boolean;
+  has_local_agent: boolean;
   agent_type: string | null;
-  active_acp_session_id: string | null;
+  active_agent_session_id: string | null;
   selected_model: string | null;
   available_models: string[];
   available_tools: string[];
@@ -642,9 +642,9 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
   const tools = getAllTools();
 
   return {
-    has_acp_agent: agentStore.availableAgents.length > 0,
+    has_local_agent: agentStore.availableAgents.length > 0,
     agent_type: agentStore.selectedAgentType ?? null,
-    active_acp_session_id: agentStore.agentModeEnabled
+    active_agent_session_id: agentStore.agentModeEnabled
       ? (agentStore.activeSessionId ?? null)
       : null,
     selected_model:

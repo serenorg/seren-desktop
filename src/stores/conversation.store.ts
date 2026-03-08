@@ -1,5 +1,5 @@
 // ABOUTME: Unified conversation store for the orchestrator.
-// ABOUTME: Replaces chatStore/acpStore for message management with UnifiedMessage types.
+// ABOUTME: Replaces separate chat and local-agent message state with UnifiedMessage types.
 
 import { createStore } from "solid-js/store";
 import type { ProviderId } from "@/lib/providers/types";

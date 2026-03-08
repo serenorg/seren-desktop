@@ -461,10 +461,6 @@ export const agentStore = {
     return state.agentModeEnabled;
   },
 
-  get supportsAcp() {
-    return runtimeHasCapability("agents");
-  },
-
   get supportsAgents() {
     return runtimeHasCapability("agents");
   },
@@ -3279,9 +3275,6 @@ Summary:`;
     }
   },
 };
-
-// Legacy compatibility alias retained while ACP-named imports are removed.
-export const acpStore = agentStore;
 
 export type {
   AgentType,
