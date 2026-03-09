@@ -1,7 +1,9 @@
 // ABOUTME: Web Worker for off-thread markdown rendering.
-// ABOUTME: Processes renderMarkdown calls without blocking the main thread.
+// ABOUTME: Processes renderMarkdown + post-processing without blocking the main thread.
 /// <reference lib="webworker" />
 
+import { collapseBuildOutput } from "@/lib/build-output";
+import { collapseDirectoryListings } from "@/lib/directory-listing";
 import { escapeHtml } from "@/lib/escape-html";
 import { renderMarkdown } from "@/lib/render-markdown";
 
@@ -19,7 +21,9 @@ interface RenderResponse {
 self.onmessage = (e: MessageEvent<RenderRequest>) => {
   const { id, markdown } = e.data;
   try {
-    const html = renderMarkdown(markdown);
+    const html = collapseBuildOutput(
+      collapseDirectoryListings(renderMarkdown(markdown)),
+    );
     self.postMessage({ id, html } satisfies RenderResponse);
   } catch (err) {
     console.error("[render-markdown.worker] renderMarkdown failed:", err);
