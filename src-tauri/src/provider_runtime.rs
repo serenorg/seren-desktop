@@ -102,8 +102,15 @@ impl ProviderRuntimeState {
         if let Some(stdout) = child.stdout.take() {
             tauri::async_runtime::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    log::info!("[ProviderRuntime stdout] {}", line);
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) => log::info!("[ProviderRuntime stdout] {}", line),
+                        Ok(None) => break, // EOF
+                        Err(err) => {
+                            log::warn!("[ProviderRuntime stdout] Read error: {}", err);
+                            break;
+                        }
+                    }
                 }
             });
         }
@@ -111,8 +118,15 @@ impl ProviderRuntimeState {
         if let Some(stderr) = child.stderr.take() {
             tauri::async_runtime::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    log::warn!("[ProviderRuntime stderr] {}", line);
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) => log::warn!("[ProviderRuntime stderr] {}", line),
+                        Ok(None) => break, // EOF
+                        Err(err) => {
+                            log::warn!("[ProviderRuntime stderr] Read error: {}", err);
+                            break;
+                        }
+                    }
                 }
             });
         }
@@ -348,9 +362,23 @@ pub async fn provider_runtime_stop(
         return Ok(());
     };
 
-    process
-        .child
-        .kill()
-        .await
-        .map_err(|err| format!("Failed to stop provider runtime: {}", err))
+    // Attempt graceful shutdown before force kill
+    #[cfg(unix)]
+    {
+        if let Some(pid) = process.child.id() {
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
+            }
+        }
+    }
+
+    // Wait up to 5 seconds for graceful exit, then force kill
+    match tokio::time::timeout(Duration::from_secs(5), process.child.wait()).await {
+        Ok(Ok(_)) => Ok(()),
+        _ => process
+            .child
+            .kill()
+            .await
+            .map_err(|err| format!("Failed to stop provider runtime: {}", err)),
+    }
 }
