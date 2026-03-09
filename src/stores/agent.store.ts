@@ -17,6 +17,24 @@ const sessionReadyPromises = new Map<
   { promise: Promise<void>; resolve: () => void }
 >();
 
+/** Max time to wait for a session to become ready before giving up */
+const SESSION_READY_TIMEOUT_MS = 30_000;
+
+/** Await a session ready promise with a timeout to prevent infinite hangs */
+function waitForSessionReady(sessionId: string): Promise<void> {
+  const entry = sessionReadyPromises.get(sessionId);
+  if (!entry) return Promise.resolve();
+  return Promise.race([
+    entry.promise,
+    new Promise<void>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Session ${sessionId} did not become ready within ${SESSION_READY_TIMEOUT_MS}ms`)),
+        SESSION_READY_TIMEOUT_MS,
+      ),
+    ),
+  ]);
+}
+
 import { isLikelyAuthError } from "@/lib/auth-errors";
 import {
   isPromptTooLongError,
@@ -1713,10 +1731,7 @@ Summary:`;
         : `Here is a summary of our prior conversation:\n\n${summary}\n\nContinue from where we left off. The user may send a new message shortly.`;
 
       // Wait for the new session to be ready, then restore settings and seed
-      const readyEntry = sessionReadyPromises.get(newSessionId);
-      if (readyEntry) {
-        await readyEntry.promise;
-      }
+      await waitForSessionReady(newSessionId);
 
       // Restore user-configured settings from the prior session
       await this.restoreSessionSettings(session, newSessionId);
@@ -1791,10 +1806,7 @@ Summary:`;
       );
 
       // Wait for the new session to be ready
-      const readyEntry = sessionReadyPromises.get(newSessionId);
-      if (readyEntry) {
-        await readyEntry.promise;
-      }
+      await waitForSessionReady(newSessionId);
 
       // Retry the original prompt
       await providerService.sendPrompt(newSessionId, lastPrompt);
@@ -1888,12 +1900,11 @@ Summary:`;
     }
 
     // Wait for session to be ready before sending prompt
-    const readyEntry = sessionReadyPromises.get(sessionId);
-    if (readyEntry && state.sessions[sessionId]?.info.status !== "ready") {
+    if (sessionReadyPromises.has(sessionId) && state.sessions[sessionId]?.info.status !== "ready") {
       console.info(
         `[AgentStore] sendPrompt: waiting for session ${sessionId} to be ready...`,
       );
-      await readyEntry.promise;
+      await waitForSessionReady(sessionId);
       console.info("[AgentStore] sendPrompt: session is now ready");
     }
 
