@@ -62,6 +62,7 @@ type WorkerEvent =
       final_content: string;
       thinking: string | null;
       cost?: number;
+      rlm_steps?: string | null;
     }
   | { type: "error"; message: string }
   | {
@@ -69,6 +70,13 @@ type WorkerEvent =
       from_model: string;
       to_model: string;
       reason: string;
+    }
+  | { type: "rlm_start"; chunk_count: number }
+  | {
+      type: "rlm_chunk_complete";
+      index: number;
+      total: number;
+      summary: string;
     };
 
 /** Capabilities payload sent to the Rust orchestrator. */
@@ -295,6 +303,7 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
         workerEvent.final_content,
         workerEvent.thinking,
         workerEvent.cost,
+        workerEvent.rlm_steps ?? null,
       );
       break;
     case "error":
@@ -302,6 +311,12 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
       break;
     case "reroute":
       handleReroute(workerEvent);
+      break;
+    case "rlm_start":
+      conversationStore.setRLMProcessing(true);
+      break;
+    case "rlm_chunk_complete":
+      // Steps are collected in the Complete event payload; nothing to do here.
       break;
   }
 }
@@ -438,6 +453,7 @@ function handleComplete(
   finalContent: string,
   thinking: string | null,
   cost?: number,
+  rlmStepsJson?: string | null,
 ): void {
   if (!activeMessageId) return;
 
@@ -454,6 +470,16 @@ function handleComplete(
   const thinkingContent =
     conversationStore.streamingThinking || thinking || undefined;
 
+  // Parse RLM steps from JSON if present
+  let rlmSteps: UnifiedMessage["rlmSteps"] | undefined;
+  if (rlmStepsJson) {
+    try {
+      rlmSteps = JSON.parse(rlmStepsJson);
+    } catch {
+      console.warn("[orchestrator] Failed to parse rlm_steps JSON");
+    }
+  }
+
   const assistantMessage: UnifiedMessage = {
     id: activeMessageId,
     type: "assistant",
@@ -465,8 +491,10 @@ function handleComplete(
     workerType: "orchestrator",
     duration,
     cost,
+    rlmSteps,
   };
 
+  conversationStore.setRLMProcessing(false);
   conversationStore.finalizeStreaming();
   conversationStore.addMessage(assistantMessage);
   conversationStore.persistMessage(assistantMessage);

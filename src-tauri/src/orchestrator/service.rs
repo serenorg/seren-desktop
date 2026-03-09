@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::chat_model_worker::ChatModelWorker;
 use super::classifier;
 use super::decomposer;
+use super::rlm;
 use super::mcp_publisher_worker::McpPublisherWorker;
 use super::router;
 use super::trust;
@@ -90,6 +91,49 @@ pub async fn orchestrate(
         "[Orchestrator] Starting orchestration for conversation {}",
         conversation_id
     );
+
+    // 0. RLM check: if input exceeds context window threshold, process recursively.
+    //    Use the user-selected model (or a sensible default) for the limit check.
+    let model_for_limit = capabilities
+        .selected_model
+        .as_deref()
+        .filter(|m| !m.is_empty())
+        .unwrap_or("anthropic/claude-sonnet-4");
+
+    if rlm::needs_rlm(&prompt, &history, &images, model_for_limit) {
+        log::info!("[Orchestrator] Input exceeds context threshold — activating RLM");
+
+        // Create an event channel and forward events to the frontend.
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<WorkerEvent>(64);
+        let app_clone = app.clone();
+        let conv_id = conversation_id.clone();
+
+        // Spawn the RLM processor
+        let rlm_model = model_for_limit.to_string();
+        let rlm_prompt = prompt.clone();
+        let rlm_history = history.clone();
+        let rlm_app = app.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                rlm::process(&rlm_app, &conv_id, &rlm_prompt, &rlm_history, &rlm_model, &event_tx)
+                    .await
+            {
+                let _ = event_tx.send(WorkerEvent::Error { message: e }).await;
+            }
+        });
+
+        // Forward all events to the frontend
+        while let Some(event) = event_rx.recv().await {
+            let orch_event = OrchestratorEvent {
+                conversation_id: conversation_id.clone(),
+                worker_event: event,
+                subtask_id: None,
+            };
+            let _ = app_clone.emit("orchestrator://event", &orch_event);
+        }
+
+        return Ok(());
+    }
 
     // 1. Classify the task
     let classification = classifier::classify(&prompt, &capabilities.installed_skills);

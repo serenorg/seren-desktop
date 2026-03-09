@@ -30,7 +30,12 @@ function waitForSessionReady(sessionId: string): Promise<void> {
     entry.promise,
     new Promise<void>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`Session ${sessionId} did not become ready within ${SESSION_READY_TIMEOUT_MS}ms`)),
+        () =>
+          reject(
+            new Error(
+              `Session ${sessionId} did not become ready within ${SESSION_READY_TIMEOUT_MS}ms`,
+            ),
+          ),
         SESSION_READY_TIMEOUT_MS,
       ),
     ),
@@ -1934,7 +1939,10 @@ Summary:`;
     }
 
     // Wait for session to be ready before sending prompt
-    if (sessionReadyPromises.has(sessionId) && state.sessions[sessionId]?.info.status !== "ready") {
+    if (
+      sessionReadyPromises.has(sessionId) &&
+      state.sessions[sessionId]?.info.status !== "ready"
+    ) {
       console.info(
         `[AgentStore] sendPrompt: waiting for session ${sessionId} to be ready...`,
       );

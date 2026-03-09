@@ -135,6 +135,7 @@ impl Worker for ProviderRuntimeWorker {
                             final_content: String::new(),
                             thinking: None,
                             cost: None,
+                            rlm_steps: None,
                         })
                         .await
                         .map_err(|err| format!("Failed to send completion event: {}", err))?;
@@ -169,6 +170,7 @@ impl Worker for ProviderRuntimeWorker {
                             final_content: String::new(),
                             thinking: None,
                             cost: None,
+                            rlm_steps: None,
                         })
                         .await
                         .map_err(|err| format!("Failed to send completion event: {}", err))?;
@@ -367,6 +369,7 @@ fn map_provider_event(method: &str, payload: &Value) -> Option<WorkerEvent> {
             final_content: String::new(),
             thinking: None,
             cost: None,
+            rlm_steps: None,
         }),
         _ => None,
     }
