@@ -181,6 +181,14 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
           </div>
         </Show>
 
+        {/* Needs manual restart after update */}
+        <Show when={updaterStore.state.status === "needs_restart"}>
+          <div class="text-[10px] text-foreground/70 flex items-center gap-1.5">
+            <span>✓</span>
+            <span>Update installed — please restart</span>
+          </div>
+        </Show>
+
         {/* Error state with retry */}
         <Show when={updaterStore.state.status === "error"}>
           <button

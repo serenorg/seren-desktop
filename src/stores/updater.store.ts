@@ -13,6 +13,7 @@ export type UpdateStatus =
   | "deferred"
   | "downloading"
   | "installing"
+  | "needs_restart"
   | "error";
 
 interface UpdaterState {
@@ -147,9 +148,17 @@ async function installAvailableUpdate(): Promise<void> {
       setState({ status: "installing", progressPercent: 100 });
     });
     console.log("[Updater] Install complete, relaunching...");
-    await relaunch();
+    const relaunchTimeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("relaunch_timeout")), 10_000),
+    );
+    await Promise.race([relaunch(), relaunchTimeout]);
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
+    if (err.message === "relaunch_timeout") {
+      console.warn("[Updater] Relaunch timed out — update is installed, manual restart required");
+      setState({ status: "needs_restart" });
+      return;
+    }
     console.error("[Updater] Install failed:", err.message);
     telemetry.captureError(err, { type: "updater", phase: "install" });
     setState({ status: "error", error: err.message });
