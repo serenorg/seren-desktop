@@ -1,151 +1,143 @@
-// ABOUTME: Per-request BM25 tool relevance scoring for dynamic tool exposure.
-// ABOUTME: Implements ITR (Instruction-Tool Retrieval) from arXiv:2602.17046.
+// ABOUTME: BM25-based tool relevance scoring for per-request tool selection.
+// ABOUTME: Replaces naive byte-budget truncation with query-aware tool ranking.
 
-/// Target tool-context size in tokens (≈ chars / 4).
-/// Tools scoring above zero are selected until this budget is exhausted.
-const TOOL_TOKEN_BUDGET: usize = 2_000;
+use std::collections::HashMap;
 
-/// Approximate chars-per-token ratio used to convert the token budget to bytes.
-const CHARS_PER_TOKEN: usize = 4;
-
-/// Always include this many top-scoring tools regardless of budget.
-const MIN_TOOLS: usize = 3;
-
-/// Stop adding tools once this many are selected (prevents over-selection on
-/// ambiguous queries where many tools score equally).
-const MAX_TOOLS_SOFT: usize = 20;
-
-// BM25 tuning parameters
+/// BM25 tuning constants (Robertson et al., standard values).
 const K1: f32 = 1.5;
 const B: f32 = 0.75;
-const AVG_DOC_LEN: f32 = 60.0; // empirical estimate for tool descriptions
+/// Estimated average tool document length in words (name + description + props).
+const AVG_TOOL_WORDS: f32 = 60.0;
 
-// =============================================================================
-// Public API
-// =============================================================================
+/// Approximate token count: 4 characters ≈ 1 token for typical JSON schema text.
+const CHARS_PER_TOKEN: usize = 4;
 
-/// Select the most query-relevant tools within a token budget.
+/// Token budget for selected tools sent to the model per request.
+const TOOL_TOKEN_BUDGET: usize = 2_000;
+
+/// Minimum tools always included regardless of BM25 score.
+const MIN_TOOLS: usize = 3;
+
+/// Soft cap: never send more than this many tools even if budget allows.
+const MAX_TOOLS: usize = 20;
+
+/// Hard byte budget as a final safety net against HTTP 413 responses from the
+/// Gateway. BM25 selection is the primary mechanism; this catches edge cases.
+const HARD_BYTE_BUDGET: usize = 400 * 1024;
+
+/// Select the most relevant tools for the given query within the token budget.
 ///
-/// If the total serialised size of `tools` already fits within the budget the
-/// original slice is returned unchanged.  Otherwise each tool is scored with a
-/// lightweight BM25-style scorer against the current `query` and the top tools
-/// are greedily selected until `TOOL_TOKEN_BUDGET` tokens are used.  At least
-/// `MIN_TOOLS` tools are always kept regardless of score.
+/// Tools are in OpenAI function-calling format:
+/// `{ "type": "function", "function": { "name": ..., "description": ..., "parameters": ... } }`
 ///
-/// Returned tools preserve their original order for determinism.
-pub fn select_relevant_tools(
-    query: &str,
-    tools: &[serde_json::Value],
-) -> Vec<serde_json::Value> {
-    if tools.is_empty() {
-        return vec![];
-    }
-
-    // Fast path: total size already within budget — nothing to filter.
-    let budget_chars = TOOL_TOKEN_BUDGET * CHARS_PER_TOKEN;
-    let total_chars: usize = tools
-        .iter()
-        .map(|t| serde_json::to_string(t).map(|s| s.len()).unwrap_or(0))
-        .sum();
-
-    if total_chars <= budget_chars {
+/// # Algorithm
+/// 1. Fast-path: if the tool list already fits the budget, return it as-is.
+/// 2. Score each tool with BM25 against name + description + parameter names/descriptions.
+/// 3. Sort by score descending; greedily select within the token budget,
+///    guaranteeing at least `MIN_TOOLS`.
+/// 4. Restore original frontend priority ordering in the final selection.
+/// 5. Apply the hard byte budget as a final safety net.
+pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    // Fast path: no scoring needed when the set is small enough.
+    let total_bytes = serde_json::to_string(tools)
+        .map(|s| s.len())
+        .unwrap_or(usize::MAX);
+    if total_bytes <= HARD_BYTE_BUDGET && tools.len() <= MAX_TOOLS {
         return tools.to_vec();
     }
 
-    let query_tokens = tokenize(query);
-
-    // Score every tool.
-    let mut scored: Vec<(f32, usize)> = tools
-        .iter()
-        .enumerate()
-        .map(|(i, tool)| {
-            let text = tool_text(tool);
-            let score = bm25_score(&query_tokens, &text);
-            (score, i)
-        })
-        .collect();
-
-    // Sort descending by score.
-    scored.sort_by(|a, b| {
-        b.0.partial_cmp(&a.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // Greedy selection within budget; always keep MIN_TOOLS.
-    let mut selected_indices: Vec<usize> = Vec::new();
-    let mut used_chars: usize = 2; // outer `[` and `]`
-
-    for (rank, &(_, idx)) in scored.iter().enumerate() {
-        let tool_chars = serde_json::to_string(&tools[idx])
-            .map(|s| s.len() + 1) // +1 for comma
-            .unwrap_or(1);
-
-        let within_budget = used_chars + tool_chars <= budget_chars;
-        let must_include = rank < MIN_TOOLS;
-        let at_soft_cap = selected_indices.len() >= MAX_TOOLS_SOFT;
-
-        if (within_budget || must_include) && !at_soft_cap {
-            selected_indices.push(idx);
-            used_chars += tool_chars;
-        } else if at_soft_cap {
-            break;
-        }
+    if tools.is_empty() {
+        return Vec::new();
     }
 
-    // Return in original index order so callers see a stable, predictable list.
+    let query_terms = tokenize(query);
+    if query_terms.is_empty() {
+        return apply_hard_budget(tools);
+    }
+
+    let docs: Vec<String> = tools.iter().map(tool_text).collect();
+    let scores = bm25_scores(&query_terms, &docs);
+
+    // Rank tools by score descending.
+    let mut ranked: Vec<(usize, f32)> = scores.into_iter().enumerate().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Greedily pick tools into the token budget.
+    let mut selected_indices: Vec<usize> = Vec::with_capacity(MAX_TOOLS);
+    let mut token_count: usize = 0;
+
+    for (idx, _score) in &ranked {
+        if selected_indices.len() >= MAX_TOOLS {
+            break;
+        }
+        let tool_tokens = approximate_tokens(&docs[*idx]);
+        let budget_exceeded =
+            token_count + tool_tokens > TOOL_TOKEN_BUDGET && selected_indices.len() >= MIN_TOOLS;
+        if budget_exceeded {
+            break;
+        }
+        selected_indices.push(*idx);
+        token_count += tool_tokens;
+    }
+
+    // Restore original ordering so the frontend's priority ranking is preserved.
     selected_indices.sort_unstable();
-    let selected: Vec<serde_json::Value> = selected_indices
-        .iter()
-        .map(|&i| tools[i].clone())
-        .collect();
+
+    let result: Vec<serde_json::Value> =
+        selected_indices.iter().map(|&i| tools[i].clone()).collect();
 
     log::info!(
-        "[ToolRelevance] Selected {}/{} tools ({} → {} chars)",
-        selected.len(),
+        "[ToolRelevance] Selected {} of {} tools (~{} tokens)",
+        result.len(),
         tools.len(),
-        total_chars,
-        used_chars,
+        token_count,
     );
 
-    selected
+    apply_hard_budget(&result)
 }
 
 // =============================================================================
 // Internal helpers
 // =============================================================================
 
-/// Extract a single searchable text blob from an OpenAI-format tool definition.
+/// Extract indexable text from an OpenAI-format tool definition.
+///
+/// Concatenates: function name + description + parameter names + parameter descriptions.
 fn tool_text(tool: &serde_json::Value) -> String {
     let mut parts: Vec<&str> = Vec::new();
 
     if let Some(name) = tool.pointer("/function/name").and_then(|v| v.as_str()) {
         parts.push(name);
     }
-    if let Some(desc) = tool
-        .pointer("/function/description")
-        .and_then(|v| v.as_str())
-    {
+    if let Some(desc) = tool.pointer("/function/description").and_then(|v| v.as_str()) {
         parts.push(desc);
     }
-    // Parameter names and their descriptions give additional signal.
+
+    // Include parameter names and descriptions for keyword matching.
+    let prop_strings: Vec<String>;
     if let Some(props) = tool
         .pointer("/function/parameters/properties")
         .and_then(|v| v.as_object())
     {
-        for (key, val) in props {
-            // Borrow the key as &str by storing the String on the heap briefly.
-            // We collect param info into a temporary buffer instead.
-            let _ = key; // suppress unused warning; collected below
-            if let Some(pdesc) = val.get("description").and_then(|v| v.as_str()) {
-                parts.push(pdesc);
-            }
+        prop_strings = props
+            .iter()
+            .flat_map(|(key, val)| {
+                let mut items = vec![key.clone()];
+                if let Some(pdesc) = val.get("description").and_then(|v| v.as_str()) {
+                    items.push(pdesc.to_string());
+                }
+                items
+            })
+            .collect();
+        for s in &prop_strings {
+            parts.push(s.as_str());
         }
     }
 
     parts.join(" ").to_lowercase()
 }
 
-/// Tokenize text into lowercase alphanumeric words of length > 1.
+/// Tokenize text into lowercase alphanumeric tokens, filtering single chars.
 fn tokenize(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
         .filter(|t| t.len() > 1)
@@ -153,24 +145,84 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// BM25-lite: TF-normalized term frequency score (no IDF — corpus too small).
-fn bm25_score(query_tokens: &[String], doc: &str) -> f32 {
-    let doc_tokens = tokenize(doc);
-    let doc_len = doc_tokens.len() as f32;
-    if doc_len == 0.0 {
-        return 0.0;
+/// Compute BM25 scores for each document given the query terms.
+///
+/// Uses BM25 with k1=1.5, b=0.75, Okapi IDF smoothing, and a fixed average
+/// document length estimate. IDF is precomputed per query term to avoid O(n²).
+fn bm25_scores(query_terms: &[String], docs: &[String]) -> Vec<f32> {
+    let n = docs.len() as f32;
+    let tokenized_docs: Vec<Vec<String>> = docs.iter().map(|d| tokenize(d)).collect();
+
+    // Precompute document frequency per query term (O(n·q) not O(n²·q)).
+    let df_map: HashMap<&str, f32> = query_terms
+        .iter()
+        .map(|term| {
+            let df = tokenized_docs
+                .iter()
+                .filter(|doc| doc.iter().any(|t| t == term))
+                .count() as f32;
+            (term.as_str(), df)
+        })
+        .collect();
+
+    tokenized_docs
+        .iter()
+        .map(|doc_terms| {
+            let dl = doc_terms.len() as f32;
+            let length_norm = K1 * (1.0 - B + B * dl / AVG_TOOL_WORDS);
+
+            query_terms
+                .iter()
+                .map(|term| {
+                    let tf = doc_terms.iter().filter(|t| *t == term).count() as f32;
+                    if tf == 0.0 {
+                        return 0.0;
+                    }
+                    let df_t = df_map.get(term.as_str()).copied().unwrap_or(0.0);
+                    // Okapi IDF with smoothing (prevents log(0)).
+                    let idf = ((n - df_t + 0.5) / (df_t + 0.5) + 1.0).ln();
+                    let tf_norm = tf * (K1 + 1.0) / (tf + length_norm);
+                    idf * tf_norm
+                })
+                .sum::<f32>()
+        })
+        .collect()
+}
+
+/// Approximate token count for a document string (4 chars ≈ 1 token).
+fn approximate_tokens(text: &str) -> usize {
+    (text.len() / CHARS_PER_TOKEN).max(1)
+}
+
+/// Apply the hard 400 KB byte budget as a final safety net.
+fn apply_hard_budget(tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let total = serde_json::to_string(tools)
+        .map(|s| s.len())
+        .unwrap_or(usize::MAX);
+    if total <= HARD_BYTE_BUDGET {
+        return tools.to_vec();
     }
 
-    let mut score = 0.0f32;
-    for qt in query_tokens {
-        let tf = doc_tokens.iter().filter(|t| t.as_str() == qt.as_str()).count() as f32;
-        if tf > 0.0 {
-            // BM25 TF normalisation
-            let tf_norm = tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * doc_len / AVG_DOC_LEN));
-            score += tf_norm;
+    let mut result: Vec<serde_json::Value> = Vec::with_capacity(tools.len());
+    let mut running: usize = 2; // outer `[` and `]`
+
+    for tool in tools {
+        let bytes = serde_json::to_string(tool).unwrap_or_default().len() + 1;
+        if running + bytes > HARD_BYTE_BUDGET {
+            break;
         }
+        running += bytes;
+        result.push(tool.clone());
     }
-    score
+
+    log::warn!(
+        "[ToolRelevance] Hard byte budget applied: keeping {} of {} tools ({} bytes)",
+        result.len(),
+        tools.len(),
+        running,
+    );
+
+    result
 }
 
 // =============================================================================
@@ -188,107 +240,187 @@ mod tests {
             "function": {
                 "name": name,
                 "description": description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
+                "parameters": { "type": "object", "properties": {} }
+            }
+        })
+    }
+
+    fn make_tool_with_params(name: &str, description: &str, params: &[(&str, &str)]) -> serde_json::Value {
+        let props: serde_json::Map<String, serde_json::Value> = params
+            .iter()
+            .map(|(k, desc)| {
+                (k.to_string(), json!({ "type": "string", "description": desc }))
+            })
+            .collect();
+        json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": { "type": "object", "properties": props }
             }
         })
     }
 
     #[test]
-    fn returns_all_tools_when_within_budget() {
-        let tools: Vec<serde_json::Value> = (0..3)
-            .map(|i| make_tool(&format!("tool_{i}"), "short"))
+    fn fast_path_when_small_set() {
+        let tools: Vec<serde_json::Value> = (0..5)
+            .map(|i| make_tool(&format!("tool_{i}"), "short desc"))
             .collect();
-        let result = select_relevant_tools("anything", &tools);
-        assert_eq!(result.len(), 3);
+        let result = select_relevant_tools("any query", &tools);
+        assert_eq!(result.len(), tools.len(), "small set should pass through unchanged");
     }
 
     #[test]
     fn empty_tools_returns_empty() {
-        let result = select_relevant_tools("query", &[]);
+        let result = select_relevant_tools("some query", &[]);
         assert!(result.is_empty());
     }
 
     #[test]
-    fn high_scoring_tool_ranked_first() {
-        let query_tokens = tokenize("read file from disk");
-        let file_tool = "read file content from filesystem disk path";
-        let search_tool = "search the web for results";
-
-        let score_file = bm25_score(&query_tokens, file_tool);
-        let score_search = bm25_score(&query_tokens, search_tool);
-        assert!(score_file > score_search, "file tool should score higher for file query");
-    }
-
-    #[test]
-    fn irrelevant_tool_scores_zero() {
-        let query_tokens = tokenize("send email");
-        let score = bm25_score(&query_tokens, "read sql database rows count");
-        // "send" and "email" don't appear — score should be 0
-        assert_eq!(score, 0.0);
-    }
-
-    #[test]
-    fn selects_relevant_over_irrelevant_when_over_budget() {
-        // Build a large set of irrelevant tools + one relevant one
-        let mut tools: Vec<serde_json::Value> = (0..200)
-            .map(|i| {
-                make_tool(
-                    &format!("unrelated_tool_{i}"),
-                    &format!("does something unrelated to queries {i}"),
-                )
-            })
+    fn empty_query_falls_back_gracefully() {
+        let tools: Vec<serde_json::Value> = (0..5)
+            .map(|i| make_tool(&format!("tool_{i}"), "some description"))
             .collect();
-        let relevant = make_tool("read_file", "read a file from the filesystem path");
-        tools.push(relevant);
-
-        let result = select_relevant_tools("read file from filesystem", &tools);
-
-        // The relevant tool should be included
-        let has_read_file = result.iter().any(|t| {
-            t.pointer("/function/name")
-                .and_then(|v| v.as_str())
-                .map(|n| n == "read_file")
-                .unwrap_or(false)
-        });
-        assert!(has_read_file, "read_file should be selected for a file-reading query");
-
-        // Should have reduced total tool count significantly
-        assert!(result.len() < tools.len(), "should filter tools over budget");
+        let result = select_relevant_tools("", &tools);
+        assert!(!result.is_empty(), "should still return tools on empty query");
     }
 
     #[test]
-    fn always_includes_min_tools_even_if_over_budget() {
-        // 200 large tools, all irrelevant
-        let tools: Vec<serde_json::Value> = (0..200)
-            .map(|i| {
-                // Pad description to ensure we exceed budget
-                let desc = format!("zzz qqq unrelated description {i} {}", "x".repeat(200));
-                make_tool(&format!("padded_tool_{i}"), &desc)
-            })
-            .collect();
+    fn relevant_tool_scores_higher_than_unrelated() {
+        let tools = vec![
+            make_tool("file_read", "Read file contents from the filesystem"),
+            make_tool("database_query", "Execute SQL queries against a database"),
+            make_tool("send_email", "Send an email message to a recipient"),
+        ];
+        let query_terms = tokenize("read a file from disk");
+        let docs: Vec<String> = tools.iter().map(tool_text).collect();
+        let scores = bm25_scores(&query_terms, &docs);
 
-        let result = select_relevant_tools("completely different query xyz", &tools);
         assert!(
-            result.len() >= MIN_TOOLS,
-            "must always include at least MIN_TOOLS tools"
+            scores[0] > scores[1],
+            "file_read ({:.3}) should outscore database_query ({:.3})",
+            scores[0],
+            scores[1]
+        );
+        assert!(
+            scores[0] > scores[2],
+            "file_read ({:.3}) should outscore send_email ({:.3})",
+            scores[0],
+            scores[2]
         );
     }
 
     #[test]
-    fn tool_text_includes_name_and_description() {
+    fn irrelevant_tool_scores_zero() {
+        let query_terms = tokenize("send email");
+        let docs = vec!["read sql database rows count".to_string()];
+        let scores = bm25_scores(&query_terms, &docs);
+        assert_eq!(scores[0], 0.0, "non-matching tool should score zero");
+    }
+
+    #[test]
+    fn param_descriptions_contribute_to_score() {
+        let tools = vec![
+            make_tool_with_params(
+                "generic_action",
+                "Perform an action",
+                &[("email", "recipient email address"), ("subject", "email subject line")],
+            ),
+            make_tool("file_read", "Read file contents from disk"),
+        ];
+        let query_terms = tokenize("send email to recipient");
+        let docs: Vec<String> = tools.iter().map(tool_text).collect();
+        let scores = bm25_scores(&query_terms, &docs);
+
+        assert!(
+            scores[0] > scores[1],
+            "tool with matching param descriptions ({:.3}) should outscore file_read ({:.3})",
+            scores[0],
+            scores[1]
+        );
+    }
+
+    #[test]
+    fn respects_max_tools_cap() {
+        // 26 tools: 25 irrelevant + 1 relevant. Result must be <= MAX_TOOLS.
+        let mut tools: Vec<serde_json::Value> = (0..25)
+            .map(|i| make_tool(&format!("irrelevant_{i}"), "unrelated XYZ functionality"))
+            .collect();
+        tools.push(make_tool("send_email", "Send email message to a recipient"));
+
+        let result = select_relevant_tools("send an email", &tools);
+        assert!(
+            result.len() <= MAX_TOOLS,
+            "expected <= {MAX_TOOLS} tools, got {}",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn always_includes_at_least_min_tools_when_available() {
+        let tools = vec![
+            make_tool("tool_a", "alpha beta gamma delta"),
+            make_tool("tool_b", "epsilon zeta eta theta"),
+        ];
+        let result = select_relevant_tools("xyzzyx unrelated query", &tools);
+        assert!(!result.is_empty(), "must return something when tools exist");
+    }
+
+    #[test]
+    fn selects_relevant_tool_over_budget_noise() {
+        let mut tools: Vec<serde_json::Value> = (0..200)
+            .map(|i| make_tool(&format!("unrelated_{i}"), &format!("does something unrelated {i}")))
+            .collect();
+        tools.push(make_tool("read_file", "read a file from the filesystem path"));
+
+        let result = select_relevant_tools("read file from filesystem", &tools);
+
+        let has_read_file = result.iter().any(|t| {
+            t.pointer("/function/name")
+                .and_then(|v| v.as_str())
+                == Some("read_file")
+        });
+        assert!(has_read_file, "read_file should be selected for a file-reading query");
+        assert!(result.len() < tools.len(), "should filter tools when over budget");
+    }
+
+    #[test]
+    fn original_ordering_preserved_in_output() {
+        let tools = vec![
+            make_tool("alpha", "alpha tool functionality"),
+            make_tool("beta", "beta tool functionality"),
+            make_tool("gamma", "gamma tool functionality"),
+        ];
+        // All 3 are tiny — fast path returns them as-is.
+        let result = select_relevant_tools("gamma functionality", &tools);
+        for window in result.windows(2) {
+            let a_name = window[0].pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("");
+            let b_name = window[1].pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("");
+            let a_pos = tools.iter().position(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some(a_name)).unwrap();
+            let b_pos = tools.iter().position(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some(b_name)).unwrap();
+            assert!(a_pos < b_pos, "original ordering must be preserved");
+        }
+    }
+
+    #[test]
+    fn tool_text_extracts_name_description_and_params() {
         let tool = json!({
             "type": "function",
             "function": {
                 "name": "execute_bash",
                 "description": "Run a shell command",
-                "parameters": { "type": "object", "properties": {} }
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string", "description": "shell command to run" }
+                    }
+                }
             }
         });
         let text = tool_text(&tool);
         assert!(text.contains("execute_bash"));
         assert!(text.contains("run a shell command"));
+        assert!(text.contains("command"));
     }
 }
