@@ -70,7 +70,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
-    "@hey-api/openapi-ts": "0.93.1",
+    "@hey-api/openapi-ts": "0.94.0",
     "@playwright/test": "^1.58.2",
     "@tauri-apps/cli": "^2",
     "@types/node": "^25.3.5",
