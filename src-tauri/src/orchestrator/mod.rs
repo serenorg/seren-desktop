@@ -11,6 +11,7 @@ pub mod provider_worker;
 pub mod router;
 pub mod service;
 pub mod tool_bridge;
+pub mod tool_relevance;
 pub mod trust;
 pub mod types;
 pub mod worker;
