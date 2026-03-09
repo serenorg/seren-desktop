@@ -75,10 +75,11 @@ vi.mock("@/stores/conversation.store", () => ({
   },
 }));
 
-// Mock ACP service (listSessions)
+// Mock provider service (listSessions)
 const mockBackendSessions: Array<{ id: string }> = [];
-vi.mock("@/services/acp", () => ({
+vi.mock("@/services/providers", () => ({
   listSessions: vi.fn(async () => mockBackendSessions),
+  invokeProvider: vi.fn(),
 }));
 
 // Mock ACP store
