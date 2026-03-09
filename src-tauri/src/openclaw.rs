@@ -474,6 +474,9 @@ pub async fn openclaw_restart(
 ) -> Result<(), String> {
     {
         let mut status = state.status.lock().await;
+        if *status == ProcessStatus::Restarting {
+            return Ok(()); // already restarting, reject concurrent call
+        }
         *status = ProcessStatus::Restarting;
     }
     emit_status(&app, ProcessStatus::Restarting);
@@ -710,10 +713,14 @@ fn handle_ws_message(app: &AppHandle, text: &str) {
 
     match event_type {
         "channel:connected" | "channel:disconnected" | "channel:error" => {
-            let _ = app.emit(events::CHANNEL_EVENT, &msg);
+            if let Err(err) = app.emit(events::CHANNEL_EVENT, &msg) {
+                log::warn!("[OpenClaw WS] Failed to emit channel event: {}", err);
+            }
         }
         "message:received" => {
-            let _ = app.emit(events::MESSAGE_RECEIVED, &msg);
+            if let Err(err) = app.emit(events::MESSAGE_RECEIVED, &msg) {
+                log::warn!("[OpenClaw WS] Failed to emit message received event: {}", err);
+            }
         }
         _ => {
             log::debug!("[OpenClaw WS] Unhandled event type: {}", event_type);
@@ -1107,15 +1114,7 @@ fn write_openclaw_config(config: &serde_json::Value) -> Result<(), String> {
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
     // Atomic write: temp file + rename
-    let unique_id = format!(
-        "{}.{:?}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos(),
-        std::thread::current().id()
-    );
-    let tmp_path = config_path.with_extension(format!("json.{}.tmp", unique_id));
+    let tmp_path = config_path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4()));
     std::fs::write(&tmp_path, &json_str)
         .map_err(|e| format!("Failed to write temp config: {}", e))?;
 
