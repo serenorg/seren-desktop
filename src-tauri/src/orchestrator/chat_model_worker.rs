@@ -13,6 +13,7 @@ use tauri::{Emitter, Manager};
 use tokio::sync::{Mutex, mpsc};
 
 use super::tool_bridge::ToolResultBridge;
+use super::tool_relevance::select_relevant_tools;
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
 
@@ -1051,10 +1052,10 @@ impl Worker for ChatModelWorker {
         // Reset cancellation flag
         *self.cancelled.lock().await = false;
 
-        // Apply a byte budget to the tool list before building the request body.
-        // Sending too many verbose tool schemas can push the body over the
-        // Gateway's buffer limit and produce an HTTP 413 response.
-        let budgeted_tools = Self::budget_tool_definitions(&self.tool_definitions);
+        // Select only the tools relevant to the current query (ITR, arXiv:2602.17046).
+        // Falls back to the hard byte-budget cap to prevent HTTP 413 responses.
+        let relevant_tools = select_relevant_tools(prompt, &self.tool_definitions);
+        let budgeted_tools = Self::budget_tool_definitions(&relevant_tools);
 
         log::info!(
             "[ChatModelWorker] Executing with model: {}, tools: {}",
