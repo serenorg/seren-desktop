@@ -264,7 +264,12 @@ async fn wait_for_provider_runtime(
 
         if let Ok(response) = client.get(&health_url).send().await {
             if response.status().is_success() {
-                return Ok(());
+                // Also check that the runtime reports itself as ready
+                if let Ok(body) = response.json::<serde_json::Value>().await {
+                    if body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        return Ok(());
+                    }
+                }
             }
         }
 
