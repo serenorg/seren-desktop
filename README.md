@@ -9,7 +9,7 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 
 ### AI Chat
 
-- **Multi-model support** — Claude, Gemini, and GPT models via Seren Gateway or direct API keys
+- **Multi-model support** — Claude, Gemini, and GPT models via Seren Gateway (default); or connect directly using an Anthropic API key, OpenAI API key, or Google API key / OAuth
 - **Smart model routing** — Satisfaction-driven model selection using Thompson sampling
 - **Auto-reroute on failure** — Falls back to satisfaction-ranked model on 408/timeout errors
 - **Task classification** — Routes prompts to the optimal worker (chat, agent, or publisher)
@@ -28,7 +28,7 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 - **Smart balance warnings** — Prompts to top up or switch to free model when low on credits
 - **Conversation persistence** — Chat history saved locally
 
-### AI Coding Agents (ACP)
+### AI Coding Agents
 
 - **Multi-agent support** — Run Claude Code and Codex agents side by side
 - **Multiple concurrent sessions** — Tabbed interface with agent type picker
@@ -44,11 +44,12 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 - **Agent tasks** — Background task monitoring panel for agent operations
 - **CLI auto-installer** — Automatic installation of Claude Code and Codex CLI tools
 - **Thinking animation** — Bouncing dot indicator with rotating status words
-- **Embedded runtimes** — Bundled Node.js, npm, and ACP binaries (no PATH conflicts)
+- **Embedded runtimes** — Bundled Node.js, npm, and agent binaries (no PATH conflicts)
 
 ### Thread Management
 
 - **Threaded conversations** — Sidebar with persistent chat and agent threads
+- **Thread forking** — Fork an agent conversation from any message to explore alternate paths; uses native provider session fork at head, or context bootstrap for mid-thread forks
 - **Folder grouping** — Threads grouped by project directory
 - **Running indicators** — Pulsing green dot for active agents across folder groups
 - **Thread persistence** — Active threads persist across folder switches
@@ -272,7 +273,7 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 seren-desktop/
 ├── src/                      # SolidJS frontend
 │   ├── components/
-│   │   ├── acp/             # Permission dialog, diff proposals
+│   │   ├── agent/           # Agent permission dialog, diff proposals
 │   │   ├── auth/            # SignIn
 │   │   ├── chat/            # Chat, agents, voice input, thinking display
 │   │   ├── common/          # Header, status bar, about dialog
@@ -290,7 +291,7 @@ seren-desktop/
 │   └── lib/                 # Utilities (indexing, audio, commands, rendering)
 ├── src-tauri/               # Rust backend
 │   ├── src/
-│   │   ├── acp.rs           # Agent Client Protocol
+│   │   ├── provider_runtime.rs  # Agent provider runtime (Claude Code, Codex)
 │   │   ├── auth.rs          # Authentication and token management
 │   │   ├── orchestrator/    # Task classifier, model router, RLM, ITR, workers
 │   │   ├── openclaw.rs      # OpenClaw messaging integration
