@@ -8,12 +8,18 @@ import { escapeHtml } from "@/lib/escape-html";
 // complex regex patterns in hljs language grammars and marked's GFM inline
 // tokenizer. Guard all regex-heavy paths with size limits.
 //
-// highlightAuto tries every registered grammar — tight limit.
-const MAX_HIGHLIGHT_AUTO_CHARS = 2_000;
-// Explicit-language highlight is cheaper but still regex-heavy for huge blocks.
-const MAX_HIGHLIGHT_CHARS = 30_000;
-// wrapCodeIslands tests ~20 regex patterns per line — skip for large content.
-const MAX_WRAP_ISLANDS_CHARS = 20_000;
+// highlightAuto tries every registered grammar — must bail before the
+// worst-case grammars accumulate. 10 KB covers ~300 lines of typical code,
+// which handles the vast majority of fenced blocks without explicit language.
+const MAX_HIGHLIGHT_AUTO_CHARS = 10_000;
+// Explicit-language highlight runs one grammar — safe up to much larger sizes.
+const MAX_HIGHLIGHT_CHARS = 100_000;
+// wrapCodeIslands tests ~20 regex patterns per line — skip for very large
+// messages (e.g. full file dumps or long agent responses).
+const MAX_WRAP_ISLANDS_CHARS = 50_000;
+// marked.parse's GFM inline tokenizer is O(n²) for certain content patterns
+// (long lines, many special characters). Render as pre-escaped text above this.
+const MAX_MARKDOWN_CHARS = 200_000;
 
 // Custom renderer for markdown
 const renderer = new marked.Renderer();
@@ -246,6 +252,11 @@ function normalizeAgentMarkdown(markdown: string): string {
 }
 
 export function renderMarkdown(markdown: string): string {
+  if (markdown.length > MAX_MARKDOWN_CHARS) {
+    // marked's GFM inline tokenizer is O(n²) for certain content patterns.
+    // Fall back to escaped text in a pre block for very large messages.
+    return `<pre style="white-space:pre-wrap;word-break:break-word">${escapeHtml(markdown)}</pre>`;
+  }
   const result = marked.parse(normalizeAgentMarkdown(markdown));
   return typeof result === "string" ? result : "";
 }
