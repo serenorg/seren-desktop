@@ -1,6 +1,7 @@
 # Triggered when an issue is labeled `agent-task`.
 # The agent reads the issue, clones the repo, diagnoses the failure,
 # opens a fix branch, and raises a PR — with no human in the loop.
+# Uses the Seren Gateway (OpenAI-compatible) — no ANTHROPIC_API_KEY needed.
 name: Agent fix
 
 on:
@@ -43,8 +44,11 @@ jobs:
       - name: Prepare MCP servers
         run: pnpm prepare:mcp-servers
 
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install agent dependencies
+        run: pip install openai
 
       - name: Configure git identity
         run: |
@@ -53,32 +57,10 @@ jobs:
 
       - name: Run agent fix
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SEREN_API_KEY: ${{ secrets.SEREN_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
-        run: |
-          claude --print \
-            --allowedTools "Read,Write,Edit,Glob,Grep,Bash" \
-            --max-turns 40 \
-            "You are a software engineer fixing a CI failure in the seren-desktop repo.
-
-          Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
-
-          ${ISSUE_BODY}
-
-          Instructions:
-          1. Understand the failing CI job from the issue title and body.
-          2. Reproduce the failure locally: run the relevant test or lint command.
-          3. Find the root cause. Do not fix symptoms.
-          4. Create a branch named fix/issue-${ISSUE_NUMBER} and fix the root cause.
-          5. Run the tests again to confirm the fix.
-          6. Commit the fix with a clear message.
-          7. Push the branch and open a PR that closes issue #${ISSUE_NUMBER}.
-          8. Comment on issue #${ISSUE_NUMBER} with the PR link.
-
-          Use gh CLI for GitHub operations (git, gh pr create, gh issue comment).
-          Follow all rules in CLAUDE.md. Never skip pre-commit hooks.
-          The failing job name is in the issue title after 'CI failure:'."
+        run: python .github/scripts/agent_fix.py
