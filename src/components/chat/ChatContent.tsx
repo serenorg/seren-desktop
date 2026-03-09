@@ -63,6 +63,7 @@ import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
 import { RerouteAnnouncement } from "./RerouteAnnouncement";
+import { RLMStepsBlock } from "./RLMStepsBlock";
 import { SatisfactionSignal } from "./SatisfactionSignal";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
@@ -1123,6 +1124,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                           );
                         })()}
                       </Show>
+                      <Show when={(message.rlmSteps ?? []).length > 0}>
+                        {(_) => (
+                          <RLMStepsBlock steps={message.rlmSteps ?? []} />
+                        )}
+                      </Show>
                       <Show
                         when={
                           message.role === "assistant" &&
@@ -1245,7 +1251,19 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             }
           >
             <article class="px-5 py-4 border-b border-surface-2">
-              <ThinkingStatus />
+              <Show
+                when={conversationStore.isRLMProcessing}
+                fallback={<ThinkingStatus />}
+              >
+                <span class="inline-flex items-center gap-2 text-sm text-foreground">
+                  <span class="inline-flex items-center gap-[3px]">
+                    <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-1" />
+                    <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-2" />
+                    <span class="inline-block w-[6px] h-[6px] rounded-full bg-primary thinking-dot thinking-dot-3" />
+                  </span>
+                  <span>Processing large input…</span>
+                </span>
+              </Show>
             </article>
           </Show>
 

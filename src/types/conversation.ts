@@ -49,6 +49,9 @@ export interface UnifiedMessage {
   toolCall?: ToolCallData;
   diff?: DiffData;
 
+  // RLM step metadata — present only when this message was produced by RLM
+  rlmSteps?: RLMStepData[];
+
   // For retry support
   request?: {
     prompt: string;
@@ -76,6 +79,12 @@ export interface DiffData {
   oldText: string;
   newText: string;
   toolCallId?: string;
+}
+
+export interface RLMStepData {
+  index: number;
+  total: number;
+  summary: string;
 }
 
 export interface ChatContextData {

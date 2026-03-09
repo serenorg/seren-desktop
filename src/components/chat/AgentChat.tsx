@@ -1006,7 +1006,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             >
               <div class="px-3 py-2 border rounded-md text-sm bg-warning/10 border-warning/40 text-warning">
                 <div class="flex items-center justify-between gap-2">
-                  <span>Authentication expired. Please log in to continue.</span>
+                  <span>
+                    Authentication expired. Please log in to continue.
+                  </span>
                   <button
                     type="button"
                     class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110 flex-shrink-0"

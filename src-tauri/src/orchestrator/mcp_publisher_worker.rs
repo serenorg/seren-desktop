@@ -169,6 +169,7 @@ impl McpPublisherWorker {
                 final_content,
                 thinking: None,
                 cost: None, // Cost set by stream_response from accumulated total
+                rlm_steps: None,
             });
         }
 
@@ -217,6 +218,7 @@ impl McpPublisherWorker {
                                     final_content: accumulated_content.clone(),
                                     thinking: None,
                                     cost,
+                                    rlm_steps: None,
                                 })
                                 .await
                                 .map_err(|e| format!("Failed to send Complete event: {}", e))?;
@@ -245,6 +247,7 @@ impl McpPublisherWorker {
                                         final_content: accumulated_content.clone(),
                                         thinking: None,
                                         cost,
+                                        rlm_steps: None,
                                     })
                                     .await
                                     .map_err(|e| format!("Failed to send Complete event: {}", e))?;
@@ -272,6 +275,7 @@ impl McpPublisherWorker {
                     final_content: accumulated_content,
                     thinking: None,
                     cost,
+                    rlm_steps: None,
                 })
                 .await
                 .map_err(|e| format!("Failed to send final Complete event: {}", e))?;

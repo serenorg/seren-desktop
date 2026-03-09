@@ -1167,6 +1167,7 @@ impl Worker for ChatModelWorker {
                             final_content,
                             thinking,
                             cost: total,
+                            rlm_steps: None,
                         })
                         .await
                         .map_err(|e| format!("Failed to send Complete event: {}", e))?;
@@ -1200,6 +1201,7 @@ impl Worker for ChatModelWorker {
                                 } else {
                                     None
                                 },
+                                rlm_steps: None,
                             })
                             .await
                             .map_err(|e| format!("Failed to send Complete event: {}", e))?;

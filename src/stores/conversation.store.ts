@@ -35,6 +35,7 @@ interface ConversationState {
   activeConversationId: string | null;
   messages: Record<string, UnifiedMessage[]>;
   isLoading: boolean;
+  isRLMProcessing: boolean;
   error: string | null;
   streamingContent: string;
   streamingThinking: string;
@@ -45,6 +46,7 @@ const [state, setState] = createStore<ConversationState>({
   activeConversationId: null,
   messages: {},
   isLoading: false,
+  isRLMProcessing: false,
   error: null,
   streamingContent: "",
   streamingThinking: "",
@@ -101,6 +103,14 @@ export const conversationStore = {
 
   get isLoading(): boolean {
     return state.isLoading;
+  },
+
+  get isRLMProcessing(): boolean {
+    return state.isRLMProcessing;
+  },
+
+  setRLMProcessing(value: boolean) {
+    setState("isRLMProcessing", value);
   },
 
   get error(): string | null {

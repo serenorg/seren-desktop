@@ -1,0 +1,85 @@
+/* ABOUTME: Styles for the RLM processing steps expandable block. */
+/* ABOUTME: Matches the visual style of ToolCallGroup for consistency. */
+
+.rlm-steps-block {
+  margin: 6px 20px;
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-surface-3);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.rlm-steps-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-muted-foreground);
+  transition: background-color 0.15s;
+}
+
+.rlm-steps-header:hover {
+  background: var(--color-surface-2);
+}
+
+.rlm-steps-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+}
+
+.rlm-steps-label {
+  flex: 1;
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+}
+
+.rlm-steps-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+  transition: transform 0.15s;
+}
+
+.rlm-steps-chevron--open {
+  transform: rotate(180deg);
+}
+
+.rlm-steps-body {
+  border-top: 1px solid var(--color-surface-2);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rlm-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rlm-step-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rlm-step-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-foreground);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -65,6 +65,9 @@ pub enum WorkerEvent {
         /// Total cost in SerenBucks for this worker's request, reported by Gateway.
         #[serde(skip_serializing_if = "Option::is_none")]
         cost: Option<f64>,
+        /// JSON-encoded Vec<rlm::ChunkResult> set when RLM processed this response.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rlm_steps: Option<String>,
     },
     Error {
         message: String,
@@ -74,6 +77,16 @@ pub enum WorkerEvent {
         from_model: String,
         to_model: String,
         reason: String,
+    },
+    /// Emitted at the start of recursive language model processing.
+    RlmStart {
+        chunk_count: usize,
+    },
+    /// Emitted when one chunk has been processed during RLM.
+    RlmChunkComplete {
+        index: usize,
+        total: usize,
+        summary: String,
     },
 }
 
@@ -260,6 +273,7 @@ mod tests {
             final_content: "done".to_string(),
             thinking: None,
             cost: Some(0.005),
+            rlm_steps: None,
         };
         let json = serde_json::to_value(&complete).unwrap();
         assert_eq!(json["type"], "complete");
@@ -271,6 +285,7 @@ mod tests {
             final_content: "done".to_string(),
             thinking: None,
             cost: None,
+            rlm_steps: None,
         };
         let json = serde_json::to_value(&complete_no_cost).unwrap();
         assert!(json.get("cost").is_none());
