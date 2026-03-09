@@ -18,6 +18,7 @@ import { getRuntimeConfig } from "@/lib/runtime";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
+import { syncMemories } from "@/services/memory";
 import { telemetry } from "@/services/telemetry";
 import { agentStore } from "@/stores/agent.store";
 import {
@@ -175,6 +176,8 @@ function App() {
         // Store cleanup to prevent effect accumulation
         cleanupAutoTopUp = initAutoTopUp();
         checkDailyClaim();
+        // Push any locally-cached memories that failed to reach cloud (e.g. cold start)
+        void syncMemories();
       });
     } else {
       console.log("[App] User logged out, stopping services...");
