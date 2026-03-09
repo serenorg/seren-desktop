@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
@@ -20,6 +20,8 @@ pub struct ProviderRuntimeConfig {
     pub ws_base_url: String,
 }
 
+const MAX_RESTART_ATTEMPTS: u32 = 3;
+
 struct ProviderRuntimeProcess {
     child: Child,
     config: ProviderRuntimeConfig,
@@ -27,12 +29,14 @@ struct ProviderRuntimeProcess {
 
 pub struct ProviderRuntimeState {
     process: Mutex<Option<ProviderRuntimeProcess>>,
+    monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl ProviderRuntimeState {
     pub fn new() -> Self {
         Self {
             process: Mutex::new(None),
+            monitor_handle: Mutex::new(None),
         }
     }
 
@@ -118,6 +122,11 @@ impl ProviderRuntimeState {
             child,
             config: config.clone(),
         });
+        drop(guard);
+
+        // Start crash monitor
+        let monitor = spawn_process_monitor(app.clone());
+        *self.monitor_handle.lock().await = Some(monitor);
 
         Ok(config)
     }
@@ -253,6 +262,71 @@ async fn wait_for_provider_runtime(
     }
 }
 
+/// Watches for provider runtime process death and attempts bounded auto-restart.
+fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut restart_attempts: u32 = 0;
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            let state = app.state::<ProviderRuntimeState>();
+            let exited = {
+                let mut guard = state.process.lock().await;
+                match guard.as_mut() {
+                    None => break, // Process was intentionally stopped
+                    Some(proc) => match proc.child.try_wait() {
+                        Ok(None) => false,     // Still running
+                        Ok(Some(status)) => {
+                            log::warn!("[ProviderRuntime] Process exited unexpectedly: {}", status);
+                            *guard = None;
+                            true
+                        }
+                        Err(err) => {
+                            log::warn!("[ProviderRuntime] Failed to check process status: {}", err);
+                            false
+                        }
+                    },
+                }
+            };
+
+            if exited {
+                restart_attempts += 1;
+                if restart_attempts > MAX_RESTART_ATTEMPTS {
+                    log::error!(
+                        "[ProviderRuntime] Crashed {} times, giving up",
+                        restart_attempts - 1
+                    );
+                    let _ = app.emit(
+                        "provider-runtime://failed",
+                        serde_json::json!({ "attempts": restart_attempts - 1 }),
+                    );
+                    return;
+                }
+
+                log::info!(
+                    "[ProviderRuntime] Restarting (attempt {}/{})",
+                    restart_attempts,
+                    MAX_RESTART_ATTEMPTS
+                );
+                tokio::time::sleep(Duration::from_secs(2)).await;
+
+                let state = app.state::<ProviderRuntimeState>();
+                match state.ensure_started(&app).await {
+                    Ok(_) => {
+                        log::info!("[ProviderRuntime] Restarted successfully");
+                        let _ = app.emit("provider-runtime://restarted", serde_json::json!({}));
+                        restart_attempts = 0;
+                        return; // ensure_started spawns a new monitor
+                    }
+                    Err(err) => {
+                        log::error!("[ProviderRuntime] Restart failed: {}", err);
+                    }
+                }
+            }
+        }
+    })
+}
+
 #[tauri::command]
 pub async fn provider_runtime_get_config(
     app: AppHandle,
@@ -265,6 +339,10 @@ pub async fn provider_runtime_get_config(
 pub async fn provider_runtime_stop(
     state: State<'_, ProviderRuntimeState>,
 ) -> Result<(), String> {
+    if let Some(handle) = state.monitor_handle.lock().await.take() {
+        handle.abort();
+    }
+
     let mut guard = state.process.lock().await;
     let Some(mut process) = guard.take() else {
         return Ok(());
