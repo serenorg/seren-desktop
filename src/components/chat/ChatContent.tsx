@@ -305,12 +305,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       conversationStore.isLoading,
     );
 
-    // Reset orphaned loading state from HMR interruption
-    if (conversationStore.isLoading) {
-      console.log("[ChatContent] Resetting orphaned loading state from HMR");
-      conversationStore.setLoading(false);
-    }
-
     // Register copy button handler on document for better reliability
     // Using document-level delegation ensures copy buttons work even if messagesRef timing is off
     document.addEventListener("click", handleCopyClick);
@@ -362,12 +356,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       "seren:set-chat-input",
       handleSetChatInput as EventListener,
     );
-
-    // Reset loading state if still active when unmounting (e.g., HMR)
-    if (conversationStore.isLoading) {
-      console.log("[ChatContent] Cleaning up loading state on unmount");
-      conversationStore.setLoading(false);
-    }
 
     if (suggestionDebounceTimer) {
       clearTimeout(suggestionDebounceTimer);
