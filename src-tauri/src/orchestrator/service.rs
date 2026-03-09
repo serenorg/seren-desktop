@@ -639,14 +639,23 @@ async fn execute_multi_task(
         subtasks.len()
     );
 
+    // Bridge the oneshot cancel_rx into a watch channel so cancellation state
+    // can be cloned across the forward task and each worker layer.
+    let (cancel_watch_tx, cancel_watch_rx) = tokio::sync::watch::channel(false);
+    let cancel_watch_tx_for_bridge = cancel_watch_tx.clone();
+    tokio::spawn(async move {
+        let _ = cancel_rx.await;
+        let _ = cancel_watch_tx_for_bridge.send(true);
+    });
+
     // Shared event channel: all workers send (subtask_id, event) through this
     let (shared_tx, mut shared_rx) = mpsc::channel::<(String, WorkerEvent)>(256);
 
     // Spawn event forwarding task
     let conv_id = conversation_id.to_string();
     let app_for_events = app.clone();
+    let mut cancel_watch_for_forward = cancel_watch_rx.clone();
     let forward_handle = tokio::spawn(async move {
-        let mut cancel_rx = cancel_rx;
         loop {
             tokio::select! {
                 event = shared_rx.recv() => {
@@ -665,7 +674,7 @@ async fn execute_multi_task(
                         None => break,
                     }
                 }
-                _ = &mut cancel_rx => {
+                _ = cancel_watch_for_forward.wait_for(|v| *v) => {
                     log::info!("[Orchestrator] Cancellation received for multi-task conversation {}", conv_id);
                     break;
                 }
@@ -794,7 +803,13 @@ async fn execute_multi_task(
         // Wait for all workers in this layer before starting next
         let mut layer_had_success = false;
         let mut layer_fatal_error: Option<String> = None;
+        let mut cancel_check = cancel_watch_rx.clone();
         for handle in handles {
+            // If already cancelled, abort this handle immediately
+            if *cancel_check.borrow() {
+                handle.abort();
+                continue;
+            }
             match handle.await {
                 Ok(Ok(Ok(()))) => {
                     layer_had_success = true;
@@ -819,6 +834,12 @@ async fn execute_multi_task(
                     log::error!("[Orchestrator] Join error in layer {}: {}", layer_idx, e);
                 }
             }
+        }
+
+        // After processing layer handles, stop if cancelled
+        if *cancel_watch_rx.borrow() {
+            log::info!("[Orchestrator] Cancellation detected — stopping layer execution");
+            break 'layers;
         }
 
         // Abort immediately on fatal errors (e.g. no balance)
