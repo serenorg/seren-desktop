@@ -2380,30 +2380,17 @@ async fn run_session_worker(
                                 break result;
                             }
                             _ = tokio::time::sleep_until(deadline) => {
-                                log::warn!("[ACP] Prompt did not resolve within 5s after cancel — agent unresponsive");
+                                log::warn!("[ACP] Prompt did not resolve within 60s after cancel — forcing turn end");
 
-                                // Capture stderr to help diagnose why cancel failed
-                                let stderr_lines = {
-                                    let buf = _stderr_tail_for_errors.lock().await;
-                                    buf.iter()
-                                        .rev()
-                                        .take(STDERR_TAIL_ON_ERROR)
-                                        .cloned()
-                                        .collect::<Vec<_>>()
-                                        .into_iter()
-                                        .rev()
-                                        .collect::<Vec<_>>()
-                                };
+                                // The agent didn't respond to the cancel in time.
+                                // Instead of force-stopping the entire session (which
+                                // destroys all conversation context), just end this turn
+                                // with a cancellation error. The session stays alive and
+                                // the user can send another prompt.
+                                let error_msg = "Task cancelled".to_string();
+                                log::info!("[ACP] Cancel timeout — ending turn without killing session");
 
-                                let mut error_msg = "Agent unresponsive after cancel request. Session will restart automatically.".to_string();
-                                if !stderr_lines.is_empty() {
-                                    error_msg.push_str("\n\nAgent stderr (last 50 lines):\n");
-                                    error_msg.push_str(&stderr_lines.join("\n"));
-                                }
-
-                                log::error!("[ACP] Cancel timeout error details: {}", error_msg);
-
-                                force_stopped = true;
+                                // Do NOT set force_stopped — keep the session alive.
                                 break Err(agent_client_protocol::Error::internal_error().data(
                                     serde_json::Value::String(error_msg),
                                 ));
@@ -2503,7 +2490,7 @@ async fn run_session_worker(
                                         let cancel_result = connection.cancel(cancel).await;
                                         let _ = cancel_tx.send(cancel_result.map_err(|e| format!("{:?}", e)));
                                         cancelled = true;
-                                        cancel_deadline = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
+                                        cancel_deadline = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(60));
                                     }
                                     Some(AcpCommand::Terminate) => {
                                         log::info!("[ACP] Terminate received during active prompt");
