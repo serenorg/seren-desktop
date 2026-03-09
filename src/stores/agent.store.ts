@@ -22,6 +22,8 @@ const SESSION_READY_TIMEOUT_MS = 30_000;
 
 /** Await a session ready promise with a timeout to prevent infinite hangs */
 function waitForSessionReady(sessionId: string): Promise<void> {
+  // Note: this only resolves the initial ready promise set up in spawnSession.
+  // Use waitForSessionIdle for post-seed-prompt readiness.
   const entry = sessionReadyPromises.get(sessionId);
   if (!entry) return Promise.resolve();
   return Promise.race([
@@ -33,6 +35,24 @@ function waitForSessionReady(sessionId: string): Promise<void> {
       ),
     ),
   ]);
+}
+
+/** Wait for a session to return to 'ready' (not 'prompting') with a timeout.
+ * Used after sending the compaction seed prompt to avoid racing with the retry. */
+async function waitForSessionIdle(
+  sessionId: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (state.sessions[sessionId]?.info.status === "prompting") {
+    if (Date.now() >= deadline) {
+      console.warn(
+        `[AgentStore] waitForSessionIdle: timed out after ${timeoutMs}ms for session ${sessionId}`,
+      );
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
@@ -1699,12 +1719,24 @@ Summary:`;
       // Store compacted summary and preserved messages on the new session.
       // Mark them as restored so the message-count threshold ignores them.
       setState("sessions", newSessionId, "compactedSummary", compactedSummary);
-      setState("sessions", newSessionId, "messages", toPreserve);
+
+      // Prepend a visible notice so the user knows compaction occurred and
+      // understands why earlier messages are no longer visible.
+      const compactionNotice: AgentMessage = {
+        id: crypto.randomUUID(),
+        type: "assistant",
+        content: `Context compacted: ${toCompact.length} earlier messages summarized to keep the session active. The ${toPreserve.length} most recent messages are shown below.`,
+        timestamp: Date.now(),
+      };
+      setState("sessions", newSessionId, "messages", [
+        compactionNotice,
+        ...toPreserve,
+      ]);
       setState(
         "sessions",
         newSessionId,
         "restoredMessageCount",
-        toPreserve.length,
+        toPreserve.length + 1, // +1 for the compaction notice
       );
 
       // Seed the new agent with the summary so it has context
@@ -1805,8 +1837,10 @@ Summary:`;
         `[AgentStore] Compaction complete, retrying prompt on session ${newSessionId}`,
       );
 
-      // Wait for the new session to be ready
-      await waitForSessionReady(newSessionId);
+      // compactAgentConversation sends the seed prompt before returning, so the
+      // session may still be in 'prompting' state. Wait for it to go idle before
+      // sending the user's original prompt to avoid a concurrent-prompt race.
+      await waitForSessionIdle(newSessionId);
 
       // Retry the original prompt
       await providerService.sendPrompt(newSessionId, lastPrompt);
