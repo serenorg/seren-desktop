@@ -9,18 +9,20 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 
 ### AI Chat
 
-- **Multi-model support** — Claude, GPT-4, Gemini via Seren Gateway or direct API keys
+- **Multi-model support** — Claude, Gemini, and GPT models via Seren Gateway or direct API keys
 - **Smart model routing** — Satisfaction-driven model selection using Thompson sampling
 - **Auto-reroute on failure** — Falls back to satisfaction-ranked model on 408/timeout errors
 - **Task classification** — Routes prompts to the optimal worker (chat, agent, or publisher)
-- **Free tier included** — Start chatting with Gemini 2.0 Flash (Free), no payment required
+- **Context overflow handling (RLM)** — Automatically splits oversized prompts into overlapping chunks and merges responses when input exceeds a model's context window
+- **Dynamic tool exposure** — BM25-lite relevance scoring selects only the tools relevant to each query, reducing tool-context tokens and improving response quality
+- **Free tier included** — Start chatting with Gemini Flash (Free), no payment required
 - **Multi-tab conversations** — Work on multiple chats simultaneously
 - **Streaming responses** — Real-time token-by-token output
 - **Thinking display** — Toggle chain-of-thought reasoning visibility
 - **Query cost tracking** — Shows Gateway cost alongside response duration
 - **Image attachments** — Attach images to chat messages
 - **Voice input** — Speech-to-text via Seren Whisper publisher with auto-submit option
-- **Slash commands** — `/` command autocomplete with `/login`, `/clear`, `/new`, `/copy`
+- **Slash commands** — `/` command autocomplete with 15 built-in commands
 - **Satisfaction signals** — Thumbs up/down feedback that trains the model router
 - **Semantic code context** — AI retrieves relevant code from your indexed codebase
 - **Smart balance warnings** — Prompts to top up or switch to free model when low on credits
@@ -55,13 +57,11 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 
 - **AgentSkills.io standard** — Standards-compliant skill format with SKILL.md metadata
 - **Three-tier hierarchy** — Global defaults, project defaults, and thread-level overrides
-- **Skill discovery** — Browse available skills from `https://github.com/serenorg/seren-skills`
+- **Skill discovery** — Browse available skills from the [seren-skills](https://github.com/serenorg/seren-skills) catalog
 - **One-click installation** — Install skills directly from the catalog
 - **Slash command invocation** — Activate skills with `/skill-name` in chat or agent threads
 - **Thread-level management** — Enable/disable skills per conversation
 - **Project-scoped skills** — Skills can be project-specific via `.seren/skills.json`
-- **Built-in skills** — Polymarket Bot, Skill Creator, Getting Started, Playwright, Apollo
-- **Skill source** — Built-in skills are provided by the public repo at `https://github.com/serenorg/seren-skills`.
 
 ### Seren Memory
 
@@ -75,7 +75,7 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 
 ### OpenClaw Messaging
 
-- **Multi-platform agents** — Connect AI to Discord, Slack, Telegram, and more
+- **Multi-platform agents** — Connect AI to Discord, Slack, Telegram, and Signal
 - **Per-channel trust levels** — Auto-respond, mention-only, or approval-required
 - **Agent mode per channel** — Choose which AI model handles each channel
 - **Message approval workflow** — Review and approve agent responses before sending
@@ -148,6 +148,13 @@ An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. C
 - **Cloudflare R2** — Fast, reliable update distribution with zero egress fees
 - **Automatic signature verification** — Cryptographically signed updates
 
+### CI Automation
+
+- **Autonomous fix pipeline** — CI failures on `main` are automatically filed as GitHub issues labeled `agent-task`
+- **Deduplication** — Duplicate issues are suppressed; only one open issue per failing job
+- **ReAct agent loop** — An AI agent reads the issue, reproduces the failure, applies a fix, opens a PR, and comments on the issue — with no human in the loop
+- **Seren Gateway execution** — Agent runs via the Seren Gateway (no separate API key required)
+
 ### Security
 
 - **Encrypted storage** — Tokens stored via Tauri secure storage
@@ -209,7 +216,7 @@ Builds are available for:
 Seren Desktop is the **open source client**. It connects to Seren's proprietary Gateway API for:
 
 - **Authentication & Billing** — SerenBucks payment system
-- **AI Model Access** — Claude, GPT, Gemini, and other models
+- **AI Model Access** — Claude, Gemini, GPT, and other models
 - **Publisher Marketplace** — Firecrawl, Perplexity, databases
 - **MCP Server Hosting** — Email, calendar, CRM actions
 - **SerenDB** — Serverless PostgreSQL databases
@@ -231,14 +238,16 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
 │  │Orchestr. │  │ Indexing │  │ Sandbox  │  │  Skills  │ │
-│  │ Router   │  │sqlite-vec│  │ Terminal │  │AgntSkills│ │
-│  │ Classify │  │          │  │          │  │          │ │
+│  │ Router   │  │sqlite-vec│  │ Terminal │  │ Remote   │ │
+│  │ RLM+ITR  │  │          │  │          │  │ Catalog  │ │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐  ┌──────────┐                              │
-│  │  Memory  │  │  Tasks   │                              │
-│  │Cross-sess│  │ Agent Ops│  Backend: Rust/Tauri         │
-│  │  Vector  │  │          │  Frontend: SolidJS/TypeScript │
-│  └──────────┘  └──────────┘  Embedded: Node.js + npm + ACP│
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐              │
+│  │  Memory  │  │  Tasks   │  │    CI    │              │
+│  │Cross-sess│  │ Agent Ops│  │ Auto-fix │              │
+│  │  Vector  │  │          │  │  Agent   │              │
+│  └──────────┘  └──────────┘  └──────────┘              │
+│  Backend: Rust/Tauri   Frontend: SolidJS/TypeScript      │
+│  Embedded: Node.js + npm + ACP                           │
 └─────────────────────────┬────────────────────────────────┘
                           │
                           ▼
@@ -246,7 +255,7 @@ Think of it like VS Code (open source) connecting to the Extension Marketplace (
 │             Seren Gateway (Proprietary)                   │
 │  • api.serendb.com                                       │
 │  • Authentication & billing (SerenBucks)                 │
-│  • AI model routing (Claude, GPT, Gemini)                │
+│  • AI model routing (Claude, Gemini, GPT)                │
 │  • Publisher ecosystem (100+ services)                   │
 │  • MCP server hosting (mcp.serendb.com)                  │
 │  • SerenDB serverless PostgreSQL                         │
@@ -283,7 +292,7 @@ seren-desktop/
 │   ├── src/
 │   │   ├── acp.rs           # Agent Client Protocol
 │   │   ├── auth.rs          # Authentication and token management
-│   │   ├── orchestrator/    # Task classifier, model router, workers
+│   │   ├── orchestrator/    # Task classifier, model router, RLM, ITR, workers
 │   │   ├── openclaw.rs      # OpenClaw messaging integration
 │   │   ├── skills.rs        # Skills system management
 │   │   ├── terminal.rs      # Terminal process management
@@ -298,16 +307,15 @@ seren-desktop/
 │   │   ├── services/        # Vector store, chunker, indexer, database
 │   │   └── wallet/          # x402 payments, Ethereum signing
 │   └── embedded-runtime/    # Bundled runtimes and OpenClaw
-├── skills/                  # Bundled skills (Polymarket, Apollo, etc.)
 ├── tests/                   # E2E tests (Playwright)
 ├── build/                   # Platform-specific build scripts
-└── .github/workflows/       # CI and release automation
+└── .github/workflows/       # CI, release, and autonomous agent-fix automation
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|------------|
+| ----- | ---------- |
 | Frontend | SolidJS 1.8+, TypeScript 5+, Vite |
 | Backend | Rust, Tauri 2.0 |
 | Editor | Monaco Editor 0.52+ |
