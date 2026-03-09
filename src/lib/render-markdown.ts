@@ -4,6 +4,23 @@ import hljs from "highlight.js";
 import { marked, type Tokens } from "marked";
 import { escapeHtml } from "@/lib/escape-html";
 
+// JSC's Yarr regex interpreter (WebKit) can catastrophically backtrack on
+// complex regex patterns in hljs language grammars and marked's GFM inline
+// tokenizer. Guard all regex-heavy paths with size limits.
+//
+// highlightAuto tries every registered grammar — must bail before the
+// worst-case grammars accumulate. 10 KB covers ~300 lines of typical code,
+// which handles the vast majority of fenced blocks without explicit language.
+const MAX_HIGHLIGHT_AUTO_CHARS = 10_000;
+// Explicit-language highlight runs one grammar — safe up to much larger sizes.
+const MAX_HIGHLIGHT_CHARS = 100_000;
+// wrapCodeIslands tests ~20 regex patterns per line — skip for very large
+// messages (e.g. full file dumps or long agent responses).
+const MAX_WRAP_ISLANDS_CHARS = 50_000;
+// marked.parse's GFM inline tokenizer is O(n²) for certain content patterns
+// (long lines, many special characters). Render as pre-escaped text above this.
+const MAX_MARKDOWN_CHARS = 200_000;
+
 // Custom renderer for markdown
 const renderer = new marked.Renderer();
 
@@ -28,10 +45,16 @@ renderer.code = (token: Tokens.Code): string => {
   const { text, lang } = token;
   let highlighted: string;
 
-  if (lang && hljs.getLanguage(lang)) {
+  if (text.length > MAX_HIGHLIGHT_CHARS) {
+    // Skip hljs entirely for very large blocks — plain-escape to avoid ReDoS.
+    highlighted = escapeHtml(text);
+  } else if (lang && hljs.getLanguage(lang)) {
     highlighted = hljs.highlight(text, { language: lang }).value;
-  } else {
+  } else if (text.length <= MAX_HIGHLIGHT_AUTO_CHARS) {
+    // highlightAuto tries all grammars — only safe for small snippets.
     highlighted = hljs.highlightAuto(text).value;
+  } else {
+    highlighted = escapeHtml(text);
   }
 
   const langClass = lang ? ` class="language-${escapeHtml(lang)}"` : "";
@@ -220,10 +243,20 @@ export function wrapCodeIslands(text: string): string {
 function normalizeAgentMarkdown(markdown: string): string {
   let result = markdown.replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2");
   result = result.replace(/([^\n])\n(`{3,}|~{3,})/g, "$1\n\n$2");
+  // Skip wrapCodeIslands for large content: it tests ~20 regex patterns per
+  // line and can take seconds on multi-thousand-line messages.
+  if (result.length > MAX_WRAP_ISLANDS_CHARS) {
+    return result;
+  }
   return wrapCodeIslands(result);
 }
 
 export function renderMarkdown(markdown: string): string {
+  if (markdown.length > MAX_MARKDOWN_CHARS) {
+    // marked's GFM inline tokenizer is O(n²) for certain content patterns.
+    // Fall back to escaped text in a pre block for very large messages.
+    return `<pre style="white-space:pre-wrap;word-break:break-word">${escapeHtml(markdown)}</pre>`;
+  }
   const result = marked.parse(normalizeAgentMarkdown(markdown));
   return typeof result === "string" ? result : "";
 }

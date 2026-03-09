@@ -12,20 +12,20 @@ import {
   onCleanup,
   onMount,
   Show,
+  untrack,
 } from "solid-js";
+import { createStore } from "solid-js/store";
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { DepositModal } from "@/components/wallet/DepositModal";
 import { isAuthError } from "@/lib/auth-errors";
-import { collapseBuildOutput } from "@/lib/build-output";
 import {
   getCompletions,
   matchSkillCommand,
   parseCommand,
 } from "@/lib/commands/parser";
 import type { CommandContext } from "@/lib/commands/types";
-import { collapseDirectoryListings } from "@/lib/directory-listing";
 import { createDragDrop } from "@/lib/drag-drop";
 import { openExternalLink } from "@/lib/external-link";
 import { openFileInTab } from "@/lib/files/service";
@@ -33,7 +33,8 @@ import { formatDurationWithVerb } from "@/lib/format-duration";
 import { pickAndReadAttachments } from "@/lib/images/attachments";
 import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
-import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
+import { escapeHtmlWithLinks } from "@/lib/render-markdown";
+import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -207,6 +208,40 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   let messagesRef: HTMLDivElement | undefined;
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | undefined;
   let prevConversationId: string | null = null;
+
+  // Off-thread markdown rendering: finalized assistant messages are processed
+  // in a Web Worker so renderMarkdown (marked + hljs) never blocks JSC's main
+  // thread. The worker returns HTML via onmessage → setHtmlCache → reactive
+  // DOM update. Mirrors the same pattern used in AgentChat.tsx.
+  const markdownWorker = new RenderMarkdownWorker();
+  const [htmlCache, setHtmlCache] = createStore<Record<string, string>>({});
+  markdownWorker.onmessage = (
+    e: MessageEvent<{ id: string; html: string; error?: boolean }>,
+  ) => {
+    if (e.data.error) {
+      console.warn(
+        `[ChatContent] Worker markdown render failed for message ${e.data.id}, using fallback`,
+      );
+    }
+    setHtmlCache(e.data.id, e.data.html);
+  };
+  markdownWorker.onerror = (err) => {
+    console.error("[ChatContent] Markdown worker error:", err.message);
+  };
+  onCleanup(() => markdownWorker.terminate());
+
+  // Enqueue finalized assistant messages to the render worker.
+  createEffect(() => {
+    for (const msg of conversationStore.messages) {
+      if (
+        msg.role === "assistant" &&
+        msg.status !== "streaming" &&
+        untrack(() => htmlCache[msg.id]) === undefined
+      ) {
+        markdownWorker.postMessage({ id: msg.id, markdown: msg.content });
+      }
+    }
+  });
 
   // Save/restore per-thread input drafts when switching conversations
   createEffect(() => {
@@ -1096,11 +1131,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                         class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-[1.3em] [&_h1]:font-semibold [&_h1]:mt-5 [&_h1]:mb-3 [&_h1]:text-foreground [&_h1]:border-b [&_h1]:border-surface-2 [&_h1]:pb-2 [&_h2]:text-[1.15em] [&_h2]:font-semibold [&_h2]:mt-4 [&_h2]:mb-2 [&_h2]:text-foreground [&_h3]:text-[1.05em] [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-2 [&_h3]:text-foreground [&_code]:bg-surface-1 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_li]:leading-[1.6] [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline [&_strong]:text-foreground [&_strong]:font-semibold"
                         innerHTML={
                           message.role === "assistant"
-                            ? collapseBuildOutput(
-                                collapseDirectoryListings(
-                                  renderMarkdown(message.content),
-                                ),
-                              )
+                            ? (htmlCache[message.id] ?? "")
                             : escapeHtmlWithLinks(message.content)
                         }
                       />
