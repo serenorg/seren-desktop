@@ -48,7 +48,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install agent dependencies
-        run: pip install openai
+        run: pip install openai httpx
 
       - name: Configure git identity
         run: |

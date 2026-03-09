@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+
+import httpx
 from openai import OpenAI
 
 SEREN_API_KEY = os.environ["SEREN_API_KEY"]
@@ -15,9 +17,20 @@ ISSUE_BODY = os.environ["ISSUE_BODY"]
 MODEL = os.environ.get("AGENT_MODEL", "anthropic/claude-sonnet-4-6")
 MAX_TURNS = int(os.environ.get("MAX_TURNS", "40"))
 
+# Guard: only run on CI-failure issues, not feature requests or other issue types.
+# The issue title is set by ci.yml as "CI failure: <job> on main".
+if not ISSUE_TITLE.startswith("CI failure:"):
+    print(f"Issue #{ISSUE_NUMBER} is not a CI failure (\"{ISSUE_TITLE}\"). Skipping.")
+    sys.exit(0)
+
+GATEWAY_BASE = "https://api.serendb.com/publishers/seren-models"
+
 client = OpenAI(
     api_key=SEREN_API_KEY,
-    base_url="https://api.serendb.com/publishers/seren-models/",
+    base_url=f"{GATEWAY_BASE}/",
+    http_client=httpx.Client(event_hooks={
+        "response": [lambda r: print(f"[http] {r.status_code} {r.url}", file=sys.stderr)],
+    }),
 )
 
 TOOLS = [
@@ -154,6 +167,10 @@ def main():
             tools=TOOLS,
             tool_choice="auto",
         )
+
+        if not response.choices:
+            print(f"[error] Empty choices in response. Full response: {response.model_dump_json()}", file=sys.stderr)
+            sys.exit(1)
 
         choice = response.choices[0]
         messages.append(choice.message.model_dump(exclude_unset=False))
