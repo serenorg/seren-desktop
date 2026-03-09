@@ -1,7 +1,6 @@
 // ABOUTME: Left sidebar with project header and unified thread list.
 // ABOUTME: Displays all chat and agent threads for the active project, sorted by recency.
 
-import { open } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
   createMemo,
@@ -11,10 +10,11 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { openFolder } from "@/lib/files/service";
 import type { InstalledSkill, Skill } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
-import { acpStore } from "@/stores/acp.store";
-import { fileTreeState, setRootPath } from "@/stores/fileTree";
+import { agentStore } from "@/stores/agent.store";
+import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -61,10 +61,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   });
 
   const handleOpenFolder = async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (selected && typeof selected === "string") {
-      setRootPath(selected);
-    }
+    await openFolder();
   };
 
   const handleNewChat = async () => {
@@ -345,7 +342,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               />
             </svg>
           </Show>
-          {spawning() ? (acpStore.installStatus ?? "Starting...") : "New Agent"}
+          {spawning()
+            ? (agentStore.installStatus ?? "Starting...")
+            : "New Agent"}
         </button>
 
         <Show when={showLauncher()}>
@@ -362,7 +361,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
             {/* Claude Agent */}
             <Show
-              when={acpStore.availableAgents.some(
+              when={agentStore.availableAgents.some(
                 (a) => a.type === "claude-code" && a.available,
               )}
             >
@@ -388,7 +387,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
             {/* Codex Agent */}
             <Show
-              when={acpStore.availableAgents.some(
+              when={agentStore.availableAgents.some(
                 (a) => a.type === "codex" && a.available,
               )}
             >
@@ -835,7 +834,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           when={
                             thread.kind === "agent" &&
                             thread.id !== threadStore.activeThreadId &&
-                            acpStore.hasPendingApprovals(thread.id)
+                            agentStore.hasPendingApprovals(thread.id)
                           }
                         >
                           <span
@@ -848,7 +847,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                             !(
                               thread.kind === "agent" &&
                               thread.id !== threadStore.activeThreadId &&
-                              acpStore.hasPendingApprovals(thread.id)
+                              agentStore.hasPendingApprovals(thread.id)
                             )
                           }
                         >

@@ -1,9 +1,8 @@
 // ABOUTME: File explorer panel with folder selection and tree view.
 // ABOUTME: Provides VS Code-like file browsing for local projects.
 
-import { open } from "@tauri-apps/plugin-dialog";
 import { type Component, createSignal, Show } from "solid-js";
-import { type FileEntry, listDirectory } from "@/lib/tauri-bridge";
+import { type FileEntry, listDirectory, openFolder } from "@/lib/files/service";
 import {
   type FileNode,
   fileTreeState,
@@ -38,39 +37,14 @@ export const FileExplorerPanel: Component<FileExplorerPanelProps> = (props) => {
    * Open folder picker and load the selected directory.
    */
   async function handleOpenFolder() {
-    try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: "Select Project Folder",
-      });
-
-      if (selected && typeof selected === "string") {
-        await loadFolder(selected);
-      }
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to open folder";
-      setError(message);
-    }
-  }
-
-  /**
-   * Load a folder and its contents into the file tree.
-   */
-  async function loadFolder(path: string) {
     setIsLoading(true);
     setError(null);
 
     try {
-      const entries = await listDirectory(path);
-      const nodes = entries.map(entryToNode);
-
-      setRootPath(path);
-      setNodes(nodes);
+      await openFolder();
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to load folder";
+        err instanceof Error ? err.message : "Failed to open folder";
       setError(message);
     } finally {
       setIsLoading(false);

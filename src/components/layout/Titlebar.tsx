@@ -1,11 +1,11 @@
 // ABOUTME: Compact titlebar with app branding, project folder name, and user actions.
 // ABOUTME: Replaces the old Header component with a cleaner, Codex-inspired design.
 
-import { open } from "@tauri-apps/plugin-dialog";
 import { type Component, Show } from "solid-js";
 import { BalanceDisplay } from "@/components/common/BalanceDisplay";
+import { openFolder } from "@/lib/files/service";
 import { authStore } from "@/stores/auth.store";
-import { fileTreeState, setRootPath } from "@/stores/fileTree";
+import { fileTreeState } from "@/stores/fileTree";
 import { updaterStore } from "@/stores/updater.store";
 
 interface TitlebarProps {
@@ -67,10 +67,7 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
   };
 
   const handleOpenFolder = async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (selected && typeof selected === "string") {
-      setRootPath(selected);
-    }
+    await openFolder();
   };
 
   const handleSupportClick = () => {

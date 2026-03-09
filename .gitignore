@@ -41,6 +41,7 @@ src-tauri/binaries/
 # Keep .gitkeep placeholder for CI
 src-tauri/embedded-runtime/bin/
 src-tauri/embedded-runtime/openclaw/
+src-tauri/embedded-runtime/provider-runtime/
 src-tauri/embedded-runtime/darwin-*/
 src-tauri/embedded-runtime/win32-*/
 src-tauri/embedded-runtime/linux-*/

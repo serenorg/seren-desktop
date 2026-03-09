@@ -22,8 +22,6 @@ pub mod services {
     pub mod vector_store;
 }
 
-#[cfg(feature = "acp")]
-mod acp;
 mod auth;
 mod claude_setup;
 mod embedded_runtime;
@@ -35,11 +33,10 @@ mod oauth_callback_server;
 mod openclaw;
 mod orchestrator;
 mod polymarket;
-mod sandbox;
+mod provider_runtime;
 mod shell;
 mod skills;
 mod sync;
-mod terminal;
 mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
@@ -469,13 +466,9 @@ pub fn run() {
         .manage(orchestrator::service::OrchestratorState::new())
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
+        .manage(provider_runtime::ProviderRuntimeState::new())
         .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
             as polymarket::commands::PolymarketWsState);
-
-    #[cfg(feature = "acp")]
-    {
-        builder = builder.manage(acp::AcpState::new());
-    }
 
     #[cfg(feature = "openclaw")]
     {
@@ -698,6 +691,7 @@ pub fn run() {
             commands::chat::set_agent_conversation_session_id,
             commands::chat::set_agent_conversation_title,
             commands::chat::set_agent_conversation_model_id,
+            commands::chat::set_agent_conversation_metadata,
             commands::chat::archive_agent_conversation,
             // Message commands
             commands::chat::save_message,
@@ -733,6 +727,8 @@ pub fn run() {
             polymarket::commands::subscribe_polymarket_market,
             polymarket::commands::subscribe_polymarket_user,
             embedded_runtime::get_embedded_runtime_info,
+            provider_runtime::provider_runtime_get_config,
+            provider_runtime::provider_runtime_stop,
             // CLI installer commands
             commands::cli_installer::check_cli_installed,
             commands::cli_installer::install_cli_tool,
@@ -759,41 +755,6 @@ pub fn run() {
             commands::indexing::chunk_file,
             commands::indexing::estimate_indexing,
             commands::indexing::compute_file_hash,
-            // ACP commands (conditionally included when acp feature is enabled)
-            #[cfg(feature = "acp")]
-            acp::acp_spawn,
-            #[cfg(feature = "acp")]
-            acp::acp_prompt,
-            #[cfg(feature = "acp")]
-            acp::acp_cancel,
-            #[cfg(feature = "acp")]
-            acp::acp_terminate,
-            #[cfg(feature = "acp")]
-            acp::acp_fork_session,
-            #[cfg(feature = "acp")]
-            acp::acp_list_sessions,
-            #[cfg(feature = "acp")]
-            acp::acp_list_remote_sessions,
-            #[cfg(feature = "acp")]
-            acp::acp_set_permission_mode,
-            #[cfg(feature = "acp")]
-            acp::acp_set_model,
-            #[cfg(feature = "acp")]
-            acp::acp_set_config_option,
-            #[cfg(feature = "acp")]
-            acp::acp_respond_to_permission,
-            #[cfg(feature = "acp")]
-            acp::acp_get_available_agents,
-            #[cfg(feature = "acp")]
-            acp::acp_check_agent_available,
-            #[cfg(feature = "acp")]
-            acp::acp_launch_login,
-            #[cfg(feature = "acp")]
-            acp::acp_ensure_claude_cli,
-            #[cfg(feature = "acp")]
-            acp::acp_ensure_codex_cli,
-            #[cfg(feature = "acp")]
-            acp::acp_respond_to_diff_proposal,
             // OpenClaw commands (conditionally included when openclaw feature is enabled)
             #[cfg(feature = "openclaw")]
             openclaw::openclaw_start,

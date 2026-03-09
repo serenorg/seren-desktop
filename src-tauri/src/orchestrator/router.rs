@@ -32,7 +32,7 @@ pub const LARGE_CONTEXT_FALLBACK_MODELS: &[&str] = &[
 /// Route a classified task to the appropriate worker.
 ///
 /// Bootstrap routing logic:
-/// 1. Code generation + file system + ACP agent available → AcpAgent
+/// 1. Code generation + file system + local agent available → LocalAgent
 /// 2. Requires tools + tools available → ChatModel (with tools)
 /// 3. Default → ChatModel (without tools)
 ///
@@ -40,7 +40,7 @@ pub const LARGE_CONTEXT_FALLBACK_MODELS: &[&str] = &[
 /// - Code tasks: prefer the most capable model
 /// - Simple Q&A: prefer a fast/cheap model
 ///
-/// Delegation: AcpAgent defaults to FullHandoff (agent manages its own loop);
+/// Delegation: LocalAgent defaults to FullHandoff (agent manages its own loop);
 /// ChatModel and McpPublisher default to InLoop (trust graduation can override).
 pub fn route(
     classification: &TaskClassification,
@@ -54,7 +54,7 @@ pub fn route(
     let publisher_slug = extract_publisher_slug(&worker_type, capabilities);
 
     let delegation = match worker_type {
-        WorkerType::AcpAgent => DelegationType::FullHandoff,
+        WorkerType::LocalAgent => DelegationType::FullHandoff,
         _ => DelegationType::InLoop,
     };
 
@@ -73,13 +73,13 @@ fn select_worker_type(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
 ) -> WorkerType {
-    // Code generation with file system access + active ACP session → AcpAgent
+    // Code generation with file system access + active local agent session → LocalAgent
     if classification.task_type == "code_generation"
         && classification.requires_file_system
-        && capabilities.has_acp_agent
-        && capabilities.active_acp_session_id.is_some()
+        && capabilities.has_local_agent
+        && capabilities.active_agent_session_id.is_some()
     {
-        return WorkerType::AcpAgent;
+        return WorkerType::LocalAgent;
     }
 
     // Non-file-system tasks requiring tools + a valid gateway publisher → McpPublisher
@@ -211,7 +211,7 @@ fn build_reason(
     let task_desc = humanize_task_type(&classification.task_type);
 
     match worker_type {
-        WorkerType::AcpAgent => {
+        WorkerType::LocalAgent => {
             format!("Working with agent on {}", task_desc)
         }
         WorkerType::ChatModel => {
@@ -406,13 +406,13 @@ mod tests {
 
     fn make_capabilities(has_agent: bool, models: &[&str], tools: &[&str]) -> UserCapabilities {
         UserCapabilities {
-            has_acp_agent: has_agent,
+            has_local_agent: has_agent,
             agent_type: if has_agent {
                 Some("claude-code".to_string())
             } else {
                 None
             },
-            active_acp_session_id: if has_agent {
+            active_agent_session_id: if has_agent {
                 Some("test-session-id".to_string())
             } else {
                 None
@@ -432,13 +432,13 @@ mod tests {
         skills: Vec<SkillRef>,
     ) -> UserCapabilities {
         UserCapabilities {
-            has_acp_agent: has_agent,
+            has_local_agent: has_agent,
             agent_type: if has_agent {
                 Some("claude-code".to_string())
             } else {
                 None
             },
-            active_acp_session_id: if has_agent {
+            active_agent_session_id: if has_agent {
                 Some("test-session-id".to_string())
             } else {
                 None
@@ -485,11 +485,11 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn routes_code_generation_with_agent_to_acp() {
+    fn routes_code_generation_with_agent_to_local_agent() {
         let classification = make_classification("code_generation", true, true);
         let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &["firecrawl"]);
         let decision = route(&classification, &capabilities);
-        assert_eq!(decision.worker_type, WorkerType::AcpAgent);
+        assert_eq!(decision.worker_type, WorkerType::LocalAgent);
     }
 
     #[test]
@@ -498,7 +498,7 @@ mod tests {
         let mut capabilities =
             make_capabilities(true, &["anthropic/claude-opus-4-6"], &["firecrawl"]);
         // Agent is available but no active session — should fall back to ChatModel
-        capabilities.active_acp_session_id = None;
+        capabilities.active_agent_session_id = None;
         let decision = route(&classification, &capabilities);
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
@@ -571,8 +571,8 @@ mod tests {
     }
 
     #[test]
-    fn code_generation_with_gateway_tools_but_no_acp_routes_to_chat_model() {
-        // code_generation + requires_file_system but no ACP session —
+    fn code_generation_with_gateway_tools_but_no_local_agent_routes_to_chat_model() {
+        // code_generation + requires_file_system but no local agent session —
         // must NOT route to McpPublisher even when gateway tools exist
         let classification = make_classification("code_generation", true, true);
         let capabilities = make_capabilities(
@@ -705,11 +705,11 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn acp_agent_uses_full_handoff_delegation() {
+    fn local_agent_uses_full_handoff_delegation() {
         let classification = make_classification("code_generation", true, true);
         let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &[]);
         let decision = route(&classification, &capabilities);
-        assert_eq!(decision.worker_type, WorkerType::AcpAgent);
+        assert_eq!(decision.worker_type, WorkerType::LocalAgent);
         assert_eq!(decision.delegation, DelegationType::FullHandoff);
     }
 

@@ -1,6 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
+import {
+  getLocalProviderProjectRoot,
+  isBrowserLocalRuntime,
+} from "@/lib/browser-local-runtime";
+import {
+  type FileEntry,
+  isTauriRuntime,
+  listDirectory,
+} from "@/lib/tauri-bridge";
 
 export interface FileNode {
   name: string;
@@ -9,12 +17,6 @@ export interface FileNode {
   children?: FileNode[];
   isExpanded?: boolean;
   isLoading?: boolean;
-}
-
-interface FileEntry {
-  name: string;
-  path: string;
-  is_directory: boolean;
 }
 
 interface FileTreeState {
@@ -127,7 +129,7 @@ function entryToNode(entry: FileEntry): FileNode {
  */
 export async function refreshDirectory(path: string): Promise<void> {
   try {
-    const entries = await invoke<FileEntry[]>("list_directory", { path });
+    const entries = await listDirectory(path);
     const children = entries.map(entryToNode);
 
     // If this is the root path, update the root nodes
@@ -148,9 +150,19 @@ export async function refreshDirectory(path: string): Promise<void> {
 export async function initDefaultRootIfNeeded(): Promise<void> {
   if (fileTreeState.rootPath) return;
   try {
-    const defaultDir = await invoke<string>("get_default_project_dir");
+    let defaultDir: string | null = null;
+
+    if (isBrowserLocalRuntime()) {
+      defaultDir = getLocalProviderProjectRoot();
+    } else if (isTauriRuntime()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      defaultDir = await invoke<string>("get_default_project_dir");
+    }
+
     if (defaultDir) {
       setRootPath(defaultDir);
+      const entries = await listDirectory(defaultDir);
+      setNodes(entries.map(entryToNode));
     }
   } catch {
     // Silently ignore — user can still open a folder manually

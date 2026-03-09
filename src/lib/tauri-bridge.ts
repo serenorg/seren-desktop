@@ -1,6 +1,11 @@
 // ABOUTME: Frontend wrapper for Tauri IPC commands.
 // ABOUTME: Provides typed functions for secure token storage and Rust communication.
 
+import {
+  isBrowserLocalRuntime,
+  runtimeInvoke,
+} from "@/lib/browser-local-runtime";
+
 const TOKEN_STORAGE_KEY = "seren_token";
 const REFRESH_TOKEN_STORAGE_KEY = "seren_refresh_token";
 const API_KEY_STORAGE_KEY = "seren_api_key";
@@ -262,10 +267,13 @@ export interface FileEntry {
  */
 export async function listDirectory(path: string): Promise<FileEntry[]> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    return await invoke<FileEntry[]>("list_directory", { path });
   }
-  return await invoke<FileEntry[]>("list_directory", { path });
+  if (isBrowserLocalRuntime()) {
+    return runtimeInvoke<FileEntry[]>("list_directory", { path });
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 /**
@@ -273,10 +281,27 @@ export async function listDirectory(path: string): Promise<FileEntry[]> {
  */
 export async function readFile(path: string): Promise<string> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    return await invoke<string>("read_file", { path });
   }
-  return await invoke<string>("read_file", { path });
+  if (isBrowserLocalRuntime()) {
+    return runtimeInvoke<string>("read_file", { path });
+  }
+  throw new Error("File system operations require a local runtime");
+}
+
+/**
+ * Read a file as base64.
+ */
+export async function readFileBase64(path: string): Promise<string> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    return await invoke<string>("read_file_base64", { path });
+  }
+  if (isBrowserLocalRuntime()) {
+    return runtimeInvoke<string>("read_file_base64", { path });
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 /**
@@ -284,10 +309,15 @@ export async function readFile(path: string): Promise<string> {
  */
 export async function writeFile(path: string, content: string): Promise<void> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    await invoke("write_file", { path, content });
+    return;
   }
-  await invoke("write_file", { path, content });
+  if (isBrowserLocalRuntime()) {
+    await runtimeInvoke("write_file", { path, content });
+    return;
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 /**
@@ -295,10 +325,13 @@ export async function writeFile(path: string, content: string): Promise<void> {
  */
 export async function pathExists(path: string): Promise<boolean> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    return await invoke<boolean>("path_exists", { path });
   }
-  return await invoke<boolean>("path_exists", { path });
+  if (isBrowserLocalRuntime()) {
+    return runtimeInvoke<boolean>("path_exists", { path });
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 /**
@@ -306,10 +339,13 @@ export async function pathExists(path: string): Promise<boolean> {
  */
 export async function isDirectory(path: string): Promise<boolean> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    return await invoke<boolean>("is_directory", { path });
   }
-  return await invoke<boolean>("is_directory", { path });
+  if (isBrowserLocalRuntime()) {
+    return runtimeInvoke<boolean>("is_directory", { path });
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 /**
@@ -320,10 +356,15 @@ export async function createFile(
   content?: string,
 ): Promise<void> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    await invoke("create_file", { path, content });
+    return;
   }
-  await invoke("create_file", { path, content });
+  if (isBrowserLocalRuntime()) {
+    await runtimeInvoke("create_file", { path, content });
+    return;
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 /**
@@ -331,10 +372,15 @@ export async function createFile(
  */
 export async function createDirectory(path: string): Promise<void> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    await invoke("create_directory", { path });
+    return;
   }
-  await invoke("create_directory", { path });
+  if (isBrowserLocalRuntime()) {
+    await runtimeInvoke("create_directory", { path });
+    return;
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 /**
@@ -342,10 +388,15 @@ export async function createDirectory(path: string): Promise<void> {
  */
 export async function deletePath(path: string): Promise<void> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    await invoke("delete_path", { path });
+    return;
   }
-  await invoke("delete_path", { path });
+  if (isBrowserLocalRuntime()) {
+    await runtimeInvoke("delete_path", { path });
+    return;
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 /**
@@ -356,10 +407,31 @@ export async function renamePath(
   newPath: string,
 ): Promise<void> {
   const invoke = await getInvoke();
-  if (!invoke) {
-    throw new Error("File system operations require Tauri runtime");
+  if (invoke) {
+    await invoke("rename_path", { oldPath, newPath });
+    return;
   }
-  await invoke("rename_path", { oldPath, newPath });
+  if (isBrowserLocalRuntime()) {
+    await runtimeInvoke("rename_path", { oldPath, newPath });
+    return;
+  }
+  throw new Error("File system operations require a local runtime");
+}
+
+/**
+ * Reveal a file or directory in the system file manager.
+ */
+export async function revealInFileManager(path: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("reveal_in_file_manager", { path });
+    return;
+  }
+  if (isBrowserLocalRuntime()) {
+    await runtimeInvoke("reveal_in_file_manager", { path });
+    return;
+  }
+  throw new Error("File system operations require a local runtime");
 }
 
 // ============================================================================
@@ -546,6 +618,7 @@ export interface AgentConversation {
   agent_session_id: string | null;
   agent_cwd: string | null;
   agent_model_id: string | null;
+  agent_metadata: string | null;
   project_id: string | null;
   project_root: string | null;
   is_archived: boolean;
@@ -646,6 +719,7 @@ export async function createAgentConversation(
   agentCwd?: string,
   projectRoot?: string,
   agentSessionId?: string,
+  agentMetadata?: string,
 ): Promise<AgentConversation> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -658,6 +732,7 @@ export async function createAgentConversation(
     agentCwd,
     projectRoot,
     agentSessionId,
+    agentMetadata: agentMetadata ?? null,
   });
 }
 
@@ -694,7 +769,7 @@ export async function getAgentConversation(
 }
 
 /**
- * Update the remote ACP session id (e.g., Codex thread id) for a persisted agent conversation.
+ * Update the remote agent session id (e.g., Codex thread id) for a persisted agent conversation.
  */
 export async function setAgentConversationSessionId(
   id: string,
@@ -733,6 +808,20 @@ export async function setAgentConversationModelId(
     throw new Error("Conversation operations require Tauri runtime");
   }
   await invoke("set_agent_conversation_model_id", { id, agentModelId });
+}
+
+export async function setAgentConversationMetadata(
+  id: string,
+  agentMetadata?: string | null,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("set_agent_conversation_metadata", {
+    id,
+    agentMetadata: agentMetadata ?? null,
+  });
 }
 
 /**

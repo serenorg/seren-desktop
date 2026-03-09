@@ -139,8 +139,7 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
         }
     }
 
-    // Check for sidecar binaries in bin/ directory (all platforms)
-    // This is where seren-acp-claude, seren-acp-codex, and seren-mcp are located
+    // Check for bundled helper binaries in bin/ directory (all platforms).
     let bin_dir = runtime_dir.join("bin");
     let bin_dir = if bin_dir.exists() {
         Some(bin_dir)
@@ -180,7 +179,7 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
 
     // In GUI app contexts (especially macOS), the process PATH can be missing common tool locations
     // like Homebrew (/opt/homebrew/bin) or /usr/local/bin. Ensure those are present so spawned
-    // sidecars can find installed CLIs (e.g., `codex`).
+    // helper processes can find installed CLIs (e.g., `codex`).
     let current_path = env::var("PATH").unwrap_or_default();
     let current_path = extend_path_with_common_bins(&current_path, path_separator);
     let new_path = if paths_to_add.is_empty() {

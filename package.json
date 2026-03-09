@@ -2,21 +2,23 @@
   "name": "seren-desktop",
   "version": "0.1.0",
   "description": "Open source AI-powered desktop IDE with integrated chat, code completion, and MCP integration",
+  "bin": {
+    "seren-desktop": "./bin/seren-desktop.mjs"
+  },
   "type": "module",
   "scripts": {
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "browser:local": "node ./bin/seren-desktop.mjs",
     "serve": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "pnpm tauri dev",
     "tauri:dev:nowatch": "pnpm tauri dev --no-watch",
+    "build:provider-runtime": "tsx scripts/build-provider-runtime.ts",
     "build:openclaw": "tsx scripts/build-openclaw.ts",
     "build:openclaw:optional": "tsx scripts/build-openclaw.ts --optional",
-    "build:sidecar": "tsx scripts/build-sidecar.ts",
-    "build:sidecar:release": "tsx scripts/build-sidecar.ts release",
     "sign:embedded-runtime": "tsx scripts/sign-embedded-runtime.ts",
-    "sidecar:update": "tsx scripts/update-sidecar.ts",
     "generate:api": "openapi-ts -f openapi/openapi-ts.config.ts",
     "lint": "biome lint",
     "lint:fix": "biome lint --fix",
@@ -29,6 +31,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
+    "test:runtime-smoke": "node ./scripts/smoke-local-provider-runtime.mjs",
+    "test:runtime-e2e": "node ./scripts/e2e-local-provider-runtime.mjs",
     "prepare:runtime": "tsx build/darwin/prepare-embedded-runtime.ts",
     "prepare:runtime:darwin-x64": "tsx build/darwin/prepare-embedded-runtime.ts x64",
     "prepare:runtime:darwin-arm64": "tsx build/darwin/prepare-embedded-runtime.ts arm64",
@@ -61,7 +65,8 @@
     "solid-js": "^1.9.3",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "4",
-    "thirdweb": "^5.119.0"
+    "thirdweb": "^5.119.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.4",
@@ -75,29 +80,5 @@
     "vite-plugin-solid": "^2.11.0",
     "vitest": "^4.0.18"
   },
-  "publisherVersion": "v1.0.0",
-  "sidecars": {
-    "seren-acp-claude": {
-      "name": "Claude Code",
-      "git": "https://github.com/serenorg/seren-acp-claude",
-      "branch": "main",
-      "bin": "seren-acp-claude",
-      "dest": "seren-acp-claude"
-    },
-    "seren-acp-codex": {
-      "name": "Codex",
-      "git": "https://github.com/serenorg/seren-acp-codex",
-      "branch": "main",
-      "bin": "seren-acp-codex",
-      "dest": "seren-acp-codex"
-    },
-    "seren-mcp": {
-      "name": "Seren MCP",
-      "git": "https://github.com/serenorg/seren",
-      "tag": "v0.4.0",
-      "package": "seren-mcp",
-      "bin": "seren-mcp",
-      "dest": "seren-mcp"
-    }
-  }
+  "publisherVersion": "v1.0.0"
 }

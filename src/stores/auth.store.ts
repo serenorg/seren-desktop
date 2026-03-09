@@ -1,12 +1,13 @@
 // ABOUTME: Reactive store for authentication state management.
-// ABOUTME: Tracks user session and provides login/logout actions with unified auth flow.
+// ABOUTME: Tracks user session and installs runtime-specific auth bindings lazily.
 
-import { listen } from "@tauri-apps/api/event";
 import { createStore } from "solid-js/store";
 import { addSerenDbServer, removeSerenDbServer } from "@/lib/mcp/serendb";
+import { runtimeHasCapability } from "@/lib/runtime";
 import {
   clearSerenApiKey,
   getSerenApiKey,
+  isTauriRuntime,
   storeSerenApiKey,
 } from "@/lib/tauri-bridge";
 import {
@@ -36,6 +37,8 @@ const [state, setState] = createStore<AuthState>({
   isAuthenticated: false,
   mcpConnected: false,
 });
+
+let authBindingsInitialized = false;
 
 /**
  * Ensure we have a Seren API key for MCP authentication.
@@ -67,6 +70,11 @@ async function ensureApiKey(): Promise<boolean> {
  * This uses the stored API key for authentication.
  */
 async function initializeMcpInBackground(): Promise<void> {
+  if (!runtimeHasCapability("localMcp")) {
+    setState("mcpConnected", false);
+    return;
+  }
+
   try {
     console.log("[Auth Store] Adding Seren MCP server config...");
     await addSerenDbServer();
@@ -109,7 +117,7 @@ export async function checkAuth(): Promise<void> {
       }
 
       // Initialize MCP Gateway in background (non-blocking)
-      initializeMcpInBackground();
+      void initializeMcpInBackground();
     }
   } finally {
     setState("isLoading", false);
@@ -136,7 +144,7 @@ export async function setAuthenticated(user: User): Promise<void> {
   }
 
   // Initialize MCP Gateway in background (non-blocking)
-  initializeMcpInBackground();
+  void initializeMcpInBackground();
 }
 
 /**
@@ -174,11 +182,19 @@ export function promptLogin(): void {
   setState({ isAuthenticated: false, user: null });
 }
 
-// Listen for session-expired events from Rust backend (e.g. both tokens dead).
+// Listen for session-expired events from the desktop runtime (e.g. both tokens dead).
 // Sets isAuthenticated = false so the UI shows the sign-in prompt.
-listen("auth:session-expired", () => {
-  console.warn("[Auth Store] Session expired event from backend");
-  promptLogin();
-});
+export async function initAuthRuntimeBindings(): Promise<void> {
+  if (authBindingsInitialized || !isTauriRuntime()) {
+    return;
+  }
+
+  authBindingsInitialized = true;
+  const { listen } = await import("@tauri-apps/api/event");
+  await listen("auth:session-expired", () => {
+    console.warn("[Auth Store] Session expired event from backend");
+    promptLogin();
+  });
+}
 
 export const authStore = state;

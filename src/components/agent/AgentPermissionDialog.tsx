@@ -1,11 +1,11 @@
-// ABOUTME: Permission approval dialog for ACP agent tool execution.
+// ABOUTME: Permission approval dialog for agent tool execution.
 // ABOUTME: Shows tool details and lets users approve or deny agent actions.
 
 import { type Component, For, Show } from "solid-js";
-import type { PermissionRequestEvent } from "@/services/acp";
-import { acpStore } from "@/stores/acp.store";
+import type { PermissionRequestEvent } from "@/services/providers";
+import { agentStore } from "@/stores/agent.store";
 
-export interface AcpPermissionDialogProps {
+export interface AgentPermissionDialogProps {
   permission: PermissionRequestEvent;
 }
 
@@ -44,7 +44,7 @@ function formatToolCall(toolCall: unknown): string {
   return name;
 }
 
-export const AcpPermissionDialog: Component<AcpPermissionDialogProps> = (
+export const AgentPermissionDialog: Component<AgentPermissionDialogProps> = (
   props,
 ) => {
   const risk = () => getRiskLevel(props.permission.toolCall);
@@ -54,11 +54,11 @@ export const AcpPermissionDialog: Component<AcpPermissionDialogProps> = (
   function handleApprove(optionId?: string) {
     const id =
       optionId || props.permission.options[0]?.optionId || "allow_once";
-    acpStore.respondToPermission(props.permission.requestId, id);
+    agentStore.respondToPermission(props.permission.requestId, id);
   }
 
   function handleDeny() {
-    acpStore.dismissPermission(props.permission.requestId);
+    agentStore.dismissPermission(props.permission.requestId);
   }
 
   return (

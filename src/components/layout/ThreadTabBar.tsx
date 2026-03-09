@@ -9,7 +9,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { acpStore } from "@/stores/acp.store";
+import { agentStore } from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -86,7 +86,7 @@ export const ThreadTabBar: Component = () => {
                 when={
                   thread.kind === "agent" &&
                   thread.id !== threadStore.activeThreadId &&
-                  acpStore.hasPendingApprovals(thread.id)
+                  agentStore.hasPendingApprovals(thread.id)
                 }
               >
                 <span
@@ -99,7 +99,7 @@ export const ThreadTabBar: Component = () => {
                   !(
                     thread.kind === "agent" &&
                     thread.id !== threadStore.activeThreadId &&
-                    acpStore.hasPendingApprovals(thread.id)
+                    agentStore.hasPendingApprovals(thread.id)
                   )
                 }
               >

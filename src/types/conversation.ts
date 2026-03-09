@@ -1,12 +1,12 @@
 // ABOUTME: Unified message and conversation types for the orchestrator.
-// ABOUTME: Replaces separate Message (chat) and AgentMessage (acp) types.
+// ABOUTME: Replaces separate chat and local-agent message models.
 
 import type { Attachment } from "@/lib/providers/types";
 
 /** Source that produced this message */
 export type WorkerType =
   | "chat_model"
-  | "acp_agent"
+  | "local_agent"
   | "mcp_publisher"
   | "orchestrator";
 
@@ -155,7 +155,9 @@ export function deserializeMetadata(
       return {};
     }
     const result: Partial<UnifiedMessage> = {};
-    if (meta.worker_type) result.workerType = meta.worker_type as WorkerType;
+    if (typeof meta.worker_type === "string") {
+      result.workerType = meta.worker_type as WorkerType;
+    }
     if (meta.model_id) result.modelId = meta.model_id as string;
     if (meta.task_type) result.taskType = meta.task_type as string;
     if (typeof meta.duration === "number" && meta.duration > 0)

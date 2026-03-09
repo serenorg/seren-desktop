@@ -7,7 +7,7 @@ import {
   isDirectoryListing,
   summarizeDirectoryListing,
 } from "@/lib/directory-listing";
-import type { ToolCallEvent } from "@/services/acp";
+import type { ToolCallEvent } from "@/services/providers";
 
 interface ToolCallCardProps {
   toolCall: ToolCallEvent;

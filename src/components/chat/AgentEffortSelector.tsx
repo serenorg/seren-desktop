@@ -1,9 +1,9 @@
-// ABOUTME: Dropdown component for selecting agent reasoning effort (ACP config option).
+// ABOUTME: Dropdown component for selecting agent reasoning effort.
 // ABOUTME: Currently targets Codex's `reasoning_effort` session config option when available.
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { type ActiveSession, acpStore } from "@/stores/acp.store";
+import { type ActiveSession, agentStore } from "@/stores/agent.store";
 
 interface Props {
   session: ActiveSession | null;
@@ -40,7 +40,7 @@ export const AgentEffortSelector: Component<Props> = (props) => {
   });
 
   const selectValue = (valueId: string) => {
-    acpStore.setConfigOption(
+    agentStore.setConfigOption(
       "reasoning_effort",
       valueId,
       props.session?.info.id,

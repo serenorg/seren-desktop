@@ -1,9 +1,14 @@
-// ABOUTME: Reactive ACP (Agent Client Protocol) state management for agent sessions.
+// ABOUTME: Reactive provider-runtime state management for agent sessions.
 // ABOUTME: Stores agent sessions, message streams, tool calls, and plan state.
 
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
-import { settingsStore } from "@/stores/settings.store";
+import {
+  isLocalProviderRuntime,
+  onRuntimeEvent,
+} from "@/lib/browser-local-runtime";
+import { runtimeHasCapability } from "@/lib/runtime";
+import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 
 /** Per-session ready promises — resolved when backend emits "ready" status */
@@ -25,30 +30,29 @@ import {
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
   getAgentConversations,
-  getMessages,
   getSerenApiKey,
-  type StoredMessage,
-  saveMessage,
+  setAgentConversationMetadata as setAgentConversationMetadataDb,
   setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
   setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
+import { sendMessage } from "@/services/chat";
 import type {
-  AcpEvent,
-  AcpSessionInfo,
+  AgentEvent,
   AgentInfo,
+  AgentSessionInfo,
   AgentType,
   DiffEvent,
   DiffProposalEvent,
+  PermissionRequestEvent,
   PlanEntry,
   RemoteSessionInfo,
   SessionConfigOption,
   SessionStatus,
   SessionStatusEvent,
   ToolCallEvent,
-} from "@/services/acp";
-import * as acpService from "@/services/acp";
-import { sendMessage } from "@/services/chat";
+} from "@/services/providers";
+import * as providerService from "@/services/providers";
 
 // ============================================================================
 // Types
@@ -58,6 +62,11 @@ export interface AgentCompactedSummary {
   content: string;
   originalMessageCount: number;
   compactedAt: number;
+}
+
+interface AgentConversationMetadata {
+  pendingBootstrapPromptContext?: string;
+  pendingBootstrapMessages?: AgentMessage[];
 }
 
 export interface AgentMessage {
@@ -89,7 +98,7 @@ export interface AgentModeInfo {
 }
 
 export interface ActiveSession {
-  info: AcpSessionInfo;
+  info: AgentSessionInfo;
   messages: AgentMessage[];
   plan: PlanEntry[];
   pendingToolCalls: Map<string, ToolCallEvent>;
@@ -108,9 +117,9 @@ export interface ActiveSession {
   cwd: string;
   /** Local persisted conversation id (SQLite). */
   conversationId: string;
-  /** Remote ACP session id (e.g., Codex thread id). */
+  /** Remote agent runtime session id (e.g., Codex thread id). */
   agentSessionId?: string;
-  /** Session configuration options reported by the agent (unstable ACP surface). */
+  /** Session configuration options reported by the agent runtime. */
   configOptions?: SessionConfigOption[];
   /** Timestamp when the current prompt started */
   promptStartTime?: number;
@@ -150,12 +159,14 @@ export interface ActiveSession {
   lastUserPrompt?: string;
   /** Set after a compact-and-retry attempt so we only try once per prompt. */
   compactRetryAttempted?: boolean;
+  /** Transcript bootstrap injected into the first real prompt of a forked branch. */
+  bootstrapPromptContext?: string;
   /** Set when the user explicitly requested a cancel — suppresses auto-retry
    *  in the unresponsive-agent recovery path. */
   cancelRequested?: boolean;
-  /** Config option values to restore on the next configOptionsUpdate event.
-   *  Set after compaction so user-configured values survive the agent's
-   *  initial configOptionsUpdate (which would otherwise overwrite them). */
+  /** Config option values queued for restoration after the next configOptionsUpdate
+   *  event from the new session. Prevents the agent's initial announcement from
+   *  overwriting values restored during compaction or recovery. */
   pendingConfigRestore?: Record<string, string>;
 }
 
@@ -163,65 +174,118 @@ export interface ActiveSession {
 // Agent message persistence helpers
 // ============================================================================
 
-/** Serialize an AgentMessage to the shape expected by the save_message Tauri command. */
-function agentMessageToStored(
-  conversationId: string,
-  msg: AgentMessage,
-): {
-  id: string;
-  conversationId: string;
-  role: string;
-  content: string;
-  model: string | null;
-  timestamp: number;
-  metadata: string | null;
-} {
-  const meta: Record<string, unknown> = { agentMsgType: msg.type };
-  if (msg.toolCallId) meta.toolCallId = msg.toolCallId;
-  if (msg.toolCall) meta.toolCall = msg.toolCall;
-  if (msg.diff) meta.diff = msg.diff;
-  if (msg.cost != null) meta.cost = msg.cost;
-  if (msg.duration != null) meta.duration = msg.duration;
-  return {
-    id: msg.id,
-    conversationId,
-    role: msg.type,
-    content: msg.content,
-    model: null,
-    timestamp: msg.timestamp,
-    metadata: JSON.stringify(meta),
-  };
+const FORK_BOOTSTRAP_MAX_MSG_CHARS = 2_000;
+
+function truncateBootstrapText(content: string): string {
+  return content.length > FORK_BOOTSTRAP_MAX_MSG_CHARS
+    ? `${content.slice(0, FORK_BOOTSTRAP_MAX_MSG_CHARS)}... [truncated]`
+    : content;
 }
 
-/** Deserialize a StoredMessage from SQLite back into an AgentMessage. */
-function storedToAgentMessage(stored: StoredMessage): AgentMessage {
-  const meta = stored.metadata ? JSON.parse(stored.metadata) : {};
-  return {
-    id: stored.id,
-    type: (meta.agentMsgType ?? stored.role) as AgentMessage["type"],
-    content: stored.content,
-    timestamp: stored.timestamp,
-    toolCallId: meta.toolCallId,
-    toolCall: meta.toolCall,
-    diff: meta.diff,
-    cost: meta.cost,
-    duration: meta.duration,
-  };
+function formatForkBootstrapMessage(message: AgentMessage): string | null {
+  const content = message.content.trim();
+
+  switch (message.type) {
+    case "user":
+      return content ? `USER: ${truncateBootstrapText(content)}` : null;
+    case "assistant":
+      return content ? `ASSISTANT: ${truncateBootstrapText(content)}` : null;
+    case "error":
+      return content ? `SYSTEM: ${truncateBootstrapText(content)}` : null;
+    case "tool": {
+      const label = message.toolCall?.status
+        ? `TOOL (${message.toolCall.status})`
+        : "TOOL";
+      return content ? `${label}: ${truncateBootstrapText(content)}` : null;
+    }
+    case "diff": {
+      const path = message.diff?.path;
+      const summary = path ? `Modified ${path}` : content;
+      return summary ? `DIFF: ${truncateBootstrapText(summary)}` : null;
+    }
+    case "thought":
+      return null;
+  }
 }
 
-/** Fire-and-forget persist of a single agent message to SQLite. */
-function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
-  const s = agentMessageToStored(conversationId, msg);
-  saveMessage(
-    s.id,
-    s.conversationId,
-    s.role,
-    s.content,
-    s.model,
-    s.timestamp,
-    s.metadata,
-  ).catch((err) =>
-    console.error("[AcpStore] Failed to persist agent message:", err),
+function buildForkBootstrapContext(
+  session: ActiveSession,
+  messages: AgentMessage[],
+): string | null {
+  const summary = session.compactedSummary?.content.trim();
+  const transcript = messages
+    .map(formatForkBootstrapMessage)
+    .filter((line): line is string => Boolean(line))
+    .join("\n\n");
+
+  if (!summary && !transcript) {
+    return null;
+  }
+
+  const sections = [
+    "This prompt continues a forked branch of an earlier coding-agent conversation.",
+    "Treat the summary and transcript below as the authoritative history for this branch.",
+    "Anything that happened after the branch point is not part of this branch.",
+  ];
+
+  if (summary) {
+    sections.push(`Earlier summary:\n${summary}`);
+  }
+
+  if (transcript) {
+    sections.push(`Branch transcript:\n${transcript}`);
+  }
+
+  sections.push(
+    "Continue from the branch transcript's final message. Do not mention this bootstrap unless it helps answer the user.",
+  );
+
+  return sections.join("\n\n");
+}
+
+function parseAgentConversationMetadata(
+  raw: string | null | undefined,
+): AgentConversationMetadata {
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as AgentConversationMetadata;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function serializeAgentConversationMetadata(
+  metadata: AgentConversationMetadata,
+): string | null {
+  return metadata.pendingBootstrapPromptContext ||
+    (metadata.pendingBootstrapMessages &&
+      metadata.pendingBootstrapMessages.length > 0)
+    ? JSON.stringify(metadata)
+    : null;
+}
+
+/**
+ * Provider-owned agent transcripts are not stored in Seren SQLite.
+ * We keep only in-memory session messages plus narrow bootstrap metadata for
+ * exact local forks that have not materialized provider history yet.
+ */
+function persistAgentMessage(
+  _conversationId: string,
+  _msg: AgentMessage,
+): void {
+  // Intentionally no-op.
+}
+
+function clearLegacyAgentTranscript(conversationId: string): void {
+  clearConversationHistory(conversationId).catch((error) =>
+    console.warn(
+      "[AgentStore] Failed to clear legacy provider transcript:",
+      error,
+    ),
   );
 }
 
@@ -229,7 +293,7 @@ function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
 // State
 // ============================================================================
 
-interface AcpState {
+interface AgentState {
   /** Available agents and their status */
   availableAgents: AgentInfo[];
   /** Active sessions keyed by session ID */
@@ -240,7 +304,7 @@ interface AcpState {
   selectedAgentType: AgentType;
   /** Recent persisted agent conversations for resuming. */
   recentAgentConversations: DbAgentConversation[];
-  /** Remote sessions listed from the agent's underlying session store (ACP listSessions). */
+  /** Remote sessions listed from the agent's underlying session store. */
   remoteSessions: RemoteSessionInfo[];
   remoteSessionsNextCursor: string | null;
   remoteSessionsLoading: boolean;
@@ -252,14 +316,14 @@ interface AcpState {
   /** CLI install progress message */
   installStatus: string | null;
   /** Pending permission requests awaiting user response */
-  pendingPermissions: import("@/services/acp").PermissionRequestEvent[];
+  pendingPermissions: PermissionRequestEvent[];
   /** Pending diff proposals awaiting user accept/reject */
   pendingDiffProposals: DiffProposalEvent[];
   /** Whether agent mode is active (vs chat mode) */
   agentModeEnabled: boolean;
 }
 
-const [state, setState] = createStore<AcpState>({
+const [state, setState] = createStore<AgentState>({
   availableAgents: [],
   sessions: {},
   activeSessionId: null,
@@ -278,7 +342,7 @@ const [state, setState] = createStore<AcpState>({
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
-const pendingSessionEvents = new Map<string, AcpEvent[]>();
+const pendingSessionEvents = new Map<string, AgentEvent[]>();
 
 /** Guard against concurrent auto-recovery spawns in sendPrompt. */
 let recoveryInFlight: Promise<string | null> | null = null;
@@ -322,6 +386,47 @@ function clearChunkBuf(sessionId: string): void {
   }
   chunkBufs.delete(sessionId);
 }
+
+function disposeAgentStoreRuntimeBindings(): void {
+  if (globalUnsubscribe) {
+    globalUnsubscribe();
+    globalUnsubscribe = null;
+  }
+  pendingSessionEvents.clear();
+  sessionReadyPromises.clear();
+  recoveryInFlight = null;
+  for (const timer of chunkFlushTimers.values()) {
+    clearTimeout(timer);
+  }
+  chunkFlushTimers.clear();
+  chunkBufs.clear();
+}
+
+const agentStoreHot =
+  (
+    import.meta as ImportMeta & {
+      hot?: { dispose: (callback: () => void) => void };
+    }
+  ).hot ?? null;
+
+if (agentStoreHot) {
+  const globalScope = globalThis as typeof globalThis & {
+    __serenAgentStoreHmrDispose__?: (() => void) | undefined;
+  };
+
+  globalScope.__serenAgentStoreHmrDispose__?.();
+
+  const dispose = () => {
+    disposeAgentStoreRuntimeBindings();
+    if (globalScope.__serenAgentStoreHmrDispose__ === dispose) {
+      delete globalScope.__serenAgentStoreHmrDispose__;
+    }
+  };
+
+  globalScope.__serenAgentStoreHmrDispose__ = dispose;
+  agentStoreHot.dispose(dispose);
+}
+
 const PENDING_SESSION_EVENT_LIMIT = 500;
 const CLAUDE_INIT_RETRY_DELAY_MS = 350;
 const MAX_CLAUDE_INIT_RETRIES = 3;
@@ -387,7 +492,7 @@ function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
 // Store
 // ============================================================================
 
-export const acpStore = {
+export const agentStore = {
   // ============================================================================
   // Getters
   // ============================================================================
@@ -457,6 +562,10 @@ export const acpStore = {
 
   get agentModeEnabled() {
     return state.agentModeEnabled;
+  },
+
+  get supportsAgents() {
+    return runtimeHasCapability("agents");
   },
 
   /**
@@ -562,12 +671,30 @@ export const acpStore = {
   // ============================================================================
 
   /**
-   * Initialize the ACP store by loading available agents.
+   * Initialize the agent store by loading available agents.
    */
   async initialize() {
+    if (!runtimeHasCapability("agents")) {
+      setState("availableAgents", []);
+      setState("agentModeEnabled", false);
+      setState("remoteSessions", []);
+      setState("remoteSessionsNextCursor", null);
+      setState("remoteSessionsError", null);
+      return;
+    }
+
     try {
-      const agents = await acpService.getAvailableAgents();
+      const agents = await providerService.getAvailableAgents();
       setState("availableAgents", agents);
+      const currentAgent = agents.find(
+        (agent) => agent.type === state.selectedAgentType,
+      );
+      if (!currentAgent?.available) {
+        const fallbackAgent = agents.find((agent) => agent.available);
+        if (fallbackAgent) {
+          setState("selectedAgentType", fallbackAgent.type);
+        }
+      }
     } catch (error) {
       console.error("Failed to load available agents:", error);
     }
@@ -596,7 +723,7 @@ export const acpStore = {
     setState("remoteSessionsError", null);
     try {
       const [page, localRows] = await Promise.all([
-        acpService.listRemoteSessions(resolvedAgentType, cwd),
+        providerService.listRemoteSessions(resolvedAgentType, cwd),
         getAgentConversations(200),
       ]);
 
@@ -635,7 +762,7 @@ export const acpStore = {
     setState("remoteSessionsLoading", true);
     setState("remoteSessionsError", null);
     try {
-      const page = await acpService.listRemoteSessions(
+      const page = await providerService.listRemoteSessions(
         resolvedAgentType,
         cwd,
         cursor,
@@ -682,6 +809,7 @@ export const acpStore = {
       initRetryAttempt?: number;
       reclaimedIdleClaude?: boolean;
       restoredMessages?: AgentMessage[];
+      bootstrapPromptContext?: string;
     },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
@@ -696,7 +824,7 @@ export const acpStore = {
     setState("isLoading", true);
     setState("error", null);
 
-    console.log("[AcpStore] Spawning session:", {
+    console.log("[AgentStore] Spawning session:", {
       agentType: resolvedAgentType,
       cwd,
       localSessionId,
@@ -704,12 +832,12 @@ export const acpStore = {
     });
 
     const agentAvailable =
-      await acpService.checkAgentAvailable(resolvedAgentType);
+      await providerService.checkAgentAvailable(resolvedAgentType);
     if (!agentAvailable) {
       const helper =
-        resolvedAgentType === "codex"
-          ? "Codex agent binary not found. Run `pnpm build:sidecar seren-acp-codex` (or reinstall Seren Desktop) and try again."
-          : "Claude Code agent binary not found. Run `pnpm build:sidecar seren-acp-claude` and try again.";
+        state.availableAgents.find((agent) => agent.type === resolvedAgentType)
+          ?.unavailableReason ??
+        `${resolvedAgentType === "codex" ? "Codex" : "Claude Code"} is not available in this runtime.`;
       setState("error", helper);
       setState("isLoading", false);
       return null;
@@ -727,10 +855,10 @@ export const acpStore = {
     // Listen to session status events temporarily so ready-state resolution does
     // not depend on global event routing order.
     const tempUnsubscribe =
-      await acpService.subscribeToEvent<SessionStatusEvent>(
+      await providerService.subscribeToEvent<SessionStatusEvent>(
         "sessionStatus",
         (data) => {
-          console.log("[AcpStore] Received session status event:", data);
+          console.log("[AgentStore] Received session status event:", data);
           if (state.sessions[data.sessionId]) {
             this.handleStatusChange(data.sessionId, data.status, data);
           }
@@ -745,54 +873,67 @@ export const acpStore = {
         },
       );
 
-    // Subscribe once to all ACP events before spawning, so early replay events
+    // Subscribe once to all agent runtime events before spawning, so early replay events
     // from load_session are buffered instead of dropped.
     if (!globalUnsubscribe) {
-      globalUnsubscribe = await acpService.subscribeToAllEvents((event) => {
-        const eventSessionId = event.data.sessionId;
-        if (!eventSessionId) return;
-        // Skip logging high-frequency messageChunk events to avoid flooding
-        // DevTools. Other event types (sessionStatus, toolCall, etc.) are
-        // still logged for debugging.
-        if (event.type !== "messageChunk") {
-          console.log(
-            "[ACP] Event received - type:",
-            event.type,
-            "sessionId:",
-            eventSessionId,
-            "conversationId:",
-            state.sessions[eventSessionId]?.conversationId,
-          );
-        }
-        if (state.sessions[eventSessionId]) {
-          this.handleSessionEvent(eventSessionId, event);
-          return;
-        }
+      globalUnsubscribe = await providerService.subscribeToAllEvents(
+        (event) => {
+          const eventSessionId = event.data.sessionId;
+          if (!eventSessionId) return;
+          // Skip logging high-frequency messageChunk events to avoid flooding
+          // DevTools. Other event types (sessionStatus, toolCall, etc.) are
+          // still logged for debugging.
+          if (event.type !== "messageChunk") {
+            console.log(
+              "[AgentRuntime] Event received - type:",
+              event.type,
+              "sessionId:",
+              eventSessionId,
+              "conversationId:",
+              state.sessions[eventSessionId]?.conversationId,
+            );
+          }
+          if (state.sessions[eventSessionId]) {
+            this.handleSessionEvent(eventSessionId, event);
+            return;
+          }
 
-        const pending = pendingSessionEvents.get(eventSessionId) ?? [];
-        pending.push(event);
-        if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
-          pending.shift();
-        }
-        pendingSessionEvents.set(eventSessionId, pending);
-      });
+          const pending = pendingSessionEvents.get(eventSessionId) ?? [];
+          pending.push(event);
+          if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
+            pending.shift();
+          }
+          pendingSessionEvents.set(eventSessionId, pending);
+        },
+      );
     }
 
     try {
       // Ensure the underlying CLI is installed and up-to-date before spawning
       const ensureFn =
         resolvedAgentType === "claude-code"
-          ? acpService.ensureClaudeCli
+          ? providerService.ensureClaudeCli
           : resolvedAgentType === "codex"
-            ? acpService.ensureCodexCli
+            ? providerService.ensureCodexCli
             : null;
 
       if (ensureFn) {
-        const { listen } = await import("@tauri-apps/api/event");
-        const progressUnsub = await listen<{ stage: string; message: string }>(
-          "acp://cli-install-progress",
-          (event) => {
-            setState("installStatus", event.payload.message);
+        let progressUnsub: UnlistenFn = () => {};
+
+        if (!isLocalProviderRuntime()) {
+          setState(
+            "error",
+            "Local provider runtime is not configured for agent installation.",
+          );
+          setState("isLoading", false);
+          return null;
+        }
+
+        progressUnsub = onRuntimeEvent(
+          "provider://cli-install-progress",
+          (payload) => {
+            const event = payload as { stage?: string; message?: string };
+            setState("installStatus", event.message ?? null);
           },
         );
 
@@ -817,6 +958,7 @@ export const acpStore = {
 
       // Get Seren API key to enable MCP tools for the agent
       const apiKey = await getSerenApiKey();
+      const enabledMcpServers = getEnabledMcpServers();
 
       // No inactivity timeout — agent sessions wait indefinitely.
       // The agent may be waiting for tool approval, thinking, or the user
@@ -830,7 +972,7 @@ export const acpStore = {
           ? "on-failure"
           : settingsStore.settings.agentApprovalPolicy;
 
-      const info = await acpService.spawnAgent(
+      const info = await providerService.spawnAgent(
         resolvedAgentType,
         cwd,
         settingsStore.settings.agentSandboxMode,
@@ -841,8 +983,9 @@ export const acpStore = {
         localSessionId,
         resumeAgentSessionId,
         timeoutSecs,
+        enabledMcpServers,
       );
-      console.log("[AcpStore] Spawn result:", info);
+      console.log("[AgentStore] Spawn result:", info);
 
       // Persist an agent conversation record (safe to call repeatedly via INSERT OR IGNORE).
       try {
@@ -853,6 +996,12 @@ export const acpStore = {
           cwd,
           cwd,
           resumeAgentSessionId ?? undefined,
+          serializeAgentConversationMetadata({
+            pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
+            pendingBootstrapMessages: opts?.bootstrapPromptContext
+              ? opts?.restoredMessages
+              : undefined,
+          }) ?? undefined,
         );
       } catch (error) {
         console.warn("Failed to persist agent conversation", error);
@@ -871,15 +1020,15 @@ export const acpStore = {
         pendingUserMessage: "",
         cwd,
         conversationId: info.id,
-        // When we already have persisted messages from SQLite, skip the
-        // backend's history replay to avoid duplicates and skill-content
-        // pollution (the backend replays the full context including injected
-        // skill text as user messages).
+        // When we already have a pending local bootstrap snapshot, skip the
+        // provider's replay to avoid duplicates until that bootstrap state is
+        // cleared and provider history becomes authoritative.
         skipHistoryReplay: hasRestoredMessages ? true : undefined,
         restoredMessageCount: hasRestoredMessages
-          ? opts.restoredMessages.length
+          ? opts?.restoredMessages?.length
           : undefined,
         contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
+        bootstrapPromptContext: opts?.bootstrapPromptContext,
       };
 
       setState("sessions", info.id, session);
@@ -903,6 +1052,14 @@ export const acpStore = {
       };
       sessionReadyPromises.set(info.id, readyPromiseObj);
 
+      // Buffered resume events can mark the session ready before this gate is
+      // installed. If that already happened, don't leave sendPrompt blocked on
+      // a promise that will never resolve.
+      if (state.sessions[info.id]?.info.status === "ready") {
+        readyPromiseObj.resolve();
+        sessionReadyPromises.delete(info.id);
+      }
+
       // Wait for ready event with timeout (agent initialization can take a moment)
       const timeoutPromise = new Promise<string>((_, reject) => {
         setTimeout(
@@ -917,7 +1074,7 @@ export const acpStore = {
           readyPromise,
           timeoutPromise,
         ]);
-        console.log("[AcpStore] Session ready:", readySessionId);
+        console.log("[AgentStore] Session ready:", readySessionId);
 
         // Update status to ready
         if (readySessionId === info.id) {
@@ -928,21 +1085,13 @@ export const acpStore = {
             "status",
             "ready" as SessionStatus,
           );
-          // The ready event may have fired before sessionReadyPromises was
-          // created (buffered in pendingSessionEvents and drained before the
-          // entry existed). Resolve it now so sendPrompt doesn't hang forever.
-          const pendingReadyEntry = sessionReadyPromises.get(info.id);
-          if (pendingReadyEntry) {
-            pendingReadyEntry.resolve();
-            sessionReadyPromises.delete(info.id);
-          }
         }
       } catch (raceError) {
         const message =
           raceError instanceof Error ? raceError.message : String(raceError);
         if (message.includes("timed out")) {
           console.warn(
-            "[AcpStore] Timeout waiting for ready, proceeding anyway",
+            "[AgentStore] Timeout waiting for ready, proceeding anyway",
           );
           // Resolve the ready promise so sendPrompt doesn't block forever
           const entry = sessionReadyPromises.get(info.id);
@@ -961,7 +1110,10 @@ export const acpStore = {
           initRetryAttempt < MAX_CLAUDE_INIT_RETRIES &&
           isRetryableClaudeInitError(initFailure)
         ) {
-          console.warn("[AcpStore] Claude init failed, retrying:", initFailure);
+          console.warn(
+            "[AgentStore] Claude init failed, retrying:",
+            initFailure,
+          );
           await this.terminateSession(info.id);
           sessionReadyPromises.delete(info.id);
           pendingSessionEvents.delete(info.id);
@@ -985,7 +1137,7 @@ export const acpStore = {
           if (idleClaude.length > 0) {
             const evictedId = idleClaude[0];
             console.warn(
-              "[AcpStore] Claude init failed under pressure; reclaiming idle Claude session and retrying:",
+              "[AgentStore] Claude init failed under pressure; reclaiming idle Claude session and retrying:",
               evictedId,
             );
             await this.terminateSession(evictedId);
@@ -1021,7 +1173,7 @@ export const acpStore = {
           initRetryAttempt < MAX_CLAUDE_INIT_RETRIES
         ) {
           console.warn(
-            "[AcpStore] Claude session exited during init, retrying.",
+            "[AgentStore] Claude session exited during init, retrying.",
           );
           sessionReadyPromises.delete(info.id);
           pendingSessionEvents.delete(info.id);
@@ -1041,7 +1193,7 @@ export const acpStore = {
           if (idleClaude.length > 0) {
             const evictedId = idleClaude[0];
             console.warn(
-              "[AcpStore] Claude init exited early; reclaiming idle Claude session and retrying:",
+              "[AgentStore] Claude init exited early; reclaiming idle Claude session and retrying:",
               evictedId,
             );
             await this.terminateSession(evictedId);
@@ -1090,7 +1242,7 @@ export const acpStore = {
 
       return info.id;
     } catch (error) {
-      console.error("[AcpStore] Spawn error:", error);
+      console.error("[AgentStore] Spawn error:", error);
       tempUnsubscribe();
       const message = error instanceof Error ? error.message : String(error);
       setState("error", message);
@@ -1100,10 +1252,10 @@ export const acpStore = {
   },
 
   /**
-   * Resume a persisted agent conversation by loading its remote ACP session.
+   * Resume a persisted agent conversation by loading its remote agent session.
    *
-   * This relies on the agent sidecar supporting `load_session` and having access
-   * to the underlying session store (e.g., local Codex threads).
+   * Provider sessions own transcript history; Seren only restores local
+   * bootstrap snapshots for forks that have not materialized provider history yet.
    */
   async resumeAgentConversation(
     conversationId: string,
@@ -1119,7 +1271,7 @@ export const acpStore = {
     // has failed too many times in a short window, stop retrying.
     if (isSpawnCascading(conversationId)) {
       console.error(
-        `[AcpStore] Spawn cascade detected for ${conversationId} — ${SPAWN_CASCADE_MAX_FAILURES} failures in ${SPAWN_CASCADE_WINDOW_MS / 1000}s. Stopping auto-resume.`,
+        `[AgentStore] Spawn cascade detected for ${conversationId} — ${SPAWN_CASCADE_MAX_FAILURES} failures in ${SPAWN_CASCADE_WINDOW_MS / 1000}s. Stopping auto-resume.`,
       );
       setState(
         "error",
@@ -1135,7 +1287,7 @@ export const acpStore = {
     // If the frontend lost track of a session (e.g. after a crash or auth error),
     // the backend may still hold it, causing "Session already exists" on re-spawn.
     try {
-      await acpService.terminateSession(conversationId);
+      await providerService.terminateSession(conversationId);
     } catch {
       // Ignore — session likely doesn't exist in the backend
     }
@@ -1154,26 +1306,19 @@ export const acpStore = {
       convo.agent_type === "codex" || convo.agent_type === "claude-code"
         ? (convo.agent_type as AgentType)
         : state.selectedAgentType;
-
-    // Load persisted messages from SQLite so the user sees full history immediately.
-    let restoredMessages: AgentMessage[] = [];
-    try {
-      const stored = await getMessages(conversationId, 1000);
-      restoredMessages = stored.map(storedToAgentMessage);
-      if (restoredMessages.length > 0) {
-        console.log(
-          `[AcpStore] Restored ${restoredMessages.length} persisted messages for conversation`,
-          conversationId,
-        );
-      }
-    } catch (err) {
-      console.warn("[AcpStore] Failed to load persisted agent messages:", err);
-    }
+    const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);
+    const pendingBootstrapPromptContext =
+      convoMetadata.pendingBootstrapPromptContext;
+    const restoredMessages = Array.isArray(
+      convoMetadata.pendingBootstrapMessages,
+    )
+      ? convoMetadata.pendingBootstrapMessages
+      : [];
 
     const remoteSessionId = convo.agent_session_id?.trim();
     if (!remoteSessionId) {
       console.warn(
-        "[AcpStore] Conversation has no stored remote session id; creating a fresh session.",
+        "[AgentStore] Conversation has no stored remote session id; creating a fresh session.",
         conversationId,
       );
       const convoCwd =
@@ -1190,6 +1335,7 @@ export const acpStore = {
         localSessionId: conversationId,
         conversationTitle: convo.title,
         restoredMessages,
+        bootstrapPromptContext: pendingBootstrapPromptContext,
       });
       if (freshSessionId) {
         clearSpawnFailures(conversationId);
@@ -1226,6 +1372,7 @@ export const acpStore = {
       resumeAgentSessionId: remoteSessionId,
       conversationTitle: convo.title,
       restoredMessages,
+      bootstrapPromptContext: pendingBootstrapPromptContext,
     });
 
     // Legacy Claude conversations can reference session IDs that no longer
@@ -1233,7 +1380,7 @@ export const acpStore = {
     // persisted conversation instead of failing hard.
     if (!sessionId && agentType === "claude-code") {
       console.warn(
-        "[AcpStore] Claude resume failed, starting a fresh session for conversation",
+        "[AgentStore] Claude resume failed, starting a fresh session for conversation",
         conversationId,
         state.error,
       );
@@ -1241,6 +1388,7 @@ export const acpStore = {
         localSessionId: conversationId,
         conversationTitle: convo.title,
         restoredMessages,
+        bootstrapPromptContext: pendingBootstrapPromptContext,
       });
       if (fallbackSessionId) {
         clearSpawnFailures(conversationId);
@@ -1252,6 +1400,9 @@ export const acpStore = {
     }
 
     if (sessionId) {
+      if (!pendingBootstrapPromptContext) {
+        clearLegacyAgentTranscript(conversationId);
+      }
       clearSpawnFailures(conversationId);
       void this.refreshRecentAgentConversations(200).catch(() => {});
     } else {
@@ -1260,7 +1411,7 @@ export const acpStore = {
     return sessionId;
   },
   /**
-   * Resume a remote agent session (ACP session id from listSessions).
+   * Resume a remote agent session from the provider's stored session list.
    *
    * If a local persisted conversation already exists for this remote session,
    * we resume that; otherwise we create a new local conversation and resume it.
@@ -1295,6 +1446,110 @@ export const acpStore = {
     return sessionId;
   },
 
+  async buildPromptContext(
+    sessionId: string,
+    context?: Array<Record<string, string>>,
+  ): Promise<Array<Record<string, string>> | undefined> {
+    const session = state.sessions[sessionId];
+    if (!session) {
+      return context && context.length > 0 ? [...context] : undefined;
+    }
+
+    let mergedContext = context ? [...context] : [];
+
+    if (session.bootstrapPromptContext) {
+      mergedContext = [
+        { type: "text", text: session.bootstrapPromptContext },
+        ...mergedContext,
+      ];
+    }
+
+    try {
+      const skillsContent = await skillsStore.getThreadSkillsContent(
+        session.cwd,
+        session.conversationId,
+      );
+      if (skillsContent) {
+        mergedContext = [
+          { type: "text", text: skillsContent },
+          ...mergedContext,
+        ];
+      }
+    } catch (error) {
+      console.warn(
+        "[AgentStore] Failed to load skills for agent prompt:",
+        error,
+      );
+    }
+
+    return mergedContext.length > 0 ? mergedContext : undefined;
+  },
+
+  setBootstrapPromptContext(
+    sessionId: string,
+    bootstrapPromptContext?: string,
+  ) {
+    const session = state.sessions[sessionId];
+    if (!session) {
+      return;
+    }
+
+    setState(
+      "sessions",
+      sessionId,
+      "bootstrapPromptContext",
+      bootstrapPromptContext,
+    );
+    const conversationId = session.conversationId;
+    if (conversationId) {
+      void setAgentConversationMetadataDb(
+        conversationId,
+        serializeAgentConversationMetadata({
+          pendingBootstrapPromptContext: bootstrapPromptContext,
+          pendingBootstrapMessages: bootstrapPromptContext
+            ? session.messages
+            : undefined,
+        }),
+      ).catch((error) => {
+        console.warn("Failed to persist agent bootstrap context", error);
+      });
+    }
+  },
+
+  clearBootstrapPromptContext(sessionId: string) {
+    this.setBootstrapPromptContext(sessionId, undefined);
+    const conversationId = state.sessions[sessionId]?.conversationId;
+    if (conversationId) {
+      clearLegacyAgentTranscript(conversationId);
+    }
+  },
+
+  async restoreSessionSettings(
+    sourceSession: ActiveSession,
+    targetSessionId: string,
+  ) {
+    if (sourceSession.currentModeId) {
+      await this.setPermissionMode(
+        sourceSession.currentModeId,
+        targetSessionId,
+      );
+    }
+    if (sourceSession.currentModelId) {
+      await this.setModel(sourceSession.currentModelId, targetSessionId);
+    }
+    if (sourceSession.configOptions) {
+      const restore: Record<string, string> = {};
+      for (const opt of sourceSession.configOptions) {
+        if (opt.type === "select" && opt.currentValue) {
+          restore[opt.id] = opt.currentValue;
+        }
+      }
+      if (Object.keys(restore).length > 0) {
+        setState("sessions", targetSessionId, "pendingConfigRestore", restore);
+      }
+    }
+  },
+
   /**
    * Terminate a session.
    */
@@ -1303,7 +1558,7 @@ export const acpStore = {
     if (!session) return;
 
     try {
-      await acpService.terminateSession(sessionId);
+      await providerService.terminateSession(sessionId);
     } catch (error) {
       console.error("Failed to terminate session:", error);
     }
@@ -1340,7 +1595,7 @@ export const acpStore = {
    */
   setActiveSession(sessionId: string | null) {
     console.log(
-      "[ACP] setActiveSession - old:",
+      "[AgentRuntime] setActiveSession - old:",
       state.activeSessionId,
       "new:",
       sessionId,
@@ -1357,7 +1612,7 @@ export const acpStore = {
 
     setState("sessions", sessionId, "messages", []);
     clearConversationHistory(session.conversationId).catch((err) =>
-      console.error("[AcpStore] Failed to clear persisted messages:", err),
+      console.error("[AgentStore] Failed to clear persisted messages:", err),
     );
   },
 
@@ -1375,7 +1630,7 @@ export const acpStore = {
 
     const messages = session.messages;
     if (messages.length <= preserveCount) {
-      console.info("[AcpStore] Not enough messages to compact");
+      console.info("[AgentStore] Not enough messages to compact");
       return;
     }
 
@@ -1408,10 +1663,6 @@ Summary:`;
       const cwd = session.cwd;
       const agentType = session.info.agentType;
       const conversationId = session.conversationId;
-      const prevModeId = session.currentModeId;
-      const prevModelId = session.currentModelId;
-      const prevConfigOptions = session.configOptions;
-
       // Terminate the old agent session
       await this.terminateSession(sessionId);
 
@@ -1422,7 +1673,7 @@ Summary:`;
 
       if (!newSessionId) {
         console.error(
-          "[AcpStore] Failed to spawn new session after compaction",
+          "[AgentStore] Failed to spawn new session after compaction",
         );
         return;
       }
@@ -1440,7 +1691,7 @@ Summary:`;
 
       // Seed the new agent with the summary so it has context
       console.info(
-        `[AcpStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}. Seeding new session.`,
+        `[AgentStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}. Seeding new session.`,
       );
 
       // Build a condensed representation of preserved messages so the agent
@@ -1468,31 +1719,14 @@ Summary:`;
       }
 
       // Restore user-configured settings from the prior session
-      if (prevModeId) {
-        await this.setPermissionMode(prevModeId, newSessionId);
-      }
-      if (prevModelId) {
-        await this.setModel(prevModelId, newSessionId);
-      }
-      // Queue select-type config options for restoration on the next
-      // configOptionsUpdate event. The new session will emit that event
-      // with default values shortly after startup — setting values now
-      // would just get overwritten.
-      if (prevConfigOptions) {
-        const restore: Record<string, string> = {};
-        for (const opt of prevConfigOptions) {
-          if (opt.type === "select" && opt.currentValue) {
-            restore[opt.id] = opt.currentValue;
-          }
-        }
-        if (Object.keys(restore).length > 0) {
-          setState("sessions", newSessionId, "pendingConfigRestore", restore);
-        }
-      }
+      await this.restoreSessionSettings(session, newSessionId);
 
-      await acpService.sendPrompt(newSessionId, seedPrompt);
+      await providerService.sendPrompt(newSessionId, seedPrompt);
     } catch (error) {
-      console.error("[AcpStore] Failed to compact agent conversation:", error);
+      console.error(
+        "[AgentStore] Failed to compact agent conversation:",
+        error,
+      );
       // If the original session still exists, clear compacting flag
       if (state.sessions[sessionId]) {
         setState("sessions", sessionId, "isCompacting", false);
@@ -1512,13 +1746,13 @@ Summary:`;
 
     const lastPrompt = session.lastUserPrompt;
     if (!lastPrompt) {
-      console.warn("[AcpStore] compactAndRetry: no lastUserPrompt to retry");
+      console.warn("[AgentStore] compactAndRetry: no lastUserPrompt to retry");
       return false;
     }
 
     setState("sessions", sessionId, "compactRetryAttempted", true);
     console.info(
-      "[AcpStore] Prompt too long — attempting compaction before falling back to Chat",
+      "[AgentStore] Prompt too long — attempting compaction before falling back to Chat",
     );
 
     try {
@@ -1535,7 +1769,7 @@ Summary:`;
       );
       if (!newEntry) {
         console.warn(
-          "[AcpStore] compactAndRetry: new session not found after compaction",
+          "[AgentStore] compactAndRetry: new session not found after compaction",
         );
         return false;
       }
@@ -1547,13 +1781,13 @@ Summary:`;
       // full session would fail again and falsely signal success.
       if (newSessionId === sessionId) {
         console.warn(
-          "[AcpStore] compactAndRetry: compaction was skipped, cannot retry",
+          "[AgentStore] compactAndRetry: compaction was skipped, cannot retry",
         );
         return false;
       }
 
       console.info(
-        `[AcpStore] Compaction complete, retrying prompt on session ${newSessionId}`,
+        `[AgentStore] Compaction complete, retrying prompt on session ${newSessionId}`,
       );
 
       // Wait for the new session to be ready
@@ -1563,11 +1797,11 @@ Summary:`;
       }
 
       // Retry the original prompt
-      await acpService.sendPrompt(newSessionId, lastPrompt);
+      await providerService.sendPrompt(newSessionId, lastPrompt);
       return true;
     } catch (error) {
       console.error(
-        "[AcpStore] compactAndRetry failed, falling back to Chat:",
+        "[AgentStore] compactAndRetry failed, falling back to Chat:",
         error,
       );
       return false;
@@ -1602,9 +1836,10 @@ Summary:`;
     prompt: string,
     context?: Array<Record<string, string>>,
     options?: { displayContent?: string; docNames?: string[] },
+    forSessionId?: string,
   ) {
-    const sessionId = state.activeSessionId;
-    console.log("[AcpStore] sendPrompt called:", {
+    const sessionId = forSessionId ?? state.activeSessionId;
+    console.log("[AgentStore] sendPrompt called:", {
       sessionId,
       prompt: prompt.slice(0, 50),
     });
@@ -1634,19 +1869,19 @@ Summary:`;
     // so proceeding would race and cause "Another prompt is already active".
     if (recoveryInFlight) {
       console.info(
-        "[AcpStore] sendPrompt: recovery in-flight, waiting before proceeding...",
+        "[AgentStore] sendPrompt: recovery in-flight, waiting before proceeding...",
       );
       await recoveryInFlight;
       const refreshed = state.sessions[sessionId];
       if (!refreshed) {
         console.info(
-          "[AcpStore] sendPrompt: session gone after recovery, aborting",
+          "[AgentStore] sendPrompt: session gone after recovery, aborting",
         );
         return;
       }
       if (refreshed.info.status === "prompting") {
         console.info(
-          "[AcpStore] sendPrompt: session already prompting after recovery, aborting duplicate",
+          "[AgentStore] sendPrompt: session already prompting after recovery, aborting duplicate",
         );
         return;
       }
@@ -1654,24 +1889,24 @@ Summary:`;
 
     // Wait for session to be ready before sending prompt
     const readyEntry = sessionReadyPromises.get(sessionId);
-    if (readyEntry) {
+    if (readyEntry && state.sessions[sessionId]?.info.status !== "ready") {
       console.info(
-        `[AcpStore] sendPrompt: waiting for session ${sessionId} to be ready...`,
+        `[AgentStore] sendPrompt: waiting for session ${sessionId} to be ready...`,
       );
       await readyEntry.promise;
-      console.info("[AcpStore] sendPrompt: session is now ready");
+      console.info("[AgentStore] sendPrompt: session is now ready");
     }
 
     // Re-check after async waits — recovery may have started while we waited.
     if (recoveryInFlight) {
       console.info(
-        "[AcpStore] sendPrompt: recovery started during ready-wait, deferring...",
+        "[AgentStore] sendPrompt: recovery started during ready-wait, deferring...",
       );
       await recoveryInFlight;
       const refreshed = state.sessions[sessionId];
       if (!refreshed || refreshed.info.status === "prompting") {
         console.info(
-          "[AcpStore] sendPrompt: session busy after recovery, aborting duplicate",
+          "[AgentStore] sendPrompt: session busy after recovery, aborting duplicate",
         );
         return;
       }
@@ -1705,7 +1940,7 @@ Summary:`;
     };
 
     console.log(
-      "[ACP] Adding user message to session:",
+      "[AgentRuntime] Adding user message to session:",
       sessionId,
       "conversationId:",
       state.sessions[sessionId]?.conversationId,
@@ -1746,37 +1981,19 @@ Summary:`;
       const convoId = state.sessions[sessionId]?.conversationId;
       if (convoId) {
         setAgentConversationTitleDb(convoId, title).catch((err) => {
-          console.warn("[AcpStore] Failed to persist title:", err);
+          console.warn("[AgentStore] Failed to persist title:", err);
         });
       }
     }
 
-    console.log("[AcpStore] Calling acpService.sendPrompt...");
+    console.log("[AgentStore] Calling providerService.sendPrompt...");
     try {
-      let mergedContext = context ? [...context] : [];
-      try {
-        const skillsContent = await skillsStore.getThreadSkillsContent(
-          session.cwd,
-          session.conversationId,
-        );
-        if (skillsContent) {
-          mergedContext = [
-            { type: "text", text: skillsContent },
-            ...mergedContext,
-          ];
-        }
-      } catch (error) {
-        console.warn("[AcpStore] Failed to load skills for ACP prompt:", error);
-      }
-
-      await acpService.sendPrompt(
-        sessionId,
-        prompt,
-        mergedContext.length > 0 ? mergedContext : undefined,
-      );
-      console.log("[AcpStore] sendPrompt completed successfully");
+      const mergedContext = await this.buildPromptContext(sessionId, context);
+      await providerService.sendPrompt(sessionId, prompt, mergedContext);
+      this.clearBootstrapPromptContext(sessionId);
+      console.log("[AgentStore] sendPrompt completed successfully");
     } catch (error) {
-      console.error("[AcpStore] sendPrompt error:", error);
+      console.error("[AgentStore] sendPrompt error:", error);
       const message = error instanceof Error ? error.message : String(error);
 
       // Auto-recover from dead/zombie sessions.
@@ -1796,14 +2013,14 @@ Summary:`;
         // spawning a duplicate session.
         if (recoveryInFlight) {
           console.info(
-            "[AcpStore] Recovery already in-flight, waiting for it...",
+            "[AgentStore] Recovery already in-flight, waiting for it...",
           );
           await recoveryInFlight;
           return;
         }
 
         console.info(
-          "[AcpStore] Session appears dead, attempting auto-recovery...",
+          "[AgentStore] Session appears dead, attempting auto-recovery...",
         );
 
         // Preserve conversation history and cwd before cleanup.
@@ -1828,8 +2045,11 @@ Summary:`;
         const doRecovery = async (): Promise<string | null> => {
           const newSessionId = await this.spawnSession(cwd, agentType, {
             localSessionId: session.conversationId,
+            bootstrapPromptContext: session.bootstrapPromptContext,
           });
           if (newSessionId) {
+            await this.restoreSessionSettings(session, newSessionId);
+
             // Restore conversation history to the new session.
             // Mark as restored so the message-count threshold ignores them.
             if (existingMessages.length > 0) {
@@ -1846,7 +2066,7 @@ Summary:`;
               // The user explicitly cancelled — don't retry. Just show a
               // neutral message so they know the session was restarted.
               console.info(
-                "[AcpStore] Agent unresponsive after cancel — spawned fresh session, skipping retry",
+                "[AgentStore] Agent unresponsive after cancel — spawned fresh session, skipping retry",
               );
               const cancelMsg: AgentMessage = {
                 id: crypto.randomUUID(),
@@ -1885,39 +2105,22 @@ Summary:`;
               // Retry the prompt on the new session, rebuilding skills context
               // so skill invocations work on the fresh session.
               console.info(
-                `[AcpStore] Retrying prompt on new session ${newSessionId}`,
+                `[AgentStore] Retrying prompt on new session ${newSessionId}`,
               );
               try {
-                let retryContext: Array<Record<string, string>> = context
-                  ? [...context]
-                  : [];
-                try {
-                  const newSession = state.sessions[newSessionId];
-                  const skillsContent =
-                    await skillsStore.getThreadSkillsContent(
-                      newSession?.cwd ?? cwd,
-                      newSession?.conversationId ?? newSessionId,
-                    );
-                  if (skillsContent) {
-                    retryContext = [
-                      { type: "text", text: skillsContent },
-                      ...retryContext,
-                    ];
-                  }
-                } catch (skillsError) {
-                  console.warn(
-                    "[AcpStore] Failed to load skills for recovery retry:",
-                    skillsError,
-                  );
-                }
-                await acpService.sendPrompt(
+                const retryContext = await this.buildPromptContext(
+                  newSessionId,
+                  context,
+                );
+                await providerService.sendPrompt(
                   newSessionId,
                   prompt,
-                  retryContext.length > 0 ? retryContext : undefined,
+                  retryContext,
                 );
-                console.log("[AcpStore] Retry succeeded on new session");
+                this.clearBootstrapPromptContext(newSessionId);
+                console.log("[AgentStore] Retry succeeded on new session");
               } catch (retryError) {
-                console.error("[AcpStore] Retry failed:", retryError);
+                console.error("[AgentStore] Retry failed:", retryError);
                 const retryMessage =
                   retryError instanceof Error
                     ? retryError.message
@@ -1971,32 +2174,32 @@ Summary:`;
   /**
    * Cancel the current prompt in the active session.
    */
-  async cancelPrompt() {
-    const sessionId = state.activeSessionId;
+  async cancelPrompt(forSessionId?: string) {
+    const sessionId = forSessionId ?? state.activeSessionId;
     if (!sessionId) {
-      console.warn("[AcpStore] cancelPrompt: no active session");
+      console.warn("[AgentStore] cancelPrompt: no active session");
       return;
     }
 
     const session = state.sessions[sessionId];
     console.info(
-      `[AcpStore] cancelPrompt: session=${sessionId}, status=${session?.info.status}`,
+      `[AgentStore] cancelPrompt: session=${sessionId}, status=${session?.info.status}`,
     );
 
     setState("sessions", sessionId, "cancelRequested", true);
 
     try {
-      await acpService.cancelPrompt(sessionId);
-      console.info("[AcpStore] cancelPrompt: backend acknowledged cancel");
+      await providerService.cancelPrompt(sessionId);
+      console.info("[AgentStore] cancelPrompt: backend acknowledged cancel");
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg.includes("not found")) {
         console.warn(
-          "[AcpStore] cancelPrompt: stale session, resetting status",
+          "[AgentStore] cancelPrompt: stale session, resetting status",
         );
         setState("sessions", sessionId, "info", "status", "ready");
       } else {
-        console.error("[AcpStore] cancelPrompt failed:", error);
+        console.error("[AgentStore] cancelPrompt failed:", error);
       }
     }
   },
@@ -2009,13 +2212,13 @@ Summary:`;
     if (!sessionId) return;
 
     try {
-      await acpService.setPermissionMode(sessionId, modeId);
+      await providerService.setPermissionMode(sessionId, modeId);
       // Optimistic update — the authoritative update arrives via
       // CurrentModeUpdate notification handled in handleStatusChange.
       setState("sessions", sessionId, "currentModeId", modeId);
     } catch (error) {
       console.error(
-        `[AcpStore] Failed to set permission mode to "${modeId}":`,
+        `[AgentStore] Failed to set permission mode to "${modeId}":`,
         error,
       );
     }
@@ -2029,7 +2232,7 @@ Summary:`;
     if (!sessionId) return;
 
     try {
-      await acpService.setModel(sessionId, modelId);
+      await providerService.setModel(sessionId, modelId);
       setState("sessions", sessionId, "currentModelId", modelId);
       const session = state.sessions[sessionId];
       if (session) {
@@ -2041,7 +2244,7 @@ Summary:`;
         });
       }
     } catch (error) {
-      console.error("[AcpStore] Failed to set model:", error);
+      console.error("[AgentStore] Failed to set model:", error);
     }
   },
 
@@ -2057,7 +2260,7 @@ Summary:`;
     if (!sessionId) return;
 
     try {
-      await acpService.setConfigOption(sessionId, configId, valueId);
+      await providerService.setConfigOption(sessionId, configId, valueId);
       // Optimistically update local config option state (if present).
       setState("sessions", sessionId, "configOptions", (opts) => {
         if (!opts) return opts;
@@ -2069,7 +2272,7 @@ Summary:`;
         });
       });
     } catch (error) {
-      console.error("[AcpStore] Failed to set config option:", error);
+      console.error("[AgentStore] Failed to set config option:", error);
     }
   },
 
@@ -2079,35 +2282,35 @@ Summary:`;
     );
     if (!permission) {
       console.warn(
-        `[AcpStore] respondToPermission: request ${requestId} not found in pending list`,
+        `[AgentStore] respondToPermission: request ${requestId} not found in pending list`,
       );
       return;
     }
 
     console.info(
-      `[AcpStore] Responding to permission ${requestId}: session=${permission.sessionId}, option=${optionId}`,
+      `[AgentStore] Responding to permission ${requestId}: session=${permission.sessionId}, option=${optionId}`,
     );
 
     try {
-      await acpService.respondToPermission(
+      await providerService.respondToPermission(
         permission.sessionId,
         requestId,
         optionId,
       );
       console.info(
-        `[AcpStore] Permission ${requestId} response delivered to backend`,
+        `[AgentStore] Permission ${requestId} response delivered to backend`,
       );
     } catch (error) {
       const errorMsg = String(error);
       if (errorMsg.includes("not found") || errorMsg.includes("timed out")) {
         // Permission already timed out or was cleaned up on backend
         console.warn(
-          `[AcpStore] Permission ${requestId} no longer valid (likely timed out)`,
+          `[AgentStore] Permission ${requestId} no longer valid (likely timed out)`,
         );
         // User was already notified by the timeout error handler above
       } else {
         console.error(
-          `[AcpStore] Failed to respond to permission ${requestId}:`,
+          `[AgentStore] Failed to respond to permission ${requestId}:`,
           error,
         );
       }
@@ -2125,23 +2328,23 @@ Summary:`;
     );
     if (permission) {
       console.info(
-        `[AcpStore] Dismissing permission ${requestId}: session=${permission.sessionId}`,
+        `[AgentStore] Dismissing permission ${requestId}: session=${permission.sessionId}`,
       );
       try {
-        await acpService.respondToPermission(
+        await providerService.respondToPermission(
           permission.sessionId,
           requestId,
           "deny",
         );
       } catch (error) {
         console.error(
-          `[AcpStore] Failed to send deny for permission ${requestId}:`,
+          `[AgentStore] Failed to send deny for permission ${requestId}:`,
           error,
         );
       }
     } else {
       console.warn(
-        `[AcpStore] dismissPermission: request ${requestId} not found in pending list`,
+        `[AgentStore] dismissPermission: request ${requestId} not found in pending list`,
       );
     }
     setState(
@@ -2157,7 +2360,7 @@ Summary:`;
     if (!proposal) return;
 
     try {
-      await acpService.respondToDiffProposal(
+      await providerService.respondToDiffProposal(
         proposal.sessionId,
         proposalId,
         accepted,
@@ -2180,7 +2383,7 @@ Summary:`;
    * Set the selected agent type for new sessions.
    */
   setAgentModeEnabled(enabled: boolean) {
-    setState("agentModeEnabled", enabled);
+    setState("agentModeEnabled", runtimeHasCapability("agents") && enabled);
   },
 
   setSelectedAgentType(agentType: AgentType) {
@@ -2301,7 +2504,7 @@ Summary:`;
   // Event Handling (Internal)
   // ============================================================================
 
-  handleSessionEvent(sessionId: string, event: AcpEvent) {
+  handleSessionEvent(sessionId: string, event: AgentEvent) {
     // User replay messages can arrive as multiple chunks; flush buffered user
     // text when the stream transitions to a non-user event.
     if (event.type !== "userMessage") {
@@ -2386,7 +2589,7 @@ Summary:`;
           if (inputTokens != null) {
             setState("sessions", sessionId, "lastInputTokens", inputTokens);
             console.log(
-              `[AcpStore] Agent usage: ${inputTokens} input tokens`,
+              `[AgentStore] Agent usage: ${inputTokens} input tokens`,
               `(${Math.round((inputTokens / (state.sessions[sessionId]?.contextWindowSize ?? 200_000)) * 100)}% of context)`,
             );
           }
@@ -2416,7 +2619,7 @@ Summary:`;
                 settingsStore.settings.autoCompactThreshold / 100;
               if (usagePercent >= threshold) {
                 console.info(
-                  `[AcpStore] Context usage at ${Math.round(usagePercent * 100)}% — triggering auto-compaction`,
+                  `[AgentStore] Context usage at ${Math.round(usagePercent * 100)}% — triggering auto-compaction`,
                 );
                 shouldCompact = true;
               }
@@ -2430,7 +2633,7 @@ Summary:`;
               );
               if (activeCount > MESSAGE_COUNT_COMPACT_THRESHOLD) {
                 console.info(
-                  `[AcpStore] ${activeCount} active messages (${sess.messages.length} total) without token usage data — triggering auto-compaction`,
+                  `[AgentStore] ${activeCount} active messages (${sess.messages.length} total) without token usage data — triggering auto-compaction`,
                 );
                 shouldCompact = true;
               }
@@ -2460,7 +2663,6 @@ Summary:`;
         setState("sessions", sessionId, "configOptions", merged);
         if (restore) {
           setState("sessions", sessionId, "pendingConfigRestore", undefined);
-          // Apply restored values to the agent so it is aware of them
           for (const [id, value] of Object.entries(restore)) {
             void this.setConfigOption(id, value, sessionId);
           }
@@ -2474,7 +2676,7 @@ Summary:`;
       case "error":
         // Log full error content for diagnostics (helps debug cascade crashes)
         console.error(
-          `[AcpStore] Error event for session ${sessionId}:`,
+          `[AgentStore] Error event for session ${sessionId}:`,
           event.data.error,
         );
 
@@ -2516,14 +2718,14 @@ Summary:`;
           // here would create duplicate banners when the recovery code
           // restores message history to the new session.
           console.info(
-            "[AcpStore] Skipping error message for unresponsive agent — sendPrompt handles recovery",
+            "[AgentStore] Skipping error message for unresponsive agent — sendPrompt handles recovery",
           );
         } else if (
           String(event.data.error).includes("Permission request timed out")
         ) {
           // Permission timeout: clean up stale permission dialogs and notify user
           console.warn(
-            "[AcpStore] Permission request timed out for session:",
+            "[AgentStore] Permission request timed out for session:",
             sessionId,
           );
 
@@ -2559,11 +2761,11 @@ Summary:`;
           // displaying these errors to avoid confusing the user with false
           // error messages when their request actually succeeded.
           console.info(
-            "[AcpStore] Skipping non-permission timeout error — likely spurious race condition",
+            "[AgentStore] Skipping non-permission timeout error — likely spurious race condition",
           );
         } else if (isPromptTooLongError(String(event.data.error))) {
           // Context window full — try compaction + retry before falling back
-          console.info("[AcpStore] Prompt too long detected in error event");
+          console.info("[AgentStore] Prompt too long detected in error event");
 
           // Reset to "ready" so the UI unfreezes — promptComplete never
           // fires after this error so the session would stay stuck in
@@ -2580,19 +2782,19 @@ Summary:`;
           this.compactAndRetry(sessionId).then((retried) => {
             if (!retried) {
               console.info(
-                "[AcpStore] Compact-and-retry not possible, falling back to Chat mode",
+                "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
               );
               setState("sessions", sessionId, "promptTooLong", true);
               this.addErrorMessage(sessionId, event.data.error);
               this.acceptRateLimitFallback().catch((err) => {
-                console.error("[AcpStore] Auto-failover failed:", err);
+                console.error("[AgentStore] Auto-failover failed:", err);
               });
             }
           });
         } else if (isRateLimitError(String(event.data.error))) {
           // Rate limit detected — automatically switch to chat mode
           console.info(
-            "[AcpStore] Rate limit detected, automatically switching to chat mode",
+            "[AgentStore] Rate limit detected, automatically switching to chat mode",
           );
           setState("sessions", sessionId, "rateLimitHit", true);
           this.addErrorMessage(sessionId, event.data.error);
@@ -2608,7 +2810,7 @@ Summary:`;
 
           // Automatically trigger failover without user interaction
           this.acceptRateLimitFallback().catch((err) => {
-            console.error("[AcpStore] Auto-failover failed:", err);
+            console.error("[AgentStore] Auto-failover failed:", err);
           });
         } else {
           this.addErrorMessage(sessionId, event.data.error);
@@ -2616,10 +2818,9 @@ Summary:`;
         break;
 
       case "permissionRequest": {
-        const permEvent =
-          event.data as import("@/services/acp").PermissionRequestEvent;
+        const permEvent = event.data as PermissionRequestEvent;
         console.info(
-          "[AcpStore] Permission request received: requestId=" +
+          "[AgentStore] Permission request received: requestId=" +
             permEvent.requestId +
             ", session=" +
             permEvent.sessionId +
@@ -3105,7 +3306,7 @@ Summary:`;
         duration,
       };
       console.log(
-        "[ACP] Adding assistant message to session:",
+        "[AgentRuntime] Adding assistant message to session:",
         sessionId,
         "conversationId:",
         session.conversationId,
@@ -3126,16 +3327,18 @@ Summary:`;
       // If the agent's response is a prompt-too-long error (context window full),
       // try compaction + retry before falling back to Chat mode.
       if (isPromptTooLongError(session.streamingContent)) {
-        console.info("[AcpStore] Prompt too long detected in streamed content");
+        console.info(
+          "[AgentStore] Prompt too long detected in streamed content",
+        );
         void this.compactAndRetry(sessionId).then((retried) => {
           if (!retried) {
             console.info(
-              "[AcpStore] Compact-and-retry not possible, falling back to Chat mode",
+              "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
             );
             setState("sessions", sessionId, "promptTooLong", true);
             this.acceptRateLimitFallback().catch((err) => {
               console.error(
-                "[AcpStore] Auto-failover from streamed content failed:",
+                "[AgentStore] Auto-failover from streamed content failed:",
                 err,
               );
             });
@@ -3157,9 +3360,11 @@ Summary:`;
   /**
    * Fork the current agent conversation from a specific message.
    *
-   * Creates a new agent session with the same conversation history (via the ACP
-   * fork_session capability) and a new local conversation containing messages up
-   * to `fromMessageId`.  Returns the new local conversation ID.
+   * Creates a new local conversation containing messages up to `fromMessageId`.
+   * When the fork point is the latest message in a Claude session, we can use
+   * the provider's native session fork. Otherwise we branch to a fresh runtime
+   * session and bootstrap the exact transcript on the next prompt so the
+   * selected fork point is authoritative.
    */
   async forkConversation(
     conversationId: string,
@@ -3167,36 +3372,49 @@ Summary:`;
   ): Promise<string | null> {
     const session = state.sessions[conversationId];
     if (!session) {
-      console.error("[AcpStore] forkConversation: session not found");
+      console.error("[AgentStore] forkConversation: session not found");
       return null;
     }
 
     const agentType = session.info.agentType;
     const cwd = session.cwd;
 
-    // 1. Ask the sidecar to fork the CLI session.
-    let newAgentSessionId: string;
-    try {
-      newAgentSessionId = await acpService.forkSession(conversationId);
-    } catch (err) {
-      console.error("[AcpStore] forkConversation: fork failed:", err);
-      this.addErrorMessage(
-        conversationId,
-        `Fork failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return null;
-    }
-
-    // 2. Collect messages up to the fork point.
+    // 1. Collect messages up to the fork point.
     const allMessages = session.messages;
     const forkIndex = allMessages.findIndex((m) => m.id === fromMessageId);
     if (forkIndex === -1) {
-      console.error("[AcpStore] forkConversation: message not found");
+      console.error("[AgentStore] forkConversation: message not found");
       return null;
     }
     const forkedMessages = allMessages.slice(0, forkIndex + 1);
+    const isHeadFork = forkIndex === allMessages.length - 1;
+    const useNativeFork =
+      providerService.supportsNativeProviderFork(agentType) && isHeadFork;
 
-    // 3. Create a new local conversation in SQLite.
+    let newAgentSessionId: string | undefined;
+    let bootstrapPromptContext: string | undefined;
+
+    if (useNativeFork) {
+      try {
+        newAgentSessionId =
+          await providerService.nativeForkSession(conversationId);
+      } catch (err) {
+        console.error(
+          "[AgentStore] forkConversation: native fork failed:",
+          err,
+        );
+        this.addErrorMessage(
+          conversationId,
+          `Fork failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      }
+    } else {
+      bootstrapPromptContext =
+        buildForkBootstrapContext(session, forkedMessages) ?? undefined;
+    }
+
+    // 2. Create a new local conversation in SQLite.
     const newConversationId = crypto.randomUUID();
     const forkTitle = `Fork of ${session.title ?? "Agent"}`;
     try {
@@ -3206,75 +3424,40 @@ Summary:`;
         agentType,
         cwd,
         null,
-        newAgentSessionId,
+        newAgentSessionId ?? undefined,
+        serializeAgentConversationMetadata({
+          pendingBootstrapPromptContext: bootstrapPromptContext,
+          pendingBootstrapMessages: bootstrapPromptContext
+            ? forkedMessages
+            : undefined,
+        }) ?? undefined,
       );
-
-      // Persist forked messages to the new conversation.
-      for (const msg of forkedMessages) {
-        persistAgentMessage(newConversationId, msg);
-      }
     } catch (err) {
-      console.error("[AcpStore] forkConversation: DB error:", err);
+      console.error("[AgentStore] forkConversation: DB error:", err);
       return null;
     }
 
-    // 4. Spawn a new sidecar session that resumes the forked CLI session.
+    // 3. Spawn a new local session for the fork.
     const newSessionId = await this.spawnSession(cwd, agentType, {
       localSessionId: newConversationId,
       resumeAgentSessionId: newAgentSessionId,
       conversationTitle: forkTitle,
       restoredMessages: forkedMessages,
+      bootstrapPromptContext,
     });
 
     if (!newSessionId) {
-      console.error("[AcpStore] forkConversation: spawn failed");
+      console.error("[AgentStore] forkConversation: spawn failed");
       return null;
     }
 
+    await this.restoreSessionSettings(session, newSessionId);
+
     console.info(
-      `[AcpStore] Forked conversation ${conversationId} -> ${newConversationId} (agent session: ${newAgentSessionId})`,
+      `[AgentStore] Forked conversation ${conversationId} -> ${newConversationId}${newAgentSessionId ? ` (agent session: ${newAgentSessionId})` : " (bootstrap branch)"}`,
     );
 
-    // Seed the forked agent with a summary of the forked conversation so it
-    // has context of the prior work. Same pattern as compaction seeding.
-    void this.seedForkedSession(newSessionId, forkedMessages);
-
     return newConversationId;
-  },
-
-  async seedForkedSession(
-    sessionId: string,
-    messages: AgentMessage[],
-  ): Promise<void> {
-    const summaryPrompt = `Please provide a concise summary of the following AI coding agent conversation. Focus on: what tasks were requested, what files were modified, key decisions made, and current state of the work. Keep the summary under 500 words.
-
-Conversation to summarize:
-${messages
-  .filter((m) => m.type === "user" || m.type === "assistant")
-  .map((m) => `${m.type.toUpperCase()}: ${m.content}`)
-  .join("\n\n")}
-
-Summary:`;
-
-    try {
-      const summary = await sendMessage(
-        summaryPrompt,
-        "anthropic/claude-sonnet-4",
-      );
-
-      const readyEntry = sessionReadyPromises.get(sessionId);
-      if (readyEntry) {
-        await readyEntry.promise;
-      }
-
-      const seedPrompt = `Here is a summary of the conversation up to the fork point:\n\n${summary}\n\nContinue from where we left off. The user may send a new message shortly.`;
-      await acpService.sendPrompt(sessionId, seedPrompt);
-      console.info(
-        "[AcpStore] Forked session seeded with conversation summary",
-      );
-    } catch (error) {
-      console.warn("[AcpStore] Failed to seed forked session:", error);
-    }
   },
 
   addErrorMessage(sessionId: string, error: string) {
@@ -3309,7 +3492,7 @@ Summary:`;
 export type {
   AgentType,
   SessionStatus,
-  AcpSessionInfo,
+  AgentSessionInfo,
   AgentInfo,
   DiffEvent,
   DiffProposalEvent,

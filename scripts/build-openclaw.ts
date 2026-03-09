@@ -24,6 +24,10 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_OPENCLAW_DIST_TAG = "latest";
 
+function mergeEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return overrides ? { ...process.env, ...overrides } : process.env;
+}
+
 function parseArgs(argv: string[]): { optional: boolean } {
   let optional = false;
   for (const arg of argv) {
@@ -45,10 +49,10 @@ Options:
   return { optional };
 }
 
-function execText(cmd: string, args: string[], cwd?: string): string {
+function execText(cmd: string, args: string[], cwd?: string, env?: NodeJS.ProcessEnv): string {
   const res = spawnSync(cmd, args, {
     cwd,
-    env: process.env,
+    env: mergeEnv(env),
     encoding: "utf8",
     shell: process.platform === "win32",
     stdio: ["ignore", "pipe", "pipe"],
@@ -62,10 +66,10 @@ function execText(cmd: string, args: string[], cwd?: string): string {
   return (res.stdout ?? "").trim();
 }
 
-function run(cmd: string, args: string[], cwd?: string): void {
+function run(cmd: string, args: string[], cwd?: string, env?: NodeJS.ProcessEnv): void {
   const res = spawnSync(cmd, args, {
     cwd,
-    env: process.env,
+    env: mergeEnv(env),
     shell: process.platform === "win32",
     stdio: "inherit",
   });
@@ -75,10 +79,16 @@ function run(cmd: string, args: string[], cwd?: string): void {
   }
 }
 
-function runAndTail(cmd: string, args: string[], cwd: string, tailLines: number): void {
+function runAndTail(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  tailLines: number,
+  env?: NodeJS.ProcessEnv,
+): void {
   const res = spawnSync(cmd, args, {
     cwd,
-    env: process.env,
+    env: mergeEnv(env),
     encoding: "utf8",
     shell: process.platform === "win32",
     stdio: ["ignore", "pipe", "pipe"],
@@ -309,6 +319,11 @@ async function main(): Promise<void> {
       "--config.node-linker=hoisted",
       "--config.package-import-method=copy",
     ];
+    const installEnv: NodeJS.ProcessEnv = {
+      // Homebrew/system libvips makes sharp attempt a local node-gyp build,
+      // which breaks this self-contained bundle on developer machines.
+      SHARP_IGNORE_GLOBAL_LIBVIPS: "1",
+    };
 
     // Prefer lockfile if present for reproducible bundles.
     if (existsSync(path.join(openclawRuntimeDir, "pnpm-lock.yaml"))) {
@@ -316,7 +331,7 @@ async function main(): Promise<void> {
     }
 
     try {
-      runAndTail("pnpm", pnpmInstallArgs, openclawRuntimeDir, 5);
+      runAndTail("pnpm", pnpmInstallArgs, openclawRuntimeDir, 5, installEnv);
     } catch {
       // Fallback: lockfile missing/out-of-date.
       runAndTail(
@@ -324,6 +339,7 @@ async function main(): Promise<void> {
         pnpmInstallArgs.filter((a) => a !== "--frozen-lockfile"),
         openclawRuntimeDir,
         5,
+        installEnv,
       );
     }
 

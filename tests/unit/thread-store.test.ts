@@ -75,10 +75,11 @@ vi.mock("@/stores/conversation.store", () => ({
   },
 }));
 
-// Mock ACP service (listSessions)
+// Mock provider service (listSessions)
 const mockBackendSessions: Array<{ id: string }> = [];
-vi.mock("@/services/acp", () => ({
+vi.mock("@/services/providers", () => ({
   listSessions: vi.fn(async () => mockBackendSessions),
+  invokeProvider: vi.fn(),
 }));
 
 // Mock ACP store
@@ -102,8 +103,8 @@ const mockAgentConversations: Array<{
   is_archived: boolean;
 }> = [];
 
-vi.mock("@/stores/acp.store", () => ({
-  acpStore: {
+vi.mock("@/stores/agent.store", () => ({
+  agentStore: {
     selectedAgentType: "claude-code",
     get sessions() {
       return mockSessions;
@@ -124,7 +125,7 @@ vi.mock("@/stores/acp.store", () => ({
 import { threadStore } from "@/stores/thread.store";
 import { setRootPath } from "@/stores/fileTree";
 import { conversationStore } from "@/stores/conversation.store";
-import { acpStore } from "@/stores/acp.store";
+import { agentStore } from "@/stores/agent.store";
 
 describe("threadStore", () => {
   beforeEach(() => {
@@ -315,7 +316,7 @@ describe("threadStore", () => {
       threadStore.selectThread("agent-1", "agent");
       // Wait for async listSessions check
       await vi.waitFor(() => {
-        expect(acpStore.setActiveSession).toHaveBeenCalledWith("sess-1");
+        expect(agentStore.setActiveSession).toHaveBeenCalledWith("sess-1");
       });
 
       expect(threadStore.activeThreadKind).toBe("agent");
@@ -344,10 +345,10 @@ describe("threadStore", () => {
       threadStore.selectThread("agent-1", "agent");
       // Wait for async listSessions check to trigger resume
       await vi.waitFor(() => {
-        expect(acpStore.terminateSession).toHaveBeenCalledWith("sess-1");
+        expect(agentStore.terminateSession).toHaveBeenCalledWith("sess-1");
       });
 
-      expect(acpStore.resumeAgentConversation).toHaveBeenCalledWith(
+      expect(agentStore.resumeAgentConversation).toHaveBeenCalledWith(
         "agent-1",
         "/Users/dev/project-a",
       );
@@ -370,8 +371,8 @@ describe("threadStore", () => {
 
       threadStore.selectThread("agent-1", "agent");
 
-      expect(acpStore.setActiveSession).toHaveBeenCalledWith(null);
-      expect(acpStore.resumeAgentConversation).toHaveBeenCalledWith(
+      expect(agentStore.setActiveSession).toHaveBeenCalledWith(null);
+      expect(agentStore.resumeAgentConversation).toHaveBeenCalledWith(
         "agent-1",
         "/Users/dev/project-a",
       );

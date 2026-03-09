@@ -11,9 +11,13 @@ type ClientWithRequestInterceptor = {
   };
 };
 
-export function attachAuthInterceptor(client: ClientWithRequestInterceptor): void {
+export function attachAuthInterceptor(
+  client: ClientWithRequestInterceptor,
+): void {
   if (!client.interceptors?.request?.use) {
-    console.warn("[API] Client missing request interceptors — auth will not be attached");
+    console.warn(
+      "[API] Client missing request interceptors — auth will not be attached",
+    );
     return;
   }
   client.interceptors.request.use(async (request: Request) => {

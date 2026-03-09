@@ -1,9 +1,9 @@
 // ABOUTME: Dropdown component for selecting the permission mode in an agent session.
-// ABOUTME: Shows available modes reported by the ACP agent and sends set_mode commands.
+// ABOUTME: Shows available modes reported by the active agent runtime and sends set_mode commands.
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { type ActiveSession, acpStore } from "@/stores/acp.store";
+import { type ActiveSession, agentStore } from "@/stores/agent.store";
 
 interface Props {
   session: ActiveSession | null;
@@ -38,7 +38,7 @@ export const AgentModeSelector: Component<Props> = (props) => {
   });
 
   const selectMode = (modeId: string) => {
-    acpStore.setPermissionMode(modeId, props.session?.info.id);
+    agentStore.setPermissionMode(modeId, props.session?.info.id);
     setIsOpen(false);
   };
 

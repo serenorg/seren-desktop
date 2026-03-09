@@ -1183,7 +1183,7 @@ async fn request_qr_code(_port: u16, _hook_token: &str, platform: &str) -> Resul
 }
 
 /// Open a native terminal running `openclaw channels login --channel <platform>`.
-/// Follows the same pattern as `launch_claude_login()` / `launch_codex_login()` in acp.rs.
+/// This mirrors the local CLI login flow used for other agent runtimes.
 fn launch_channel_login(platform: &str) -> Result<(), String> {
     let openclaw_mjs = find_openclaw_mjs()?;
     let openclaw_path = openclaw_mjs.to_string_lossy().to_string();

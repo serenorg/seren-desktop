@@ -94,7 +94,7 @@ pub struct RoutingDecision {
 #[serde(rename_all = "snake_case")]
 pub enum WorkerType {
     ChatModel,
-    AcpAgent,
+    LocalAgent,
     McpPublisher,
 }
 
@@ -116,12 +116,12 @@ pub struct ImageAttachment {
 /// User capabilities passed from the frontend per-request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserCapabilities {
-    pub has_acp_agent: bool,
+    pub has_local_agent: bool,
     pub agent_type: Option<String>,
-    /// The active ACP session ID, if one exists. Enables the ACP fast-path
+    /// The active local agent session ID, if one exists. Enables the local-agent fast-path
     /// to skip classification/decomposition when routing to the agent.
     #[serde(default)]
-    pub active_acp_session_id: Option<String>,
+    pub active_agent_session_id: Option<String>,
     /// The model the user explicitly selected in the UI.
     #[serde(default)]
     pub selected_model: Option<String>,
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn routing_decision_round_trips_through_serde() {
         let decision = RoutingDecision {
-            worker_type: WorkerType::AcpAgent,
+            worker_type: WorkerType::LocalAgent,
             model_id: "anthropic/claude-opus-4-6".to_string(),
             delegation: DelegationType::InLoop,
             reason: "Code generation task with file system access".to_string(),
@@ -331,7 +331,7 @@ mod tests {
         let json = serde_json::to_string(&decision).unwrap();
         let deserialized: RoutingDecision = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.worker_type, WorkerType::AcpAgent);
+        assert_eq!(deserialized.worker_type, WorkerType::LocalAgent);
         assert_eq!(deserialized.model_id, "anthropic/claude-opus-4-6");
         assert_eq!(deserialized.delegation, DelegationType::InLoop);
         assert_eq!(
@@ -347,8 +347,8 @@ mod tests {
         let json = serde_json::to_value(WorkerType::ChatModel).unwrap();
         assert_eq!(json, "chat_model");
 
-        let json = serde_json::to_value(WorkerType::AcpAgent).unwrap();
-        assert_eq!(json, "acp_agent");
+        let json = serde_json::to_value(WorkerType::LocalAgent).unwrap();
+        assert_eq!(json, "local_agent");
 
         let json = serde_json::to_value(WorkerType::McpPublisher).unwrap();
         assert_eq!(json, "mcp_publisher");
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn user_capabilities_deserializes_from_frontend_json() {
         let json = r#"{
-            "has_acp_agent": true,
+            "has_local_agent": true,
             "agent_type": "claude-code",
             "available_models": ["anthropic/claude-opus-4-6", "anthropic/claude-sonnet-4"],
             "available_tools": ["firecrawl", "run_sql"],
@@ -394,14 +394,14 @@ mod tests {
         }"#;
 
         let caps: UserCapabilities = serde_json::from_str(json).unwrap();
-        assert!(caps.has_acp_agent);
+        assert!(caps.has_local_agent);
         assert_eq!(caps.agent_type, Some("claude-code".to_string()));
         assert_eq!(caps.available_models.len(), 2);
         assert_eq!(caps.available_tools.len(), 2);
         assert_eq!(caps.installed_skills.len(), 1);
         assert_eq!(caps.installed_skills[0].slug, "prose");
         // Optional fields default when not in JSON (frontend compat)
-        assert!(caps.active_acp_session_id.is_none());
+        assert!(caps.active_agent_session_id.is_none());
         assert!(caps.model_rankings.is_empty());
     }
 }

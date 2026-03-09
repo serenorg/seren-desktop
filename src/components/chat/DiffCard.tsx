@@ -3,7 +3,7 @@
 
 import type { Component } from "solid-js";
 import { createMemo, createSignal, Show } from "solid-js";
-import type { DiffEvent } from "@/services/acp";
+import type { DiffEvent } from "@/services/providers";
 
 interface DiffCardProps {
   diff: DiffEvent;

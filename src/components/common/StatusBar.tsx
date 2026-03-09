@@ -1,8 +1,8 @@
 // ABOUTME: Application status bar at the bottom.
 // ABOUTME: Displays status messages, MCP state, autocomplete status, and connection state.
 
-import { createMemo, type Component } from "solid-js";
-import { acpStore } from "@/stores/acp.store";
+import { type Component, createMemo } from "solid-js";
+import { agentStore } from "@/stores/agent.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { AutocompleteStatus } from "./AutocompleteStatus";
 import { McpStatusIndicator } from "./McpStatusIndicator";
@@ -13,7 +13,7 @@ interface StatusBarProps {
 
 export const StatusBar: Component<StatusBarProps> = (props) => {
   const agentStatusText = createMemo(() => {
-    const session = acpStore.activeSession;
+    const session = agentStore.activeSession;
     if (!session || session.info.status !== "prompting") return null;
     const running = session.messages
       .filter(

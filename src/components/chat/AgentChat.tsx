@@ -15,8 +15,8 @@ import {
   untrack,
 } from "solid-js";
 import { createStore } from "solid-js/store";
-import { AcpPermissionDialog } from "@/components/acp/AcpPermissionDialog";
-import { DiffProposalDialog } from "@/components/acp/DiffProposalDialog";
+import { AgentPermissionDialog } from "@/components/agent/AgentPermissionDialog";
+import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
 import { CompactedMessage } from "@/components/chat/CompactedMessage";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
@@ -45,19 +45,20 @@ import {
 } from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
+import { readDocument } from "@/services/docreader";
 import {
   type AgentType,
   type DiffEvent,
   launchLogin,
+  supportsConversationFork,
   type ToolCallEvent,
-} from "@/services/acp";
-import { readDocument } from "@/services/docreader";
+} from "@/services/providers";
 import { skills } from "@/services/skills";
 import {
   type AgentCompactedSummary,
   type AgentMessage,
-  acpStore,
-} from "@/stores/acp.store";
+  agentStore,
+} from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
 import { threadStore } from "@/stores/thread.store";
@@ -149,14 +150,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const threadMessages = createMemo(() => {
     const thread = activeAgentThread();
     if (!thread) return [];
-    return acpStore.getMessagesForConversation(thread.id);
+    return agentStore.getMessagesForConversation(thread.id);
   });
 
   // Get streaming content for THIS thread's conversation ID
   const threadStreamingContent = createMemo(() => {
     const thread = activeAgentThread();
     if (!thread) return "";
-    return acpStore.getStreamingContentForConversation(thread.id);
+    return agentStore.getStreamingContentForConversation(thread.id);
   });
 
   // Enqueue finalized assistant messages to the render worker.
@@ -176,7 +177,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const threadStreamingThinking = createMemo(() => {
     const thread = activeAgentThread();
     if (!thread) return "";
-    return acpStore.getStreamingThinkingForConversation(thread.id);
+    return agentStore.getStreamingThinkingForConversation(thread.id);
   });
 
   // Build reversed list of user prompts for Up/Down arrow navigation
@@ -215,9 +216,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     window.addEventListener("seren:pick-images", onPickImages);
     window.addEventListener("seren:set-chat-input", onSetChatInput);
     if (fileTreeState.rootPath) {
-      void acpStore.refreshRemoteSessions(
+      void agentStore.refreshRemoteSessions(
         fileTreeState.rootPath,
-        acpStore.selectedAgentType,
+        agentStore.selectedAgentType,
       );
     }
   });
@@ -231,14 +232,28 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // the Codex thread's controls, ready-state, and send behaviour.
   const threadSession = createMemo(() => {
     const thread = activeAgentThread();
-    if (!thread) return acpStore.activeSession;
-    return acpStore.getSessionForConversation(thread.id);
+    if (!thread) return agentStore.activeSession;
+    return agentStore.getSessionForConversation(thread.id);
+  });
+  const threadSessionId = createMemo(() => threadSession()?.info.id ?? null);
+
+  createEffect(() => {
+    const sessionId = threadSessionId();
+    if (sessionId && agentStore.activeSessionId !== sessionId) {
+      agentStore.setActiveSession(sessionId);
+    }
+  });
+
+  const forkSupported = createMemo(() => {
+    const session = threadSession();
+    if (!session) return false;
+    return supportsConversationFork(session.info.agentType);
   });
 
   const hasSession = () => threadSession() !== null;
   const isReady = () => threadSession()?.info.status === "ready";
   const isPrompting = () => threadSession()?.info.status === "prompting";
-  const sessionError = () => threadSession()?.error ?? acpStore.error;
+  const sessionError = () => threadSession()?.error ?? agentStore.error;
   const lockedAgentType = createMemo<AgentType>(() => {
     // Thread's declared agent type takes priority so the controls always
     // reflect the selected thread, not a session from a different thread.
@@ -250,7 +265,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (sessionAgent === "codex" || sessionAgent === "claude-code") {
       return sessionAgent;
     }
-    return "claude-code";
+    return agentStore.selectedAgentType;
   });
   const lockedAgentName = () =>
     lockedAgentType() === "codex" ? "Codex" : "Claude Code";
@@ -270,12 +285,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       () => [fileTreeState.rootPath, lockedAgentType()] as const,
       ([newPath, agentType]) => {
         if (newPath && !isPrompting()) {
-          void acpStore.refreshRemoteSessions(newPath, agentType);
+          void agentStore.refreshRemoteSessions(newPath, agentType);
           // Only auto-focus a project session when no thread is selected.
           // When the user already has an active thread, preserve it across
           // folder switches so agents persist regardless of file tree context.
           if (!threadStore.activeThreadId) {
-            acpStore.focusProjectSession(newPath);
+            agentStore.focusProjectSession(newPath);
           }
         }
       },
@@ -309,8 +324,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   createEffect(() => {
     threadMessages();
     threadStreamingContent();
-    acpStore.pendingPermissions;
-    acpStore.pendingDiffProposals;
+    agentStore.pendingPermissions;
+    agentStore.pendingDiffProposals;
     requestAnimationFrame(scrollToBottom);
   });
 
@@ -327,7 +342,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
     console.log("[AgentChat] Starting session with cwd:", cwd);
     try {
-      const sessionId = await acpStore.spawnSession(cwd, agentType);
+      const sessionId = await agentStore.spawnSession(cwd, agentType);
       console.log("[AgentChat] Session started:", sessionId);
     } catch (error) {
       console.error("[AgentChat] Failed to start session:", error);
@@ -462,15 +477,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     );
     if (!confirmClear) return;
 
-    const session = acpStore.activeSession;
+    const session = threadSession();
     if (!session) return;
 
     // Clear messages in the active session
-    acpStore.clearSessionMessages(session.info.id);
+    agentStore.clearSessionMessages(session.info.id);
   };
 
   const compactConversation = async (preserveCount: number) => {
-    const session = acpStore.activeSession;
+    const session = threadSession();
     if (!session) return;
 
     const messages = threadMessages();
@@ -485,7 +500,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     );
     if (!confirmCompact) return;
 
-    await acpStore.compactAgentConversation(session.info.id, preserveCount);
+    await agentStore.compactAgentConversation(session.info.id, preserveCount);
   };
 
   const executeSlashCommand = (trimmed: string) => {
@@ -581,9 +596,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             ? `/${skill.slug} ${args}`
             : `/${skill.slug}`;
 
-        await acpStore.sendPrompt(directive, undefined, {
-          displayContent: trimmed,
-        });
+        await agentStore.sendPrompt(
+          directive,
+          undefined,
+          {
+            displayContent: trimmed,
+          },
+          threadSessionId() ?? undefined,
+        );
         return;
       }
     }
@@ -596,7 +616,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
 
-    // Split attachments: images go as ACP context blocks; docreader files get extracted to text
+    // Split attachments: images go as agent context blocks; docreader files get extracted to text
     const imageAttachments = images.filter((a) => !isDocreaderMime(a.mimeType));
     const docAttachments = images.filter((a) => isDocreaderMime(a.mimeType));
     console.log("[AgentChat] Attachment split:", {
@@ -669,15 +689,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         : undefined;
 
     console.log(
-      "[AgentChat] Sending prompt to ACP, context blocks:",
+      "[AgentChat] Sending prompt to agent runtime, context blocks:",
       context?.length ?? 0,
     );
     const docNames =
       docAttachments.length > 0 ? docAttachments.map((d) => d.name) : undefined;
-    await acpStore.sendPrompt(promptWithDocs, context, {
-      displayContent: trimmed,
-      docNames,
-    });
+    await agentStore.sendPrompt(
+      promptWithDocs,
+      context,
+      {
+        displayContent: trimmed,
+        docNames,
+      },
+      threadSessionId() ?? undefined,
+    );
   };
 
   // Guard flag prevents concurrent queue processing
@@ -694,7 +719,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     console.log("[AgentChat] Processing queued message:", nextMessage);
 
     try {
-      await acpStore.sendPrompt(nextMessage);
+      await agentStore.sendPrompt(
+        nextMessage,
+        undefined,
+        undefined,
+        threadSessionId() ?? undefined,
+      );
     } catch (error) {
       console.error("[AgentChat] Queued message failed:", error);
     }
@@ -721,13 +751,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const handleCancel = async () => {
     // Clear queued messages so they don't auto-send after cancellation
     setMessageQueue([]);
-    await acpStore.cancelPrompt();
+    await agentStore.cancelPrompt(threadSessionId() ?? undefined);
   };
 
   const [forking, setForking] = createSignal(false);
 
   const handleForkFromMessage = async (messageId: string) => {
-    const session = acpStore.activeSession;
+    const session = threadSession();
     if (!session || forking()) return;
 
     setForking(true);
@@ -934,24 +964,26 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               class="text-sm leading-relaxed text-foreground whitespace-pre-wrap"
               innerHTML={escapeHtmlWithLinks(message.content)}
             />
-            <button
-              type="button"
-              class="absolute top-2 right-2 hidden group-hover/msg:inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-2 border border-border text-muted-foreground cursor-pointer transition-all hover:bg-surface-3 hover:text-foreground"
-              onClick={() => handleForkFromMessage(message.id)}
-              title="Fork conversation from here"
-            >
-              <svg
-                aria-hidden="true"
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                class="shrink-0"
+            <Show when={forkSupported()}>
+              <button
+                type="button"
+                class="absolute top-2 right-2 hidden group-hover/msg:inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-2 border border-border text-muted-foreground cursor-pointer transition-all hover:bg-surface-3 hover:text-foreground"
+                onClick={() => handleForkFromMessage(message.id)}
+                title="Fork conversation from here"
               >
-                <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM2.75 3.25a1.5 1.5 0 0 0 2.75.8v4.9a1.5 1.5 0 1 0-1.5 0v-4.9a1.5 1.5 0 0 0-1.25-.8Zm8.5 0a1.5 1.5 0 0 1-1.25.8v2.7a.75.75 0 0 1-1.5 0v-2.7a1.5 1.5 0 1 1 2.75-.8Z" />
-              </svg>
-              Fork
-            </button>
+                <svg
+                  aria-hidden="true"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  class="shrink-0"
+                >
+                  <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM2.75 3.25a1.5 1.5 0 0 0 2.75.8v4.9a1.5 1.5 0 1 0-1.5 0v-4.9a1.5 1.5 0 0 0-1.25-.8Zm8.5 0a1.5 1.5 0 0 1-1.25.8v2.7a.75.75 0 0 1-1.5 0v-2.7a1.5 1.5 0 1 1 2.75-.8Z" />
+                </svg>
+                Fork
+              </button>
+            </Show>
           </article>
         );
 
@@ -981,24 +1013,26 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 );
               })()}
             </Show>
-            <button
-              type="button"
-              class="absolute top-2 right-2 hidden group-hover/msg:inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-2 border border-border text-muted-foreground cursor-pointer transition-all hover:bg-surface-3 hover:text-foreground"
-              onClick={() => handleForkFromMessage(message.id)}
-              title="Fork conversation from here"
-            >
-              <svg
-                aria-hidden="true"
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                class="shrink-0"
+            <Show when={forkSupported()}>
+              <button
+                type="button"
+                class="absolute top-2 right-2 hidden group-hover/msg:inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-surface-2 border border-border text-muted-foreground cursor-pointer transition-all hover:bg-surface-3 hover:text-foreground"
+                onClick={() => handleForkFromMessage(message.id)}
+                title="Fork conversation from here"
               >
-                <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM2.75 3.25a1.5 1.5 0 0 0 2.75.8v4.9a1.5 1.5 0 1 0-1.5 0v-4.9a1.5 1.5 0 0 0-1.25-.8Zm8.5 0a1.5 1.5 0 0 1-1.25.8v2.7a.75.75 0 0 1-1.5 0v-2.7a1.5 1.5 0 1 1 2.75-.8Z" />
-              </svg>
-              Fork
-            </button>
+                <svg
+                  aria-hidden="true"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  class="shrink-0"
+                >
+                  <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM2.75 3.25a1.5 1.5 0 0 0 2.75.8v4.9a1.5 1.5 0 1 0-1.5 0v-4.9a1.5 1.5 0 0 0-1.25-.8Zm8.5 0a1.5 1.5 0 0 1-1.25.8v2.7a.75.75 0 0 1-1.5 0v-2.7a1.5 1.5 0 1 1 2.75-.8Z" />
+                </svg>
+                Fork
+              </button>
+            </Show>
           </article>
         );
 
@@ -1046,15 +1080,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110 flex-shrink-0"
                     onClick={async () => {
                       const agentType =
-                        acpStore.activeSession?.info.agentType ?? "claude-code";
-                      if (agentType !== "codex") {
-                        launchLogin(agentType);
-                      }
-                      const sid = acpStore.activeSessionId;
+                        threadSession()?.info.agentType ??
+                        agentStore.selectedAgentType;
+                      launchLogin(agentType);
+                      const sid = threadSessionId();
                       if (sid) {
-                        await acpStore.terminateSession(sid);
+                        await agentStore.terminateSession(sid);
                       }
-                      acpStore.clearError();
+                      agentStore.clearError();
                       setAwaitingLogin(agentType);
                     }}
                   >
@@ -1094,14 +1127,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 settingsStore.get("autoCompactPreserveMessages"),
               )
             }
-            disabled={acpStore.activeSession?.isCompacting}
+            disabled={threadSession()?.isCompacting}
             title={
-              acpStore.activeSession?.isCompacting
+              threadSession()?.isCompacting
                 ? "Compacting..."
                 : "Compact older messages"
             }
           >
-            {acpStore.activeSession?.isCompacting ? "Compacting..." : "Compact"}
+            {threadSession()?.isCompacting ? "Compacting..." : "Compact"}
           </button>
           <button
             type="button"
@@ -1284,9 +1317,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     type="button"
                     class="px-4 py-2 bg-success text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={retrySessionConnection}
-                    disabled={acpStore.isLoading || !hasFolderOpen()}
+                    disabled={agentStore.isLoading || !hasFolderOpen()}
                   >
-                    {acpStore.isLoading
+                    {agentStore.isLoading
                       ? "Reconnecting..."
                       : "Retry Connection"}
                   </button>
@@ -1311,7 +1344,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             }
           >
             {/* Compacted summary from previous messages */}
-            <Show when={acpStore.activeSession?.compactedSummary}>
+            <Show when={agentStore.activeSession?.compactedSummary}>
               {(summary) => (
                 <CompactedMessage
                   summary={summary() as AgentCompactedSummary}
@@ -1376,17 +1409,17 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           to prevent permissions from one session bleeding into another thread. */}
       <Show
         when={
-          acpStore.pendingDiffProposals.some(
+          agentStore.pendingDiffProposals.some(
             (p) => p.sessionId === threadSession()?.info.id,
           ) ||
-          acpStore.pendingPermissions.some(
+          agentStore.pendingPermissions.some(
             (p) => p.sessionId === threadSession()?.info.id,
           )
         }
       >
         <div class="border-t border-border bg-background max-h-[40vh] overflow-y-auto">
           <For
-            each={acpStore.pendingDiffProposals.filter(
+            each={agentStore.pendingDiffProposals.filter(
               (p) => p.sessionId === threadSession()?.info.id,
             )}
           >
@@ -1397,13 +1430,13 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             )}
           </For>
           <For
-            each={acpStore.pendingPermissions.filter(
+            each={agentStore.pendingPermissions.filter(
               (p) => p.sessionId === threadSession()?.info.id,
             )}
           >
             {(perm) => (
               <div class="px-5 py-2">
-                <AcpPermissionDialog permission={perm} />
+                <AgentPermissionDialog permission={perm} />
               </div>
             )}
           </For>
@@ -1411,15 +1444,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       </Show>
 
       {/* Agent Fallback Banner (rate limit or context window full) */}
-      <Show when={acpStore.agentFallbackNeeded}>
+      <Show when={agentStore.agentFallbackNeeded}>
         {(() => {
           const agentType =
-            acpStore.activeSession?.info.agentType ?? "claude-code";
-          const agentModelId = acpStore.activeSession?.currentModelId;
+            agentStore.activeSession?.info.agentType ??
+            agentStore.selectedAgentType;
+          const agentModelId = agentStore.activeSession?.currentModelId;
           const chatModelId = mapAgentModelToChat(agentModelId, agentType);
           const modelName = getModelDisplayName(chatModelId);
           const agentName = agentType === "codex" ? "Codex" : "Claude Code";
-          const reason = acpStore.agentFallbackReason;
+          const reason = agentStore.agentFallbackReason;
           const title =
             reason === "prompt_too_long"
               ? `${agentName}'s context window is full`
@@ -1451,7 +1485,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <button
                   type="button"
                   class="px-2 py-1 text-xs font-medium bg-transparent text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-                  onClick={() => acpStore.dismissRateLimitPrompt()}
+                  onClick={() => agentStore.dismissRateLimitPrompt()}
                   title="Dismiss"
                 >
                   ✕
@@ -1484,15 +1518,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   class="px-2 py-1 text-xs font-medium bg-warning text-background rounded hover:brightness-110"
                   onClick={async () => {
                     const agentType =
-                      acpStore.activeSession?.info.agentType ?? "claude-code";
-                    if (agentType !== "codex") {
-                      launchLogin(agentType);
-                    }
-                    const sid = acpStore.activeSessionId;
+                      threadSession()?.info.agentType ??
+                      agentStore.selectedAgentType;
+                    launchLogin(agentType);
+                    const sid = threadSessionId();
                     if (sid) {
-                      await acpStore.terminateSession(sid);
+                      await agentStore.terminateSession(sid);
                     }
-                    acpStore.clearError();
+                    agentStore.clearError();
                     setAwaitingLogin(agentType);
                   }}
                 >
@@ -1502,18 +1535,18 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <Show
                 when={
                   !isAuthError(sessionError()) &&
-                  acpStore.activeSession?.info.status === "error"
+                  threadSession()?.info.status === "error"
                 }
               >
                 <button
                   type="button"
                   class="text-xs underline hover:no-underline"
                   onClick={async () => {
-                    const sid = acpStore.activeSessionId;
+                    const sid = threadSessionId();
                     if (sid) {
-                      await acpStore.terminateSession(sid);
+                      await agentStore.terminateSession(sid);
                     }
-                    acpStore.clearError();
+                    agentStore.clearError();
                     startSession();
                   }}
                 >
@@ -1523,7 +1556,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <button
                 type="button"
                 class="text-xs underline hover:no-underline"
-                onClick={() => acpStore.clearError()}
+                onClick={() => agentStore.clearError()}
               >
                 Dismiss
               </button>
@@ -1571,7 +1604,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       </Show>
 
       {/* Agent CWD Display */}
-      <Show when={hasSession() && acpStore.cwd}>
+      <Show when={hasSession() && agentStore.cwd}>
         <div class="shrink-0 px-4 py-1.5 border-t border-surface-2 bg-background flex items-center gap-2 text-xs text-muted-foreground">
           <svg
             class="w-3 h-3 flex-shrink-0"
@@ -1588,8 +1621,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
             />
           </svg>
-          <span class="truncate" title={acpStore.cwd ?? ""}>
-            {acpStore.cwd}
+          <span class="truncate" title={agentStore.cwd ?? ""}>
+            {agentStore.cwd}
           </span>
         </div>
       </Show>

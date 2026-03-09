@@ -910,23 +910,10 @@ fn create_worker(
         WorkerType::ChatModel => Arc::new(ChatModelWorker::with_tools(
             capabilities.tool_definitions.clone(),
         )),
-        WorkerType::AcpAgent => {
-            // ACP worker requires feature flag; fall back to chat model if not available
-            #[cfg(feature = "acp")]
-            {
-                let worker = super::acp_worker::AcpWorker::new(_app.clone(), None);
-                Arc::new(worker)
-            }
-            #[cfg(not(feature = "acp"))]
-            {
-                log::warn!(
-                    "[Orchestrator] ACP feature not enabled, falling back to ChatModel worker"
-                );
-                Arc::new(ChatModelWorker::with_tools(
-                    capabilities.tool_definitions.clone(),
-                ))
-            }
-        }
+        WorkerType::LocalAgent => Arc::new(super::provider_worker::ProviderRuntimeWorker::new(
+            _app.clone(),
+            capabilities.active_agent_session_id.clone(),
+        )),
         WorkerType::McpPublisher => Arc::new(McpPublisherWorker::new()),
     }
 }

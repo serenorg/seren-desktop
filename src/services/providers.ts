@@ -1,14 +1,28 @@
-// ABOUTME: ACP (Agent Client Protocol) service for spawning and communicating with AI coding agents.
-// ABOUTME: Wraps Tauri commands and provides event subscriptions for agent interactions.
+// ABOUTME: Provider runtime service for spawning and communicating with coding agents.
+// ABOUTME: Resolves the active runtime transport dynamically so browser modes can degrade cleanly.
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  isLocalProviderRuntime,
+  onRuntimeEvent,
+  runtimeInvoke,
+} from "@/lib/browser-local-runtime";
+import type { McpServerConfig } from "@/lib/mcp/types";
+import { runtimeHasCapability } from "@/lib/runtime";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export type AgentType = "claude-code" | "codex";
+export type UnlistenFn = () => void;
+
+export function supportsConversationFork(_agentType: AgentType): boolean {
+  return true;
+}
+
+export function supportsNativeProviderFork(agentType: AgentType): boolean {
+  return agentType === "claude-code";
+}
 
 export type SessionStatus =
   | "initializing"
@@ -17,13 +31,13 @@ export type SessionStatus =
   | "error"
   | "terminated";
 
-export interface AcpSessionInfo {
+export interface AgentSessionInfo {
   id: string;
   agentType: AgentType;
   cwd: string;
   status: SessionStatus;
   createdAt: string;
-  /** Remote ACP session id (e.g., Codex thread id). Populated after ready. */
+  /** Remote agent runtime session id (e.g., Codex thread id). Populated after ready. */
   agentSessionId?: string;
   /** Prompt timeout in seconds. Undefined means unlimited (no timeout). */
   timeoutSecs?: number;
@@ -38,7 +52,7 @@ export interface AgentInfo {
   unavailableReason?: string;
 }
 
-// Remote sessions (ACP unstable listSessions capability)
+// Remote sessions (provider runtime listSessions capability)
 export interface RemoteSessionInfo {
   sessionId: string;
   cwd: string;
@@ -96,7 +110,7 @@ export interface PlanEntry {
   status: string;
 }
 
-// Session config options (unstable ACP surface, but used by Codex for reasoning effort)
+// Session config options (unstable provider-runtime surface, but used by Codex for reasoning effort)
 export interface SessionConfigSelectOption {
   value: string;
   name: string;
@@ -149,7 +163,7 @@ export interface PermissionRequestEvent {
 export interface SessionStatusEvent {
   sessionId: string;
   status: SessionStatus;
-  /** Remote ACP session id (e.g., Codex thread id). */
+  /** Remote agent runtime session id (e.g., Codex thread id). */
   agentSessionId?: string;
   /** Session configuration options (e.g., reasoning effort). */
   configOptions?: SessionConfigOption[];
@@ -204,8 +218,8 @@ export interface ErrorEvent {
   error: string;
 }
 
-// Union type for all ACP events
-export type AcpEvent =
+// Union type for all provider runtime events
+export type AgentEvent =
   | { type: "messageChunk"; data: MessageChunkEvent }
   | { type: "toolCall"; data: ToolCallEvent }
   | { type: "toolResult"; data: ToolResultEvent }
@@ -219,12 +233,28 @@ export type AcpEvent =
   | { type: "userMessage"; data: UserMessageEvent }
   | { type: "error"; data: ErrorEvent };
 
+async function invokeProvider<T>(
+  command: string,
+  args?: Record<string, unknown>,
+  options?: { timeoutMs?: number | null },
+): Promise<T> {
+  if (!runtimeHasCapability("agents")) {
+    throw new Error("Agent runtime is not supported in this runtime.");
+  }
+
+  if (isLocalProviderRuntime()) {
+    return runtimeInvoke<T>(command, args, options);
+  }
+
+  throw new Error("Local provider runtime is not configured.");
+}
+
 // ============================================================================
 // Tauri Command Wrappers
 // ============================================================================
 
 /**
- * Spawn a new ACP agent session.
+ * Spawn a new agent runtime session.
  *
  * @param agentType - The type of agent to spawn (claude-code or codex)
  * @param cwd - Working directory for the agent session
@@ -246,70 +276,80 @@ export async function spawnAgent(
   localSessionId?: string,
   resumeAgentSessionId?: string,
   timeoutSecs?: number,
-): Promise<AcpSessionInfo> {
-  return invoke<AcpSessionInfo>("acp_spawn", {
-    agentType,
-    cwd,
-    localSessionId: localSessionId ?? null,
-    resumeAgentSessionId: resumeAgentSessionId ?? null,
-    sandboxMode: sandboxMode ?? null,
-    apiKey: apiKey ?? null,
-    approvalPolicy: approvalPolicy ?? null,
-    searchEnabled: searchEnabled ?? null,
-    networkEnabled: networkEnabled ?? null,
-    timeoutSecs: timeoutSecs ?? null,
-  });
+  mcpServers?: McpServerConfig[],
+): Promise<AgentSessionInfo> {
+  return invokeProvider<AgentSessionInfo>(
+    "provider_spawn",
+    {
+      agentType,
+      cwd,
+      localSessionId: localSessionId ?? null,
+      resumeAgentSessionId: resumeAgentSessionId ?? null,
+      sandboxMode: sandboxMode ?? null,
+      apiKey: apiKey ?? null,
+      approvalPolicy: approvalPolicy ?? null,
+      searchEnabled: searchEnabled ?? null,
+      networkEnabled: networkEnabled ?? null,
+      timeoutSecs: timeoutSecs ?? null,
+      mcpServers: mcpServers ?? null,
+    },
+    { timeoutMs: 120_000 },
+  );
 }
 
 /**
- * Send a prompt to an ACP agent session.
+ * Send a prompt to an agent runtime session.
  */
 export async function sendPrompt(
   sessionId: string,
   prompt: string,
   context?: Array<Record<string, string>>,
 ): Promise<void> {
-  return invoke("acp_prompt", { sessionId, prompt, context });
+  return invokeProvider(
+    "provider_prompt",
+    { sessionId, prompt, context },
+    { timeoutMs: null },
+  );
 }
 
 /**
- * Cancel an ongoing prompt in an ACP session.
+ * Cancel an ongoing prompt in an agent runtime session.
  */
 export async function cancelPrompt(sessionId: string): Promise<void> {
-  return invoke("acp_cancel", { sessionId });
+  return invokeProvider("provider_cancel", { sessionId });
 }
 
 /**
- * Terminate an ACP session.
+ * Terminate an agent runtime session.
  */
 export async function terminateSession(sessionId: string): Promise<void> {
-  return invoke("acp_terminate", { sessionId });
+  return invokeProvider("provider_terminate", { sessionId });
 }
 
 /**
- * Fork an ACP agent session, creating a new CLI session with the same
- * conversation history.  Returns the new remote agent session ID.
+ * Use a provider-native fork primitive when the agent runtime exposes one.
+ * Returns the new remote agent session ID.
  */
-export async function forkSession(sessionId: string): Promise<string> {
-  return invoke<string>("acp_fork_session", { sessionId });
+export async function nativeForkSession(sessionId: string): Promise<string> {
+  return invokeProvider<string>("provider_native_fork_session", { sessionId });
 }
 
 /**
- * List all active ACP sessions.
+ * List all active agent runtime sessions.
  */
-export async function listSessions(): Promise<AcpSessionInfo[]> {
-  return invoke<AcpSessionInfo[]>("acp_list_sessions");
+export async function listSessions(): Promise<AgentSessionInfo[]> {
+  return invokeProvider<AgentSessionInfo[]>("provider_list_sessions");
 }
 
 /**
- * List remote sessions from the agent's underlying session store (ACP listSessions).
+ * List remote sessions from the agent's underlying session store.
  */
 export async function listRemoteSessions(
   agentType: AgentType,
   cwd: string,
   cursor?: string,
 ): Promise<RemoteSessionsPage> {
-  return invoke<RemoteSessionsPage>("acp_list_remote_sessions", {
+  return invokeProvider<RemoteSessionsPage>("provider_list_remote_sessions", {
     agentType,
     cwd,
     cursor: cursor ?? null,
@@ -317,13 +357,13 @@ export async function listRemoteSessions(
 }
 
 /**
- * Set the AI model for an ACP session.
+ * Set the AI model for an agent runtime session.
  */
 export async function setModel(
   sessionId: string,
   modelId: string,
 ): Promise<void> {
-  return invoke("acp_set_model", { sessionId, modelId });
+  return invokeProvider("provider_set_session_model", { sessionId, modelId });
 }
 
 /**
@@ -334,17 +374,21 @@ export async function setConfigOption(
   configId: string,
   valueId: string,
 ): Promise<void> {
-  return invoke("acp_set_config_option", { sessionId, configId, valueId });
+  return invokeProvider("provider_update_session_config_option", {
+    sessionId,
+    configId,
+    valueId,
+  });
 }
 
 /**
- * Set the permission mode for an ACP session.
+ * Set the permission mode for an agent runtime session.
  */
 export async function setPermissionMode(
   sessionId: string,
   mode: string,
 ): Promise<void> {
-  return invoke("acp_set_permission_mode", { sessionId, mode });
+  return invokeProvider("provider_set_permission_mode", { sessionId, mode });
 }
 
 /**
@@ -355,7 +399,7 @@ export async function respondToPermission(
   requestId: string,
   optionId: string,
 ): Promise<void> {
-  return invoke("acp_respond_to_permission", {
+  return invokeProvider("provider_respond_to_permission", {
     sessionId,
     requestId,
     optionId,
@@ -370,7 +414,7 @@ export async function respondToDiffProposal(
   proposalId: string,
   accepted: boolean,
 ): Promise<void> {
-  return invoke("acp_respond_to_diff_proposal", {
+  return invokeProvider("provider_respond_to_diff_proposal", {
     sessionId,
     proposalId,
     accepted,
@@ -381,7 +425,7 @@ export async function respondToDiffProposal(
  * Get list of available agents and their status.
  */
 export async function getAvailableAgents(): Promise<AgentInfo[]> {
-  return invoke<AgentInfo[]>("acp_get_available_agents");
+  return invokeProvider<AgentInfo[]>("provider_get_available_agents");
 }
 
 /**
@@ -389,7 +433,9 @@ export async function getAvailableAgents(): Promise<AgentInfo[]> {
  * Returns the bin directory path containing the claude binary.
  */
 export async function ensureClaudeCli(): Promise<string> {
-  return invoke<string>("acp_ensure_claude_cli");
+  return invokeProvider<string>("provider_ensure_agent_cli", {
+    agentType: "claude-code",
+  });
 }
 
 /**
@@ -398,7 +444,9 @@ export async function ensureClaudeCli(): Promise<string> {
  * Returns the bin directory path containing the codex binary.
  */
 export async function ensureCodexCli(): Promise<string> {
-  return invoke<string>("acp_ensure_codex_cli");
+  return invokeProvider<string>("provider_ensure_agent_cli", {
+    agentType: "codex",
+  });
 }
 
 /**
@@ -407,7 +455,7 @@ export async function ensureCodexCli(): Promise<string> {
 export async function checkAgentAvailable(
   agentType: AgentType,
 ): Promise<boolean> {
-  return invoke<boolean>("acp_check_agent_available", {
+  return invokeProvider<boolean>("provider_check_agent_available", {
     agentType,
   });
 }
@@ -417,56 +465,65 @@ export async function checkAgentAvailable(
  * For Claude, this opens a terminal running `claude login`.
  */
 export async function launchLogin(agentType: AgentType): Promise<void> {
-  return invoke("acp_launch_login", { agentType });
+  return invokeProvider("provider_launch_login", { agentType });
 }
 
 // ============================================================================
 // Event Subscription
 // ============================================================================
 
-const EVENT_CHANNELS = {
-  messageChunk: "acp://message-chunk",
-  toolCall: "acp://tool-call",
-  toolResult: "acp://tool-result",
-  diff: "acp://diff",
-  planUpdate: "acp://plan-update",
-  promptComplete: "acp://prompt-complete",
-  permissionRequest: "acp://permission-request",
-  diffProposal: "acp://diff-proposal",
-  sessionStatus: "acp://session-status",
-  configOptionsUpdate: "acp://config-options-update",
-  userMessage: "acp://user-message",
-  error: "acp://error",
+const EVENT_SUFFIXES = {
+  messageChunk: "message-chunk",
+  toolCall: "tool-call",
+  toolResult: "tool-result",
+  diff: "diff",
+  planUpdate: "plan-update",
+  promptComplete: "prompt-complete",
+  permissionRequest: "permission-request",
+  diffProposal: "diff-proposal",
+  sessionStatus: "session-status",
+  configOptionsUpdate: "config-options-update",
+  userMessage: "user-message",
+  error: "error",
 } as const;
 
-type EventType = keyof typeof EVENT_CHANNELS;
+type EventType = keyof typeof EVENT_SUFFIXES;
+
+function eventChannelForRuntime(eventType: EventType): string {
+  const suffix = EVENT_SUFFIXES[eventType];
+  return `provider://${suffix}`;
+}
 
 /**
- * Subscribe to a specific ACP event type.
+ * Subscribe to a specific agent runtime event type.
  * Returns an unlisten function to clean up the subscription.
  */
 export async function subscribeToEvent<T extends { sessionId: string }>(
   eventType: EventType,
   callback: (data: T) => void,
 ): Promise<UnlistenFn> {
-  const channel = EVENT_CHANNELS[eventType];
-  return listen<T>(channel, (event) => {
-    callback(event.payload);
+  if (!isLocalProviderRuntime()) {
+    throw new Error("Local provider runtime is not configured.");
+  }
+
+  const channel = eventChannelForRuntime(eventType);
+  return onRuntimeEvent(channel, (payload) => {
+    callback(payload as T);
   });
 }
 
 /**
- * Subscribe to all ACP events for a session.
+ * Subscribe to all agent runtime events for a session.
  * Returns an unlisten function to clean up all subscriptions.
  */
 export async function subscribeToSession(
   sessionId: string,
-  callback: (event: AcpEvent) => void,
+  callback: (event: AgentEvent) => void,
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
 
   // Helper to filter events by sessionId and create properly typed events
-  function createHandler<E extends AcpEvent>(
+  function createHandler<E extends AgentEvent>(
     type: E["type"],
   ): (data: E["data"]) => void {
     return (data) => {
@@ -578,11 +635,11 @@ export async function subscribeToSession(
 }
 
 /**
- * Subscribe to all ACP events (not filtered by session).
+ * Subscribe to all agent runtime events (not filtered by session).
  * Returns an unlisten function to clean up all subscriptions.
  */
 export async function subscribeToAllEvents(
-  callback: (event: AcpEvent) => void,
+  callback: (event: AgentEvent) => void,
 ): Promise<UnlistenFn> {
   const unlisteners: UnlistenFn[] = [];
 

@@ -1,13 +1,18 @@
 // ABOUTME: File tree component for displaying folder structure in the sidebar.
 // ABOUTME: Supports right-click context menu with file operations.
 
-import { invoke } from "@tauri-apps/api/core";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import {
   ContextMenu,
   type ContextMenuItem,
 } from "@/components/common/ContextMenu";
-import { openFolder } from "@/lib/files/service";
+import {
+  deletePath,
+  openFolder,
+  readFile,
+  renamePath,
+  revealInFileManager,
+} from "@/lib/files/service";
 import { chatStore } from "@/stores/chat.store";
 import {
   type FileNode,
@@ -65,7 +70,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
   const handleCopy = async (node: FileNode) => {
     if (node.isDirectory) return;
     try {
-      const content = await invoke<string>("read_file", { path: node.path });
+      const content = await readFile(node.path);
       await navigator.clipboard.writeText(content);
     } catch (err) {
       console.error("Failed to copy file:", err);
@@ -108,7 +113,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
   const handleAddToChat = async (node: FileNode) => {
     if (node.isDirectory) return;
     try {
-      const content = await invoke<string>("read_file", { path: node.path });
+      const content = await readFile(node.path);
       const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
       chatStore.setPendingInput(message);
       // Navigate to chat panel
@@ -124,7 +129,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
   const handleAddToNewChat = async (node: FileNode) => {
     if (node.isDirectory) return;
     try {
-      const content = await invoke<string>("read_file", { path: node.path });
+      const content = await readFile(node.path);
       const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
       await chatStore.createConversation(`File: ${node.name}`);
       chatStore.setPendingInput(message);
@@ -141,7 +146,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
   const handleAddToAgent = async (node: FileNode) => {
     if (node.isDirectory) return;
     try {
-      const content = await invoke<string>("read_file", { path: node.path });
+      const content = await readFile(node.path);
       const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
       chatStore.setPendingInput(message);
       // Navigate to chat panel
@@ -157,7 +162,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
   const handleAddToNewAgent = async (node: FileNode) => {
     if (node.isDirectory) return;
     try {
-      const content = await invoke<string>("read_file", { path: node.path });
+      const content = await readFile(node.path);
       const message = `Here is the content of \`${node.name}\`:\n\n\`\`\`\n${content}\n\`\`\``;
       chatStore.setPendingInput(message);
       // Navigate to chat panel
@@ -180,7 +185,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
     const newPath = `${dir}/${newName}`;
 
     try {
-      await invoke("rename_path", { oldPath, newPath });
+      await renamePath(oldPath, newPath);
       // Refresh the parent directory
       await refreshDirectory(dir);
     } catch (err) {
@@ -198,7 +203,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
     if (!confirmDelete) return;
 
     try {
-      await invoke("delete_path", { path: node.path });
+      await deletePath(node.path);
       // Refresh the parent directory
       const dir = node.path.substring(0, node.path.lastIndexOf("/"));
       await refreshDirectory(dir);
@@ -211,7 +216,7 @@ export const FileTree: Component<FileTreeProps> = (props) => {
   // Reveal in Finder
   const handleRevealInFinder = async (node: FileNode) => {
     try {
-      await invoke("reveal_in_file_manager", { path: node.path });
+      await revealInFileManager(node.path);
     } catch (err) {
       console.error("Failed to reveal in finder:", err);
     }

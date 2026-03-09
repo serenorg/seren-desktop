@@ -1,9 +1,9 @@
 // ABOUTME: Dropdown component for selecting the AI model in an agent session.
-// ABOUTME: Shows available models reported by the ACP agent and sends set_model commands.
+// ABOUTME: Shows available models reported by the active agent runtime and sends set_model commands.
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { type ActiveSession, acpStore } from "@/stores/acp.store";
+import { type ActiveSession, agentStore } from "@/stores/agent.store";
 
 interface Props {
   session: ActiveSession | null;
@@ -38,7 +38,7 @@ export const AgentModelSelector: Component<Props> = (props) => {
   });
 
   const selectModel = (modelId: string) => {
-    acpStore.setModel(modelId, props.session?.info.id);
+    agentStore.setModel(modelId, props.session?.info.id);
     setIsOpen(false);
   };
 
