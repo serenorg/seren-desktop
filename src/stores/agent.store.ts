@@ -8,10 +8,7 @@ import {
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
 import { runtimeHasCapability } from "@/lib/runtime";
-import {
-  getEnabledMcpServers,
-  settingsStore,
-} from "@/stores/settings.store";
+import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 
 /** Per-session ready promises — resolved when backend emits "ready" status */
@@ -34,20 +31,21 @@ import {
   getAgentConversation,
   getAgentConversations,
   getSerenApiKey,
-    setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationMetadata as setAgentConversationMetadataDb,
-    setAgentConversationSessionId as setAgentConversationSessionIdDb,
-    setAgentConversationTitle as setAgentConversationTitleDb,
+  setAgentConversationModelId as setAgentConversationModelIdDb,
+  setAgentConversationSessionId as setAgentConversationSessionIdDb,
+  setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
+import { sendMessage } from "@/services/chat";
 import type {
   AgentEvent,
-  AgentSessionInfo,
   AgentInfo,
+  AgentSessionInfo,
   AgentType,
   DiffEvent,
   DiffProposalEvent,
-  PlanEntry,
   PermissionRequestEvent,
+  PlanEntry,
   RemoteSessionInfo,
   SessionConfigOption,
   SessionStatus,
@@ -55,7 +53,6 @@ import type {
   ToolCallEvent,
 } from "@/services/providers";
 import * as providerService from "@/services/providers";
-import { sendMessage } from "@/services/chat";
 
 // ============================================================================
 // Types
@@ -167,6 +164,10 @@ export interface ActiveSession {
   /** Set when the user explicitly requested a cancel — suppresses auto-retry
    *  in the unresponsive-agent recovery path. */
   cancelRequested?: boolean;
+  /** Config option values queued for restoration after the next configOptionsUpdate
+   *  event from the new session. Prevents the agent's initial announcement from
+   *  overwriting values restored during compaction or recovery. */
+  pendingConfigRestore?: Record<string, string>;
 }
 
 // ============================================================================
@@ -272,13 +273,19 @@ function serializeAgentConversationMetadata(
  * We keep only in-memory session messages plus narrow bootstrap metadata for
  * exact local forks that have not materialized provider history yet.
  */
-function persistAgentMessage(_conversationId: string, _msg: AgentMessage): void {
+function persistAgentMessage(
+  _conversationId: string,
+  _msg: AgentMessage,
+): void {
   // Intentionally no-op.
 }
 
 function clearLegacyAgentTranscript(conversationId: string): void {
   clearConversationHistory(conversationId).catch((error) =>
-    console.warn("[AgentStore] Failed to clear legacy provider transcript:", error),
+    console.warn(
+      "[AgentStore] Failed to clear legacy provider transcript:",
+      error,
+    ),
   );
 }
 
@@ -396,9 +403,11 @@ function disposeAgentStoreRuntimeBindings(): void {
 }
 
 const agentStoreHot =
-  (import.meta as ImportMeta & {
-    hot?: { dispose: (callback: () => void) => void };
-  }).hot ?? null;
+  (
+    import.meta as ImportMeta & {
+      hot?: { dispose: (callback: () => void) => void };
+    }
+  ).hot ?? null;
 
 if (agentStoreHot) {
   const globalScope = globalThis as typeof globalThis & {
@@ -867,34 +876,36 @@ export const agentStore = {
     // Subscribe once to all agent runtime events before spawning, so early replay events
     // from load_session are buffered instead of dropped.
     if (!globalUnsubscribe) {
-      globalUnsubscribe = await providerService.subscribeToAllEvents((event) => {
-        const eventSessionId = event.data.sessionId;
-        if (!eventSessionId) return;
-        // Skip logging high-frequency messageChunk events to avoid flooding
-        // DevTools. Other event types (sessionStatus, toolCall, etc.) are
-        // still logged for debugging.
-        if (event.type !== "messageChunk") {
-          console.log(
-            "[AgentRuntime] Event received - type:",
-            event.type,
-            "sessionId:",
-            eventSessionId,
-            "conversationId:",
-            state.sessions[eventSessionId]?.conversationId,
-          );
-        }
-        if (state.sessions[eventSessionId]) {
-          this.handleSessionEvent(eventSessionId, event);
-          return;
-        }
+      globalUnsubscribe = await providerService.subscribeToAllEvents(
+        (event) => {
+          const eventSessionId = event.data.sessionId;
+          if (!eventSessionId) return;
+          // Skip logging high-frequency messageChunk events to avoid flooding
+          // DevTools. Other event types (sessionStatus, toolCall, etc.) are
+          // still logged for debugging.
+          if (event.type !== "messageChunk") {
+            console.log(
+              "[AgentRuntime] Event received - type:",
+              event.type,
+              "sessionId:",
+              eventSessionId,
+              "conversationId:",
+              state.sessions[eventSessionId]?.conversationId,
+            );
+          }
+          if (state.sessions[eventSessionId]) {
+            this.handleSessionEvent(eventSessionId, event);
+            return;
+          }
 
-        const pending = pendingSessionEvents.get(eventSessionId) ?? [];
-        pending.push(event);
-        if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
-          pending.shift();
-        }
-        pendingSessionEvents.set(eventSessionId, pending);
-      });
+          const pending = pendingSessionEvents.get(eventSessionId) ?? [];
+          pending.push(event);
+          if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
+            pending.shift();
+          }
+          pendingSessionEvents.set(eventSessionId, pending);
+        },
+      );
     }
 
     try {
@@ -1099,7 +1110,10 @@ export const agentStore = {
           initRetryAttempt < MAX_CLAUDE_INIT_RETRIES &&
           isRetryableClaudeInitError(initFailure)
         ) {
-          console.warn("[AgentStore] Claude init failed, retrying:", initFailure);
+          console.warn(
+            "[AgentStore] Claude init failed, retrying:",
+            initFailure,
+          );
           await this.terminateSession(info.id);
           sessionReadyPromises.delete(info.id);
           pendingSessionEvents.delete(info.id);
@@ -1456,10 +1470,16 @@ export const agentStore = {
         session.conversationId,
       );
       if (skillsContent) {
-        mergedContext = [{ type: "text", text: skillsContent }, ...mergedContext];
+        mergedContext = [
+          { type: "text", text: skillsContent },
+          ...mergedContext,
+        ];
       }
     } catch (error) {
-      console.warn("[AgentStore] Failed to load skills for agent prompt:", error);
+      console.warn(
+        "[AgentStore] Failed to load skills for agent prompt:",
+        error,
+      );
     }
 
     return mergedContext.length > 0 ? mergedContext : undefined;
@@ -1509,16 +1529,23 @@ export const agentStore = {
     targetSessionId: string,
   ) {
     if (sourceSession.currentModeId) {
-      await this.setPermissionMode(sourceSession.currentModeId, targetSessionId);
+      await this.setPermissionMode(
+        sourceSession.currentModeId,
+        targetSessionId,
+      );
     }
     if (sourceSession.currentModelId) {
       await this.setModel(sourceSession.currentModelId, targetSessionId);
     }
     if (sourceSession.configOptions) {
+      const restore: Record<string, string> = {};
       for (const opt of sourceSession.configOptions) {
         if (opt.type === "select" && opt.currentValue) {
-          await this.setConfigOption(opt.id, opt.currentValue, targetSessionId);
+          restore[opt.id] = opt.currentValue;
         }
+      }
+      if (Object.keys(restore).length > 0) {
+        setState("sessions", targetSessionId, "pendingConfigRestore", restore);
       }
     }
   },
@@ -1696,7 +1723,10 @@ Summary:`;
 
       await providerService.sendPrompt(newSessionId, seedPrompt);
     } catch (error) {
-      console.error("[AgentStore] Failed to compact agent conversation:", error);
+      console.error(
+        "[AgentStore] Failed to compact agent conversation:",
+        error,
+      );
       // If the original session still exists, clear compacting flag
       if (state.sessions[sessionId]) {
         setState("sessions", sessionId, "isCompacting", false);
@@ -1959,11 +1989,7 @@ Summary:`;
     console.log("[AgentStore] Calling providerService.sendPrompt...");
     try {
       const mergedContext = await this.buildPromptContext(sessionId, context);
-      await providerService.sendPrompt(
-        sessionId,
-        prompt,
-        mergedContext,
-      );
+      await providerService.sendPrompt(sessionId, prompt, mergedContext);
       this.clearBootstrapPromptContext(sessionId);
       console.log("[AgentStore] sendPrompt completed successfully");
     } catch (error) {
@@ -2624,14 +2650,25 @@ Summary:`;
         break;
       }
 
-      case "configOptionsUpdate":
-        setState(
-          "sessions",
-          sessionId,
-          "configOptions",
-          event.data.configOptions,
-        );
+      case "configOptionsUpdate": {
+        const restore = state.sessions[sessionId]?.pendingConfigRestore;
+        const incoming = event.data.configOptions;
+        const merged = restore
+          ? incoming.map((opt) =>
+              opt.type === "select" && restore[opt.id]
+                ? { ...opt, currentValue: restore[opt.id] }
+                : opt,
+            )
+          : incoming;
+        setState("sessions", sessionId, "configOptions", merged);
+        if (restore) {
+          setState("sessions", sessionId, "pendingConfigRestore", undefined);
+          for (const [id, value] of Object.entries(restore)) {
+            void this.setConfigOption(id, value, sessionId);
+          }
+        }
         break;
+      }
       case "sessionStatus":
         this.handleStatusChange(sessionId, event.data.status, event.data);
         break;
@@ -3290,7 +3327,9 @@ Summary:`;
       // If the agent's response is a prompt-too-long error (context window full),
       // try compaction + retry before falling back to Chat mode.
       if (isPromptTooLongError(session.streamingContent)) {
-        console.info("[AgentStore] Prompt too long detected in streamed content");
+        console.info(
+          "[AgentStore] Prompt too long detected in streamed content",
+        );
         void this.compactAndRetry(sessionId).then((retried) => {
           if (!retried) {
             console.info(
@@ -3350,19 +3389,20 @@ Summary:`;
     const forkedMessages = allMessages.slice(0, forkIndex + 1);
     const isHeadFork = forkIndex === allMessages.length - 1;
     const useNativeFork =
-      providerService.supportsNativeProviderFork(agentType) &&
-      isHeadFork;
+      providerService.supportsNativeProviderFork(agentType) && isHeadFork;
 
     let newAgentSessionId: string | undefined;
     let bootstrapPromptContext: string | undefined;
 
     if (useNativeFork) {
       try {
-        newAgentSessionId = await providerService.nativeForkSession(
-          conversationId,
-        );
+        newAgentSessionId =
+          await providerService.nativeForkSession(conversationId);
       } catch (err) {
-        console.error("[AgentStore] forkConversation: native fork failed:", err);
+        console.error(
+          "[AgentStore] forkConversation: native fork failed:",
+          err,
+        );
         this.addErrorMessage(
           conversationId,
           `Fork failed: ${err instanceof Error ? err.message : String(err)}`,

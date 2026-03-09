@@ -247,15 +247,17 @@ async function fetchRepoSkillPayloadFiles(
     siblingFiles.map(async (node): Promise<ExtraFile | null> => {
       const filePath = node.path ?? "";
       const relativePath = filePath.slice(dirPrefix.length);
-      const segments = filePath
-        .split("/")
-        .map((s) => encodeURIComponent(s));
+      const segments = filePath.split("/").map((s) => encodeURIComponent(s));
       const rawUrl = `${SKILLS_RAW_URL}/${segments.join("/")}`;
 
       try {
         const resp = await appFetch(rawUrl);
         if (!resp.ok) {
-          log.warn("[Skills] Failed to fetch payload file", rawUrl, resp.status);
+          log.warn(
+            "[Skills] Failed to fetch payload file",
+            rawUrl,
+            resp.status,
+          );
           return null;
         }
         const content = await resp.text();
@@ -340,10 +342,18 @@ export const skills = {
         const { timestamp, data } = JSON.parse(cached);
         const ageMs = Date.now() - timestamp;
         if (ageMs < MAX_STALE_CACHE_AGE) {
-          log.warn("[Skills] Serving stale index cache, age:", Math.round(ageMs / 1000), "s");
+          log.warn(
+            "[Skills] Serving stale index cache, age:",
+            Math.round(ageMs / 1000),
+            "s",
+          );
           return (data as SkillIndexEntry[]).map(indexEntryToSkill);
         }
-        log.error("[Skills] Stale cache too old to serve:", Math.round(ageMs / 1000), "s");
+        log.error(
+          "[Skills] Stale cache too old to serve:",
+          Math.round(ageMs / 1000),
+          "s",
+        );
       }
       return [];
     }
@@ -393,10 +403,18 @@ export const skills = {
         const { timestamp, data } = JSON.parse(cached);
         const ageMs = Date.now() - timestamp;
         if (ageMs < MAX_STALE_CACHE_AGE) {
-          log.warn("[Skills] Serving stale publisher skills cache, age:", Math.round(ageMs / 1000), "s");
+          log.warn(
+            "[Skills] Serving stale publisher skills cache, age:",
+            Math.round(ageMs / 1000),
+            "s",
+          );
           return data as Skill[];
         }
-        log.error("[Skills] Stale publisher skills cache too old to serve:", Math.round(ageMs / 1000), "s");
+        log.error(
+          "[Skills] Stale publisher skills cache too old to serve:",
+          Math.round(ageMs / 1000),
+          "s",
+        );
       }
       return [];
     }
@@ -764,10 +782,7 @@ export const skills = {
    * Validate an installed skill's payload files.
    * Returns a list of file paths referenced in SKILL.md but missing from disk.
    */
-  async validatePayload(
-    skillsDir: string,
-    slug: string,
-  ): Promise<string[]> {
+  async validatePayload(skillsDir: string, slug: string): Promise<string[]> {
     if (!isTauriRuntime()) return [];
     try {
       return await invoke<string[]>("validate_skill_payload", {

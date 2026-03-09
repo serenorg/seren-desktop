@@ -3,13 +3,13 @@
 
 import {
   type CreateProjectRequest,
+  type Project,
   serenDbCreateProject,
   serenDbDeleteProject,
   serenDbGetProject,
   serenDbListProjects,
-  type Project,
-  type UpdateProjectRequest,
   serenDbUpdateProject,
+  type UpdateProjectRequest,
 } from "@/api/seren-db";
 
 // Re-export types for backwards compatibility

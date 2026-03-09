@@ -35,7 +35,6 @@ import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks, renderMarkdown } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
-import type { ToolCallEvent } from "@/services/providers";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
   CHAT_MAX_RETRIES,
@@ -47,6 +46,7 @@ import {
   orchestrate,
   retryOrchestration,
 } from "@/services/orchestrator";
+import type { ToolCallEvent } from "@/services/providers";
 import { skills } from "@/services/skills";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";

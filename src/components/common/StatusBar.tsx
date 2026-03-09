@@ -1,7 +1,7 @@
 // ABOUTME: Application status bar at the bottom.
 // ABOUTME: Displays status messages, MCP state, autocomplete status, and connection state.
 
-import { createMemo, type Component } from "solid-js";
+import { type Component, createMemo } from "solid-js";
 import { agentStore } from "@/stores/agent.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { AutocompleteStatus } from "./AutocompleteStatus";

@@ -111,7 +111,9 @@ async function fetchRuntimeHealth(apiBaseUrl: string): Promise<RuntimeHealth> {
 
 async function loadDesktopRuntimeConfig(): Promise<LocalRuntimeConnectionConfig> {
   const { invoke } = await import("@tauri-apps/api/core");
-  const config = await invoke<DesktopRuntimeConfig>("provider_runtime_get_config");
+  const config = await invoke<DesktopRuntimeConfig>(
+    "provider_runtime_get_config",
+  );
   return {
     mode: "desktop-native",
     apiBaseUrl: config.apiBaseUrl,

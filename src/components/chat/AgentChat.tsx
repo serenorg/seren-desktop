@@ -45,6 +45,7 @@ import {
 } from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
+import { readDocument } from "@/services/docreader";
 import {
   type AgentType,
   type DiffEvent,
@@ -52,7 +53,6 @@ import {
   supportsConversationFork,
   type ToolCallEvent,
 } from "@/services/providers";
-import { readDocument } from "@/services/docreader";
 import { skills } from "@/services/skills";
 import {
   type AgentCompactedSummary,

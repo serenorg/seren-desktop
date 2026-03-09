@@ -567,7 +567,10 @@ export const skillsStore = {
    * Pass skipCache=true for user-triggered refreshes that should bypass cache.
    */
   async refresh(skipCache = false): Promise<void> {
-    await Promise.all([this.refreshAvailable(skipCache), this.refreshInstalled()]);
+    await Promise.all([
+      this.refreshAvailable(skipCache),
+      this.refreshInstalled(),
+    ]);
   },
 
   /**

@@ -59,7 +59,14 @@ function App() {
       runtime.capabilities.agents &&
       (runtime.mode === "browser-local" || runtime.mode === "desktop-native")
     ) {
-      await connectLocalProviderRuntime();
+      try {
+        await connectLocalProviderRuntime();
+      } catch (error) {
+        console.error(
+          "[App] Failed to connect to local provider runtime:",
+          error,
+        );
+      }
     }
 
     await initAuthRuntimeBindings();

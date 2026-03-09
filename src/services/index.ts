@@ -5,6 +5,6 @@ export * as auth from "./auth";
 export * as autoTopUp from "./autoTopUp";
 export * as catalog from "./catalog";
 export * as chat from "./chat";
-export * as providers from "./providers";
 export * as projects from "./projects";
+export * as providers from "./providers";
 export * as wallet from "./wallet";
