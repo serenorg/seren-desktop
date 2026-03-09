@@ -747,10 +747,13 @@ export const skills = {
         slug: skill.slug,
       });
       if (missingFiles.length > 0) {
-        log.warn(
+        // These are user-provisioned files (requirements.txt, config.json, etc.)
+        // referenced in the SKILL.md but not included in the marketplace payload.
+        // Demote to debug — absence is expected and not an install failure.
+        log.debug(
           "[Skills] Skill",
           skill.slug,
-          "is missing referenced files:",
+          "references files not present in payload (user must provision):",
           missingFiles,
         );
       }
