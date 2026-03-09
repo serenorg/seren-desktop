@@ -107,9 +107,14 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         await skillsStore.install(marketplaceSkill, content, "seren");
         await skillsStore.refreshInstalled();
 
-        // Find the newly installed skill
+        // Find the newly installed skill. Match by slug first, then fall back to
+        // dirName because resolveSkillSlug() may derive a different slug from the
+        // SKILL.md name metadata than the marketplace slug (e.g. "skill-creator"
+        // vs "seren-skill-creator"). dirName always equals the marketplace slug.
         const found = skillsStore.installed.find(
-          (s) => s.slug === marketplaceSkill.slug,
+          (s) =>
+            s.slug === marketplaceSkill.slug ||
+            s.dirName === marketplaceSkill.slug,
         );
         if (!found) {
           console.error("[ThreadSidebar] Skill installed but not found");
