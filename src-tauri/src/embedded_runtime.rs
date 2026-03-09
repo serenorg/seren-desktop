@@ -33,6 +33,7 @@ pub fn platform_subdir() -> String {
     } else if cfg!(target_arch = "aarch64") {
         "arm64"
     } else {
+        log::warn!("[EmbeddedRuntime] Unknown target architecture, falling back to x64");
         "x64"
     };
 
