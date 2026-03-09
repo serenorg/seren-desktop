@@ -101,6 +101,8 @@ pub struct OpenClawState {
     ws_listener_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Handle to the process monitor task (cancelled on stop/restart)
     monitor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Oneshot sender to signal the WS listener to close gracefully
+    ws_close_tx: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 impl OpenClawState {
@@ -116,6 +118,7 @@ impl OpenClawState {
             approved_ids: Mutex::new(HashSet::new()),
             ws_listener_handle: Mutex::new(None),
             monitor_handle: Mutex::new(None),
+            ws_close_tx: Mutex::new(None),
         }
     }
 }
@@ -361,16 +364,27 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
     emit_status(&app, ProcessStatus::Running);
 
     // Start WebSocket listener to receive real-time events from OpenClaw
-    let ws_handle = spawn_ws_listener(app.clone(), port, token);
+    let (close_tx, close_rx) = tokio::sync::oneshot::channel::<()>();
+    let ws_handle = spawn_ws_listener(app.clone(), port, token, close_rx);
     {
         let mut h = state.ws_listener_handle.lock().await;
+        if let Some(old) = h.take() {
+            old.abort();
+        }
         *h = Some(ws_handle);
+    }
+    {
+        let mut tx = state.ws_close_tx.lock().await;
+        *tx = Some(close_tx);
     }
 
     // Start process monitor for crash detection and auto-restart
     let monitor_handle = spawn_process_monitor(app);
     {
         let mut h = state.monitor_handle.lock().await;
+        if let Some(old) = h.take() {
+            old.abort();
+        }
         *h = Some(monitor_handle);
     }
 
@@ -380,6 +394,12 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
 /// Stop the OpenClaw background process
 #[tauri::command]
 pub async fn openclaw_stop(app: AppHandle, state: State<'_, OpenClawState>) -> Result<(), String> {
+    // Send graceful close signal to the WebSocket listener before aborting
+    if let Some(tx) = state.ws_close_tx.lock().await.take() {
+        let _ = tx.send(());
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
     // Cancel background tasks before stopping the process
     if let Some(handle) = state.ws_listener_handle.lock().await.take() {
         handle.abort();
@@ -429,6 +449,18 @@ pub async fn openclaw_stop(app: AppHandle, state: State<'_, OpenClawState>) -> R
     {
         let mut channels = state.channels.lock().await;
         channels.clear();
+    }
+
+    // Clear approved IDs to prevent stale approval replay across sessions (#1037)
+    {
+        let mut approved_ids = state.approved_ids.lock().await;
+        approved_ids.clear();
+    }
+
+    // Delete persisted hook token so each new start generates a fresh one (#1035)
+    if let Ok(store) = app.store(OPENCLAW_STORE) {
+        let _ = store.delete(HOOK_TOKEN_KEY);
+        let _ = store.save();
     }
 
     Ok(())
@@ -583,10 +615,12 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
 
 /// Connect to OpenClaw's WebSocket gateway and forward events to the frontend.
 /// Retries connection with backoff since OpenClaw takes a few seconds to initialize.
+/// Accepts a oneshot receiver; when it fires, sends a WS Close frame and returns.
 pub fn spawn_ws_listener(
     app: AppHandle,
     port: u16,
     hook_token: String,
+    mut close_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let max_retries = 10;
@@ -601,23 +635,32 @@ pub fn spawn_ws_listener(
                     log::info!("[OpenClaw WS] Connected to gateway on port {}", port);
                     attempt = 0; // Reset on successful connect
 
-                    use futures::StreamExt;
-                    let (_, mut read) = ws_stream.split();
+                    use futures::{SinkExt, StreamExt};
+                    let (mut write, mut read) = ws_stream.split();
 
-                    while let Some(msg) = read.next().await {
-                        match msg {
-                            Ok(tokio_tungstenite::tungstenite::Message::Text(text)) => {
-                                handle_ws_message(&app, &text);
+                    loop {
+                        tokio::select! {
+                            msg = read.next() => {
+                                match msg {
+                                    Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
+                                        handle_ws_message(&app, &text);
+                                    }
+                                    Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) => {
+                                        log::info!("[OpenClaw WS] Connection closed by server");
+                                        break;
+                                    }
+                                    Some(Err(e)) => {
+                                        log::error!("[OpenClaw WS] Error: {}", e);
+                                        break;
+                                    }
+                                    None | Some(Ok(_)) => { break; }
+                                }
                             }
-                            Ok(tokio_tungstenite::tungstenite::Message::Close(_)) => {
-                                log::info!("[OpenClaw WS] Connection closed by server");
-                                break;
+                            _ = &mut close_rx => {
+                                log::info!("[OpenClaw WS] Graceful close requested");
+                                let _ = write.send(tokio_tungstenite::tungstenite::Message::Close(None)).await;
+                                return;
                             }
-                            Err(e) => {
-                                log::error!("[OpenClaw WS] Error: {}", e);
-                                break;
-                            }
-                            _ => {}
                         }
                     }
                 }
