@@ -139,42 +139,42 @@ pub async fn memory_remember(
         .as_deref()
         .and_then(|s| uuid::Uuid::parse_str(s).ok());
 
+    // Validate auth before writing anything.
     let client = state.client(&app)?;
-    let result = client
-        .remember(&content, &memory_type, project_uuid, None)
-        .await
-        .map_err(|e| e.to_string())?;
 
-    // Best-effort parse of returned memory ID for local/cloud correlation.
-    let cloud_id = serde_json::from_str::<serde_json::Value>(&result)
-        .ok()
-        .and_then(|v| {
-            v.get("memory_id")
-                .and_then(|id| id.as_str())
-                .and_then(|s| uuid::Uuid::parse_str(s).ok())
-        })
-        .or_else(|| uuid::Uuid::parse_str(&result).ok());
-
-    // Also cache locally (with zero embedding — cloud has the real one).
+    // Write to local cache first (synced=false) so memory survives cloud failures
+    // such as scale-to-zero cold starts. The sync engine will push pending entries later.
+    let local_id = uuid::Uuid::new_v4();
     state.ensure_cache()?;
     let cached = CachedMemory {
-        id: uuid::Uuid::new_v4(),
-        content,
-        memory_type,
+        id: local_id,
+        content: content.clone(),
+        memory_type: memory_type.clone(),
         metadata: serde_json::json!({}),
         embedding: vec![0.0; 1536],
         relevance_score: 1.0,
         created_at: seren_memory_sdk::chrono::Utc::now(),
-        synced: true,
-        cloud_id,
+        synced: false,
+        cloud_id: None,
     };
-
-    let guard = state.cache.lock().map_err(|e| e.to_string())?;
-    if let Some(cache) = guard.as_ref() {
-        cache.insert_memory(&cached).ok();
+    {
+        let guard = state.cache.lock().map_err(|e| e.to_string())?;
+        if let Some(cache) = guard.as_ref() {
+            cache.insert_memory(&cached).ok();
+        }
     }
 
-    Ok(result)
+    // Attempt cloud sync (best-effort; service may be warming up from scale-to-zero).
+    match client
+        .remember(&content, &memory_type, project_uuid, None)
+        .await
+    {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            log::warn!("Cloud remember failed (local cache saved, will sync later): {e}");
+            Ok(local_id.to_string())
+        }
+    }
 }
 
 /// Search memories via the cloud MCP recall tool.
