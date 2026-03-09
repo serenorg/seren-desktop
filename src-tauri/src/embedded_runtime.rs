@@ -65,6 +65,12 @@ fn get_embedded_runtime_dir(app: &AppHandle) -> Option<PathBuf> {
         if platform_runtime.exists() {
             return Some(platform_runtime);
         }
+        log::info!(
+            "[EmbeddedRuntime] Dev runtime not found at {:?}. \
+             Run `pnpm prepare:runtime:{}` to set it up.",
+            platform_runtime,
+            subdir
+        );
     }
 
     None
@@ -75,11 +81,22 @@ pub fn discover_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
     let runtime_dir = match get_embedded_runtime_dir(app) {
         Some(dir) => dir,
         None => {
-            log::warn!(
-                "[EmbeddedRuntime] No runtime directory found for {}. \
-                 Child processes may fail to locate node/git.",
-                platform_subdir()
-            );
+            let subdir = platform_subdir();
+            if cfg!(debug_assertions) {
+                log::warn!(
+                    "[EmbeddedRuntime] Embedded runtime missing for {}. \
+                     Node.js and Git will not be available to child processes. \
+                     Fix: run `pnpm prepare:runtime:{}`.",
+                    subdir,
+                    subdir
+                );
+            } else {
+                log::warn!(
+                    "[EmbeddedRuntime] No runtime directory found for {}. \
+                     Child processes may fail to locate node/git.",
+                    subdir
+                );
+            }
             return EmbeddedRuntimePaths {
                 node_dir: None,
                 git_dir: None,
