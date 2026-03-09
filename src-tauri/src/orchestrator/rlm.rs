@@ -290,6 +290,18 @@ fn chunk_content(content: &str, budget: usize) -> Vec<Chunk> {
         .collect()
 }
 
+/// Compute the start position for the next chunk, including overlap from the
+/// previous chunk's tail. When `tail_start <= CHUNK_OVERLAP_CHARS` the entire
+/// head is shorter than the overlap window; skip the overlap to guarantee
+/// forward progress and prevent infinite recursion.
+fn overlap_start_for(tail_start: usize) -> usize {
+    if tail_start > CHUNK_OVERLAP_CHARS {
+        tail_start - CHUNK_OVERLAP_CHARS
+    } else {
+        tail_start
+    }
+}
+
 fn split_at_budget(text: &str, budget: usize) -> Vec<String> {
     if text.len() <= budget {
         return vec![text.to_string()];
@@ -302,8 +314,7 @@ fn split_at_budget(text: &str, budget: usize) -> Vec<String> {
     // Priority 1: heading boundary (line starting with #, or "N. ", "N) ")
     if let Some(pos) = find_heading_boundary(search_region, window_start) {
         let (head, _tail) = text.split_at(pos);
-        let overlap_start = head.len().saturating_sub(CHUNK_OVERLAP_CHARS);
-        let tail_with_overlap = &text[overlap_start..];
+        let tail_with_overlap = &text[overlap_start_for(head.len())..];
         let mut result = vec![head.to_string()];
         result.extend(split_at_budget(tail_with_overlap, budget));
         return result;
@@ -312,8 +323,7 @@ fn split_at_budget(text: &str, budget: usize) -> Vec<String> {
     // Priority 2: double newline (paragraph)
     if let Some(pos) = rfind_in_range(search_region, "\n\n", window_start) {
         let (head, _tail) = text.split_at(pos + 2);
-        let overlap_start = head.len().saturating_sub(CHUNK_OVERLAP_CHARS);
-        let tail_with_overlap = &text[overlap_start..];
+        let tail_with_overlap = &text[overlap_start_for(head.len())..];
         let mut result = vec![head.to_string()];
         result.extend(split_at_budget(tail_with_overlap, budget));
         return result;
@@ -322,8 +332,7 @@ fn split_at_budget(text: &str, budget: usize) -> Vec<String> {
     // Priority 3: single newline
     if let Some(pos) = rfind_in_range(search_region, "\n", window_start) {
         let (head, _tail) = text.split_at(pos + 1);
-        let overlap_start = head.len().saturating_sub(CHUNK_OVERLAP_CHARS);
-        let tail_with_overlap = &text[overlap_start..];
+        let tail_with_overlap = &text[overlap_start_for(head.len())..];
         let mut result = vec![head.to_string()];
         result.extend(split_at_budget(tail_with_overlap, budget));
         return result;
@@ -333,8 +342,7 @@ fn split_at_budget(text: &str, budget: usize) -> Vec<String> {
     for sep in &[". ", "! ", "? "] {
         if let Some(pos) = rfind_in_range(search_region, sep, window_start) {
             let (head, _tail) = text.split_at(pos + sep.len());
-            let overlap_start = head.len().saturating_sub(CHUNK_OVERLAP_CHARS);
-            let tail_with_overlap = &text[overlap_start..];
+            let tail_with_overlap = &text[overlap_start_for(head.len())..];
             let mut result = vec![head.to_string()];
             result.extend(split_at_budget(tail_with_overlap, budget));
             return result;
@@ -344,8 +352,7 @@ fn split_at_budget(text: &str, budget: usize) -> Vec<String> {
     // Priority 5: hard cut at budget (ensure valid UTF-8 boundary)
     let cut = floor_char_boundary(text, budget);
     let (head, _tail) = text.split_at(cut);
-    let overlap_start = head.len().saturating_sub(CHUNK_OVERLAP_CHARS);
-    let tail_with_overlap = &text[overlap_start..];
+    let tail_with_overlap = &text[overlap_start_for(head.len())..];
     let mut result = vec![head.to_string()];
     result.extend(split_at_budget(tail_with_overlap, budget));
     result
