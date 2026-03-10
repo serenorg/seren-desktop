@@ -34,7 +34,6 @@ import { pickAndReadAttachments } from "@/lib/images/attachments";
 import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
-import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
@@ -58,11 +57,13 @@ import { openclawStore } from "@/stores/openclaw.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import type { ToolCallData, UnifiedMessage } from "@/types/conversation";
+import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { CompactedMessage } from "./CompactedMessage";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { MessageImages } from "./MessageImages";
 import { ModelSelector } from "./ModelSelector";
 import { PublisherSuggestions } from "./PublisherSuggestions";
+import { ReasoningEffortSelector } from "./ReasoningEffortSelector";
 import { RerouteAnnouncement } from "./RerouteAnnouncement";
 import { RLMStepsBlock } from "./RLMStepsBlock";
 import { SatisfactionSignal } from "./SatisfactionSignal";
@@ -1550,6 +1551,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               <div class="flex items-center gap-3">
                 <ModelSelector />
                 <ToolsetSelector />
+                <ReasoningEffortSelector />
                 <Show when={conversationStore.isLoading}>
                   <ThinkingStatus />
                 </Show>

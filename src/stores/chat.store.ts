@@ -45,6 +45,8 @@ export interface Conversation {
   selectedProvider: ProviderId | null;
   isArchived: boolean;
   compactedSummary?: CompactedSummary;
+  /** Reasoning effort level: "minimal" | "low" | "medium" | "high" | "xhigh". */
+  reasoningEffort?: string;
 }
 
 type MessagePatch = Partial<
@@ -183,6 +185,14 @@ export const chatStore = {
   get compactedSummary(): CompactedSummary | undefined {
     const active = this.activeConversation;
     return active?.compactedSummary;
+  },
+
+  /**
+   * Get the reasoning effort for the active conversation.
+   */
+  get reasoningEffort(): string | undefined {
+    const active = this.activeConversation;
+    return active?.reasoningEffort;
   },
 
   /**
@@ -382,6 +392,17 @@ export const chatStore = {
     if (activeId) {
       this.updateConversationModel(activeId, modelId);
     }
+  },
+
+  setReasoningEffort(effort: string | undefined) {
+    const conversationId = state.activeConversationId;
+    if (!conversationId) return;
+
+    setState("conversations", (convos) =>
+      convos.map((c) =>
+        c.id === conversationId ? { ...c, reasoningEffort: effort } : c,
+      ),
+    );
   },
 
   setLoading(isLoading: boolean) {

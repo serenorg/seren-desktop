@@ -229,6 +229,11 @@ impl ChatModelWorker {
             body["tool_choice"] = serde_json::json!("auto");
         }
 
+        // OpenRouter reasoning effort parameter (for models that support extended thinking)
+        if let Some(ref effort) = routing.reasoning_effort {
+            body["reasoning"] = serde_json::json!({ "effort": effort });
+        }
+
         body
     }
 
@@ -1272,6 +1277,7 @@ mod tests {
             reason: "General chat".to_string(),
             selected_skills: vec![],
             publisher_slug: None,
+            reasoning_effort: None,
         };
 
         let body = worker.build_request_body(
@@ -1303,6 +1309,7 @@ mod tests {
             reason: "General chat".to_string(),
             selected_skills: vec![],
             publisher_slug: None,
+            reasoning_effort: None,
         };
 
         let body = worker.build_request_body(
@@ -1329,6 +1336,7 @@ mod tests {
             reason: "Research".to_string(),
             selected_skills: vec![],
             publisher_slug: None,
+            reasoning_effort: None,
         };
 
         let tools = vec![serde_json::json!({
@@ -1514,6 +1522,7 @@ mod tests {
             reason: "General chat".to_string(),
             selected_skills: vec![],
             publisher_slug: None,
+            reasoning_effort: None,
         };
 
         let images = vec![ImageAttachment {
