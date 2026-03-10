@@ -375,10 +375,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
   });
 
-  // Auto-scroll to bottom when messages change, streaming starts, or switching channels
+  // Auto-scroll to bottom when messages change, streaming starts, or switching channels.
+  // Also track htmlCache size: the worker renders HTML asynchronously, so the DOM
+  // grows after messages first load. Without tracking htmlCache, the scroll fires
+  // once on empty content and never again as worker responses fill in the HTML.
   createEffect(() => {
     void conversationStore.messages;
     void conversationStore.streamingContent;
+    void Object.keys(htmlCache).length;
     requestAnimationFrame(scrollToBottom);
   });
 
