@@ -938,7 +938,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     switch (message.type) {
       case "user":
         return (
-          <article class="group/msg relative px-5 py-4 bg-surface-1 border-b border-surface-2">
+          <article class="group/msg relative px-5 py-4 bg-surface-1 border-b border-surface-2 [contain:layout]">
             <Show when={message.docNames?.length}>
               <div class="flex flex-wrap gap-1.5 mb-2">
                 <For each={message.docNames}>
@@ -989,7 +989,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       case "assistant":
         return (
-          <article class="group/msg relative px-5 py-4 border-b border-surface-2">
+          <article class="group/msg relative px-5 py-4 border-b border-surface-2 [contain:layout]">
             <Show
               when={isLikelyAuthError(message.content)}
               fallback={
