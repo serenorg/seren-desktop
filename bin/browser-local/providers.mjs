@@ -520,7 +520,8 @@ function isRecoverableResumeError(message) {
     lower.includes("not found") ||
     lower.includes("missing thread") ||
     lower.includes("unknown thread") ||
-    lower.includes("does not exist")
+    lower.includes("does not exist") ||
+    lower.includes("no rollout")
   );
 }
 

@@ -2,7 +2,7 @@
 // ABOUTME: Contains Tauri commands and the application run function.
 
 use log::info;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, RunEvent};
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_store::StoreExt;
 
@@ -810,6 +810,19 @@ pub fn run() {
             commands::memory::memory_recall,
             commands::memory::memory_sync,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                log::info!("[App] Exit event — cleaning up child processes");
+                // Kill all MCP stdio server processes to prevent orphaned zombies
+                if let Some(mcp_state) = app.try_state::<mcp::McpState>() {
+                    mcp_state.kill_all();
+                }
+                // Stop the provider runtime node process
+                if let Some(rt_state) = app.try_state::<provider_runtime::ProviderRuntimeState>() {
+                    rt_state.kill_sync();
+                }
+            }
+        });
 }
