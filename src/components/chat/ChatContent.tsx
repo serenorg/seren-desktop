@@ -1122,7 +1122,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     }
                   >
                     <article
-                      class={`group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
+                      class={`group/msg px-5 py-4 border-b border-surface-2 last:border-b-0 [contain:layout] ${message.role === "user" ? "bg-surface-1" : "bg-transparent"}`}
                     >
                       <Show when={message.images && message.images.length > 0}>
                         <MessageImages images={message.images ?? []} />
