@@ -82,6 +82,10 @@ interface AgentChatProps {
 // Per-thread input drafts so switching threads doesn't leak text between them.
 const agentDrafts = new Map<string, string>();
 
+// Per-thread message queues so canceling in one thread doesn't lose queued
+// messages in another thread.
+const threadQueues = new Map<string, string[]>();
+
 export const AgentChat: Component<AgentChatProps> = (props) => {
   const [input, setInput] = createSignal("");
   const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
@@ -129,7 +133,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     return thread;
   });
 
-  // Save/restore per-thread input drafts when switching agent threads
+  // Save/restore per-thread input drafts and message queues when switching
   createEffect(() => {
     const currentId = activeAgentThread()?.id ?? null;
     if (currentId !== prevThreadId) {
@@ -140,8 +144,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         } else {
           agentDrafts.delete(prevThreadId);
         }
+        // Persist the outgoing thread's queue
+        const currentQueue = untrack(messageQueue);
+        if (currentQueue.length > 0) {
+          threadQueues.set(prevThreadId, currentQueue);
+        } else {
+          threadQueues.delete(prevThreadId);
+        }
       }
       setInput(currentId ? (agentDrafts.get(currentId) ?? "") : "");
+      setMessageQueue(currentId ? (threadQueues.get(currentId) ?? []) : []);
       prevThreadId = currentId;
     }
   });
@@ -610,7 +622,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
     // If agent is prompting, queue the message instead
     if (isPrompting()) {
-      setMessageQueue((queue) => [...queue, trimmed]);
+      const updated = [...messageQueue(), trimmed];
+      setMessageQueue(updated);
+      const threadId = activeAgentThread()?.id;
+      if (threadId) threadQueues.set(threadId, updated);
       setInput("");
       console.log("[AgentChat] Message queued:", trimmed);
       return;
@@ -749,8 +764,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   );
 
   const handleCancel = async () => {
-    // Clear queued messages so they don't auto-send after cancellation
+    // Clear only THIS thread's queued messages
     setMessageQueue([]);
+    const threadId = activeAgentThread()?.id;
+    if (threadId) threadQueues.delete(threadId);
     await agentStore.cancelPrompt(threadSessionId() ?? undefined);
   };
 
