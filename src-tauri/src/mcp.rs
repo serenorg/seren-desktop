@@ -26,6 +26,17 @@ impl McpState {
             processes: Mutex::new(HashMap::new()),
         }
     }
+
+    /// Kill all connected MCP server processes. Called on app exit to prevent
+    /// orphaned child processes from accumulating across restarts.
+    pub fn kill_all(&self) {
+        if let Ok(mut processes) = self.processes.lock() {
+            for (name, mut process) in processes.drain() {
+                log::info!("[MCP] Killing process on exit: {}", name);
+                let _ = process.child.kill();
+            }
+        }
+    }
 }
 
 impl Default for McpState {

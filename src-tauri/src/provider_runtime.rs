@@ -138,11 +138,40 @@ impl ProviderRuntimeState {
         });
         drop(guard);
 
-        // Start crash monitor
+        // Abort any previous crash monitor before starting a new one
+        if let Some(old_handle) = self.monitor_handle.lock().await.take() {
+            old_handle.abort();
+        }
         let monitor = spawn_process_monitor(app.clone());
         *self.monitor_handle.lock().await = Some(monitor);
 
         Ok(config)
+    }
+}
+
+impl ProviderRuntimeState {
+    /// Synchronously kill the provider runtime process. Called from the app
+    /// exit handler where the async runtime may be shutting down.
+    pub fn kill_sync(&self) {
+        // Abort the monitor task if reachable via try_lock
+        if let Ok(mut guard) = self.monitor_handle.try_lock() {
+            if let Some(handle) = guard.take() {
+                handle.abort();
+            }
+        }
+
+        if let Ok(mut guard) = self.process.try_lock() {
+            if let Some(ref process) = *guard {
+                if let Some(pid) = process.child.id() {
+                    log::info!("[ProviderRuntime] Killing process on exit: pid={}", pid);
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGKILL);
+                    }
+                }
+            }
+            *guard = None;
+        }
     }
 }
 
