@@ -96,6 +96,20 @@ async function prepareNodejs(options: DownloadOptions): Promise<string> {
 	fs.rmSync(tempDir, { recursive: true, force: true });
 	fs.unlinkSync(tarPath);
 
+	// Replace bin/npm and bin/npx symlinks with shell wrappers.
+	// Tauri resolves symlinks into regular files when bundling the .app, which
+	// breaks `require('../lib/cli.js')` because the path resolves relative to
+	// bin/ rather than lib/node_modules/npm/bin/ where the symlink target lives.
+	// A shell wrapper computes its own directory at runtime and stays correct
+	// whether or not Tauri has dereferenced it.
+	const npmWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/npm/bin/npm-cli.js" "$@"\n`;
+	const npxWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/npm/bin/npx-cli.js" "$@"\n`;
+	const corepackWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/corepack/dist/corepack.js" "$@"\n`;
+	fs.writeFileSync(path.join(nodeDir, 'bin', 'npm'), npmWrapper, { mode: 0o755 });
+	fs.writeFileSync(path.join(nodeDir, 'bin', 'npx'), npxWrapper, { mode: 0o755 });
+	fs.writeFileSync(path.join(nodeDir, 'bin', 'corepack'), corepackWrapper, { mode: 0o755 });
+	console.log('Replaced bin/npm, bin/npx, and bin/corepack with Tauri-safe shell wrappers.');
+
 	console.log(`Node.js prepared at ${nodeDir}`);
 	return nodeDir;
 }
