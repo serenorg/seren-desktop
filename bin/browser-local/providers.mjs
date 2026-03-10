@@ -82,10 +82,21 @@ function codexApprovalPolicy(modeId) {
   return modeId === "ask" ? "on-request" : "never";
 }
 
-function codexModes() {
+function codexModes(session) {
   return {
-    currentModeId: "auto",
-    availableModes: [],
+    currentModeId: session?.currentModeId ?? "auto",
+    availableModes: [
+      {
+        modeId: "auto",
+        name: "Auto",
+        description: "Automatically approve safe operations",
+      },
+      {
+        modeId: "ask",
+        name: "Suggest",
+        description: "Ask for approval on each action",
+      },
+    ],
   };
 }
 
@@ -250,7 +261,7 @@ function buildSessionStatus(session, status = session.status) {
       currentModelId: session.currentModelId,
       availableModels: buildAvailableModels(session),
     },
-    modes: codexModes(),
+    modes: codexModes(session),
     configOptions: buildConfigOptions(session),
   };
 }
