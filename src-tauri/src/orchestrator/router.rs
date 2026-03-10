@@ -65,6 +65,7 @@ pub fn route(
         reason,
         selected_skills,
         publisher_slug,
+        reasoning_effort: capabilities.reasoning_effort.clone(),
     }
 }
 
@@ -423,6 +424,7 @@ mod tests {
             tool_definitions: vec![],
             installed_skills: vec![],
             model_rankings: vec![],
+            reasoning_effort: None,
         }
     }
 
@@ -449,6 +451,7 @@ mod tests {
             tool_definitions: vec![],
             installed_skills: skills,
             model_rankings: vec![],
+            reasoning_effort: None,
         }
     }
 

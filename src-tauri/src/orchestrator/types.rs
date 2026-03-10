@@ -101,6 +101,9 @@ pub struct RoutingDecision {
     /// Publisher slug for McpPublisher worker (e.g. "firecrawl-serenai").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publisher_slug: Option<String>,
+    /// Reasoning effort level forwarded from the frontend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -149,6 +152,10 @@ pub struct UserCapabilities {
     /// Empty means no data; router falls back to hardcoded preference lists.
     #[serde(default)]
     pub model_rankings: Vec<(String, f64)>,
+    /// Reasoning effort level for models that support extended thinking.
+    /// Values: "minimal", "low", "medium", "high", "xhigh". None = provider default.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 /// Transition event emitted when the orchestrator switches models.
@@ -341,6 +348,7 @@ mod tests {
                 path: "/skills/prose/SKILL.md".to_string(),
             }],
             publisher_slug: None,
+            reasoning_effort: None,
         };
 
         let json = serde_json::to_string(&decision).unwrap();

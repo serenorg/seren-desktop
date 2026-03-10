@@ -372,6 +372,7 @@ mod tests {
             reason: "Working with publisher on research".to_string(),
             selected_skills: vec![],
             publisher_slug: publisher_slug.map(String::from),
+            reasoning_effort: None,
         }
     }
 

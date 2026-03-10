@@ -89,6 +89,7 @@ interface UserCapabilities {
   available_tools: string[];
   tool_definitions: ToolDefinition[];
   installed_skills: SkillRef[];
+  reasoning_effort: string | null;
 }
 
 interface SkillRef {
@@ -689,5 +690,6 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
       tags: s.tags ?? [],
       path: s.path,
     })),
+    reasoning_effort: chatStore.reasoningEffort ?? null,
   };
 }
