@@ -833,6 +833,8 @@ export const skills = {
 
   /**
    * Get content for enabled skills to inject into agent system prompt.
+   * For serenorg skills, re-fetches missing payload files before injecting.
+   * Injects the absolute runtime path so the agent doesn't need to search.
    */
   async getEnabledSkillsContent(
     installedSkills: InstalledSkill[],
@@ -846,10 +848,48 @@ export const skills = {
     const contents: string[] = [];
 
     for (const skill of enabled) {
+      // Re-fetch missing payload files for serenorg skills before injection.
+      if (isTauriRuntime() && skill.source === "serenorg" && skill.sourceUrl) {
+        try {
+          const missing = await invoke<string[]>("validate_skill_payload", {
+            skillsDir: skill.skillsDir,
+            slug: skill.dirName,
+          });
+          if (missing.length > 0) {
+            log.info(
+              "[Skills] Re-fetching",
+              missing.length,
+              "missing payload files for",
+              skill.slug,
+            );
+            const [extraFiles, existingContent] = await Promise.all([
+              fetchRepoSkillPayloadFiles(skill.sourceUrl),
+              this.readContent(skill),
+            ]);
+            if (extraFiles.length > 0 && existingContent) {
+              await invoke("install_skill", {
+                skillsDir: skill.skillsDir,
+                slug: skill.dirName,
+                content: existingContent,
+                extraFiles: JSON.stringify(extraFiles),
+              }).catch((err) => {
+                log.warn("[Skills] Failed to re-install payload files:", err);
+              });
+            }
+          }
+        } catch {
+          // Non-fatal — proceed with injection using whatever is on disk.
+        }
+      }
+
       const content = await this.readContent(skill);
       if (content) {
         const parsed = parseSkillMd(content);
-        contents.push(`## Skill: ${skill.name}\n\n${parsed.content}`);
+        const runtimeDir = `${skill.skillsDir}/${skill.dirName}`;
+        const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.\n\n`;
+        contents.push(
+          `## Skill: ${skill.name}\n\n${runtimeNote}${parsed.content}`,
+        );
       }
     }
 
