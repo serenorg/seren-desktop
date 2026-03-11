@@ -755,6 +755,19 @@ function handleNotification(emit, session, payload) {
 
     case "turn/completed": {
       const turn = params.turn ?? {};
+      const completedTurnId = turn.id ?? params.turnId;
+
+      // Ignore stale turn/completed from a previously cancelled turn.
+      // After cancellation, a delayed completion can race with a new prompt
+      // and resolve/reject the wrong currentPrompt.
+      if (
+        typeof completedTurnId === "string" &&
+        typeof session.activeTurnId === "string" &&
+        completedTurnId !== session.activeTurnId
+      ) {
+        return;
+      }
+
       session.status = turn.status === "failed" ? "error" : "ready";
       session.activeTurnId = null;
 
@@ -1134,21 +1147,24 @@ export function createProviderHandlers({ emit }) {
     if (!session) {
       return claudeRuntime.cancelPrompt({ sessionId });
     }
-    if (!session.activeTurnId) {
-      return;
-    }
+    if (session.activeTurnId) {
+      // Capture and clear activeTurnId before sending interrupt so a stale
+      // turn/completed from this turn cannot match a subsequently started turn.
+      const interruptTurnId = session.activeTurnId;
+      session.activeTurnId = null;
 
-    await sendRequest(
-      session,
-      "turn/interrupt",
-      {
-        threadId: session.agentSessionId,
-        turnId: session.activeTurnId,
-      },
-      10_000,
-    ).catch(() => {
-      // Best-effort interrupt only.
-    });
+      await sendRequest(
+        session,
+        "turn/interrupt",
+        {
+          threadId: session.agentSessionId,
+          turnId: interruptTurnId,
+        },
+        10_000,
+      ).catch(() => {
+        // Best-effort interrupt only.
+      });
+    }
 
     session.status = "ready";
     emit("provider://error", {

@@ -265,6 +265,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const hasSession = () => threadSession() !== null;
   const isReady = () => threadSession()?.info.status === "ready";
   const isPrompting = () => threadSession()?.info.status === "prompting";
+  const promptStartTime = () => threadSession()?.promptStartTime;
   const sessionError = () => threadSession()?.error ?? agentStore.error;
   const lockedAgentType = createMemo<AgentType>(() => {
     // Thread's declared agent type takes priority so the controls always
@@ -1423,7 +1424,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               }
             >
               <article class="px-5 py-4 border-b border-surface-2">
-                <ThinkingStatus />
+                <ThinkingStatus startTime={promptStartTime} />
               </article>
             </Show>
 
@@ -1739,7 +1740,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 <AgentModeSelector session={threadSession()} />
                 <AgentEffortSelector session={threadSession()} />
                 <Show when={isPrompting()}>
-                  <ThinkingStatus />
+                  <ThinkingStatus startTime={promptStartTime} />
                 </Show>
                 <Show when={messageQueue().length > 0}>
                   <span class="flex items-center gap-2 px-2 py-1 bg-surface-2 border border-border rounded text-xs text-muted-foreground">
