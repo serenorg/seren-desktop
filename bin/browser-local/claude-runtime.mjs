@@ -1,13 +1,60 @@
 // ABOUTME: Browser-local Claude Code runtime backed by the local claude CLI.
 // ABOUTME: Manages long-lived stream-json sessions, permissions, and session listing without ACP.
 
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
+
+/**
+ * Resolve the full path to the `claude` binary.
+ * GUI apps don't inherit shell profile PATH additions, so `which claude`
+ * and bare `spawn("claude")` may fail even when Claude Code is installed.
+ * Check well-known install locations before falling back to bare command name.
+ */
+function resolveClaudeBinary() {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? "";
+    if (appData) {
+      const candidate = path.join(appData, "Claude", "claude.exe");
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return "claude";
+  }
+
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".claude", "bin", "claude"),
+    path.join(home, ".local", "bin", "claude"),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  // Try PATH lookup (works when Rust side has extended PATH correctly)
+  try {
+    const resolved = execFileSync("which", ["claude"], {
+      encoding: "utf8",
+      timeout: 5_000,
+    }).trim();
+    if (resolved) {
+      return resolved;
+    }
+  } catch {
+    // which failed — fall through to bare command name
+  }
+
+  return "claude";
+}
 
 function isAuthError(message) {
   const lower = String(message).toLowerCase();
@@ -1122,8 +1169,9 @@ export function createClaudeRuntime({ emit }) {
     const sessionId = localSessionId ?? randomUUID();
     const remoteSessionId = resumeAgentSessionId ?? randomUUID();
     const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
+    const claudeBin = resolveClaudeBinary();
     const processHandle = spawn(
-      "claude",
+      claudeBin,
       buildClaudeArgs({
         sessionId: remoteSessionId,
         resumeSessionId: resumeAgentSessionId ?? null,
@@ -1141,6 +1189,22 @@ export function createClaudeRuntime({ emit }) {
         shell: process.platform === "win32",
       },
     );
+
+    // Catch spawn errors (e.g. ENOENT) to prevent crashing the provider runtime.
+    processHandle.on("error", (spawnError) => {
+      console.error(`[browser-local][claude] Spawn error: ${spawnError.message}`);
+      sessions.delete(sessionId);
+      emit("provider://error", {
+        sessionId,
+        error: spawnError.code === "ENOENT"
+          ? `Claude Code CLI not found at "${claudeBin}". Install it from https://claude.ai/download`
+          : `Failed to start Claude Code: ${spawnError.message}`,
+      });
+      emit("provider://session-status", {
+        sessionId,
+        status: "terminated",
+      });
+    });
 
     const session = createSessionRecord({
       sessionId,
@@ -1437,8 +1501,9 @@ export function createClaudeRuntime({ emit }) {
 
     const forkedAgentSessionId = randomUUID();
     const tempLocalSessionId = randomUUID();
+    const claudeBin = resolveClaudeBinary();
     const processHandle = spawn(
-      "claude",
+      claudeBin,
       buildClaudeArgs({
         sessionId: forkedAgentSessionId,
         resumeSessionId: sourceAgentSessionId,
@@ -1456,6 +1521,11 @@ export function createClaudeRuntime({ emit }) {
         shell: process.platform === "win32",
       },
     );
+
+    // Catch spawn errors to prevent crashing the provider runtime.
+    processHandle.on("error", (spawnError) => {
+      console.error(`[browser-local][claude] Fork spawn error: ${spawnError.message}`);
+    });
 
     const tempSession = createSessionRecord({
       sessionId: tempLocalSessionId,

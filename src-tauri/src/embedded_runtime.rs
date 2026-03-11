@@ -234,24 +234,44 @@ fn extend_path_with_common_bins(current_path: &str, path_separator: &str) -> Str
 
         let mut seen: HashSet<String> = entries.iter().cloned().collect();
 
+        // Build common bins list including user-local tool directories.
+        // GUI apps don't source shell profiles so ~/.claude/bin and ~/.local/bin
+        // (where native installers place CLIs) are typically missing from PATH.
+        let home = std::env::var("HOME").unwrap_or_default();
+        let mut common_bins: Vec<String> = Vec::new();
+
+        if !home.is_empty() {
+            common_bins.push(format!("{}/.claude/bin", home));
+            common_bins.push(format!("{}/.local/bin", home));
+        }
+
         #[cfg(target_os = "macos")]
-        let common_bins: [&str; 6] = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin",
-        ];
+        {
+            common_bins.extend([
+                "/usr/local/bin".to_string(),
+                "/opt/homebrew/bin".to_string(),
+                "/usr/bin".to_string(),
+                "/bin".to_string(),
+                "/usr/sbin".to_string(),
+                "/sbin".to_string(),
+            ]);
+        }
 
         #[cfg(target_os = "linux")]
-        let common_bins: [&str; 5] = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+        {
+            common_bins.extend([
+                "/usr/local/bin".to_string(),
+                "/usr/bin".to_string(),
+                "/bin".to_string(),
+                "/usr/sbin".to_string(),
+                "/sbin".to_string(),
+            ]);
+        }
 
         for bin in common_bins {
-            if !seen.contains(bin) {
-                let bin = bin.to_string();
-                entries.push(bin.clone());
-                seen.insert(bin);
+            if !seen.contains(&bin) {
+                seen.insert(bin.clone());
+                entries.push(bin);
             }
         }
     }
