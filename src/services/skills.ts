@@ -848,39 +848,58 @@ export const skills = {
     const contents: string[] = [];
 
     for (const skill of enabled) {
-      // Re-fetch missing payload files for serenorg skills before injection.
+      // Sync payload files for serenorg skills before injection.
+      // - If the upstream SKILL.md has changed, overwrite all payload files
+      //   (the skill was updated; canonical runtime takes precedence).
+      // - If SKILL.md is unchanged, only write files that are missing on disk
+      //   (preserve local modifications to existing files).
       if (isTauriRuntime() && skill.source === "serenorg" && skill.sourceUrl) {
         try {
-          const missing = await invoke<string[]>("validate_skill_payload", {
-            skillsDir: skill.skillsDir,
-            slug: skill.dirName,
-          });
-          if (missing.length > 0) {
+          const [remoteSkillMd, missing] = await Promise.all([
+            appFetch(skill.sourceUrl).then((r) =>
+              r.ok ? r.text() : Promise.resolve(null),
+            ),
+            invoke<string[]>("validate_skill_payload", {
+              skillsDir: skill.skillsDir,
+              slug: skill.dirName,
+            }),
+          ]);
+
+          const remoteHash = remoteSkillMd
+            ? await computeContentHash(remoteSkillMd)
+            : null;
+          const skillUpdated =
+            remoteHash !== null && remoteHash !== skill.contentHash;
+
+          if (skillUpdated || missing.length > 0) {
             log.info(
-              "[Skills] Re-fetching",
-              missing.length,
-              "missing payload files for",
+              "[Skills] Syncing payload files for",
               skill.slug,
+              skillUpdated ? "(skill updated)" : "(missing files)",
             );
             const [allPayloadFiles, existingContent] = await Promise.all([
               fetchRepoSkillPayloadFiles(skill.sourceUrl),
               this.readContent(skill),
             ]);
-            // Only write files that are actually missing — never overwrite
-            // locally-modified files that already exist on disk.
-            const missingSet = new Set(missing);
-            const filesToWrite = allPayloadFiles.filter((f) =>
-              missingSet.has(f.path),
-            );
-            if (filesToWrite.length > 0 && existingContent) {
-              await invoke("install_skill", {
-                skillsDir: skill.skillsDir,
-                slug: skill.dirName,
-                content: existingContent,
-                extraFiles: JSON.stringify(filesToWrite),
-              }).catch((err) => {
-                log.warn("[Skills] Failed to re-install payload files:", err);
-              });
+            const installContent = remoteSkillMd ?? existingContent;
+            if (allPayloadFiles.length > 0 && installContent) {
+              // When the skill has been updated upstream, overwrite all payload
+              // files so the user gets the latest runtime. When only files are
+              // missing (SKILL.md unchanged), write only the absent files so
+              // local modifications to existing files are preserved.
+              const filesToWrite = skillUpdated
+                ? allPayloadFiles
+                : allPayloadFiles.filter((f) => missing.includes(f.path));
+              if (filesToWrite.length > 0) {
+                await invoke("install_skill", {
+                  skillsDir: skill.skillsDir,
+                  slug: skill.dirName,
+                  content: installContent,
+                  extraFiles: JSON.stringify(filesToWrite),
+                }).catch((err) => {
+                  log.warn("[Skills] Failed to sync payload files:", err);
+                });
+              }
             }
           }
         } catch {
