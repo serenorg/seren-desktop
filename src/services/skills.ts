@@ -833,6 +833,8 @@ export const skills = {
 
   /**
    * Get content for enabled skills to inject into agent system prompt.
+   * For serenorg skills, re-fetches missing payload files before injecting.
+   * Injects the absolute runtime path so the agent doesn't need to search.
    */
   async getEnabledSkillsContent(
     installedSkills: InstalledSkill[],
@@ -846,10 +848,73 @@ export const skills = {
     const contents: string[] = [];
 
     for (const skill of enabled) {
+      // Sync payload files for serenorg skills before injection.
+      // - If the upstream SKILL.md has changed, overwrite all payload files
+      //   (the skill was updated; canonical runtime takes precedence).
+      // - If SKILL.md is unchanged, only write files that are missing on disk
+      //   (preserve local modifications to existing files).
+      if (isTauriRuntime() && skill.source === "serenorg" && skill.sourceUrl) {
+        try {
+          const [remoteSkillMd, missing] = await Promise.all([
+            appFetch(skill.sourceUrl).then((r) =>
+              r.ok ? r.text() : Promise.resolve(null),
+            ),
+            invoke<string[]>("validate_skill_payload", {
+              skillsDir: skill.skillsDir,
+              slug: skill.dirName,
+            }),
+          ]);
+
+          const remoteHash = remoteSkillMd
+            ? await computeContentHash(remoteSkillMd)
+            : null;
+          const skillUpdated =
+            remoteHash !== null && remoteHash !== skill.contentHash;
+
+          if (skillUpdated || missing.length > 0) {
+            log.info(
+              "[Skills] Syncing payload files for",
+              skill.slug,
+              skillUpdated ? "(skill updated)" : "(missing files)",
+            );
+            const [allPayloadFiles, existingContent] = await Promise.all([
+              fetchRepoSkillPayloadFiles(skill.sourceUrl),
+              this.readContent(skill),
+            ]);
+            const installContent = remoteSkillMd ?? existingContent;
+            if (allPayloadFiles.length > 0 && installContent) {
+              // When the skill has been updated upstream, overwrite all payload
+              // files so the user gets the latest runtime. When only files are
+              // missing (SKILL.md unchanged), write only the absent files so
+              // local modifications to existing files are preserved.
+              const filesToWrite = skillUpdated
+                ? allPayloadFiles
+                : allPayloadFiles.filter((f) => missing.includes(f.path));
+              if (filesToWrite.length > 0) {
+                await invoke("install_skill", {
+                  skillsDir: skill.skillsDir,
+                  slug: skill.dirName,
+                  content: installContent,
+                  extraFiles: JSON.stringify(filesToWrite),
+                }).catch((err) => {
+                  log.warn("[Skills] Failed to sync payload files:", err);
+                });
+              }
+            }
+          }
+        } catch {
+          // Non-fatal — proceed with injection using whatever is on disk.
+        }
+      }
+
       const content = await this.readContent(skill);
       if (content) {
         const parsed = parseSkillMd(content);
-        contents.push(`## Skill: ${skill.name}\n\n${parsed.content}`);
+        const runtimeDir = `${skill.skillsDir}/${skill.dirName}`;
+        const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.\n\n`;
+        contents.push(
+          `## Skill: ${skill.name}\n\n${runtimeNote}${parsed.content}`,
+        );
       }
     }
 
