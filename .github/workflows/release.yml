@@ -633,67 +633,111 @@ jobs:
             const fs = require('fs');
             const path = require('path');
 
-            const releaseId = '${{ needs.create-release.outputs.release_id }}';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const initialReleaseId = '${{ needs.create-release.outputs.release_id }}';
+            const tagName = '${{ github.ref_name }}';
             const artifactsDir = 'artifacts';
 
-            if (!releaseId) {
-              throw new Error('No release ID available - create-release job may have failed');
+            const resolveCanonicalRelease = async () => {
+              try {
+                const { data } = await github.rest.repos.getReleaseByTag({
+                  owner,
+                  repo,
+                  tag: tagName
+                });
+                console.log(`Resolved canonical release by tag ${tagName}: ${data.id} (draft=${data.draft})`);
+                return data;
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+
+                if (!initialReleaseId) {
+                  throw new Error(`No release found for tag ${tagName} and no fallback release ID is available`);
+                }
+
+                const fallbackReleaseId = Number(initialReleaseId);
+                if (!Number.isFinite(fallbackReleaseId)) {
+                  throw new Error(`Invalid fallback release ID: ${initialReleaseId}`);
+                }
+
+                console.log(`No release currently resolves by tag ${tagName}; falling back to release ID ${fallbackReleaseId}`);
+                const { data } = await github.rest.repos.getRelease({
+                  owner,
+                  repo,
+                  release_id: fallbackReleaseId
+                });
+                return data;
+              }
+            };
+
+            const syncArtifactsToRelease = async (release) => {
+              const releaseId = release.id;
+              console.log(`Syncing artifacts to release ID ${releaseId} for tag ${tagName}`);
+
+              const existingAssets = await github.rest.repos.listReleaseAssets({
+                owner,
+                repo,
+                release_id: releaseId
+              });
+              const existingNames = new Set(existingAssets.data.map((asset) => asset.name));
+
+              const uploadAsset = async (filePath, fileName) => {
+                if (existingNames.has(fileName)) {
+                  console.log(`Skipping ${fileName} on release ${releaseId} - already exists`);
+                  return;
+                }
+
+                const content = fs.readFileSync(filePath);
+                await github.rest.repos.uploadReleaseAsset({
+                  owner,
+                  repo,
+                  release_id: releaseId,
+                  name: fileName,
+                  data: content
+                });
+                existingNames.add(fileName);
+              };
+
+              const walkDir = async (dir) => {
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                  const filePath = path.join(dir, file);
+                  const stat = fs.statSync(filePath);
+                  if (stat.isDirectory()) {
+                    await walkDir(filePath);
+                  } else {
+                    console.log(`Uploading to release ${releaseId}: ${filePath}`);
+                    await uploadAsset(filePath, file);
+                  }
+                }
+              };
+
+              await walkDir(artifactsDir);
+            };
+
+            const uploadTarget = await resolveCanonicalRelease();
+            await syncArtifactsToRelease(uploadTarget);
+
+            const publishTarget = await resolveCanonicalRelease();
+            if (publishTarget.id !== uploadTarget.id) {
+              console.log(`Canonical release changed from ${uploadTarget.id} to ${publishTarget.id}; syncing artifacts to the latest canonical release`);
+              await syncArtifactsToRelease(publishTarget);
             }
 
-            console.log(`Publishing to release ID: ${releaseId}`);
-
-            // Get existing assets to avoid duplicates
-            const existingAssets = await github.rest.repos.listReleaseAssets({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: releaseId
-            });
-            const existingNames = new Set(existingAssets.data.map(a => a.name));
-
-            // Upload all artifact files (track names to prevent duplicates within this run)
-            const uploadAsset = async (filePath, fileName) => {
-              if (existingNames.has(fileName)) {
-                console.log(`Skipping ${fileName} - already exists`);
-                return;
-              }
-              const content = fs.readFileSync(filePath);
-              await github.rest.repos.uploadReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: releaseId,
-                name: fileName,
-                data: content
+            if (publishTarget.draft) {
+              console.log(`Setting release ${publishTarget.id} to published (non-draft)`);
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: publishTarget.id,
+                draft: false
               });
-              existingNames.add(fileName);
-            };
-
-            // Walk through artifacts directory
-            const walkDir = async (dir) => {
-              const files = fs.readdirSync(dir);
-              for (const file of files) {
-                const filePath = path.join(dir, file);
-                const stat = fs.statSync(filePath);
-                if (stat.isDirectory()) {
-                  await walkDir(filePath);
-                } else {
-                  console.log(`Uploading: ${filePath}`);
-                  await uploadAsset(filePath, file);
-                }
-              }
-            };
-
-            await walkDir(artifactsDir);
-
-            // Undraft the release
-            console.log('Setting release to published (non-draft)');
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: releaseId,
-              draft: false
-            });
-
-            console.log('Release published successfully!');
+              console.log('Release published successfully!');
+            } else {
+              console.log(`Release ${publishTarget.id} for tag ${tagName} is already published; skipping undraft`);
+            }
 
       # Step 2: Verify the release is now published before uploading to R2
       # This ensures the auto-updater (latest.json) only points to a fully published release
