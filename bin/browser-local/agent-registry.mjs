@@ -2,6 +2,8 @@
 // ABOUTME: Keeps provider metadata and per-agent setup logic separate from session runtime handling.
 
 import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 function launchLoginCommand(command) {
   const loginCommand = `${command} login`;
@@ -56,6 +58,36 @@ async function isCommandAvailable(command) {
   }
 }
 
+/**
+ * Resolve the path to npm-cli.js relative to the running Node.js binary.
+ * This bypasses shell wrapper shims that break execFile() on macOS/Linux
+ * after Tauri bundling replaces symlinks with shell scripts.
+ *
+ * Layout:
+ *   macOS/Linux: <prefix>/bin/node  → <prefix>/lib/node_modules/npm/bin/npm-cli.js
+ *   Windows:     <prefix>/node.exe  → <prefix>/node_modules/npm/bin/npm-cli.js
+ */
+function resolveNpmCliScript() {
+  const nodeDir = path.dirname(process.execPath);
+
+  if (process.platform === "win32") {
+    // Windows: node.exe sits at the prefix root
+    const candidate = path.join(nodeDir, "node_modules", "npm", "bin", "npm-cli.js");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  } else {
+    // macOS/Linux: node sits in <prefix>/bin/
+    const prefix = path.dirname(nodeDir);
+    const candidate = path.join(prefix, "lib", "node_modules", "npm", "bin", "npm-cli.js");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
   if (await isCommandAvailable(command)) {
     return command;
@@ -66,20 +98,41 @@ async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
     message: `Installing ${label} CLI...`,
   });
 
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  await new Promise((resolvePromise, rejectPromise) => {
-    execFile(
-      npmCommand,
-      ["install", "-g", packageName],
-      (error, stdout, stderr) => {
-        if (error) {
-          rejectPromise(new Error(stderr || error.message));
-          return;
-        }
-        resolvePromise(stdout.trim());
-      },
-    );
-  });
+  // Invoke node with npm-cli.js directly to avoid shell wrapper shims that
+  // break execFile() after Tauri replaces bin/npm symlinks with shell scripts.
+  const npmCliScript = resolveNpmCliScript();
+  if (npmCliScript) {
+    await new Promise((resolvePromise, rejectPromise) => {
+      execFile(
+        process.execPath,
+        [npmCliScript, "install", "-g", packageName],
+        (error, stdout, stderr) => {
+          if (error) {
+            rejectPromise(new Error(stderr || error.message));
+            return;
+          }
+          resolvePromise(stdout.trim());
+        },
+      );
+    });
+  } else {
+    // Fallback: try npm directly (works in dev where symlinks are intact,
+    // and on Windows where npm.cmd is a valid batch file).
+    const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+    await new Promise((resolvePromise, rejectPromise) => {
+      execFile(
+        npmCommand,
+        ["install", "-g", packageName],
+        (error, stdout, stderr) => {
+          if (error) {
+            rejectPromise(new Error(stderr || error.message));
+            return;
+          }
+          resolvePromise(stdout.trim());
+        },
+      );
+    });
+  }
 
   emit("provider://cli-install-progress", {
     stage: "complete",
@@ -87,6 +140,45 @@ async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
   });
 
   return command;
+}
+
+async function ensureClaudeCodeViaNativeInstaller(emit) {
+  if (await isCommandAvailable("claude")) {
+    return "claude";
+  }
+
+  emit("provider://cli-install-progress", {
+    stage: "installing",
+    message: "Installing Claude Code CLI via official installer...",
+  });
+
+  await new Promise((resolvePromise, rejectPromise) => {
+    let cmd;
+    let args;
+
+    if (process.platform === "win32") {
+      cmd = "powershell";
+      args = ["-NoProfile", "-Command", "irm https://claude.ai/install.ps1 | iex"];
+    } else {
+      cmd = "bash";
+      args = ["-c", "curl -fsSL https://claude.ai/install.sh | bash"];
+    }
+
+    execFile(cmd, args, { timeout: 120_000 }, (error, stdout, stderr) => {
+      if (error) {
+        rejectPromise(new Error(stderr || error.message));
+        return;
+      }
+      resolvePromise(stdout.trim());
+    });
+  });
+
+  emit("provider://cli-install-progress", {
+    stage: "complete",
+    message: "Claude Code CLI installed successfully",
+  });
+
+  return "claude";
 }
 
 export function createBrowserLocalAgentRegistry({ emit }) {
@@ -152,12 +244,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return true;
       },
       async ensureCli() {
-        return ensureGlobalNpmPackage({
-          emit,
-          command: "claude",
-          packageName: "@anthropic-ai/claude-code",
-          label: "Claude Code",
-        });
+        return ensureClaudeCodeViaNativeInstaller(emit);
       },
       launchLogin() {
         launchLoginCommand("claude");
