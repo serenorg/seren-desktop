@@ -862,16 +862,22 @@ export const skills = {
               "missing payload files for",
               skill.slug,
             );
-            const [extraFiles, existingContent] = await Promise.all([
+            const [allPayloadFiles, existingContent] = await Promise.all([
               fetchRepoSkillPayloadFiles(skill.sourceUrl),
               this.readContent(skill),
             ]);
-            if (extraFiles.length > 0 && existingContent) {
+            // Only write files that are actually missing — never overwrite
+            // locally-modified files that already exist on disk.
+            const missingSet = new Set(missing);
+            const filesToWrite = allPayloadFiles.filter((f) =>
+              missingSet.has(f.path),
+            );
+            if (filesToWrite.length > 0 && existingContent) {
               await invoke("install_skill", {
                 skillsDir: skill.skillsDir,
                 slug: skill.dirName,
                 content: existingContent,
-                extraFiles: JSON.stringify(extraFiles),
+                extraFiles: JSON.stringify(filesToWrite),
               }).catch((err) => {
                 log.warn("[Skills] Failed to re-install payload files:", err);
               });
