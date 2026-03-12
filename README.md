@@ -1,394 +1,133 @@
 # Seren Desktop
 
-An open source AI desktop client built with Tauri, SolidJS, and Monaco Editor. Chat with AI models, run coding agents, manage databases, and connect to messaging platforms — all from one app.
+Seren is an AI workspace for knowledge workers. Install skills, connect your accounts, and let agents handle repeatable work while you stay in control.
 
 [![CI](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/serenorg/seren-desktop/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Features
+---
 
-### AI Chat
+## Download
 
-- **Multi-model support** — Claude, Gemini, and GPT models via Seren Gateway (default); or connect directly using an Anthropic API key, OpenAI API key, or Google API key / OAuth
-- **Smart model routing** — Satisfaction-driven model selection using Thompson sampling
-- **Auto-reroute on failure** — Falls back to satisfaction-ranked model on 408/timeout errors
-- **Task classification** — Routes prompts to the optimal worker (chat, agent, or publisher)
-- **Context overflow handling (RLM)** — Automatically splits oversized prompts into overlapping chunks and merges responses when input exceeds a model's context window
-- **Dynamic tool exposure** — BM25-lite relevance scoring selects only the tools relevant to each query, reducing tool-context tokens and improving response quality
-- **Free tier included** — Start chatting with Gemini Flash (Free), no payment required
-- **Multi-tab conversations** — Work on multiple chats simultaneously
-- **Streaming responses** — Real-time token-by-token output
-- **Thinking display** — Toggle chain-of-thought reasoning visibility
-- **Query cost tracking** — Shows Gateway cost alongside response duration
-- **Image attachments** — Attach images to chat messages
-- **Voice input** — Speech-to-text via Seren Whisper publisher with auto-submit option
-- **Slash commands** — `/` command autocomplete with 15 built-in commands
-- **Satisfaction signals** — Thumbs up/down feedback that trains the model router
-- **Semantic code context** — AI retrieves relevant code from your indexed codebase
-- **Smart balance warnings** — Prompts to top up or switch to free model when low on credits
-- **Conversation persistence** — Chat history saved locally
-
-### AI Coding Agents
-
-- **Multi-agent support** — Run Claude Code and Codex agents side by side
-- **Multiple concurrent sessions** — Tabbed interface with agent type picker
-- **Inline diff review** — Monaco diff editor with accept/reject for file edits
-- **Tool execution** — Agents read files, execute commands, and make edits
-- **Permission system** — User approval for sensitive operations with risk levels
-- **Sandbox modes** — ReadOnly, WorkspaceWrite, or FullAccess execution tiers
-- **GPG signing support** — Sandbox allows gpg-agent access for signed commits
-- **Prompt queue** — Sequential message queuing during active agent prompts
-- **Cancel with cleanup** — Force-stop agents, clear tool spinners, flush queued messages
-- **Auth error detection** — Auto-launches `claude login` when authentication is needed
-- **Automatic failover** — Instantly switches to chat mode when agent hits rate limits or context limits
-- **Agent tasks** — Background task monitoring panel for agent operations
-- **CLI auto-installer** — Automatic installation of Claude Code and Codex CLI tools
-- **Thinking animation** — Bouncing dot indicator with rotating status words
-- **Embedded runtimes** — Bundled Node.js, npm, and agent binaries (no PATH conflicts)
-
-### Thread Management
-
-- **Threaded conversations** — Sidebar with persistent chat and agent threads
-- **Thread forking** — Fork an agent conversation from any message to explore alternate paths; uses native provider session fork at head, or context bootstrap for mid-thread forks
-- **Folder grouping** — Threads grouped by project directory
-- **Running indicators** — Pulsing green dot for active agents across folder groups
-- **Thread persistence** — Active threads persist across folder switches
-
-### Skills System
-
-- **AgentSkills.io standard** — Standards-compliant skill format with SKILL.md metadata
-- **Three-tier hierarchy** — Global defaults, project defaults, and thread-level overrides
-- **Skill discovery** — Browse available skills from the [seren-skills](https://github.com/serenorg/seren-skills) catalog
-- **One-click installation** — Install skills directly from the catalog
-- **Slash command invocation** — Activate skills with `/skill-name` in chat or agent threads
-- **Thread-level management** — Enable/disable skills per conversation
-- **Project-scoped skills** — Skills can be project-specific via `.seren/skills.json`
-
-### Seren Memory
-
-- **Persistent semantic memory** — Stores conversation context across sessions
-- **Automatic recall** — AI retrieves relevant memories during conversations
-- **Project-scoped** — Memories organized by project for better context
-- **Hybrid retrieval** — Vector search + full-text search + graph relationships
-- **Cloud sync** — Syncs to memory.serendb.com for cross-device access
-- **Privacy controls** — Enable/disable in settings, stored encrypted locally
-- **Memory types** — Conversation, code patterns, error fixes, user preferences
-
-### OpenClaw Messaging
-
-- **Multi-platform agents** — Connect AI to Discord, Slack, Telegram, and Signal
-- **Per-channel trust levels** — Auto-respond, mention-only, or approval-required
-- **Agent mode per channel** — Choose which AI model handles each channel
-- **Message approval workflow** — Review and approve agent responses before sending
-- **Channel connection wizard** — Guided setup for new messaging channels
-- **Process lifecycle management** — Start, stop, restart with crash recovery
-
-### Code Editor
-
-- **Monaco Editor** — Full VS Code editing experience
-- **Syntax highlighting** — 100+ languages supported
-- **Multi-file tabs** — Open and edit multiple files
-- **Cmd+K inline editing** — AI-powered code modification with streaming diff preview
-- **Context menu actions** — Right-click to add code to chat, explain, or improve
-- **Markdown preview** — Live preview for `.md` files
-- **Image viewer** — View images inline
-- **PDF viewer** — Read PDF documents
-
-### Semantic Codebase Indexing
-
-- **AI-powered embeddings** — Index your entire codebase with SerenEmbed
-- **Instant vector search** — Local sqlite-vec storage for zero-latency retrieval
-- **Automatic context injection** — AI gets relevant code context during conversations
-- **Language-aware chunking** — Smart code splitting for Rust, TypeScript/JavaScript, Python
-- **File watcher integration** — Automatic re-indexing on save
-- **Hash-based change detection** — Only re-index modified files
-
-### File Explorer
-
-- **Tree navigation** — Browse local directories
-- **File operations** — Create, rename, delete files and folders
-- **Context menu** — Right-click actions
-- **Dotfile support** — Show/hide hidden files
-
-### Database Panel (SerenDB)
-
-- **Project management** — Create and delete SerenDB projects
-- **Branch navigation** — Browse project branches
-- **Connection strings** — Copy database connection strings
-- **Organization support** — Multi-org project creation
-
-### MCP Integration (Model Context Protocol)
-
-- **90+ built-in tools** — Gateway MCP via mcp.serendb.com
-- **Tool execution** — Run tools with approval workflow
-- **Resource browsing** — Access MCP server resources
-- **Multi-server support** — Connect to multiple MCP servers
-- **OAuth flows** — MCP server and publisher OAuth authentication
-- **x402 payments** — Automatic micropayments for premium tools
-
-### Publisher Catalog
-
-- **Browse APIs** — Discover AI-accessible services
-- **Publisher details** — View pricing, capabilities, usage
-- **Quick connect** — One-click publisher activation with OAuth
-- **Connection status** — Visual indicators for authenticated publishers
-
-### Wallet & Payments
-
-- **SerenBucks** — View balance and transaction history
-- **Daily claim** — Free daily SerenBucks credits
-- **Stripe deposits** — Add funds via credit card
-- **Auto top-up** — Configure automatic balance refresh
-- **Crypto payments** — x402 USDC payments on Base network
-
-### Auto-Updater
-
-- **In-app updates** — Check for and install updates without leaving the app
-- **Download progress** — Progress bar with quips during update download
-- **Cross-platform** — Signed updates for macOS, Windows, and Linux
-- **Cloudflare R2** — Fast, reliable update distribution with zero egress fees
-- **Automatic signature verification** — Cryptographically signed updates
-
-### CI Automation
-
-- **Autonomous fix pipeline** — CI failures on `main` are automatically filed as GitHub issues labeled `agent-task`
-- **Deduplication** — Duplicate issues are suppressed; only one open issue per failing job
-- **ReAct agent loop** — An AI agent reads the issue, reproduces the failure, applies a fix, opens a PR, and comments on the issue — with no human in the loop
-- **Seren Gateway execution** — Agent runs via the Seren Gateway (no separate API key required)
-
-### Security
-
-- **Encrypted storage** — Tokens stored via Tauri secure storage
-- **Sandboxed execution** — macOS seatbelt profiles for agent commands
-- **Targeted deny lists** — Private keys blocked, GPG agent access preserved
-- **Secure IPC** — Tauri's secure inter-process communication
-- **HTTPS only** — All API calls over TLS
-
-## Quick Start
-
-### Prerequisites
-
-- [Rust](https://rustup.rs/) (1.75+)
-- [Node.js](https://nodejs.org/) (20+)
-- [pnpm](https://pnpm.io/) (9+)
-
-### Development
-
-```bash
-# Clone the repository
-git clone https://github.com/serenorg/seren-desktop.git
-cd seren-desktop
-
-# Install dependencies
-pnpm install
-
-# Run in development mode
-pnpm tauri dev
-```
-
-### Testing
-
-```bash
-# Unit tests (Vitest)
-pnpm test
-
-# Lint and format (Biome)
-pnpm check
-
-# Rust tests
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-### Build
-
-```bash
-# Build for production
-pnpm tauri build
-```
-
-Builds are available for:
+Get the latest release for your platform from the [Releases page](https://github.com/serenorg/seren-desktop/releases):
 
 - **macOS** — `.dmg` (Apple Silicon & Intel)
 - **Windows** — `.msi` / `.exe`
 - **Linux** — `.deb` / `.AppImage`
 
-## Architecture
+Updates install automatically from within the app.
 
-Seren Desktop is the **open source client**. It connects to Seren's proprietary Gateway API for:
+---
 
-- **Authentication & Billing** — SerenBucks payment system
-- **AI Model Access** — Claude, Gemini, GPT, and other models
-- **Publisher Marketplace** — Firecrawl, Perplexity, databases
-- **MCP Server Hosting** — Email, calendar, CRM actions
-- **SerenDB** — Serverless PostgreSQL databases
+## Who it's for
 
-Think of it like VS Code (open source) connecting to the Extension Marketplace (proprietary).
+Seren is built for people who spend their day making decisions, not stitching together five different tools.
 
-```text
-┌──────────────────────────────────────────────────────────┐
-│             Seren Desktop (Open Source)                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
-│  │ AI Chat  │  │  Editor  │  │ Database │  │ OpenClaw │ │
-│  │ + Voice  │  │  Monaco  │  │  SerenDB │  │ Discord  │ │
-│  │ + Images │  │  + Cmd+K │  │          │  │ Slack    │ │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
-│  │   ACP    │  │   MCP    │  │  Wallet  │  │ Catalog  │ │
-│  │ Claude   │  │ 90+ Tools│  │ Payments │  │ Browser  │ │
-│  │ Codex    │  │ + OAuth  │  │ + Crypto │  │          │ │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
-│  │Orchestr. │  │ Indexing │  │ Sandbox  │  │  Skills  │ │
-│  │ Router   │  │sqlite-vec│  │ Terminal │  │ Remote   │ │
-│  │ RLM+ITR  │  │          │  │          │  │ Catalog  │ │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐              │
-│  │  Memory  │  │  Tasks   │  │    CI    │              │
-│  │Cross-sess│  │ Agent Ops│  │ Auto-fix │              │
-│  │  Vector  │  │          │  │  Agent   │              │
-│  └──────────┘  └──────────┘  └──────────┘              │
-│  Backend: Rust/Tauri   Frontend: SolidJS/TypeScript      │
-│  Embedded: Node.js + npm + ACP                           │
-└─────────────────────────┬────────────────────────────────┘
-                          │
-                          ▼
-┌──────────────────────────────────────────────────────────┐
-│             Seren Gateway (Proprietary)                   │
-│  • api.serendb.com                                       │
-│  • Authentication & billing (SerenBucks)                 │
-│  • AI model routing (Claude, Gemini, GPT)                │
-│  • Publisher ecosystem (100+ services)                   │
-│  • MCP server hosting (mcp.serendb.com)                  │
-│  • SerenDB serverless PostgreSQL                         │
-│  • SerenEmbed API (embeddings)                           │
-│  • SerenWhisper API (speech-to-text)                     │
-│  • SerenMemory API (memory.serendb.com)                  │
-│  • Skills repo (github.com/serenorg/seren-skills)        │
-└──────────────────────────────────────────────────────────┘
-```
+- **Traders and investors** — run automated strategies, monitor markets, and move faster on research
+- **Analysts, operators, and finance teams** — automate reporting, reconciliation, intake, and back-office workflows
+- **Job seekers and independent professionals** — automate a full pipeline: company discovery, contact research, personalized outreach, and application tracking
+- **Finance and tax filers** — process bank statements, reconcile transactions, and prepare crypto and traditional tax filings
+- **Knowledge workers** — keep chat, files, notes, automations, and approvals in one place
 
-## Project Structure
+---
 
-```text
-seren-desktop/
-├── src/                      # SolidJS frontend
-│   ├── components/
-│   │   ├── agent/           # Agent permission dialog, diff proposals
-│   │   ├── auth/            # SignIn
-│   │   ├── chat/            # Chat, agents, voice input, thinking display
-│   │   ├── common/          # Header, status bar, about dialog
-│   │   ├── editor/          # Monaco, file tabs, inline edit, viewers
-│   │   ├── gateway/         # Gateway tool approval
-│   │   ├── layout/          # AppShell, thread sidebar, titlebar, tab bar
-│   │   ├── mcp/             # MCP tools, resources, OAuth, x402 approval
-│   │   ├── settings/        # Providers, MCP servers, OpenClaw config
-│   │   ├── shell/           # Shell command approval
-│   │   ├── sidebar/         # File explorer, database panel, indexing, skills
-│   │   ├── tasks/           # Agent tasks panel, task items, status badges
-│   │   └── wallet/          # Deposits, transactions, daily claim
-│   ├── services/            # API clients (chat, ACP, MCP, wallet, memory, skills, tasks)
-│   ├── stores/              # SolidJS stores (state management)
-│   └── lib/                 # Utilities (indexing, audio, commands, rendering)
-├── src-tauri/               # Rust backend
-│   ├── src/
-│   │   ├── provider_runtime.rs  # Agent provider runtime (Claude Code, Codex)
-│   │   ├── auth.rs          # Authentication and token management
-│   │   ├── orchestrator/    # Task classifier, model router, RLM, ITR, workers
-│   │   ├── openclaw.rs      # OpenClaw messaging integration
-│   │   ├── skills.rs        # Skills system management
-│   │   ├── terminal.rs      # Terminal process management
-│   │   ├── sandbox.rs       # macOS sandbox profiles (GPG-aware)
-│   │   ├── shell.rs         # Shell command execution
-│   │   ├── mcp.rs           # MCP server management
-│   │   ├── embedded_runtime.rs  # Bundled Node.js/npm/ACP runtime
-│   │   ├── oauth.rs         # OAuth callback server
-│   │   ├── files.rs         # File system operations
-│   │   ├── sync.rs          # Data synchronization
-│   │   ├── commands/        # Tauri commands (chat, indexing, memory, skills, web, CLI installer)
-│   │   ├── services/        # Vector store, chunker, indexer, database
-│   │   └── wallet/          # x402 payments, Ethereum signing
-│   └── embedded-runtime/    # Bundled runtimes and OpenClaw
-├── tests/                   # E2E tests (Playwright)
-├── build/                   # Platform-specific build scripts
-└── .github/workflows/       # CI, release, and autonomous agent-fix automation
-```
+## What you can do
 
-## Tech Stack
+### Install AI skills for real workflows
 
-| Layer | Technology |
-| ----- | ---------- |
-| Frontend | SolidJS 1.8+, TypeScript 5+, Vite |
-| Backend | Rust, Tauri 2.0 |
-| Editor | Monaco Editor 0.52+ |
-| Vector Store | sqlite-vec (semantic search) |
-| Memory | seren-memory-sdk (persistent context) |
-| Skills | AgentSkills.io standard |
-| State | SolidJS stores |
-| Styling | Plain CSS |
-| Storage | tauri-plugin-store (encrypted) |
-| Crypto | alloy-rs (Ethereum signing) |
-| ACP | agent-client-protocol |
-| MCP | rmcp (Model Context Protocol) |
-| Linting | Biome 2.3+ |
-| Testing | Vitest (unit), Playwright (e2e) |
+Install a skill and let an AI agent handle the work — 24/7, within the limits you set. Agents connect to your accounts, execute your strategy, and report back. You stay in control.
 
-## Configuration
+Under the hood, skills can call hosted publishers and services on demand, so the same workspace can mix trading actions, research tools, notes, databases, and scheduled automations.
 
-### Environment Variables
+- **For traders and investors** — Crypto grid trading and smart DCA on Coinbase or Kraken, stock strategies through Alpaca, delta-neutral hedged shorts, DeFi yield workflows, and Polymarket prediction market automation
+- **For job seekers** — Full-pipeline job search automation: pull your resume and LinkedIn, discover 50 target companies via AlphaGrowth, research the top 20 with Perplexity and Exa, surface 100 hiring manager contacts via Apollo, generate personalized outreach, and automate parts of the application flow when the required integrations are available.
+- **For finance and tax filers** — Wells Fargo statement processing with LLM-assisted transaction categorization, crypto tax reconciliation (CARF / Form 8949), recurring transaction tracking, and cash flow reporting
+- **For borrowers and deal-makers** — Loan qualification, commercial mortgage introductions, institutional deal workflows, and grant intake
+- **For research and business work** — Apollo prospecting, browser automation, AI governance assessments, and other publisher-backed tasks
+- **Built into Seren Desktop** — Browse and launch all of these workflows from the built-in skill catalog
 
-Create `.env.local` for local development:
+Browse the full catalog at [serendb.com/skills](https://serendb.com/skills) or [github.com/serenorg/seren-skills](https://github.com/serenorg/seren-skills).
 
-```env
-VITE_SEREN_API_URL=https://api.serendb.com
-```
+### Research faster with top AI models
 
-### Provider API Keys
+Ask questions, get analysis, draft notes, briefs, and reports, or talk through a strategy — using Claude, GPT, or Gemini from a single app. Seren picks the right model for your question, or you choose.
 
-You can use Seren's gateway (default) or configure direct API access:
+- Let Seren route to the right model, or choose one yourself
+- Work on multiple conversations simultaneously in separate tabs
+- Conversation history saved locally on your machine
+- Attach images or use voice input
 
-1. Open **Settings** (gear icon)
-2. Navigate to **Providers**
-3. Enter API keys for Anthropic, OpenAI, or Google
+### Keep context from one session to the next
 
-## Contributing
+Seren keeps track of important context across sessions so you don't have to re-explain your situation each time.
 
-We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+- Recalls relevant notes, past conversations, and project context automatically
+- Organized by project so memories stay focused
+- Optional memory sync when you want the same context on multiple devices
 
-### Bug Reports & Feature Requests
+### Connect your accounts and tools
 
-Report bugs and request features in our [GitHub Issues](https://github.com/serenorg/seren-desktop/issues).
+Link Seren to the services and platforms your agents need to operate.
 
-### Development Workflow
+- **Exchanges, brokerages, and banks** — Coinbase, Kraken, Alpaca, Wells Fargo, and more
+- **Seren services** — SerenCloud for cloud agent hosting, SerenNotes for hosted notes and optional memory sync, SerenCron for scheduled jobs, SerenEmbed for vector embeddings, SerenCouncil for multi-model consensus, SerenWhisper for speech-to-text, and SerenSwarm for multi-agent coordination
+- **External tools and data sources** — Apollo, Perplexity, Exa, AlphaGrowth, Firecrawl, broker/data integrations, and other specialist capabilities
+- **Browser automation** — Playwright-based automation for web workflows that need form filling, scraping, or step-by-step interaction
+- **Messaging and alerts** — Slack, Discord, Telegram, or Signal for notifications and operator workflows
+- **Catalog + MCP tools** — Browse and activate from the built-in catalog with one click
 
-1. Fork the repository
-2. Create a feature branch in a worktree:
+### Work with files in the same app
 
-   ```bash
-   git worktree add ../.worktrees/feature-name -b feature/feature-name
-   ```
+Open the files you are already using without leaving the app. Ask AI to summarize, explain, or extract what matters from any open file.
 
-3. Make changes and test: `pnpm test`
-4. Commit with conventional commits: `git commit -m "feat: add feature"`
-5. Push and open a PR
+- Open PDFs, images, markdown, text, and code side by side
+- AI-assisted editing — highlight text and ask AI to rewrite, summarize, or improve it
+- Save useful outputs to notes and reusable memory
 
-### Good First Issues
+### Launch agents into the cloud
 
-Look for issues labeled [`good first issue`](https://github.com/serenorg/seren-desktop/labels/good%20first%20issue).
+Seren is designed to launch agents that keep working when your laptop is closed. Run a skill as a hosted workflow, or create a custom agent from a prompt and let Seren handle the cloud runtime.
 
-## Documentation
+- Turn a trading skill into an always-on bot that can place trades or notify you when a signal appears
+- Launch scheduled or long-running agents for monitoring, reporting, intake, and follow-up workflows
+- Create prompt-based custom agents for market briefs, research monitors, ops routing, and other repeatable tasks
+- Track task status and outputs from Seren Desktop while the work runs in Seren Cloud
 
-- [Contributing Guide](CONTRIBUTING.md)
-- [Security Policy](SECURITY.md)
-- [Seren Documentation](https://docs.serendb.com)
-- [Skills Repository](https://github.com/serenorg/seren-skills)
+### Security and control
 
-## License
+- All credentials stored with OS-level encryption — never in plain text
+- All connections made over HTTPS
+- Agents operate within the limits and permissions you define — no surprises
+- Option to connect directly to AI providers using your own API keys
 
-MIT License - see [LICENSE](LICENSE)
+### Pay as you go
+
+No subscription required. Use SerenBucks credits to pay only for what you use.
+
+- Top up with a credit card or USDC crypto
+- Set automatic top-ups so you never run dry mid-session
+
+---
+
+## How it works
+
+Seren Desktop is the **open source workspace**. Around it are three product layers:
+
+- **Desktop app** — your local workspace for chat, files, notes, approvals, and task tracking
+- **Skills, publishers, and Seren Cloud** — installable workflows from the skills catalog plus hosted agents and services for trading, browser work, research, notes, and other tasks
+- **Seren Gateway and SerenDB** — authentication, model routing, billing, wallet funding, optional memory sync, hosted notes, integrations, and the database layer behind persistent projects and structured workflows
+
+Think of it as one workspace connected to a marketplace of skills, publishers, and cloud services.
+
+In Seren, a publisher is a service or data source your agent can call when needed. That can mean a broker integration, a note store, a cron service, a consensus service, an embedding pipeline, or a database-backed workflow.
+
+Most day-to-day workspace state stays local. Some features use Seren services when you sign in, sync memories, save notes, fund your wallet, or call hosted tools.
+
+---
 
 ## Links
 
 - [Seren Website](https://serendb.com)
-- [Seren Documentation](https://docs.serendb.com)
+- [Documentation](https://docs.serendb.com)
+- [Skills Repository](https://github.com/serenorg/seren-skills)
 - [Discord Community](https://discord.gg/seren)
-- [GitHub Issues](https://github.com/serenorg/seren-desktop/issues)
