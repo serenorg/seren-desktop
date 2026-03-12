@@ -387,8 +387,8 @@ const [state, setState] = createStore<AgentState>({
 let globalUnsubscribe: UnlistenFn | null = null;
 const pendingSessionEvents = new Map<string, AgentEvent[]>();
 
-/** Guard against concurrent auto-recovery spawns in sendPrompt. */
-let recoveryInFlight: Promise<string | null> | null = null;
+/** Guard against concurrent auto-recovery spawns in sendPrompt (per-session). */
+const recoveryInFlightMap = new Map<string, Promise<string | null>>();
 const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
 
 // Chunk accumulation buffers — plain JS, not reactive.
@@ -437,7 +437,7 @@ function disposeAgentStoreRuntimeBindings(): void {
   }
   pendingSessionEvents.clear();
   sessionReadyPromises.clear();
-  recoveryInFlight = null;
+  recoveryInFlightMap.clear();
   for (const timer of chunkFlushTimers.values()) {
     clearTimeout(timer);
   }
@@ -1915,14 +1915,16 @@ Summary:`;
       return;
     }
 
-    // If auto-recovery is in-flight (triggered by another sendPrompt call),
-    // wait for it to complete. Recovery already retries the original prompt,
-    // so proceeding would race and cause "Another prompt is already active".
-    if (recoveryInFlight) {
+    // If auto-recovery is in-flight for THIS session (triggered by another
+    // sendPrompt call), wait for it. Recovery already retries the original
+    // prompt, so proceeding would race and cause "Another prompt is already
+    // active". Recovery on OTHER sessions must NOT block this one.
+    const thisRecovery = recoveryInFlightMap.get(sessionId);
+    if (thisRecovery) {
       console.info(
-        "[AgentStore] sendPrompt: recovery in-flight, waiting before proceeding...",
+        `[AgentStore] sendPrompt: recovery in-flight for ${sessionId}, waiting before proceeding...`,
       );
-      await recoveryInFlight;
+      await thisRecovery;
       const refreshed = state.sessions[sessionId];
       if (!refreshed) {
         console.info(
@@ -1951,11 +1953,12 @@ Summary:`;
     }
 
     // Re-check after async waits — recovery may have started while we waited.
-    if (recoveryInFlight) {
+    const thisRecoveryAfterWait = recoveryInFlightMap.get(sessionId);
+    if (thisRecoveryAfterWait) {
       console.info(
-        "[AgentStore] sendPrompt: recovery started during ready-wait, deferring...",
+        `[AgentStore] sendPrompt: recovery started during ready-wait for ${sessionId}, deferring...`,
       );
-      await recoveryInFlight;
+      await thisRecoveryAfterWait;
       const refreshed = state.sessions[sessionId];
       if (!refreshed || refreshed.info.status === "prompting") {
         console.info(
@@ -2062,13 +2065,14 @@ Summary:`;
         isForceStop ||
         (!message.includes("Task cancelled") && isDeadSession)
       ) {
-        // If another recovery is already in-flight, wait for it instead of
-        // spawning a duplicate session.
-        if (recoveryInFlight) {
+        // If another recovery is already in-flight for this session, wait
+        // for it instead of spawning a duplicate session.
+        const existingRecovery = recoveryInFlightMap.get(sessionId);
+        if (existingRecovery) {
           console.info(
-            "[AgentStore] Recovery already in-flight, waiting for it...",
+            `[AgentStore] Recovery already in-flight for ${sessionId}, waiting for it...`,
           );
-          await recoveryInFlight;
+          await existingRecovery;
           return;
         }
 
@@ -2188,11 +2192,12 @@ Summary:`;
           return newSessionId;
         };
 
-        recoveryInFlight = doRecovery().finally(() => {
-          recoveryInFlight = null;
+        const recoveryPromise = doRecovery().finally(() => {
+          recoveryInFlightMap.delete(sessionId);
         });
+        recoveryInFlightMap.set(sessionId, recoveryPromise);
 
-        const newSessionId = await recoveryInFlight;
+        const newSessionId = await recoveryPromise;
         if (!newSessionId) {
           setState("error", "Session died and could not be restarted.");
         }
