@@ -3346,6 +3346,17 @@ Summary:`;
 
     // Finalize assistant content if any
     if (session.streamingContent) {
+      // Skill context is injected into every prompt as additional context and
+      // echoed back by the provider as an assistant message during session
+      // replay. Discard these — they are system prompts, not conversation
+      // content, and should never appear as visible chat messages.
+      if (session.streamingContent.trimStart().startsWith("## Skill:")) {
+        setState("sessions", sessionId, "streamingContent", "");
+        setState("sessions", sessionId, "streamingContentTimestamp", undefined);
+        setState("sessions", sessionId, "promptStartTime", undefined);
+        return;
+      }
+
       // Calculate duration if we have a start time
       const duration = session.promptStartTime
         ? Date.now() - session.promptStartTime
