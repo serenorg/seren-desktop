@@ -1364,13 +1364,33 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   </Show>
                   <button
                     type="button"
-                    class="px-4 py-2 bg-success text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="inline-flex items-center gap-2 px-4 py-2 bg-success text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={retrySessionConnection}
                     disabled={agentStore.isLoading || !hasFolderOpen()}
                   >
-                    {agentStore.isLoading
-                      ? "Reconnecting..."
-                      : "Retry Connection"}
+                    <Show when={agentStore.isLoading}>
+                      <svg
+                        class="animate-spin w-4 h-4 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <circle
+                          class="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          stroke-width="4"
+                        />
+                        <path
+                          class="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                    </Show>
+                    {agentStore.isLoading ? "Reconnecting..." : "Retry Connection"}
                   </button>
                 </div>
               </div>
