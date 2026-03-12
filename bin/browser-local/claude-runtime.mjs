@@ -1156,6 +1156,20 @@ export function createClaudeRuntime({ emit }) {
     };
   }
 
+  function claudeModeFromApprovalPolicy(approvalPolicy) {
+    switch (approvalPolicy) {
+      case "on-request":
+      case "untrusted":
+        return "default";
+      case "on-failure":
+        return "acceptEdits";
+      case "never":
+        return "bypassPermissions";
+      default:
+        return "default";
+    }
+  }
+
   async function spawnSession(params) {
     const {
       cwd,
@@ -1163,6 +1177,7 @@ export function createClaudeRuntime({ emit }) {
       resumeAgentSessionId,
       apiKey,
       mcpServers,
+      approvalPolicy,
       timeoutSecs,
     } = params;
 
@@ -1206,12 +1221,14 @@ export function createClaudeRuntime({ emit }) {
       });
     });
 
+    const resolvedMode = claudeModeFromApprovalPolicy(approvalPolicy);
     const session = createSessionRecord({
       sessionId,
       cwd,
       processHandle,
       timeoutSecs,
       agentSessionId: remoteSessionId,
+      currentModeId: resolvedMode,
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
       spawnEnv: mcpConfig.childEnv,
     });
@@ -1236,6 +1253,21 @@ export function createClaudeRuntime({ emit }) {
           session.availableModelRecords,
         ) ??
         session.currentModelId;
+
+      // Sync the permission mode with Claude CLI so it sends control_request
+      // messages for tool approval instead of auto-approving everything.
+      if (resolvedMode !== "bypassPermissions") {
+        await sendControlRequest(
+          session,
+          { subtype: "set_permission_mode", mode: resolvedMode },
+          10_000,
+        ).catch((err) => {
+          console.warn(
+            `[browser-local][claude] Failed to set permission mode "${resolvedMode}":`,
+            err.message,
+          );
+        });
+      }
 
       if (resumeAgentSessionId) {
         await replayClaudeHistoryBestEffort(
