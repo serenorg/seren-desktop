@@ -211,6 +211,11 @@ export interface ActiveSession {
    *  event from the new session. Prevents the agent's initial announcement from
    *  overwriting values restored during compaction or recovery. */
   pendingConfigRestore?: Record<string, string>;
+  /** When true, keep discarding streaming content until the current turn ends
+   *  (promptComplete). Set when the first chunk of skill context is filtered so
+   *  that subsequent chunks of the same skill block — which arrive without the
+   *  '# Active Skills' header — are also suppressed. */
+  isSkippingSkillContext?: boolean;
 }
 
 // ============================================================================
@@ -2620,6 +2625,8 @@ Summary:`;
         }
         this.flushPendingUserMessage(sessionId);
         this.finalizeStreamingContent(sessionId);
+        // Each promptComplete ends a turn; the next turn may have real content.
+        setState("sessions", sessionId, "isSkippingSkillContext", undefined);
         if (!isHistoryReplay) {
           this.markPendingToolCallsComplete(sessionId);
 
@@ -2913,6 +2920,15 @@ Summary:`;
     // During history replay skip mode, discard the buffered replay text
     // instead of appending it (restored SQLite messages are authoritative).
     if (session.skipHistoryReplay) {
+      setState("sessions", sessionId, "pendingUserMessage", "");
+      setState("sessions", sessionId, "pendingUserMessageId", undefined);
+      setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
+      return;
+    }
+
+    // Skill context can arrive as a userMessage event when the provider stores
+    // context items as user turns. Discard it — same as in finalizeStreamingContent.
+    if (session.pendingUserMessage.trimStart().startsWith("# Active Skills")) {
       setState("sessions", sessionId, "pendingUserMessage", "");
       setState("sessions", sessionId, "pendingUserMessageId", undefined);
       setState("sessions", sessionId, "pendingUserMessageTimestamp", undefined);
@@ -3355,7 +3371,17 @@ Summary:`;
       // echoed back by the provider as an assistant message during session
       // replay. Discard these — they are system prompts, not conversation
       // content, and should never appear as visible chat messages.
-      if (session.streamingContent.trimStart().startsWith("# Active Skills")) {
+      //
+      // The content can arrive split across multiple finalizeStreamingContent
+      // calls: the first chunk starts with '# Active Skills' (caught here), but
+      // subsequent chunks of the same block start mid-content. The
+      // isSkippingSkillContext flag ensures those continuations are also dropped.
+      const isSkillContextStart =
+        session.streamingContent.trimStart().startsWith("# Active Skills");
+      if (isSkillContextStart || session.isSkippingSkillContext) {
+        if (isSkillContextStart) {
+          setState("sessions", sessionId, "isSkippingSkillContext", true);
+        }
         setState("sessions", sessionId, "streamingContent", "");
         setState("sessions", sessionId, "streamingContentTimestamp", undefined);
         setState("sessions", sessionId, "promptStartTime", undefined);
