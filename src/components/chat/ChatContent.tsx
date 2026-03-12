@@ -263,6 +263,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
   });
 
+  // Suppress the native browser context menu on file links so "Open Link"
+  // doesn't navigate the WebView. The JS click handler opens the editor instead.
+  const handleContextMenu = (event: MouseEvent) => {
+    if ((event.target as HTMLElement).closest(".external-link")) {
+      event.preventDefault();
+    }
+  };
+
   // Click handler for copy buttons and external links (event delegation)
   const handleCopyClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
@@ -287,9 +295,15 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               : root
                 ? `${root.replace(/\/$/, "")}/${url}`
                 : url;
-          openFileInTab(resolved).catch((err) =>
-            console.warn("[ChatContent] Failed to open file:", resolved, err),
-          );
+          openFileInTab(resolved)
+            .then(() => {
+              window.dispatchEvent(
+                new CustomEvent("seren:open-panel", { detail: "editor" }),
+              );
+            })
+            .catch((err) =>
+              console.warn("[ChatContent] Failed to open file:", resolved, err),
+            );
         } else {
           openExternalLink(url);
         }
@@ -345,6 +359,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // Register copy button handler on document for better reliability
     // Using document-level delegation ensures copy buttons work even if messagesRef timing is off
     document.addEventListener("click", handleCopyClick);
+    document.addEventListener("contextmenu", handleContextMenu);
 
     // Listen for slash command events
     window.addEventListener("seren:pick-images", handlePickImages);
@@ -389,6 +404,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   onCleanup(() => {
     document.removeEventListener("click", handleCopyClick);
+    document.removeEventListener("contextmenu", handleContextMenu);
     window.removeEventListener(
       "seren:pick-images",
       handlePickImages as EventListener,

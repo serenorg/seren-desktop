@@ -3350,7 +3350,7 @@ Summary:`;
       // echoed back by the provider as an assistant message during session
       // replay. Discard these — they are system prompts, not conversation
       // content, and should never appear as visible chat messages.
-      if (session.streamingContent.trimStart().startsWith("## Skill:")) {
+      if (session.streamingContent.trimStart().startsWith("# Active Skills")) {
         setState("sessions", sessionId, "streamingContent", "");
         setState("sessions", sessionId, "streamingContentTimestamp", undefined);
         setState("sessions", sessionId, "promptStartTime", undefined);
