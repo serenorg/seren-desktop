@@ -1247,6 +1247,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         ref={messagesRef}
         onScroll={handleMessagesScroll}
         class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-surface-3 [&::-webkit-scrollbar-thumb]:rounded"
+        onContextMenu={(e) => {
+          if ((e.target as HTMLElement).closest(".external-link")) {
+            e.preventDefault();
+          }
+        }}
         onClick={(e) => {
           const target = e.target as HTMLElement;
           const link = target.closest(".external-link") as HTMLAnchorElement;
