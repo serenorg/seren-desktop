@@ -244,7 +244,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // the Codex thread's controls, ready-state, and send behaviour.
   const threadSession = createMemo(() => {
     const thread = activeAgentThread();
-    if (!thread) return agentStore.activeSession;
+    if (!thread) return null;
     return agentStore.getSessionForConversation(thread.id);
   });
   const threadSessionId = createMemo(() => threadSession()?.info.id ?? null);
