@@ -15,6 +15,33 @@ import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 
+const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
+
+function persistLastActiveThread(id: string, kind: "chat" | "agent"): void {
+  try {
+    localStorage.setItem(LAST_ACTIVE_THREAD_KEY, JSON.stringify({ id, kind }));
+  } catch {
+    // Non-fatal
+  }
+}
+
+function loadLastActiveThread(): { id: string; kind: "chat" | "agent" } | null {
+  try {
+    const raw = localStorage.getItem(LAST_ACTIVE_THREAD_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed?.id === "string" &&
+      (parsed?.kind === "chat" || parsed?.kind === "agent")
+    ) {
+      return parsed as { id: string; kind: "chat" | "agent" };
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -284,6 +311,7 @@ export const threadStore = {
    */
   selectThread(id: string, kind: "chat" | "agent") {
     setState({ activeThreadId: id, activeThreadKind: kind });
+    persistLastActiveThread(id, kind);
 
     // Keep the project context aligned with the selected thread.
     const thread = this.threads.find((t) => t.id === id);
@@ -499,10 +527,24 @@ export const threadStore = {
 
   /**
    * Sync thread state from underlying stores. Call after auth or on mount.
+   * Restores the last-active thread after loading so the user sees the same
+   * thread they had open before an upgrade restart.
    */
   async refresh() {
     await conversationStore.loadHistory();
     await agentStore.refreshRecentAgentConversations(200);
+
+    // Only restore if no thread is already active (e.g. deep-linked navigation).
+    if (state.activeThreadId) return;
+
+    const last = loadLastActiveThread();
+    if (!last) return;
+
+    // Verify the thread still exists in the loaded list before selecting it.
+    const exists = this.threads.some((t) => t.id === last.id);
+    if (exists) {
+      this.selectThread(last.id, last.kind);
+    }
   },
 
   /**
@@ -514,5 +556,10 @@ export const threadStore = {
       activeThreadKind: null,
       preferChat: false,
     });
+    try {
+      localStorage.removeItem(LAST_ACTIVE_THREAD_KEY);
+    } catch {
+      // Non-fatal
+    }
   },
 };
