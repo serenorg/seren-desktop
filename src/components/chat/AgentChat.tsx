@@ -729,9 +729,25 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const queue = messageQueue();
     if (queue.length === 0 || !isReady()) return;
 
+    // Capture thread identity synchronously before any async gap.
+    // threadSessionId() must be locked in NOW — after an await the active
+    // thread may have changed, which would cause the message to be sent to
+    // the wrong session.
+    const drainThreadId = activeAgentThread()?.id;
+    const drainSessionId = threadSessionId();
+    if (!drainThreadId || !drainSessionId) return;
+
     queueDraining = true;
     const [nextMessage, ...remaining] = queue;
     setMessageQueue(remaining);
+    // Keep threadQueues in sync so the Map and signal never diverge.
+    // Without this, a component remount during an active drain would
+    // restore a stale threadQueues entry and re-send already-sent messages.
+    if (remaining.length > 0) {
+      threadQueues.set(drainThreadId, remaining);
+    } else {
+      threadQueues.delete(drainThreadId);
+    }
     console.log("[AgentChat] Processing queued message:", nextMessage);
 
     try {
@@ -739,7 +755,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         nextMessage,
         undefined,
         undefined,
-        threadSessionId() ?? undefined,
+        drainSessionId,
       );
     } catch (error) {
       console.error("[AgentChat] Queued message failed:", error);
@@ -747,8 +763,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
     queueDraining = false;
     // After the prompt completes, promptComplete has already set status
-    // back to "ready" — check if there are more messages to process.
-    processNextQueuedMessage();
+    // back to "ready" — only continue draining if still on the same thread.
+    // If the user switched threads during the await, let the isReady effect
+    // for that thread handle its own queue instead of spilling over here.
+    if (activeAgentThread()?.id === drainThreadId) {
+      processNextQueuedMessage();
+    }
   };
 
   // Trigger queue drain when agent becomes ready
@@ -1395,7 +1415,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                         />
                       </svg>
                     </Show>
-                    {agentStore.isLoading ? "Reconnecting..." : "Retry Connection"}
+                    {agentStore.isLoading
+                      ? "Reconnecting..."
+                      : "Retry Connection"}
                   </button>
                 </div>
               </div>
