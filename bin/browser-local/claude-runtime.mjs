@@ -1160,13 +1160,12 @@ export function createClaudeRuntime({ emit }) {
     switch (approvalPolicy) {
       case "on-request":
       case "untrusted":
-        return "default";
       case "on-failure":
         return "acceptEdits";
       case "never":
         return "bypassPermissions";
       default:
-        return "default";
+        return "acceptEdits";
     }
   }
 
