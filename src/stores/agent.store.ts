@@ -511,7 +511,11 @@ function isRetryableClaudeInitError(message: string): boolean {
   return (
     lower.includes("server shut down unexpectedly") ||
     lower.includes("signal: 9") ||
-    lower.includes("sigkill")
+    lower.includes("sigkill") ||
+    // Claude MCP initialize handshake can time out under load (another session
+    // active, slow startup, machine pressure). This is transient — retrying
+    // with backoff succeeds without any user intervention needed.
+    lower.includes("timed out waiting for claude control request initialize")
   );
 }
 
@@ -3376,8 +3380,9 @@ Summary:`;
       // calls: the first chunk starts with '# Active Skills' (caught here), but
       // subsequent chunks of the same block start mid-content. The
       // isSkippingSkillContext flag ensures those continuations are also dropped.
-      const isSkillContextStart =
-        session.streamingContent.trimStart().startsWith("# Active Skills");
+      const isSkillContextStart = session.streamingContent
+        .trimStart()
+        .startsWith("# Active Skills");
       if (isSkillContextStart || session.isSkippingSkillContext) {
         if (isSkillContextStart) {
           setState("sessions", sessionId, "isSkippingSkillContext", true);
