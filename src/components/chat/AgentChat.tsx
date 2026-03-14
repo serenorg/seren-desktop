@@ -212,7 +212,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       setInput(detail);
       inputRef?.focus();
     } else if (detail && typeof detail === "object") {
-      setInput(detail.text);
+      setInput(detail.text ?? "");
       inputRef?.focus();
 
       // Auto-send if requested (e.g., from skill click)
@@ -871,7 +871,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         }
         const newIndex = Math.min(historyIndex() + 1, history.length - 1);
         setHistoryIndex(newIndex);
-        setInput(history[newIndex]);
+        setInput(history[newIndex] ?? "");
         queueMicrotask(() => {
           textarea.setSelectionRange(
             textarea.value.length,
@@ -892,7 +892,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           setInput(savedInput());
           setSavedInput("");
         } else {
-          setInput(history[newIndex]);
+          setInput(history[newIndex] ?? "");
         }
         queueMicrotask(() => {
           textarea.setSelectionRange(
@@ -1741,7 +1741,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             />
             <div class="relative">
               <SlashCommandPopup
-                input={input()}
+                input={input() ?? ""}
                 panel="agent"
                 selectedIndex={commandPopupIndex()}
                 onSelect={(cmd) => {
@@ -1756,7 +1756,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               />
               <ResizableTextarea
                 ref={(el) => (inputRef = el)}
-                value={input()}
+                value={input() ?? ""}
                 placeholder={
                   isPrompting()
                     ? "Type to queue message..."
@@ -1822,7 +1822,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                       type="submit"
                       class="px-4 py-1.5 bg-success text-white rounded-md text-[13px] font-medium hover:bg-emerald-700 transition-colors disabled:bg-surface-2 disabled:text-muted-foreground disabled:cursor-not-allowed"
                       disabled={
-                        !hasSession() || !input().trim() || isProcessingDocs()
+                        !hasSession() ||
+                        !(input() ?? "").trim() ||
+                        isProcessingDocs()
                       }
                     >
                       Send

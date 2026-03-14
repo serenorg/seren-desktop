@@ -17,7 +17,7 @@ export function SlashCommandPopup(props: SlashCommandPopupProps) {
   const matches = () => {
     const result = getCompletions(props.input, props.panel);
     // Debug logging to trace slash command matching
-    if (props.input.startsWith("/")) {
+    if (props.input?.startsWith("/")) {
       console.log(
         "[SlashCommandPopup] Input:",
         props.input,
