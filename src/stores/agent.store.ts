@@ -1141,7 +1141,7 @@ export const agentStore = {
       } catch (raceError) {
         const message =
           raceError instanceof Error ? raceError.message : String(raceError);
-        if (message.includes("timed out")) {
+        if (message.toLowerCase().includes("timed out")) {
           console.warn(
             "[AgentStore] Timeout waiting for ready, proceeding anyway",
           );
