@@ -430,6 +430,9 @@ function stringifyToolResultContent(content) {
 }
 
 function emitToolCall(emit, session, toolName, input, toolUseId, status = "in_progress") {
+  if (typeof toolUseId === "string" && toolUseId.length > 0) {
+    session.toolInputs.set(toolUseId, input ?? {});
+  }
   const title = resolveToolTitle(toolName, input);
   emit("provider://tool-call", {
     sessionId: session.id,
@@ -525,6 +528,12 @@ function buildClaudeArgs({
     "stream-json",
     "--include-partial-messages",
     "--replay-user-messages",
+    // Claude only emits approval requests over stream-json when explicitly
+    // bridged over stdio; otherwise tools fail with `permission_denials`.
+    "--permission-prompt-tool",
+    "stdio",
+    // Allow switching into bypassPermissions later from the UI footer.
+    "--allow-dangerously-skip-permissions",
   ];
 
   if (mcpConfigJson) {
@@ -813,7 +822,13 @@ function handlePermissionRequest(emit, session, payload) {
   const toolName =
     payload.request.tool_name ?? payload.request.toolName ?? "Tool";
   const toolInput =
-    payload.request.tool_input ?? payload.request.toolInput ?? {};
+    payload.request.input ??
+    payload.request.tool_input ??
+    payload.request.toolInput ??
+    session.toolInputs.get(
+      payload.request.tool_use_id ?? payload.request.toolUseId ?? "",
+    ) ??
+    {};
   const toolUseId =
     payload.request.tool_use_id ?? payload.request.toolUseId ?? randomUUID();
 
@@ -887,12 +902,22 @@ function handleSystemMessage(emit, session, payload) {
       if (typeof payload.claude_code_version === "string") {
         session.claudeVersion = payload.claude_code_version;
       }
+      if (typeof payload.permissionMode === "string") {
+        session.currentModeId = payload.permissionMode;
+      }
       session.currentModelId =
         session.currentModelId ??
         inferCurrentModelId(payload.model, session.availableModelRecords);
       emit("provider://session-status", buildSessionStatus(session));
       return;
     }
+
+    case "status":
+      if (typeof payload.permissionMode === "string") {
+        session.currentModeId = payload.permissionMode;
+      }
+      emit("provider://session-status", buildSessionStatus(session));
+      return;
 
     case "hook_response":
       if (payload.outcome === "error" && payload.stderr) {
@@ -1145,6 +1170,7 @@ export function createClaudeRuntime({ emit }) {
       currentPrompt: null,
       currentPromptHasChunks: false,
       allowedTools: new Set(),
+      toolInputs: new Map(),
       agentSessionId,
       timeoutSecs: timeoutSecs ?? undefined,
       claudeVersion: null,
@@ -1227,7 +1253,7 @@ export function createClaudeRuntime({ emit }) {
       processHandle,
       timeoutSecs,
       agentSessionId: remoteSessionId,
-      currentModeId: resolvedMode,
+      currentModeId: "default",
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
       spawnEnv: mcpConfig.childEnv,
     });
@@ -1253,20 +1279,14 @@ export function createClaudeRuntime({ emit }) {
         ) ??
         session.currentModelId;
 
-      // Sync the permission mode with Claude CLI. This must be sent for ALL
-      // modes including bypassPermissions — without it Claude CLI stays in
-      // default mode with its seatbelt active, which blocks writes outside cwd
-      // and never sends control_request, so our permission dialog never fires.
+      // The launched session stays in its default permission flow until we
+      // explicitly switch modes over the control channel.
       await sendControlRequest(
         session,
         { subtype: "set_permission_mode", mode: resolvedMode },
         10_000,
-      ).catch((err) => {
-        console.warn(
-          `[browser-local][claude] Failed to set permission mode "${resolvedMode}":`,
-          err.message,
-        );
-      });
+      );
+      session.currentModeId = resolvedMode;
 
       if (resumeAgentSessionId) {
         await replayClaudeHistoryBestEffort(
@@ -1432,8 +1452,6 @@ export function createClaudeRuntime({ emit }) {
       throw new Error(`Unsupported Claude mode: ${mode}`);
     }
 
-    session.currentModeId = mode;
-
     await sendControlRequest(
       session,
       {
@@ -1441,10 +1459,9 @@ export function createClaudeRuntime({ emit }) {
         mode,
       },
       10_000,
-    ).catch(() => {
-      // Best-effort sync only.
-    });
+    );
 
+    session.currentModeId = mode;
     emit("provider://session-status", buildSessionStatus(session));
   }
 
