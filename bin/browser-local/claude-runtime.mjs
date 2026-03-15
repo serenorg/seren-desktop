@@ -1253,20 +1253,20 @@ export function createClaudeRuntime({ emit }) {
         ) ??
         session.currentModelId;
 
-      // Sync the permission mode with Claude CLI so it sends control_request
-      // messages for tool approval instead of auto-approving everything.
-      if (resolvedMode !== "bypassPermissions") {
-        await sendControlRequest(
-          session,
-          { subtype: "set_permission_mode", mode: resolvedMode },
-          10_000,
-        ).catch((err) => {
-          console.warn(
-            `[browser-local][claude] Failed to set permission mode "${resolvedMode}":`,
-            err.message,
-          );
-        });
-      }
+      // Sync the permission mode with Claude CLI. This must be sent for ALL
+      // modes including bypassPermissions — without it Claude CLI stays in
+      // default mode with its seatbelt active, which blocks writes outside cwd
+      // and never sends control_request, so our permission dialog never fires.
+      await sendControlRequest(
+        session,
+        { subtype: "set_permission_mode", mode: resolvedMode },
+        10_000,
+      ).catch((err) => {
+        console.warn(
+          `[browser-local][claude] Failed to set permission mode "${resolvedMode}":`,
+          err.message,
+        );
+      });
 
       if (resumeAgentSessionId) {
         await replayClaudeHistoryBestEffort(
