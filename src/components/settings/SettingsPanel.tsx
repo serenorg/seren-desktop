@@ -156,10 +156,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             {(section) => (
               <button
                 type="button"
-                class={`flex items-center gap-2.5 px-3 py-2.5 bg-transparent border-none rounded-md cursor-pointer text-[0.9rem] text-left transition-all duration-150 ${
+                class={`flex items-center gap-2.5 px-3 py-2.5 border-none rounded-md cursor-pointer text-[0.9rem] text-left transition-all duration-150 ${
                   activeSection() === section.id
                     ? "bg-accent text-white"
-                    : "text-muted-foreground hover:bg-border hover:text-foreground"
+                    : "bg-transparent text-muted-foreground hover:bg-border hover:text-foreground"
                 }`}
                 onClick={() => setActiveSection(section.id)}
               >
