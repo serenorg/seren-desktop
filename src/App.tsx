@@ -39,6 +39,7 @@ import {
   checkDailyClaim,
   resetWalletState,
   startAutoRefresh,
+  startDailyClaimPolling,
   stopAutoRefresh,
 } from "@/stores/wallet.store";
 import "./styles.css";
@@ -176,6 +177,7 @@ function App() {
         // Store cleanup to prevent effect accumulation
         cleanupAutoTopUp = initAutoTopUp();
         checkDailyClaim();
+        startDailyClaimPolling();
         // Push any locally-cached memories that failed to reach cloud (e.g. cold start)
         void syncMemories();
       });
