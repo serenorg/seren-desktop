@@ -37,6 +37,8 @@ interface WalletState {
   dailyClaimDismissed: boolean;
   /** Whether daily claim check is in progress */
   dailyClaimLoading: boolean;
+  /** Timer for periodic daily claim eligibility re-checks */
+  dailyClaimTimerId: ReturnType<typeof setInterval> | null;
 }
 
 /**
@@ -55,12 +57,16 @@ const initialState: WalletState = {
   dailyClaim: null,
   dailyClaimDismissed: false,
   dailyClaimLoading: false,
+  dailyClaimTimerId: null,
 };
 
 const [walletState, setWalletState] = createStore<WalletState>(initialState);
 
 // Refresh interval in milliseconds (60 seconds)
 const REFRESH_INTERVAL = 60_000;
+
+// Daily claim re-check interval (30 minutes)
+const DAILY_CLAIM_POLL_INTERVAL = 30 * 60 * 1_000;
 
 // Lock to prevent duplicate top-ups
 let topUpInProgress = false;
@@ -264,10 +270,46 @@ function dismissDailyClaim(): void {
 }
 
 /**
+ * Start periodic re-checking of daily claim eligibility.
+ * Surfaces the claim popup for long-running sessions that span midnight UTC.
+ */
+function startDailyClaimPolling(): void {
+  if (walletState.dailyClaimTimerId) return;
+
+  const timerId = setInterval(async () => {
+    const wasPreviouslyEligible = walletState.dailyClaim?.can_claim ?? false;
+    try {
+      const eligibility = await fetchDailyEligibility();
+      setWalletState("dailyClaim", eligibility);
+      // New eligibility appeared — reset dismiss so popup re-surfaces
+      if (!wasPreviouslyEligible && eligibility.can_claim) {
+        setWalletState("dailyClaimDismissed", false);
+      }
+    } catch {
+      // Silently ignore — don't clear existing state on transient errors
+    }
+  }, DAILY_CLAIM_POLL_INTERVAL);
+
+  setWalletState("dailyClaimTimerId", timerId);
+}
+
+/**
+ * Stop periodic daily claim eligibility re-checks.
+ */
+function stopDailyClaimPolling(): void {
+  const timerId = walletState.dailyClaimTimerId;
+  if (timerId) {
+    clearInterval(timerId);
+  }
+  setWalletState("dailyClaimTimerId", null);
+}
+
+/**
  * Reset wallet state (e.g., on logout).
  */
 function resetWalletState(): void {
   stopAutoRefresh();
+  stopDailyClaimPolling();
   setWalletState(initialState);
   topUpInProgress = false;
   consecutiveFailures = 0;
@@ -353,5 +395,7 @@ export {
   checkDailyClaim,
   claimDaily,
   dismissDailyClaim,
+  startDailyClaimPolling,
+  stopDailyClaimPolling,
   updateBalanceFromError,
 };
