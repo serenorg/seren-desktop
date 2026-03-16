@@ -773,12 +773,10 @@ pub async fn mcp_call_tool_http(
         .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
 
     let result = client
-        .call_tool(rmcp::model::CallToolRequestParams {
-            name: tool_name.into(),
-            arguments: Some(serde_json::from_value(arguments).unwrap_or_default()),
-            meta: None,
-            task: None,
-        })
+        .call_tool(
+            rmcp::model::CallToolRequestParams::new(tool_name)
+                .with_arguments(serde_json::from_value(arguments).unwrap_or_default()),
+        )
         .await
         .map_err(|e| format!("Failed to call tool: {}", e))?;
 
