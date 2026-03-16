@@ -182,12 +182,22 @@ export const skillsStore = {
 
   /**
    * Check if a skill is installed.
+   * A slug match alone is not sufficient when the installed skill's dirName
+   * differs from its slug and has no sync state — that indicates a stale
+   * skill whose name-derived slug happens to collide with the repo skill.
    */
   isInstalled(skillId: string): boolean {
-    // Check by slug since installed skills have different IDs
     const skill = state.available.find((s) => s.id === skillId);
     if (!skill) return false;
-    return state.installed.some((s) => s.slug === skill.slug);
+    return state.installed.some((s) => {
+      if (s.slug !== skill.slug) return false;
+      // dirName matches slug — genuine install
+      if (s.dirName === s.slug) return true;
+      // dirName differs but has upstream sync state linking to this source — genuine install
+      if (s.syncState && s.upstreamSourceUrl) return true;
+      // dirName differs, no sync state — stale skill with coincidental slug collision
+      return false;
+    });
   },
 
   /**
