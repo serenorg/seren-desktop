@@ -52,6 +52,42 @@ export interface Skill {
   version?: string;
 }
 
+export interface SkillSyncState {
+  /** Metadata schema version */
+  version: 1;
+  /** Original upstream source for this installation */
+  upstreamSource: SkillSource;
+  /** Canonical upstream SKILL.md URL */
+  upstreamSourceUrl: string;
+  /** Upstream revision last synced into this local installation */
+  syncedRevision: string | null;
+  /** Epoch ms when sync state was last persisted */
+  syncedAt: number;
+  /** SHA-256 hashes for upstream-managed files, keyed by relative path */
+  managedFiles: Record<string, string>;
+}
+
+export interface RemoteSkillRevision {
+  sha: string;
+  shortSha: string;
+  committedAt?: string;
+  message?: string;
+  url?: string;
+  changedFiles: string[];
+}
+
+export interface SkillSyncStatus {
+  state: "current" | "update-available" | "local-changes" | "error";
+  updateAvailable: boolean;
+  hasLocalChanges: boolean;
+  syncedRevision: string | null;
+  remoteRevision: RemoteSkillRevision | null;
+  changedLocalFiles: string[];
+  localManagedState: Record<string, string | null>;
+  missingManagedFiles: string[];
+  error?: string;
+}
+
 /**
  * Scope where a skill is installed.
  */
@@ -75,6 +111,12 @@ export interface InstalledSkill extends Skill {
   enabled: boolean;
   /** SHA-256 hash of content for update detection */
   contentHash: string;
+  /** Original upstream source, if this installation is synced from a remote skill */
+  upstreamSource?: SkillSource;
+  /** Original upstream SKILL.md URL, if known */
+  upstreamSourceUrl?: string;
+  /** Persisted sync metadata for upstream-managed files */
+  syncState?: SkillSyncState | null;
 }
 
 /**

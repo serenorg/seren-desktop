@@ -797,6 +797,8 @@ pub fn run() {
             skills::validate_skill_payload,
             skills::remove_skill,
             skills::read_skill_content,
+            skills::read_skill_file,
+            skills::read_skill_sync_state,
             skills::resolve_skill_path,
             skills::create_skill_folder,
             // Orchestrator commands

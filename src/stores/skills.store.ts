@@ -654,6 +654,16 @@ export const skillsStore = {
   },
 
   /**
+   * Replace an installed skill record after an explicit refresh/update.
+   */
+  replaceInstalled(updated: InstalledSkill): void {
+    const next = state.installed.map((skill) =>
+      skill.path === updated.path ? updated : skill,
+    );
+    setState("installed", next);
+  },
+
+  /**
    * Clear the skills index cache and refresh.
    */
   async clearCacheAndRefresh(): Promise<void> {

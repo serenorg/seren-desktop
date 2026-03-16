@@ -2,11 +2,26 @@
 // ABOUTME: Provides commands to get seren, claude, and project skills directories.
 
 use rusqlite::{OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
+use url::Url;
 
 use crate::services::database::init_db;
+
+const SKILL_SYNC_STATE_FILE: &str = ".seren-sync.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillSyncStateFile {
+    version: u8,
+    upstream_source: String,
+    upstream_source_url: String,
+    synced_revision: Option<String>,
+    synced_at: i64,
+    managed_files: std::collections::BTreeMap<String, String>,
+}
 
 fn normalize_project_root(path: &str) -> Option<String> {
     let trimmed = path.trim();
@@ -157,6 +172,182 @@ fn resolve_skill_file_path(dir_path: &PathBuf, slug: &str) -> Option<PathBuf> {
 fn resolve_skill_dir_path(dir_path: &PathBuf, slug: &str) -> Option<PathBuf> {
     resolve_skill_file_path(dir_path, slug)
         .and_then(|skill_file| skill_file.parent().map(|parent| parent.to_path_buf()))
+}
+
+fn resolve_relative_skill_path(
+    skill_dir: &PathBuf,
+    relative_path: &str,
+) -> Result<PathBuf, String> {
+    let relative = PathBuf::from(relative_path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(format!(
+            "Invalid skill-relative path (must be relative, no ..): {}",
+            relative_path
+        ));
+    }
+
+    Ok(skill_dir.join(relative))
+}
+
+fn validate_sync_state_file(state: &SkillSyncStateFile) -> Result<(), String> {
+    if state.version != 1 {
+        return Err(format!("Unsupported sync state version: {}", state.version));
+    }
+    if state.upstream_source.trim().is_empty() {
+        return Err("Sync state upstreamSource cannot be empty".to_string());
+    }
+    if state.upstream_source_url.trim().is_empty() {
+        return Err("Sync state upstreamSourceUrl cannot be empty".to_string());
+    }
+    let parsed_url = Url::parse(&state.upstream_source_url)
+        .map_err(|e| format!("Invalid sync state upstreamSourceUrl: {}", e))?;
+    if parsed_url.scheme() != "https" {
+        return Err("Sync state upstreamSourceUrl must use https".to_string());
+    }
+    if state.upstream_source == "serenorg" {
+        let host = parsed_url.host_str().unwrap_or_default();
+        let path = parsed_url.path();
+        if host != "raw.githubusercontent.com" || !path.starts_with("/serenorg/seren-skills/") {
+            return Err(
+                "Seren upstream sync state must point at the canonical seren-skills raw URL"
+                    .to_string(),
+            );
+        }
+    }
+    if !state.managed_files.contains_key("SKILL.md") {
+        return Err("Sync state managedFiles must include SKILL.md".to_string());
+    }
+    if state
+        .managed_files
+        .iter()
+        .any(|(path, hash)| path.trim().is_empty() || hash.trim().is_empty())
+    {
+        return Err("Sync state managedFiles entries must be non-empty".to_string());
+    }
+    if state.managed_files.keys().any(|path| {
+        let relative = PathBuf::from(path);
+        relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+    }) {
+        return Err("Sync state managedFiles must use skill-relative paths".to_string());
+    }
+    if matches!(state.synced_revision.as_deref(), Some("")) {
+        return Err("Sync state syncedRevision cannot be empty".to_string());
+    }
+
+    Ok(())
+}
+
+fn normalize_sync_state_json(state_json: &str) -> Result<String, String> {
+    let parsed: SkillSyncStateFile =
+        serde_json::from_str(state_json).map_err(|e| format!("Invalid sync state JSON: {}", e))?;
+    validate_sync_state_file(&parsed)?;
+
+    let mut serialized = serde_json::to_string_pretty(&parsed)
+        .map_err(|e| format!("Failed to serialize sync state JSON: {}", e))?;
+    if !serialized.ends_with('\n') {
+        serialized.push('\n');
+    }
+
+    Ok(serialized)
+}
+
+fn write_sync_state_file(skill_dir: &PathBuf, state_json: &str) -> Result<(), String> {
+    let metadata_path = skill_dir.join(SKILL_SYNC_STATE_FILE);
+    let serialized = normalize_sync_state_json(state_json)?;
+    fs::write(&metadata_path, serialized)
+        .map_err(|e| format!("Failed to write {}: {}", SKILL_SYNC_STATE_FILE, e))
+}
+
+fn canonicalize_within_skill_dir(skill_dir: &PathBuf, target: &PathBuf) -> Result<PathBuf, String> {
+    let canonical_skill_dir = skill_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve skill directory: {}", e))?;
+    let canonical_target = target
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve skill-relative path: {}", e))?;
+
+    if !canonical_target.starts_with(&canonical_skill_dir) {
+        return Err("Resolved skill-relative path escapes the skill directory".to_string());
+    }
+
+    Ok(canonical_target)
+}
+
+fn unique_temp_path(parent: &PathBuf, slug: &str, label: &str) -> Result<PathBuf, String> {
+    for attempt in 0..16 {
+        let candidate = parent.join(format!(
+            ".{slug}.{label}.{}-{}-{attempt}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| format!("Failed to build temp path: {}", e))?
+                .as_nanos()
+        ));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!("Failed to allocate temporary path for {}", slug))
+}
+
+fn write_skill_tree(
+    skill_dir: &PathBuf,
+    content: &str,
+    extra_files: &[ExtraFile],
+    sync_state_json: Option<&str>,
+) -> Result<(), String> {
+    fs::create_dir_all(skill_dir)
+        .map_err(|e| format!("Failed to create skill directory: {}", e))?;
+
+    let skill_file = skill_dir.join("SKILL.md");
+    fs::write(&skill_file, content).map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
+
+    for file in extra_files {
+        let relative = PathBuf::from(&file.path);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(format!(
+                "Invalid file path (must be relative, no ..): {}",
+                file.path
+            ));
+        }
+
+        let target = skill_dir.join(&relative);
+
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory for {}: {}", file.path, e))?;
+        }
+
+        fs::write(&target, &file.content)
+            .map_err(|e| format!("Failed to write {}: {}", file.path, e))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if file.path.ends_with(".sh") || file.path.ends_with(".py") {
+                let perms = fs::Permissions::from_mode(0o755);
+                let _ = fs::set_permissions(&target, perms);
+            }
+        }
+    }
+
+    if let Some(state_json) = sync_state_json {
+        write_sync_state_file(skill_dir, state_json)?;
+    }
+
+    Ok(())
 }
 
 /// Create symlink from .claude/skills to the active skills directory for Claude Code compatibility.
@@ -495,61 +686,67 @@ pub fn install_skill(
     slug: String,
     content: String,
     extra_files: Option<String>,
+    sync_state_json: Option<String>,
 ) -> Result<String, String> {
     let dir_path = PathBuf::from(&skills_dir);
     let skill_dir = dir_path.join(&slug);
-    let skill_file = skill_dir.join("SKILL.md");
+    let parsed_extra_files: Vec<ExtraFile> = match extra_files {
+        Some(files_json) => serde_json::from_str(&files_json)
+            .map_err(|e| format!("Failed to parse extra_files JSON: {}", e))?,
+        None => Vec::new(),
+    };
+    let sync_state_json = sync_state_json.as_deref();
 
-    // Create skill directory
-    fs::create_dir_all(&skill_dir)
-        .map_err(|e| format!("Failed to create skill directory: {}", e))?;
+    let temp_skill_dir = unique_temp_path(&dir_path, &slug, "installing")?;
+    let backup_skill_dir = if skill_dir.exists() {
+        Some(unique_temp_path(&dir_path, &slug, "backup")?)
+    } else {
+        None
+    };
 
-    // Write SKILL.md content
-    fs::write(&skill_file, &content).map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
+    let install_result = (|| -> Result<(), String> {
+        write_skill_tree(
+            &temp_skill_dir,
+            &content,
+            &parsed_extra_files,
+            sync_state_json,
+        )?;
 
-    // Write additional payload files if provided
-    if let Some(files_json) = extra_files {
-        let files: Vec<ExtraFile> = serde_json::from_str(&files_json)
-            .map_err(|e| format!("Failed to parse extra_files JSON: {}", e))?;
+        if let Some(backup_dir) = &backup_skill_dir {
+            fs::rename(&skill_dir, backup_dir)
+                .map_err(|e| format!("Failed to stage existing skill directory: {}", e))?;
+        }
 
-        for file in &files {
-            // Prevent path traversal
-            let relative = PathBuf::from(&file.path);
-            if relative.is_absolute()
-                || relative
-                    .components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
-                return Err(format!(
-                    "Invalid file path (must be relative, no ..): {}",
-                    file.path
-                ));
+        fs::rename(&temp_skill_dir, &skill_dir)
+            .map_err(|e| format!("Failed to activate skill directory: {}", e))?;
+
+        Ok(())
+    })();
+
+    if let Err(error) = install_result {
+        let _ = fs::remove_dir_all(&temp_skill_dir);
+        if let Some(backup_dir) = &backup_skill_dir {
+            if backup_dir.exists() && !skill_dir.exists() {
+                let _ = fs::rename(backup_dir, &skill_dir);
             }
+        }
+        return Err(error);
+    }
 
-            let target = skill_dir.join(&relative);
-
-            // Create parent directories
-            if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create directory for {}: {}", file.path, e))?;
-            }
-
-            fs::write(&target, &file.content)
-                .map_err(|e| format!("Failed to write {}: {}", file.path, e))?;
-
-            // Make scripts executable on Unix
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if file.path.ends_with(".sh") || file.path.ends_with(".py") {
-                    let perms = fs::Permissions::from_mode(0o755);
-                    let _ = fs::set_permissions(&target, perms);
-                }
+    if let Some(backup_dir) = backup_skill_dir {
+        if backup_dir.exists() {
+            if let Err(error) = fs::remove_dir_all(&backup_dir) {
+                log::warn!(
+                    "Installed skill '{}' successfully but failed to remove backup directory {}: {}",
+                    slug,
+                    backup_dir.display(),
+                    error
+                );
             }
         }
     }
 
-    Ok(skill_file.to_string_lossy().to_string())
+    Ok(skill_dir.join("SKILL.md").to_string_lossy().to_string())
 }
 
 /// Validate that a skill directory contains all files referenced in SKILL.md.
@@ -715,6 +912,65 @@ pub fn read_skill_content(skills_dir: String, slug: String) -> Result<Option<Str
     Ok(Some(content))
 }
 
+/// Read a relative file from a skill directory.
+#[tauri::command]
+pub fn read_skill_file(
+    skills_dir: String,
+    slug: String,
+    relative_path: String,
+) -> Result<Option<String>, String> {
+    let dir_path = PathBuf::from(&skills_dir);
+    let skill_dir = match resolve_skill_dir_path(&dir_path, &slug) {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+
+    let target = resolve_relative_skill_path(&skill_dir, &relative_path)?;
+    if !target.exists() {
+        return Ok(None);
+    }
+    let target = canonicalize_within_skill_dir(&skill_dir, &target)?;
+
+    let content = fs::read_to_string(&target)
+        .map_err(|e| format!("Failed to read {}: {}", relative_path, e))?;
+    Ok(Some(content))
+}
+
+/// Read the persisted sync state for a skill if present.
+#[tauri::command]
+pub fn read_skill_sync_state(skills_dir: String, slug: String) -> Result<Option<String>, String> {
+    let dir_path = PathBuf::from(&skills_dir);
+    let skill_dir = match resolve_skill_dir_path(&dir_path, &slug) {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+
+    let metadata_path = skill_dir.join(SKILL_SYNC_STATE_FILE);
+    if !metadata_path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&metadata_path)
+        .map_err(|e| format!("Failed to read {}: {}", SKILL_SYNC_STATE_FILE, e))?;
+    Ok(Some(content))
+}
+
+/// Persist sync state metadata for a skill.
+#[cfg(test)]
+fn write_skill_sync_state(
+    skills_dir: String,
+    slug: String,
+    state_json: String,
+) -> Result<(), String> {
+    let dir_path = PathBuf::from(&skills_dir);
+    let skill_dir = match resolve_skill_dir_path(&dir_path, &slug) {
+        Some(path) => path,
+        None => return Err(format!("Skill directory not found for slug: {}", slug)),
+    };
+
+    write_sync_state_file(&skill_dir, &state_json)
+}
+
 /// Resolve the full SKILL.md file path for a slug in a skills directory.
 /// Supports both flat layout (slug/SKILL.md) and nested layout (org/skill/SKILL.md).
 #[tauri::command]
@@ -785,6 +1041,7 @@ See [section](#overview) and [email](mailto:test@example.com).
             "test-skill".to_string(),
             "# Test Skill\nHello".to_string(),
             None,
+            None,
         );
         assert!(result.is_ok());
 
@@ -811,6 +1068,7 @@ See [section](#overview) and [email](mailto:test@example.com).
             "test-skill".to_string(),
             "# Test\n".to_string(),
             Some(extras.to_string()),
+            None,
         );
         assert!(result.is_ok());
 
@@ -838,6 +1096,7 @@ See [section](#overview) and [email](mailto:test@example.com).
             "test-skill".to_string(),
             "# Test\n".to_string(),
             Some(extras.to_string()),
+            None,
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("must be relative, no .."));
@@ -863,6 +1122,7 @@ See `requirements.txt` for dependencies.
             skills_dir.clone(),
             "test-skill".to_string(),
             content.to_string(),
+            None,
             None,
         )
         .unwrap();
@@ -891,10 +1151,113 @@ Run [agent](scripts/agent.py) with `requirements.txt`.
             "test-skill".to_string(),
             content.to_string(),
             Some(extras.to_string()),
+            None,
         )
         .unwrap();
 
         let missing = validate_skill_payload(skills_dir, "test-skill".to_string()).unwrap();
         assert!(missing.is_empty(), "all referenced files should be present");
+    }
+
+    #[test]
+    fn install_skill_writes_sync_state_when_provided() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+        let sync_state = serde_json::json!({
+            "version": 1,
+            "upstreamSource": "serenorg",
+            "upstreamSourceUrl": "https://raw.githubusercontent.com/serenorg/seren-skills/main/seren/test-skill/SKILL.md",
+            "syncedRevision": "abc123",
+            "syncedAt": 1,
+            "managedFiles": {
+                "SKILL.md": "hash"
+            }
+        });
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test Skill\nHello".to_string(),
+            None,
+            Some(sync_state.to_string()),
+        )
+        .unwrap();
+
+        let raw = read_skill_sync_state(skills_dir, "test-skill".to_string())
+            .unwrap()
+            .expect("sync state should exist");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed, sync_state);
+    }
+
+    #[test]
+    fn write_and_read_skill_sync_state_round_trip() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test Skill\nHello".to_string(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let sync_state = serde_json::json!({
+            "version": 1,
+            "upstreamSource": "serenorg",
+            "upstreamSourceUrl": "https://raw.githubusercontent.com/serenorg/seren-skills/main/seren/test-skill/SKILL.md",
+            "syncedRevision": null,
+            "syncedAt": 2,
+            "managedFiles": {
+                "SKILL.md": "hash",
+                "scripts/agent.py": "hash2"
+            }
+        });
+        write_skill_sync_state(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            sync_state.to_string(),
+        )
+        .unwrap();
+
+        let raw = read_skill_sync_state(skills_dir, "test-skill".to_string())
+            .unwrap()
+            .expect("sync state should exist");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed, sync_state);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_skill_file_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().to_string_lossy().to_string();
+        let outside = TempDir::new().unwrap();
+        let secret_path = outside.path().join("secret.txt");
+        fs::write(&secret_path, "secret").unwrap();
+
+        install_skill(
+            skills_dir.clone(),
+            "test-skill".to_string(),
+            "# Test Skill\nHello".to_string(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let skill_dir = tmp.path().join("test-skill");
+        symlink(outside.path(), skill_dir.join("linked")).unwrap();
+
+        let result = read_skill_file(
+            skills_dir,
+            "test-skill".to_string(),
+            "linked/secret.txt".to_string(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("escapes the skill directory"));
     }
 }

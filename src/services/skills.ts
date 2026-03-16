@@ -10,12 +10,15 @@ import {
   getSkillPath,
   type InstalledSkill,
   parseSkillMd,
+  type RemoteSkillRevision,
   resolveSkillDisplayName,
   resolveSkillSlug,
   type Skill,
   type SkillIndexEntry,
   type SkillScope,
   type SkillSource,
+  type SkillSyncState,
+  type SkillSyncStatus,
 } from "@/lib/skills";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { catalog, type Publisher } from "./catalog";
@@ -39,9 +42,34 @@ interface GitHubTreeResponse {
   tree?: GitHubTreeNode[];
 }
 
+interface GitHubCommitListEntry {
+  sha?: string;
+  html_url?: string;
+  commit?: {
+    message?: string;
+    committer?: {
+      date?: string;
+    };
+  };
+}
+
+interface GitHubCommitFile {
+  filename?: string;
+}
+
+interface GitHubCommitDetail extends GitHubCommitListEntry {
+  files?: GitHubCommitFile[];
+}
+
 interface ExtraFile {
   path: string;
   content: string;
+}
+
+interface UpstreamSkillBundle {
+  skillMd: string;
+  payloadFiles: ExtraFile[];
+  remoteRevision: RemoteSkillRevision | null;
 }
 
 export interface InstallResult {
@@ -53,6 +81,13 @@ export interface ProjectSkillsConfig {
   version: number;
   skills: {
     enabled: string[];
+  };
+}
+
+function githubApiHeaders(): HeadersInit {
+  return {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
   };
 }
 
@@ -147,10 +182,7 @@ let cachedRepoTree: GitHubTreeNode[] | null = null;
  */
 async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
   const response = await appFetch(SKILLS_INDEX_URL, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
+    headers: githubApiHeaders(),
   });
 
   if (!response.ok) {
@@ -194,6 +226,205 @@ function deriveRepoDirPrefix(sourceUrl: string): string | null {
   return relative.slice(0, lastSlash + 1);
 }
 
+function normalizeRepoDirPath(dirPrefix: string): string {
+  return dirPrefix.endsWith("/") ? dirPrefix.slice(0, -1) : dirPrefix;
+}
+
+function trimChangedFilesToSkill(
+  changedFiles: string[],
+  dirPrefix: string,
+): string[] {
+  const normalizedPrefix = normalizeRepoDirPath(dirPrefix);
+  return changedFiles
+    .filter((path) => path.startsWith(`${normalizedPrefix}/`))
+    .map((path) => path.slice(normalizedPrefix.length + 1));
+}
+
+function buildManagedFileMap(
+  skillMdHash: string,
+  payloadFiles: Array<{ path: string; content: string; hash?: string }>,
+): Record<string, string> {
+  const managedFiles: Record<string, string> = {
+    "SKILL.md": skillMdHash,
+  };
+
+  for (const file of payloadFiles) {
+    if (file.hash) {
+      managedFiles[file.path] = file.hash;
+    }
+  }
+
+  return managedFiles;
+}
+
+function localManagedStateFingerprint(
+  localManagedState: Record<string, string | null>,
+): string {
+  return Object.entries(localManagedState)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([path, hash]) => `${path}:${hash ?? "missing"}`)
+    .join("\n");
+}
+
+function remoteRevisionShortSha(sha?: string): string {
+  if (!sha) return "";
+  return sha.slice(0, 7);
+}
+
+async function fetchRemoteSkillRevision(
+  sourceUrl: string,
+): Promise<RemoteSkillRevision | null> {
+  const dirPrefix = deriveRepoDirPrefix(sourceUrl);
+  if (!dirPrefix) return null;
+  const path = normalizeRepoDirPath(dirPrefix);
+  const commitsUrl = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/commits?sha=${encodeURIComponent(SKILLS_REPO_BRANCH)}&path=${encodeURIComponent(path)}&per_page=1`;
+
+  const response = await appFetch(commitsUrl, {
+    headers: githubApiHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch remote revision: ${response.status}`);
+  }
+
+  const commits = (await response.json()) as GitHubCommitListEntry[];
+  const latest = commits[0];
+  const sha = latest?.sha;
+  if (!sha) return null;
+
+  const detailResponse = await appFetch(
+    `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/commits/${encodeURIComponent(sha)}`,
+    { headers: githubApiHeaders() },
+  );
+  if (!detailResponse.ok) {
+    throw new Error(`Failed to fetch commit detail: ${detailResponse.status}`);
+  }
+
+  const detail = (await detailResponse.json()) as GitHubCommitDetail;
+  return {
+    sha,
+    shortSha: remoteRevisionShortSha(sha),
+    committedAt: detail.commit?.committer?.date,
+    message: detail.commit?.message,
+    url: detail.html_url,
+    changedFiles: trimChangedFilesToSkill(
+      (detail.files ?? [])
+        .map((file) => file.filename)
+        .filter((filename): filename is string => typeof filename === "string"),
+      dirPrefix,
+    ),
+  };
+}
+
+async function fetchUpstreamSkillBundle(skill: {
+  sourceUrl?: string;
+}): Promise<UpstreamSkillBundle | null> {
+  if (!skill.sourceUrl) return null;
+
+  const [skillMd, payloadFiles, remoteRevision] = await Promise.all([
+    appFetch(skill.sourceUrl).then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Failed to fetch skill content: ${response.status}`);
+      }
+      return response.text();
+    }),
+    fetchRepoSkillPayloadFiles(skill.sourceUrl),
+    fetchRemoteSkillRevision(skill.sourceUrl),
+  ]);
+
+  return { skillMd, payloadFiles, remoteRevision };
+}
+
+async function computeUpstreamSyncState(
+  upstreamSource: SkillSource,
+  upstreamSourceUrl: string,
+  remoteRevision: RemoteSkillRevision | null,
+  skillMd: string,
+  payloadFiles: ExtraFile[],
+): Promise<SkillSyncState> {
+  const skillMdHash = await computeContentHash(skillMd);
+  const payloadWithHashes = await Promise.all(
+    payloadFiles.map(async (file) => ({
+      path: file.path,
+      content: file.content,
+      hash: await computeContentHash(file.content),
+    })),
+  );
+
+  return {
+    version: 1,
+    upstreamSource,
+    upstreamSourceUrl,
+    syncedRevision: remoteRevision?.sha ?? null,
+    syncedAt: Date.now(),
+    managedFiles: buildManagedFileMap(skillMdHash, payloadWithHashes),
+  };
+}
+
+function isManagedFileMap(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.entries(value).every(
+    ([path, hash]) => typeof path === "string" && typeof hash === "string",
+  );
+}
+
+function parseInstalledSyncState(
+  raw: string,
+  dirName: string,
+): SkillSyncState | null {
+  try {
+    const parsedSyncState = JSON.parse(raw) as Partial<SkillSyncState>;
+    const normalizedSyncedRevision =
+      parsedSyncState.syncedRevision === undefined
+        ? null
+        : parsedSyncState.syncedRevision;
+    if (
+      parsedSyncState?.version !== 1 ||
+      typeof parsedSyncState.upstreamSource !== "string" ||
+      typeof parsedSyncState.upstreamSourceUrl !== "string" ||
+      parsedSyncState.upstreamSourceUrl.length === 0 ||
+      (normalizedSyncedRevision !== null &&
+        typeof normalizedSyncedRevision !== "string") ||
+      typeof parsedSyncState.syncedAt !== "number" ||
+      !isManagedFileMap(parsedSyncState.managedFiles)
+    ) {
+      return null;
+    }
+
+    if (
+      parsedSyncState.upstreamSource === "serenorg" &&
+      !deriveRepoDirPrefix(parsedSyncState.upstreamSourceUrl)
+    ) {
+      return null;
+    }
+
+    return {
+      ...parsedSyncState,
+      syncedRevision: normalizedSyncedRevision,
+    } as SkillSyncState;
+  } catch (error) {
+    log.warn("[Skills] Failed to parse sync state for", dirName, error);
+    return null;
+  }
+}
+
+export function isUpstreamManagedSkill(
+  skill: InstalledSkill,
+): skill is InstalledSkill & {
+  syncState: SkillSyncState;
+  upstreamSource: "serenorg";
+  upstreamSourceUrl: string;
+} {
+  return (
+    !!skill.syncState &&
+    skill.upstreamSource === "serenorg" &&
+    typeof skill.upstreamSourceUrl === "string" &&
+    skill.upstreamSourceUrl.length > 0
+  );
+}
+
 /**
  * Fetch all payload files (excluding SKILL.md) from a skill's GitHub directory.
  * Uses the cached repo tree to discover files, then fetches their raw content.
@@ -208,10 +439,7 @@ async function fetchRepoSkillPayloadFiles(
   if (!cachedRepoTree) {
     try {
       const response = await appFetch(SKILLS_INDEX_URL, {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
+        headers: githubApiHeaders(),
       });
       if (response.ok) {
         const payload = (await response.json()) as GitHubTreeResponse;
@@ -596,12 +824,16 @@ export const skills = {
       const installed: InstalledSkill[] = [];
 
       for (const dirName of slugs) {
-        const [content, resolvedPath] = await Promise.all([
+        const [content, resolvedPath, syncStateRaw] = await Promise.all([
           invoke<string | null>("read_skill_content", {
             skillsDir,
             slug: dirName,
           }),
           invoke<string | null>("resolve_skill_path", {
+            skillsDir,
+            slug: dirName,
+          }),
+          invoke<string | null>("read_skill_sync_state", {
             skillsDir,
             slug: dirName,
           }),
@@ -611,6 +843,9 @@ export const skills = {
           const parsed = parseSkillMd(content);
           const hash = await computeContentHash(content);
           const slug = resolveSkillSlug(parsed, dirName);
+          const syncState = syncStateRaw
+            ? parseInstalledSyncState(syncStateRaw, dirName)
+            : null;
 
           installed.push({
             id: `local:${slug}`,
@@ -627,6 +862,9 @@ export const skills = {
             installedAt: Date.now(), // We don't track this yet
             enabled: true, // All installed skills are enabled by default
             contentHash: hash,
+            upstreamSource: syncState?.upstreamSource,
+            upstreamSourceUrl: syncState?.upstreamSourceUrl,
+            syncState,
           });
         }
       }
@@ -709,34 +947,45 @@ export const skills = {
       throw new Error("No skills directory available for project scope");
     }
 
-    // Fetch payload files for serenorg skills from the GitHub repo
+    let installContent = content;
+    let extraFiles: ExtraFile[] = [];
     let extraFilesJson: string | undefined;
+    let syncState: SkillSyncState | null = null;
     if (skill.source === "serenorg" && skill.sourceUrl) {
-      try {
-        const extraFiles = await fetchRepoSkillPayloadFiles(skill.sourceUrl);
-        if (extraFiles.length > 0) {
-          extraFilesJson = JSON.stringify(extraFiles);
-          log.info(
-            "[Skills] Fetched",
-            extraFiles.length,
-            "payload files for",
-            skill.slug,
-          );
-        }
-      } catch (error) {
-        log.warn("[Skills] Failed to fetch payload files:", error);
+      const bundle = await fetchUpstreamSkillBundle(skill);
+      if (!bundle) {
+        throw new Error("Unable to fetch upstream skill content");
       }
+      installContent = bundle.skillMd;
+      extraFiles = bundle.payloadFiles;
+      if (extraFiles.length > 0) {
+        extraFilesJson = JSON.stringify(extraFiles);
+        log.info(
+          "[Skills] Fetched",
+          extraFiles.length,
+          "payload files for",
+          skill.slug,
+        );
+      }
+      syncState = await computeUpstreamSyncState(
+        skill.source,
+        skill.sourceUrl,
+        bundle.remoteRevision,
+        installContent,
+        extraFiles,
+      );
     }
 
     const path = await invoke<string>("install_skill", {
       skillsDir,
       slug: skill.slug,
-      content,
+      content: installContent,
       extraFiles: extraFilesJson ?? null,
+      syncStateJson: syncState ? JSON.stringify(syncState) : null,
     });
 
-    const hash = await computeContentHash(content);
-    const parsed = parseSkillMd(content);
+    const hash = await computeContentHash(installContent);
+    const parsed = parseSkillMd(installContent);
 
     log.info("[Skills] Installed skill:", skill.slug, "to", scope, "scope");
 
@@ -772,6 +1021,9 @@ export const skills = {
       installedAt: Date.now(),
       enabled: true,
       contentHash: hash,
+      upstreamSource: syncState?.upstreamSource,
+      upstreamSourceUrl: syncState?.upstreamSourceUrl ?? skill.sourceUrl,
+      syncState,
       // Override with parsed metadata in case it differs
       name: resolveSkillDisplayName(parsed, skill.slug),
       description: parsed.metadata.description || skill.description,
@@ -832,8 +1084,186 @@ export const skills = {
   },
 
   /**
+   * Read a relative file from an installed skill directory.
+   */
+  async readFile(
+    skill: InstalledSkill,
+    relativePath: string,
+  ): Promise<string | null> {
+    if (!isTauriRuntime()) {
+      return null;
+    }
+
+    return invoke<string | null>("read_skill_file", {
+      skillsDir: skill.skillsDir,
+      slug: skill.dirName,
+      relativePath,
+    });
+  },
+
+  /**
+   * Determine the sync status for an upstream-managed installed skill.
+   */
+  async inspectSyncStatus(
+    skill: InstalledSkill,
+  ): Promise<SkillSyncStatus | null> {
+    if (!isUpstreamManagedSkill(skill)) {
+      return null;
+    }
+
+    try {
+      const changedLocalFiles: string[] = [];
+      const localManagedState: Record<string, string | null> = {};
+      const missingManagedFiles: string[] = [];
+      const managedPaths = Object.keys(skill.syncState?.managedFiles ?? {});
+
+      if (skill.syncState) {
+        const results = await Promise.all(
+          managedPaths.map(async (path) => {
+            const content =
+              path === "SKILL.md"
+                ? await this.readContent(skill)
+                : await this.readFile(skill, path);
+            return { path, content };
+          }),
+        );
+
+        for (const { path, content } of results) {
+          if (content === null) {
+            localManagedState[path] = null;
+            missingManagedFiles.push(path);
+            continue;
+          }
+
+          const contentHash = await computeContentHash(content);
+          localManagedState[path] = contentHash;
+          if (contentHash !== skill.syncState.managedFiles[path]) {
+            changedLocalFiles.push(path);
+          }
+        }
+      }
+
+      const remoteRevision = await fetchRemoteSkillRevision(
+        skill.upstreamSourceUrl,
+      );
+      const syncedRevision = skill.syncState?.syncedRevision ?? null;
+      const updateAvailable = Boolean(
+        remoteRevision?.sha &&
+          syncedRevision &&
+          remoteRevision.sha !== syncedRevision,
+      );
+      const hasLocalChanges =
+        changedLocalFiles.length > 0 || missingManagedFiles.length > 0;
+
+      return {
+        state: hasLocalChanges
+          ? "local-changes"
+          : updateAvailable
+            ? "update-available"
+            : "current",
+        updateAvailable,
+        hasLocalChanges,
+        syncedRevision,
+        remoteRevision,
+        changedLocalFiles,
+        localManagedState,
+        missingManagedFiles,
+      };
+    } catch (error) {
+      return {
+        state: "error",
+        updateAvailable: false,
+        hasLocalChanges: false,
+        syncedRevision: skill.syncState?.syncedRevision ?? null,
+        remoteRevision: null,
+        changedLocalFiles: [],
+        localManagedState: {},
+        missingManagedFiles: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  },
+
+  /**
+   * Refresh an installed upstream-managed skill from its canonical source.
+   */
+  async refreshInstalledSkill(
+    skill: InstalledSkill,
+    options?: {
+      expectedLocalManagedState?: Record<string, string | null>;
+    },
+  ): Promise<{
+    installed: InstalledSkill;
+    syncStatus: SkillSyncStatus | null;
+  }> {
+    if (!isUpstreamManagedSkill(skill)) {
+      throw new Error("Skill is not managed by an upstream source");
+    }
+
+    const bundle = await fetchUpstreamSkillBundle({
+      sourceUrl: skill.upstreamSourceUrl,
+    });
+    if (!bundle) {
+      throw new Error("Unable to fetch upstream skill content");
+    }
+
+    if (options?.expectedLocalManagedState) {
+      // Re-verify the last approved local snapshot immediately before invoking the
+      // Rust install path. A tiny race remains between this check and the final
+      // filesystem rename, but it is limited to the local hashing + sync-state prep
+      // work in this method rather than the full upstream fetch sequence.
+      const latestStatus = await this.inspectSyncStatus(skill);
+      if (!latestStatus || latestStatus.state === "error") {
+        throw new Error(
+          `Seren could not re-verify ${skill.name} immediately before refresh.`,
+        );
+      }
+      if (
+        localManagedStateFingerprint(latestStatus.localManagedState) !==
+        localManagedStateFingerprint(options.expectedLocalManagedState)
+      ) {
+        throw new Error(
+          `${skill.name} changed after the overwrite check. Review the latest local edits and retry refresh.`,
+        );
+      }
+    }
+
+    const syncState = await computeUpstreamSyncState(
+      skill.upstreamSource,
+      skill.upstreamSourceUrl,
+      bundle.remoteRevision,
+      bundle.skillMd,
+      bundle.payloadFiles,
+    );
+
+    await invoke("install_skill", {
+      skillsDir: skill.skillsDir,
+      slug: skill.dirName,
+      content: bundle.skillMd,
+      extraFiles: JSON.stringify(bundle.payloadFiles),
+      syncStateJson: JSON.stringify(syncState),
+    });
+
+    const hash = await computeContentHash(bundle.skillMd);
+    const parsed = parseSkillMd(bundle.skillMd);
+    const refreshed: InstalledSkill = {
+      ...skill,
+      name: resolveSkillDisplayName(parsed, skill.slug),
+      description: parsed.metadata.description || skill.description,
+      contentHash: hash,
+      upstreamSource: syncState.upstreamSource,
+      upstreamSourceUrl: syncState.upstreamSourceUrl,
+      syncState,
+    };
+
+    return {
+      installed: refreshed,
+      syncStatus: await this.inspectSyncStatus(refreshed),
+    };
+  },
+
+  /**
    * Get content for enabled skills to inject into agent system prompt.
-   * For serenorg skills, re-fetches missing payload files before injecting.
    * Injects the absolute runtime path so the agent doesn't need to search.
    */
   async getEnabledSkillsContent(
@@ -848,65 +1278,6 @@ export const skills = {
     const contents: string[] = [];
 
     for (const skill of enabled) {
-      // Sync payload files for serenorg skills before injection.
-      // - If the upstream SKILL.md has changed, overwrite all payload files
-      //   (the skill was updated; canonical runtime takes precedence).
-      // - If SKILL.md is unchanged, only write files that are missing on disk
-      //   (preserve local modifications to existing files).
-      if (isTauriRuntime() && skill.source === "serenorg" && skill.sourceUrl) {
-        try {
-          const [remoteSkillMd, missing] = await Promise.all([
-            appFetch(skill.sourceUrl).then((r) =>
-              r.ok ? r.text() : Promise.resolve(null),
-            ),
-            invoke<string[]>("validate_skill_payload", {
-              skillsDir: skill.skillsDir,
-              slug: skill.dirName,
-            }),
-          ]);
-
-          const remoteHash = remoteSkillMd
-            ? await computeContentHash(remoteSkillMd)
-            : null;
-          const skillUpdated =
-            remoteHash !== null && remoteHash !== skill.contentHash;
-
-          if (skillUpdated || missing.length > 0) {
-            log.info(
-              "[Skills] Syncing payload files for",
-              skill.slug,
-              skillUpdated ? "(skill updated)" : "(missing files)",
-            );
-            const [allPayloadFiles, existingContent] = await Promise.all([
-              fetchRepoSkillPayloadFiles(skill.sourceUrl),
-              this.readContent(skill),
-            ]);
-            const installContent = remoteSkillMd ?? existingContent;
-            if (allPayloadFiles.length > 0 && installContent) {
-              // When the skill has been updated upstream, overwrite all payload
-              // files so the user gets the latest runtime. When only files are
-              // missing (SKILL.md unchanged), write only the absent files so
-              // local modifications to existing files are preserved.
-              const filesToWrite = skillUpdated
-                ? allPayloadFiles
-                : allPayloadFiles.filter((f) => missing.includes(f.path));
-              if (filesToWrite.length > 0) {
-                await invoke("install_skill", {
-                  skillsDir: skill.skillsDir,
-                  slug: skill.dirName,
-                  content: installContent,
-                  extraFiles: JSON.stringify(filesToWrite),
-                }).catch((err) => {
-                  log.warn("[Skills] Failed to sync payload files:", err);
-                });
-              }
-            }
-          }
-        } catch {
-          // Non-fatal — proceed with injection using whatever is on disk.
-        }
-      }
-
       const content = await this.readContent(skill);
       if (content) {
         const parsed = parseSkillMd(content);

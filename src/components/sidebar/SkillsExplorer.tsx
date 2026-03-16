@@ -2,6 +2,7 @@
 // ABOUTME: Renders inside SlidePanel with tabs for Installed and Browse, inline detail accordion.
 
 import { invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
   createSignal,
@@ -10,12 +11,23 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { openExternalLink } from "@/lib/external-link";
 import { appFetch } from "@/lib/fetch";
 import { openFileInTab } from "@/lib/files/service";
-import type { InstalledSkill, Skill, SkillScope } from "@/lib/skills";
+import type {
+  InstalledSkill,
+  Skill,
+  SkillScope,
+  SkillSyncStatus,
+} from "@/lib/skills";
 import { parseSkillMd, resolveSkillDisplayName } from "@/lib/skills";
-import { skills as skillsService } from "@/services/skills";
+import {
+  isUpstreamManagedSkill,
+  skills as skillsService,
+} from "@/services/skills";
+import { agentStore } from "@/stores/agent.store";
 import { skillsStore } from "@/stores/skills.store";
+import { threadStore } from "@/stores/thread.store";
 
 interface SkillsExplorerProps {
   collapsed?: boolean;
@@ -58,6 +70,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     slug: string;
     missingFiles: string[];
   } | null>(null);
+  const [syncStatuses, setSyncStatuses] = createSignal<
+    Record<string, SkillSyncStatus | null | undefined>
+  >({});
+  const [syncLoading, setSyncLoading] = createSignal<Record<string, boolean>>(
+    {},
+  );
 
   // ── Derived values ──────────────────────────────
 
@@ -78,11 +96,117 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     return skillsService.search(skillsStore.available, q);
   };
 
+  const syncStatusFor = (skill: InstalledSkill) => syncStatuses()[skill.path];
+
+  const setSyncLoadingFor = (path: string, isLoading: boolean) => {
+    setSyncLoading((current) => ({ ...current, [path]: isLoading }));
+  };
+
+  const setSyncStatusFor = (
+    path: string,
+    status: SkillSyncStatus | null | undefined,
+  ) => {
+    setSyncStatuses((current) => ({ ...current, [path]: status }));
+  };
+
+  const loadSyncStatus = async (skill: InstalledSkill) => {
+    if (!isUpstreamManagedSkill(skill)) {
+      setSyncStatusFor(skill.path, null);
+      return;
+    }
+
+    setSyncLoadingFor(skill.path, true);
+    try {
+      const status = await skillsService.inspectSyncStatus(skill);
+      setSyncStatusFor(skill.path, status);
+    } finally {
+      setSyncLoadingFor(skill.path, false);
+    }
+  };
+
+  const refreshAllSyncStatuses = async () => {
+    await Promise.all(
+      skillsStore.installed.map((skill) => loadSyncStatus(skill)),
+    );
+  };
+
+  const updateCount = () =>
+    skillsStore.installed.filter(
+      (skill) => syncStatusFor(skill)?.updateAvailable,
+    ).length;
+
+  const localChangesCount = () =>
+    skillsStore.installed.filter(
+      (skill) => syncStatusFor(skill)?.hasLocalChanges,
+    ).length;
+
+  const getAffectedLiveThreadIds = (skill: InstalledSkill) => {
+    return threadStore.threads.flatMap((thread) => {
+      if (thread.kind !== "agent" || !thread.isLive) return [];
+      const effectiveSkills = skillsStore.getThreadSkills(
+        thread.projectRoot,
+        thread.id,
+      );
+      return effectiveSkills.some(
+        (activeSkill) => activeSkill.path === skill.path,
+      )
+        ? [thread.id]
+        : [];
+    });
+  };
+
+  const restartAffectedLiveThreads = async (threadIds: string[]) => {
+    for (const threadId of threadIds) {
+      const thread = threadStore.threads.find((entry) => entry.id === threadId);
+      if (!thread || thread.kind !== "agent") continue;
+      await agentStore.resumeAgentConversation(
+        thread.id,
+        thread.projectRoot ?? undefined,
+      );
+    }
+  };
+
+  const syncStatusLabel = (status: SkillSyncStatus | null | undefined) => {
+    if (!status) return null;
+    switch (status.state) {
+      case "current":
+        return "Current";
+      case "update-available":
+        return "Update available";
+      case "local-changes":
+        return "Local edits";
+      case "error":
+        return "Check failed";
+      default:
+        return null;
+    }
+  };
+
+  const syncStatusClasses = (status: SkillSyncStatus | null | undefined) => {
+    if (!status) {
+      return "bg-surface-3 text-muted-foreground";
+    }
+
+    switch (status.state) {
+      case "current":
+        return "bg-success/10 text-success";
+      case "update-available":
+        return "bg-warning/10 text-warning";
+      case "local-changes":
+        return "bg-destructive/10 text-destructive";
+      case "error":
+        return "bg-surface-3 text-muted-foreground";
+      default:
+        return "bg-surface-3 text-muted-foreground";
+    }
+  };
+
   // ── Lifecycle ───────────────────────────────────
 
   onMount(async () => {
     await skillsStore.refresh();
     await ensureSkillCreatorInstalled();
+    await refreshAllSyncStatuses();
   });
 
   const ensureSkillCreatorInstalled = async () => {
@@ -105,7 +229,8 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       };
       const content = await skillsService.fetchContent(skill);
       if (!content) return;
-      await skillsStore.install(skill, content, "seren");
+      const installed = await skillsStore.install(skill, content, "seren");
+      await loadSyncStatus(installed);
     } catch (err) {
       console.error("[SkillsExplorer] Failed to install skill-creator:", err);
     }
@@ -169,6 +294,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
       const content = await skillsService.fetchContent(skill);
       if (content) {
         const installed = await skillsStore.install(skill, content, scope);
+        await loadSyncStatus(installed);
 
         // Validate payload after install
         const missingFiles = await skillsService.validatePayload(
@@ -190,12 +316,110 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     setActionInProgress(skill.id);
     try {
       await skillsStore.remove(skill);
+      setSyncStatusFor(skill.path, undefined);
       if (expandedSkillId() === skill.id) {
         setExpandedSkillId(null);
         setDetailContent(null);
       }
     } catch (err) {
       console.error("[SkillsExplorer] Failed to uninstall:", err);
+    } finally {
+      setActionInProgress(null);
+    }
+  };
+
+  const handleRefreshAll = async () => {
+    await skillsStore.refresh(true);
+    await refreshAllSyncStatuses();
+  };
+
+  const handleRefreshInstalledSkill = async (skill: InstalledSkill) => {
+    const cachedStatus = syncStatusFor(skill);
+    const existingStatus =
+      cachedStatus && cachedStatus.state !== "error"
+        ? cachedStatus
+        : await skillsService.inspectSyncStatus(skill);
+    setSyncStatusFor(skill.path, existingStatus);
+
+    if (!existingStatus) {
+      window.alert(
+        `${skill.name} is not tracked against an upstream Seren skill revision, so Seren will not refresh it automatically.`,
+      );
+      return;
+    }
+
+    if (existingStatus.state === "error") {
+      window.alert(
+        existingStatus.error
+          ? `Seren could not verify the current sync state for ${skill.name}.\n\n${existingStatus.error}\n\nRefresh has been blocked to avoid overwriting local files without a verified baseline.`
+          : `Seren could not verify the current sync state for ${skill.name}. Refresh has been blocked to avoid overwriting local files without a verified baseline.`,
+      );
+      return;
+    }
+
+    if (existingStatus?.hasLocalChanges) {
+      const changed = [
+        ...existingStatus.changedLocalFiles,
+        ...existingStatus.missingManagedFiles,
+      ];
+      const confirmOverwrite = await confirm(
+        `Local changes were detected in ${skill.name}.\n\n${changed
+          .slice(0, 8)
+          .join(
+            "\n",
+          )}${changed.length > 8 ? `\n...and ${changed.length - 8} more` : ""}\n\nOverwrite local skill files with upstream?`,
+        {
+          title: "Overwrite local skill changes?",
+          kind: "warning",
+        },
+      );
+      if (!confirmOverwrite) return;
+    }
+
+    const affectedThreadIds = getAffectedLiveThreadIds(skill);
+    if (affectedThreadIds.length > 0) {
+      const confirmRestart = await confirm(
+        `${skill.name} is active in ${affectedThreadIds.length} live agent thread${affectedThreadIds.length === 1 ? "" : "s"}.\n\nSeren can stop those sessions, refresh the skill, and resume them so the next prompt runs against the updated files.\n\nContinue?`,
+        {
+          title: "Restart live agent sessions?",
+          kind: "warning",
+        },
+      );
+      if (!confirmRestart) return;
+    }
+
+    setActionInProgress(skill.id);
+    let stoppedLiveThreads = false;
+    const terminatedThreadIds: string[] = [];
+    try {
+      if (affectedThreadIds.length > 0) {
+        for (const threadId of affectedThreadIds) {
+          const liveSession = Object.values(agentStore.sessions).find(
+            (session) => session.conversationId === threadId,
+          );
+          if (!liveSession) continue;
+          await agentStore.terminateSession(liveSession.info.id);
+          terminatedThreadIds.push(threadId);
+        }
+        stoppedLiveThreads = terminatedThreadIds.length > 0;
+      }
+
+      const refreshed = await skillsService.refreshInstalledSkill(skill, {
+        expectedLocalManagedState: existingStatus.localManagedState,
+      });
+      skillsStore.replaceInstalled(refreshed.installed);
+      setSyncStatusFor(refreshed.installed.path, refreshed.syncStatus);
+
+      if (terminatedThreadIds.length > 0) {
+        await restartAffectedLiveThreads(terminatedThreadIds);
+        stoppedLiveThreads = false;
+      }
+    } catch (err) {
+      console.error("[SkillsExplorer] Failed to refresh installed skill:", err);
+      if (stoppedLiveThreads) {
+        await restartAffectedLiveThreads(terminatedThreadIds);
+      }
+      await loadSyncStatus(skill);
     } finally {
       setActionInProgress(null);
     }
@@ -261,7 +485,8 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         tags: [],
       };
 
-      await skillsStore.install(skill, content, "seren");
+      const installed = await skillsStore.install(skill, content, "seren");
+      await loadSyncStatus(installed);
       setInstallUrl("");
       setShowUrlDialog(false);
       setActiveTab("installed");
@@ -368,7 +593,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
           <button
             type="button"
             class="flex items-center justify-center w-7 h-7 bg-transparent border-none rounded-md text-muted-foreground cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground"
-            onClick={() => skillsStore.refresh(true)}
+            onClick={() => void handleRefreshAll()}
             title="Refresh skills (bypass cache)"
           >
             <svg
@@ -505,6 +730,32 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
         </button>
       </div>
 
+      <Show when={updateCount() > 0 || localChangesCount() > 0}>
+        <div class="mx-4 mt-2 px-3 py-2 bg-surface-2/70 border border-border rounded-md text-[12px] text-muted-foreground">
+          <div class="font-medium text-foreground">
+            Skill sync attention needed
+          </div>
+          <div class="mt-1">
+            <Show when={updateCount() > 0}>
+              <span>
+                {updateCount()} upstream update{updateCount() === 1 ? "" : "s"}{" "}
+                available.
+              </span>
+            </Show>
+            <Show when={updateCount() > 0 && localChangesCount() > 0}>
+              <span> </span>
+            </Show>
+            <Show when={localChangesCount() > 0}>
+              <span>
+                {localChangesCount()} installed skill
+                {localChangesCount() === 1 ? "" : "s"} ha
+                {localChangesCount() === 1 ? "s" : "ve"} local edits.
+              </span>
+            </Show>
+          </div>
+        </div>
+      </Show>
+
       {/* Install warning banner */}
       <Show when={installWarning()}>
         {(warning) => (
@@ -613,6 +864,22 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                           >
                             {scopeLabel(skill.scope)}
                           </span>
+                          <Show when={syncStatusLabel(syncStatusFor(skill))}>
+                            {(label) => (
+                              <span
+                                class={`shrink-0 px-1.5 py-0 text-[10px] font-semibold rounded ${syncStatusClasses(
+                                  syncStatusFor(skill),
+                                )}`}
+                              >
+                                {label()}
+                              </span>
+                            )}
+                          </Show>
+                          <Show when={syncLoading()[skill.path]}>
+                            <span class="text-[10px] text-muted-foreground">
+                              Checking...
+                            </span>
+                          </Show>
                         </div>
                         <Show when={skill.description}>
                           <p class="m-0 mt-0.5 text-[12px] text-muted-foreground truncate">
@@ -678,6 +945,19 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             >
                               Edit in Editor
                             </button>
+                            <Show when={isUpstreamManaged(skill)}>
+                              <button
+                                type="button"
+                                class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOverflowMenuId(null);
+                                  void handleRefreshInstalledSkill(skill);
+                                }}
+                              >
+                                Refresh From Upstream
+                              </button>
+                            </Show>
                             <button
                               type="button"
                               class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-destructive cursor-pointer transition-colors hover:bg-surface-3 text-left"
@@ -708,6 +988,159 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                                   </span>
                                 )}
                               </For>
+                            </div>
+                          </Show>
+
+                          <Show when={isUpstreamManaged(skill)}>
+                            <div class="mb-2 p-2.5 bg-surface-1 border border-border rounded-md text-[11px] text-muted-foreground">
+                              <div class="flex items-center justify-between gap-2">
+                                <span class="font-medium text-foreground">
+                                  Upstream sync
+                                </span>
+                                <button
+                                  type="button"
+                                  class="px-2 py-1 bg-transparent border border-border text-muted-foreground rounded-md text-[11px] cursor-pointer transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
+                                  onClick={() =>
+                                    void handleRefreshInstalledSkill(skill)
+                                  }
+                                  disabled={
+                                    actionInProgress() === skill.id ||
+                                    syncLoading()[skill.path]
+                                  }
+                                >
+                                  {actionInProgress() === skill.id
+                                    ? "Refreshing..."
+                                    : "Refresh from upstream"}
+                                </button>
+                              </div>
+                              <div class="mt-2">
+                                Local revision:{" "}
+                                <span class="text-foreground">
+                                  {syncStatusFor(skill)?.syncedRevision?.slice(
+                                    0,
+                                    7,
+                                  ) || "unknown"}
+                                </span>
+                              </div>
+                              <div class="mt-1">
+                                Remote revision:{" "}
+                                <span class="text-foreground">
+                                  {syncStatusFor(skill)?.remoteRevision
+                                    ?.shortSha || "unavailable"}
+                                </span>
+                              </div>
+                              <Show
+                                when={
+                                  syncStatusFor(skill)?.remoteRevision?.message
+                                }
+                              >
+                                <div class="mt-1">
+                                  {
+                                    syncStatusFor(skill)?.remoteRevision
+                                      ?.message
+                                  }
+                                </div>
+                              </Show>
+                              <Show
+                                when={syncStatusFor(skill)?.remoteRevision?.url}
+                              >
+                                <div class="mt-2">
+                                  <button
+                                    type="button"
+                                    class="p-0 bg-transparent border-none text-[11px] text-primary cursor-pointer hover:underline"
+                                    onClick={() =>
+                                      void openExternalLink(
+                                        syncStatusFor(skill)?.remoteRevision
+                                          ?.url || "",
+                                      )
+                                    }
+                                  >
+                                    Open upstream commit
+                                  </button>
+                                </div>
+                              </Show>
+                              <Show
+                                when={
+                                  syncStatusFor(skill)?.remoteRevision
+                                    ?.changedFiles.length
+                                }
+                              >
+                                <div class="mt-2">
+                                  <div class="font-medium text-foreground">
+                                    Upstream changed files
+                                  </div>
+                                  <ul class="m-0 mt-1 pl-4">
+                                    <For
+                                      each={syncStatusFor(
+                                        skill,
+                                      )?.remoteRevision?.changedFiles.slice(
+                                        0,
+                                        6,
+                                      )}
+                                    >
+                                      {(file) => <li>{file}</li>}
+                                    </For>
+                                  </ul>
+                                </div>
+                              </Show>
+                              <Show
+                                when={
+                                  syncStatusFor(skill)?.changedLocalFiles.length
+                                }
+                              >
+                                <div class="mt-2">
+                                  <div class="font-medium text-destructive">
+                                    Local file changes
+                                  </div>
+                                  <ul class="m-0 mt-1 pl-4 text-destructive">
+                                    <For
+                                      each={syncStatusFor(
+                                        skill,
+                                      )?.changedLocalFiles.slice(0, 6)}
+                                    >
+                                      {(file) => <li>{file}</li>}
+                                    </For>
+                                  </ul>
+                                </div>
+                              </Show>
+                              <Show
+                                when={
+                                  syncStatusFor(skill)?.missingManagedFiles
+                                    .length
+                                }
+                              >
+                                <div class="mt-2">
+                                  <div class="font-medium text-destructive">
+                                    Missing managed files
+                                  </div>
+                                  <ul class="m-0 mt-1 pl-4 text-destructive">
+                                    <For
+                                      each={syncStatusFor(
+                                        skill,
+                                      )?.missingManagedFiles.slice(0, 6)}
+                                    >
+                                      {(file) => <li>{file}</li>}
+                                    </For>
+                                  </ul>
+                                </div>
+                              </Show>
+                              <Show
+                                when={getAffectedLiveThreads(skill).length > 0}
+                              >
+                                <div class="mt-2 text-warning">
+                                  {getAffectedLiveThreads(skill).length} live
+                                  agent thread
+                                  {getAffectedLiveThreads(skill).length === 1
+                                    ? ""
+                                    : "s"}{" "}
+                                  currently reference this skill.
+                                </div>
+                              </Show>
+                              <Show when={syncStatusFor(skill)?.error}>
+                                <div class="mt-2 text-destructive">
+                                  {syncStatusFor(skill)?.error}
+                                </div>
+                              </Show>
                             </div>
                           </Show>
 
