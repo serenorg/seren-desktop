@@ -726,28 +726,29 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const processNextQueuedMessage = async () => {
     if (queueDraining) return;
-    const queue = messageQueue();
-    if (queue.length === 0 || !isReady()) return;
 
     // Capture thread identity synchronously before any async gap.
-    // threadSessionId() must be locked in NOW — after an await the active
-    // thread may have changed, which would cause the message to be sent to
-    // the wrong session.
     const drainThreadId = activeAgentThread()?.id;
     const drainSessionId = threadSessionId();
-    if (!drainThreadId || !drainSessionId) return;
+    if (!drainThreadId || !drainSessionId || !isReady()) return;
+
+    // Read from the thread-specific Map, NOT the reactive messageQueue()
+    // signal. During a thread switch the isReady effect can fire before the
+    // thread-switch effect clears messageQueue(), making the signal stale.
+    // threadQueues is a plain JS Map keyed by thread ID — it is always
+    // accurate for the target thread and immune to SolidJS batch ordering.
+    const threadQueue = threadQueues.get(drainThreadId);
+    if (!threadQueue || threadQueue.length === 0) return;
 
     queueDraining = true;
-    const [nextMessage, ...remaining] = queue;
-    setMessageQueue(remaining);
-    // Keep threadQueues in sync so the Map and signal never diverge.
-    // Without this, a component remount during an active drain would
-    // restore a stale threadQueues entry and re-send already-sent messages.
+    const [nextMessage, ...remaining] = threadQueue;
+    // Keep the Map and signal in sync.
     if (remaining.length > 0) {
       threadQueues.set(drainThreadId, remaining);
     } else {
       threadQueues.delete(drainThreadId);
     }
+    setMessageQueue(remaining);
     console.log("[AgentChat] Processing queued message:", nextMessage);
 
     try {
@@ -771,12 +772,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     }
   };
 
-  // Trigger queue drain when agent becomes ready
+  // Trigger queue drain when agent becomes ready.
+  // Check threadQueues Map (not the reactive signal) to avoid reading stale
+  // messageQueue() values during a thread switch — the root cause of
+  // cross-thread message pollution.
   createEffect(
     on(
       isReady,
       (ready) => {
-        if (ready && messageQueue().length > 0) {
+        const threadId = activeAgentThread()?.id;
+        if (ready && threadId && (threadQueues.get(threadId)?.length ?? 0) > 0) {
           processNextQueuedMessage();
         }
       },
