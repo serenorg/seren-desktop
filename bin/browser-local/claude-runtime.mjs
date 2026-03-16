@@ -3,7 +3,7 @@
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +54,57 @@ function resolveClaudeBinary() {
   }
 
   return "claude";
+}
+
+/**
+ * Build a PATH string that includes well-known Node.js install locations.
+ * macOS GUI apps don't inherit the user's shell profile, so node/npm from
+ * nvm, fnm, Homebrew, or Volta aren't on PATH. Without this, Claude Code
+ * hooks that shell out to `node` fail with "command not found".
+ */
+function buildExtendedPath() {
+  const sep = process.platform === "win32" ? ";" : ":";
+  const base = process.env.PATH ?? "";
+  if (process.platform === "win32") return base;
+
+  const home = os.homedir();
+  const extra = [
+    // nvm (most common)
+    path.join(home, ".nvm", "versions", "node"),
+    // fnm
+    path.join(home, ".local", "share", "fnm", "aliases", "default", "bin"),
+    path.join(home, "Library", "Application Support", "fnm", "aliases", "default", "bin"),
+    // Volta
+    path.join(home, ".volta", "bin"),
+    // Homebrew (Apple Silicon + Intel)
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    // Common Linux paths
+    "/usr/bin",
+  ];
+
+  // For nvm, find the active or default version directory
+  const nvmDir = extra[0];
+  if (existsSync(nvmDir)) {
+    try {
+      const versions = readdirSync(nvmDir).sort().reverse();
+      for (const ver of versions) {
+        const binDir = path.join(nvmDir, ver, "bin");
+        if (existsSync(binDir)) {
+          extra[0] = binDir;
+          break;
+        }
+      }
+    } catch {
+      // Can't read nvm versions — remove placeholder
+      extra[0] = "";
+    }
+  } else {
+    extra[0] = "";
+  }
+
+  const additions = extra.filter((p) => p && !base.includes(p));
+  return additions.length > 0 ? `${additions.join(sep)}${sep}${base}` : base;
 }
 
 function isAuthError(message) {
@@ -1210,6 +1261,7 @@ export function createClaudeRuntime({ emit }) {
     const remoteSessionId = resumeAgentSessionId ?? randomUUID();
     const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
     const claudeBin = resolveClaudeBinary();
+    const extendedPath = buildExtendedPath();
     const processHandle = spawn(
       claudeBin,
       buildClaudeArgs({
@@ -1224,6 +1276,7 @@ export function createClaudeRuntime({ emit }) {
         env: {
           ...process.env,
           ...mcpConfig.childEnv,
+          PATH: extendedPath,
         },
         stdio: ["pipe", "pipe", "pipe"],
         shell: process.platform === "win32",
@@ -1564,6 +1617,7 @@ export function createClaudeRuntime({ emit }) {
         env: {
           ...process.env,
           ...(session.spawnEnv ?? {}),
+          PATH: buildExtendedPath(),
         },
         stdio: ["pipe", "pipe", "pipe"],
         shell: process.platform === "win32",
