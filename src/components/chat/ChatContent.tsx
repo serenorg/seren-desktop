@@ -542,6 +542,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Event handler for setting chat input (e.g., from skill invocation)
   const handleSetChatInput = (event: Event) => {
+    // Skip if another handler already processed this event (prevents
+    // duplicate sends when both AgentChat and ChatContent are mounted).
+    if ((event as CustomEvent & { _handled?: boolean })._handled) return;
+
     const customEvent = event as CustomEvent<
       | string
       | {
@@ -563,6 +567,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
       // Auto-send if requested (e.g., from skill click)
       if (detail.autoSend) {
+        (event as CustomEvent & { _handled?: boolean })._handled = true;
         // Use setTimeout to ensure input is set before sending
         setTimeout(() => {
           sendMessage({

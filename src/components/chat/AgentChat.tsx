@@ -202,6 +202,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const onPickImages = () => handleAttachImages();
   const onSetChatInput = (event: Event) => {
+    // Skip if another handler already processed this event (prevents
+    // duplicate sends when both AgentChat and ChatContent are mounted).
+    if ((event as CustomEvent & { _handled?: boolean })._handled) return;
+
     const customEvent = event as CustomEvent<
       string | { text: string; autoSend?: boolean }
     >;
@@ -217,6 +221,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
       // Auto-send if requested (e.g., from skill click)
       if (detail.autoSend) {
+        (event as CustomEvent & { _handled?: boolean })._handled = true;
         // Use setTimeout to ensure input is set before sending
         setTimeout(() => {
           sendMessage();
