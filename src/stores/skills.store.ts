@@ -581,6 +581,19 @@ export const skillsStore = {
       this.refreshAvailable(skipCache),
       this.refreshInstalled(),
     ]);
+
+    // Backfill sync state for skills installed before the sync feature
+    // existed (pre-v2.3.16). Non-blocking — failures are logged and skipped.
+    const needsBackfill = state.installed.some(
+      (s) => !s.syncState && state.available.some((a) => a.slug === s.slug && a.source === "serenorg"),
+    );
+    if (needsBackfill) {
+      const count = await skills.backfillSyncState(state.installed, state.available);
+      if (count > 0) {
+        log.info("[SkillsStore] Backfilled sync state for", count, "skills");
+        await this.refreshInstalled();
+      }
+    }
   },
 
   /**

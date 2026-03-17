@@ -799,6 +799,7 @@ pub fn run() {
             skills::read_skill_content,
             skills::read_skill_file,
             skills::read_skill_sync_state,
+            skills::write_skill_sync_state,
             skills::resolve_skill_path,
             skills::create_skill_folder,
             // Orchestrator commands

@@ -956,8 +956,8 @@ pub fn read_skill_sync_state(skills_dir: String, slug: String) -> Result<Option<
 }
 
 /// Persist sync state metadata for a skill.
-#[cfg(test)]
-fn write_skill_sync_state(
+#[tauri::command]
+pub fn write_skill_sync_state(
     skills_dir: String,
     slug: String,
     state_json: String,
