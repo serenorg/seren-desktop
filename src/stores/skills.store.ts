@@ -9,7 +9,11 @@ import type {
   SkillScope,
   SkillsState,
 } from "@/lib/skills";
-import { type ProjectSkillsConfig, skills } from "@/services/skills";
+import {
+  type ProjectSkillsConfig,
+  isUpstreamManagedSkill,
+  skills,
+} from "@/services/skills";
 import { getFileTreeState } from "@/stores/fileTree";
 
 const ENABLED_SKILLS_KEY = "seren:enabled_skills";
@@ -449,9 +453,24 @@ export const skillsStore = {
       ? [...current]
       : this.getProjectSkills(projectRoot).map((s) => skillRef(s));
 
-    const next = base.includes(target)
-      ? base.filter((r) => r !== target)
-      : [...base, target];
+    const isAdding = !base.includes(target);
+    const next = isAdding
+      ? [...base, target]
+      : base.filter((r) => r !== target);
+
+    // Auto-refresh stale upstream-managed skill when activating on a thread.
+    if (isAdding && isUpstreamManagedSkill(installed)) {
+      try {
+        const status = await skills.inspectSyncStatus(installed);
+        if (status.updateAvailable) {
+          await skills.refreshInstalledSkill(installed);
+          await this.refreshInstalled();
+          log.info("[SkillsStore] Refreshed stale skill on toggle-on:", installed.slug);
+        }
+      } catch (err) {
+        log.warn("[SkillsStore] Upstream check failed on toggle-on:", installed.slug, err);
+      }
+    }
 
     const normalized = normalizeRefs(next);
     await skills.setThreadSkills(projectRoot, threadId, normalized);
@@ -593,6 +612,26 @@ export const skillsStore = {
         log.info("[SkillsStore] Backfilled sync state for", count, "skills");
         await this.refreshInstalled();
       }
+    }
+
+    // Auto-refresh stale upstream-managed skills so users always get the
+    // latest runtime files without needing the explicit Refresh button.
+    let autoRefreshed = 0;
+    for (const skill of state.installed) {
+      if (!isUpstreamManagedSkill(skill)) continue;
+      try {
+        const status = await skills.inspectSyncStatus(skill);
+        if (status.updateAvailable) {
+          await skills.refreshInstalledSkill(skill);
+          autoRefreshed++;
+          log.info("[SkillsStore] Auto-refreshed stale skill:", skill.slug);
+        }
+      } catch (err) {
+        log.warn("[SkillsStore] Failed to check/refresh skill:", skill.slug, err);
+      }
+    }
+    if (autoRefreshed > 0) {
+      await this.refreshInstalled();
     }
   },
 
