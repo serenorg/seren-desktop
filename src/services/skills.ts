@@ -1352,4 +1352,67 @@ export const skills = {
     }
     return Array.from(tagSet).sort();
   },
+
+  /**
+   * Backfill sync state for installed skills that were installed before the
+   * sync feature existed (pre-v2.3.16). Matches installed skills missing
+   * sync state to available repo skills by slug, then writes a minimal
+   * .seren-sync.json so the upstream refresh flow can detect updates.
+   */
+  async backfillSyncState(
+    installed: InstalledSkill[],
+    available: Skill[],
+  ): Promise<number> {
+    if (!isTauriRuntime()) return 0;
+
+    const repoSkillsBySlug = new Map<string, Skill>();
+    for (const skill of available) {
+      if (skill.source === "serenorg" && skill.sourceUrl) {
+        repoSkillsBySlug.set(skill.slug, skill);
+      }
+    }
+
+    let backfilled = 0;
+
+    for (const skill of installed) {
+      // Skip skills that already have sync state
+      if (skill.syncState) continue;
+
+      const repoMatch = repoSkillsBySlug.get(skill.slug);
+      if (!repoMatch?.sourceUrl) continue;
+
+      // Read current content to compute managed file hash
+      const content = await this.readContent(skill);
+      if (!content) continue;
+
+      const contentHash = await computeContentHash(content);
+      const syncState: SkillSyncState = {
+        version: 1,
+        upstreamSource: "serenorg" as SkillSource,
+        upstreamSourceUrl: repoMatch.sourceUrl,
+        syncedRevision: null,
+        syncedAt: Date.now(),
+        managedFiles: { "SKILL.md": contentHash },
+      };
+
+      try {
+        await invoke("write_skill_sync_state", {
+          skillsDir: skill.skillsDir,
+          slug: skill.dirName,
+          stateJson: JSON.stringify(syncState),
+        });
+        backfilled++;
+        log.info(
+          "[Skills] Backfilled sync state for",
+          skill.slug,
+          "→",
+          repoMatch.sourceUrl,
+        );
+      } catch (err) {
+        log.warn("[Skills] Failed to backfill sync state for", skill.slug, err);
+      }
+    }
+
+    return backfilled;
+  },
 };
