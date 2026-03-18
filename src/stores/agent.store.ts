@@ -205,6 +205,12 @@ export interface ActiveSession {
   lastUserPrompt?: string;
   /** Set after a compact-and-retry attempt so we only try once per prompt. */
   compactRetryAttempted?: boolean;
+  /** Number of prompt exchanges (promptComplete events) in this session.
+   *  Used as a heuristic for context growth when token usage is unreliable. */
+  promptExchangeCount?: number;
+  /** In-flight compactAndRetry promise — awaited by sendPrompt catch block
+   *  so compaction completes before the error handler gives up. */
+  compactRetryPromise?: Promise<boolean>;
   /** Transcript bootstrap injected into the first real prompt of a forked branch. */
   bootstrapPromptContext?: string;
   /** Set when the user explicitly requested a cancel — suppresses auto-retry
@@ -1659,16 +1665,32 @@ export const agentStore = {
   },
 
   /**
-   * Clear all messages in a session.
+   * Clear all messages in a session and respawn the CLI process.
+   * Clearing UI messages alone is not enough — Claude Code CLI maintains its
+   * own internal context, so the old session remains full. We terminate the
+   * CLI session and spawn a fresh one to actually free up context.
    */
-  clearSessionMessages(sessionId: string) {
+  async clearSessionMessages(sessionId: string) {
     const session = state.sessions[sessionId];
     if (!session) return;
 
-    setState("sessions", sessionId, "messages", []);
-    clearConversationHistory(session.conversationId).catch((err) =>
+    const { conversationId, info } = session;
+    const cwd = info.cwd;
+    const agentType = info.agentType;
+
+    // Clear persisted messages from SQLite
+    clearConversationHistory(conversationId).catch((err) =>
       console.error("[AgentStore] Failed to clear persisted messages:", err),
     );
+
+    // Terminate the old CLI session (kills the process)
+    await this.terminateSession(sessionId);
+
+    // Spawn a fresh CLI session for the same conversation
+    console.info(
+      `[AgentStore] Clear history: respawning fresh session for conversation ${conversationId}`,
+    );
+    await this.spawnSession(cwd, agentType);
   },
 
   /**
@@ -2231,13 +2253,19 @@ Summary:`;
         return;
       }
 
-      // Skip addErrorMessage for cancellation and prompt-too-long — the error
-      // event handler already recorded them and triggers the appropriate
-      // recovery flow. Adding them again here would create duplicates.
-      if (
-        !message.includes("Task cancelled") &&
-        !isPromptTooLongError(message)
-      ) {
+      // For prompt-too-long errors, wait for the in-flight compactAndRetry
+      // to finish before giving up. Without this, sendPrompt rejects while
+      // compaction is still running, and the compaction result is lost.
+      if (isPromptTooLongError(message)) {
+        const compactPromise = state.sessions[sessionId]?.compactRetryPromise;
+        if (compactPromise) {
+          console.info(
+            "[AgentStore] sendPrompt: waiting for in-flight compaction to complete",
+          );
+          await compactPromise;
+        }
+        // Don't add error message — compactAndRetry handles fallback
+      } else if (!message.includes("Task cancelled")) {
         this.addErrorMessage(sessionId, message);
       }
 
@@ -2682,6 +2710,16 @@ Summary:`;
           }
         }
 
+        // Track prompt exchange count for heuristic compaction decisions
+        if (!isHistoryReplay) {
+          setState(
+            "sessions",
+            sessionId,
+            "promptExchangeCount",
+            (state.sessions[sessionId]?.promptExchangeCount ?? 0) + 1,
+          );
+        }
+
         // Transition status back to "ready" so queued messages can be processed
         setState(
           "sessions",
@@ -2692,16 +2730,15 @@ Summary:`;
         );
 
         // Auto-compact check: trigger compaction at 85% of context window,
-        // or at 850 messages when the agent doesn't report token usage.
+        // or by message/prompt count when token data is unreliable.
         if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
           const sess = state.sessions[sessionId];
           if (settingsStore.settings.autoCompactEnabled && sess) {
-            const MESSAGE_COUNT_COMPACT_THRESHOLD = 200;
             let shouldCompact = false;
 
             // Treat token usage below 1% as unreliable — Claude Code
             // sometimes reports near-zero tokens even when context is full.
-            // Fall through to the message-count heuristic in that case.
+            // Fall through to heuristic checks in that case.
             const MIN_RELIABLE_TOKENS = Math.max(
               100,
               sess.contextWindowSize * 0.01,
@@ -2721,16 +2758,26 @@ Summary:`;
                 shouldCompact = true;
               }
             } else {
-              // Only count messages added since session start — restored
-              // display-only history from SQLite should not re-trigger
-              // compaction on every app restart.
+              // Token usage is unreliable. Use two heuristics:
+              // 1. Active message count (user + assistant messages in store)
+              // 2. Prompt exchange count (how many promptComplete events
+              //    this session has handled — each exchange adds user msg,
+              //    assistant reply, and potentially many tool calls to the
+              //    CLI's internal context even though we only see the final
+              //    assistant message in our store).
               const activeCount = Math.max(
                 0,
                 sess.messages.length - (sess.restoredMessageCount ?? 0),
               );
-              if (activeCount > MESSAGE_COUNT_COMPACT_THRESHOLD) {
+              const promptExchanges = sess.promptExchangeCount ?? 0;
+
+              // With unreliable tokens, compact aggressively:
+              // - 50 active messages, OR
+              // - 15 prompt exchanges (each exchange includes tool calls
+              //   that consume context invisibly to us)
+              if (activeCount > 50 || promptExchanges > 15) {
                 console.info(
-                  `[AgentStore] ${activeCount} active messages (${sess.messages.length} total) without token usage data — triggering auto-compaction`,
+                  `[AgentStore] Unreliable token data — ${activeCount} active messages, ${promptExchanges} prompt exchanges — triggering auto-compaction`,
                 );
                 shouldCompact = true;
               }
@@ -2881,8 +2928,9 @@ Summary:`;
             "ready" as SessionStatus,
           );
 
-          // Try compact-and-retry first; fall back to Chat only if it fails
-          this.compactAndRetry(sessionId).then((retried) => {
+          // Try compact-and-retry first; fall back to Chat only if it fails.
+          // Store the promise so sendPrompt catch block can await it.
+          const compactPromise = this.compactAndRetry(sessionId).then((retried) => {
             if (!retried) {
               console.info(
                 "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
@@ -2893,7 +2941,9 @@ Summary:`;
                 console.error("[AgentStore] Auto-failover failed:", err);
               });
             }
+            return retried;
           });
+          setState("sessions", sessionId, "compactRetryPromise", compactPromise);
         } else if (isRateLimitError(String(event.data.error))) {
           // Rate limit detected — automatically switch to chat mode
           console.info(
@@ -3470,7 +3520,7 @@ Summary:`;
           "[AgentStore] Prompt too long detected in streamed content",
         );
         setState("sessions", sessionId, "promptTooLongHandled", true);
-        void this.compactAndRetry(sessionId).then((retried) => {
+        const compactPromise = this.compactAndRetry(sessionId).then((retried) => {
           if (!retried) {
             console.info(
               "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
@@ -3483,7 +3533,9 @@ Summary:`;
               );
             });
           }
+          return retried;
         });
+        setState("sessions", sessionId, "compactRetryPromise", compactPromise);
       }
 
       setState("sessions", sessionId, "streamingContent", "");
