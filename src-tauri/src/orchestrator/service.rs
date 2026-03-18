@@ -291,6 +291,7 @@ async fn execute_single_task(
         // Create channel and spawn worker
         let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
         let worker = create_worker(&routing, app, &capabilities);
+        let worker_for_cancel = Arc::clone(&worker);
         let worker_prompt = subtask.prompt.clone();
         let worker_routing = routing.clone();
         let worker_app = app.clone();
@@ -315,11 +316,13 @@ async fn execute_single_task(
         let app_for_events = app.clone();
         let cancel_rx_clone = cancel_rx.clone();
 
-        // Collect all events, intercepting errors for reroute analysis
+        // Collect all events, intercepting errors for reroute analysis.
+        // Returns (was_cancelled, captured_error).
         let mut reroutable_error: Option<String> = None;
         let forward_handle = tokio::spawn(async move {
             let mut taken_rx = cancel_rx_clone.lock().await.take();
             let mut captured_error: Option<String> = None;
+            let mut cancelled = false;
             loop {
                 if let Some(ref mut rx) = taken_rx {
                     tokio::select! {
@@ -345,6 +348,7 @@ async fn execute_single_task(
                         }
                         _ = rx => {
                             log::info!("[Orchestrator] Cancellation received for conversation {}", conv_id);
+                            cancelled = true;
                             break;
                         }
                     }
@@ -371,12 +375,22 @@ async fn execute_single_task(
                     }
                 }
             }
-            captured_error
+            (cancelled, captured_error)
         });
 
         let forward_result = forward_handle.await;
-        if let Ok(Some(error_msg)) = &forward_result {
+        let was_cancelled = forward_result.as_ref().map(|(c, _)| *c).unwrap_or(false);
+        if let Ok((_, Some(ref error_msg))) = forward_result {
             reroutable_error = Some(error_msg.clone());
+        }
+
+        // If the forward loop exited due to cancellation, signal the worker
+        // to stop and abort its task so in-flight HTTP requests don't linger.
+        if was_cancelled {
+            log::info!("[Orchestrator] Cancelling worker for conversation {}", conversation_id);
+            let _ = worker_for_cancel.cancel().await;
+            worker_handle.abort();
+            break;
         }
 
         match worker_handle.await {
