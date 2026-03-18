@@ -612,8 +612,24 @@ function buildClaudeArgs({
 
 function buildPromptMeta(result) {
   const usage = result?.usage ?? {};
+  // input_tokens only counts non-cached tokens. The actual context
+  // consumption includes cache_creation_input_tokens (newly cached) and
+  // cache_read_input_tokens (previously cached). Sum all three to get
+  // the real context window usage for autocompact decisions.
+  const rawInput =
+    typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+  const cacheCreation =
+    typeof usage.cache_creation_input_tokens === "number"
+      ? usage.cache_creation_input_tokens
+      : 0;
+  const cacheRead =
+    typeof usage.cache_read_input_tokens === "number"
+      ? usage.cache_read_input_tokens
+      : 0;
   const inputTokens =
-    typeof usage.input_tokens === "number" ? usage.input_tokens : undefined;
+    rawInput + cacheCreation + cacheRead > 0
+      ? rawInput + cacheCreation + cacheRead
+      : undefined;
   const outputTokens =
     typeof usage.output_tokens === "number" ? usage.output_tokens : undefined;
 

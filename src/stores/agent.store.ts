@@ -205,9 +205,6 @@ export interface ActiveSession {
   lastUserPrompt?: string;
   /** Set after a compact-and-retry attempt so we only try once per prompt. */
   compactRetryAttempted?: boolean;
-  /** Number of prompt exchanges (promptComplete events) in this session.
-   *  Used as a heuristic for context growth when token usage is unreliable. */
-  promptExchangeCount?: number;
   /** In-flight compactAndRetry promise — awaited by sendPrompt catch block
    *  so compaction completes before the error handler gives up. */
   compactRetryPromise?: Promise<boolean>;
@@ -2710,16 +2707,6 @@ Summary:`;
           }
         }
 
-        // Track prompt exchange count for heuristic compaction decisions
-        if (!isHistoryReplay) {
-          setState(
-            "sessions",
-            sessionId,
-            "promptExchangeCount",
-            (state.sessions[sessionId]?.promptExchangeCount ?? 0) + 1,
-          );
-        }
-
         // Transition status back to "ready" so queued messages can be processed
         setState(
           "sessions",
@@ -2730,23 +2717,13 @@ Summary:`;
         );
 
         // Auto-compact check: trigger compaction at 85% of context window,
-        // or by message/prompt count when token data is unreliable.
+        // or at 200 messages for agents that don't report token usage at all.
         if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
           const sess = state.sessions[sessionId];
           if (settingsStore.settings.autoCompactEnabled && sess) {
             let shouldCompact = false;
 
-            // Treat token usage below 1% as unreliable — Claude Code
-            // sometimes reports near-zero tokens even when context is full.
-            // Fall through to heuristic checks in that case.
-            const MIN_RELIABLE_TOKENS = Math.max(
-              100,
-              sess.contextWindowSize * 0.01,
-            );
-            if (
-              sess.lastInputTokens &&
-              sess.lastInputTokens >= MIN_RELIABLE_TOKENS
-            ) {
+            if (sess.lastInputTokens && sess.lastInputTokens > 0) {
               const usagePercent =
                 sess.lastInputTokens / sess.contextWindowSize;
               const threshold =
@@ -2758,26 +2735,15 @@ Summary:`;
                 shouldCompact = true;
               }
             } else {
-              // Token usage is unreliable. Use two heuristics:
-              // 1. Active message count (user + assistant messages in store)
-              // 2. Prompt exchange count (how many promptComplete events
-              //    this session has handled — each exchange adds user msg,
-              //    assistant reply, and potentially many tool calls to the
-              //    CLI's internal context even though we only see the final
-              //    assistant message in our store).
+              // No token usage data at all — fall back to message count.
+              // Only count messages added since session start.
               const activeCount = Math.max(
                 0,
                 sess.messages.length - (sess.restoredMessageCount ?? 0),
               );
-              const promptExchanges = sess.promptExchangeCount ?? 0;
-
-              // With unreliable tokens, compact aggressively:
-              // - 50 active messages, OR
-              // - 15 prompt exchanges (each exchange includes tool calls
-              //   that consume context invisibly to us)
-              if (activeCount > 50 || promptExchanges > 15) {
+              if (activeCount > 200) {
                 console.info(
-                  `[AgentStore] Unreliable token data — ${activeCount} active messages, ${promptExchanges} prompt exchanges — triggering auto-compaction`,
+                  `[AgentStore] ${activeCount} active messages without token usage data — triggering auto-compaction`,
                 );
                 shouldCompact = true;
               }
