@@ -56,7 +56,7 @@ sha2 = "0.10"
 base64 = "0.22"
 libc = "0.2"
 reqwest = { version = "0.13", features = ["json", "stream"] }
-seren-memory-sdk = "0.1"
+seren-memory-sdk = { git = "https://github.com/serenorg/seren-memory-sdk.git", branch = "main" }
 rmcp = { version = "1.2", features = [
     "client",
     "transport-io",                           # stdio for local MCP servers
