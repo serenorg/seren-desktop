@@ -1821,15 +1821,11 @@ Summary:`;
       return false;
     }
 
-    const lastPrompt = session.lastUserPrompt;
-    if (!lastPrompt) {
-      console.warn("[AgentStore] compactAndRetry: no lastUserPrompt to retry");
-      return false;
-    }
-
     setState("sessions", sessionId, "compactRetryAttempted", true);
+
+    const lastPrompt = session.lastUserPrompt;
     console.info(
-      "[AgentStore] Prompt too long — attempting compaction before falling back to Chat",
+      `[AgentStore] Prompt too long — attempting compaction${lastPrompt ? " + retry" : " (no prompt to retry)"}`,
     );
 
     try {
@@ -1863,17 +1859,23 @@ Summary:`;
         return false;
       }
 
-      console.info(
-        `[AgentStore] Compaction complete, retrying prompt on session ${newSessionId}`,
-      );
-
       // compactAgentConversation sends the seed prompt before returning, so the
       // session may still be in 'prompting' state. Wait for it to go idle before
       // sending the user's original prompt to avoid a concurrent-prompt race.
       await waitForSessionIdle(newSessionId);
 
-      // Retry the original prompt
-      await providerService.sendPrompt(newSessionId, lastPrompt);
+      // Retry the original prompt if available; otherwise leave the
+      // compacted session ready for the user's next input.
+      if (lastPrompt) {
+        console.info(
+          `[AgentStore] Compaction complete, retrying prompt on session ${newSessionId}`,
+        );
+        await providerService.sendPrompt(newSessionId, lastPrompt);
+      } else {
+        console.info(
+          `[AgentStore] Compaction complete on session ${newSessionId} — no prompt to retry, session ready`,
+        );
+      }
       return true;
     } catch (error) {
       console.error(
