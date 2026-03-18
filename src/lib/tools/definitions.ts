@@ -27,8 +27,9 @@ export const MODEL_TOOL_LIMITS: Record<string, number> = {
   // Google models
   gemini: 256,
 
-  // Default for unknown models - be conservative
-  default: 128,
+  // Default for unknown/auto models - use permissive limit since the
+  // backend orchestrator applies its own model-specific tool filtering.
+  default: 4096,
 };
 
 /**
@@ -580,7 +581,7 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
     FILE_TOOLS.length + mcpToolsFiltered + gatewayTools.length;
   if (tools.length < totalAvailable) {
     console.warn(
-      `[Tools] Limited to ${limit} tools for model "${modelId ?? "unknown"}" (had ${totalAvailable} available)`,
+      `[Tools] Limited to ${limit} tools for model "${modelId || "unspecified"}" (had ${totalAvailable} available)`,
     );
   }
 
