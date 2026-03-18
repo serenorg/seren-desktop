@@ -1072,13 +1072,22 @@ impl Worker for ChatModelWorker {
             if !response.status().is_success() {
                 let status = response.status();
                 let body_text = response.text().await.unwrap_or_default();
+                // Check cancellation before logging — a 504 after cancel is expected
+                if *self.cancelled.lock().await {
+                    log::debug!("[ChatModelWorker] HTTP {} after cancellation (expected)", status);
+                    return Ok(());
+                }
                 log::error!("[ChatModelWorker] HTTP {} from Gateway", status);
-                event_tx
+                if let Err(e) = event_tx
                     .send(WorkerEvent::Error {
                         message: format!("Gateway returned HTTP {}", status),
                     })
                     .await
-                    .map_err(|e| format!("Failed to send error event: {}", e))?;
+                {
+                    // Channel closed — likely cancelled while sending
+                    log::debug!("[ChatModelWorker] Channel closed, cannot send error: {}", e);
+                    return Ok(());
+                }
                 return Err(format!(
                     "Gateway returned HTTP {}: {}",
                     status,
@@ -1111,7 +1120,7 @@ impl Worker for ChatModelWorker {
                         final_content.len(),
                         total
                     );
-                    event_tx
+                    if let Err(e) = event_tx
                         .send(WorkerEvent::Complete {
                             final_content,
                             thinking,
@@ -1119,7 +1128,10 @@ impl Worker for ChatModelWorker {
                             rlm_steps: None,
                         })
                         .await
-                        .map_err(|e| format!("Failed to send Complete event: {}", e))?;
+                    {
+                        log::debug!("[ChatModelWorker] Channel closed, cannot send Complete: {}", e);
+                        return Ok(());
+                    }
                     log::info!("[ChatModelWorker] Execution complete, breaking from tool loop");
                     break;
                 }
