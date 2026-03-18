@@ -61,6 +61,7 @@ async function waitForSessionIdle(
 }
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
+import { refreshAccessToken } from "@/services/auth";
 import {
   isPromptTooLongError,
   isRateLimitError,
@@ -182,6 +183,8 @@ export interface ActiveSession {
   rateLimitHit?: boolean;
   /** Set when the agent's context window is full — triggers the fallback-to-chat prompt. */
   promptTooLong?: boolean;
+  /** Guards against duplicate fallback when prompt-too-long is detected in both streamed content and error event. */
+  promptTooLongHandled?: boolean;
   /** When true, skip appending/persisting messages during history replay.
    *  Set when the session was spawned with restored messages from SQLite,
    *  cleared when the replay phase ends (promptComplete with historyReplay). */
@@ -1703,7 +1706,20 @@ ${toCompact.map((m) => `${m.type.toUpperCase()}: ${m.content}`).join("\n\n")}
 Summary:`;
 
       const summaryModel = "anthropic/claude-sonnet-4";
-      const summary = await sendMessage(summaryPrompt, summaryModel);
+      let summary: string;
+      try {
+        summary = await sendMessage(summaryPrompt, summaryModel);
+      } catch (firstErr) {
+        // If auth expired, attempt a token refresh and retry once
+        const msg = firstErr instanceof Error ? firstErr.message : "";
+        if (msg.includes("Not authenticated") || msg.includes("401")) {
+          const refreshed = await refreshAccessToken();
+          if (!refreshed) throw firstErr;
+          summary = await sendMessage(summaryPrompt, summaryModel);
+        } else {
+          throw firstErr;
+        }
+      }
 
       const compactedSummary: AgentCompactedSummary = {
         content: summary,
@@ -2681,7 +2697,17 @@ Summary:`;
             const MESSAGE_COUNT_COMPACT_THRESHOLD = 200;
             let shouldCompact = false;
 
-            if (sess.lastInputTokens) {
+            // Treat token usage below 1% as unreliable — Claude Code
+            // sometimes reports near-zero tokens even when context is full.
+            // Fall through to the message-count heuristic in that case.
+            const MIN_RELIABLE_TOKENS = Math.max(
+              100,
+              sess.contextWindowSize * 0.01,
+            );
+            if (
+              sess.lastInputTokens &&
+              sess.lastInputTokens >= MIN_RELIABLE_TOKENS
+            ) {
               const usagePercent =
                 sess.lastInputTokens / sess.contextWindowSize;
               const threshold =
@@ -2832,9 +2858,15 @@ Summary:`;
           console.info(
             "[AgentStore] Skipping non-permission timeout error — likely spurious race condition",
           );
-        } else if (isPromptTooLongError(String(event.data.error))) {
-          // Context window full — try compaction + retry before falling back
+        } else if (
+          isPromptTooLongError(String(event.data.error)) &&
+          !state.sessions[sessionId]?.promptTooLongHandled
+        ) {
+          // Context window full — try compaction + retry before falling back.
+          // Guard with promptTooLongHandled to prevent duplicate fallbacks
+          // when the error is also detected in streamed content.
           console.info("[AgentStore] Prompt too long detected in error event");
+          setState("sessions", sessionId, "promptTooLongHandled", true);
 
           // Reset to "ready" so the UI unfreezes — promptComplete never
           // fires after this error so the session would stay stuck in
@@ -3426,10 +3458,16 @@ Summary:`;
 
       // If the agent's response is a prompt-too-long error (context window full),
       // try compaction + retry before falling back to Chat mode.
-      if (isPromptTooLongError(session.streamingContent)) {
+      // Guard with promptTooLongHandled to prevent duplicate fallbacks when
+      // the error is detected in both streamed content and the error event.
+      if (
+        isPromptTooLongError(session.streamingContent) &&
+        !session.promptTooLongHandled
+      ) {
         console.info(
           "[AgentStore] Prompt too long detected in streamed content",
         );
+        setState("sessions", sessionId, "promptTooLongHandled", true);
         void this.compactAndRetry(sessionId).then((retried) => {
           if (!retried) {
             console.info(
