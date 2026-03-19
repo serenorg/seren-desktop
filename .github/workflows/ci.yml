@@ -178,17 +178,15 @@ jobs:
       - name: Verify frontend is embedded in binary
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" == "macos-latest" ]; then
-            BINARY=$(find src-tauri/target/release -name "Seren" -not -path "*/bundle/*" -type f | head -1)
-          elif [ "${{ matrix.os }}" == "windows-latest" ]; then
-            BINARY="src-tauri/target/release/Seren.exe"
-          else
-            BINARY="src-tauri/target/release/seren"
-          fi
-          if [ ! -f "$BINARY" ]; then
-            echo "ERROR: Binary not found at $BINARY"
+          # Find the main binary — name varies by platform (Seren, SerenDesktop, seren-desktop)
+          BINARY=$(find src-tauri/target/release -maxdepth 1 \( -name "Seren" -o -name "Seren.exe" -o -name "seren-desktop" -o -name "SerenDesktop" -o -name "SerenDesktop.exe" -o -name "seren_desktop" \) -type f | head -1)
+          if [ -z "$BINARY" ]; then
+            echo "Available files in release dir:"
+            ls -la src-tauri/target/release/ | grep -v "\.d$" | head -20
+            echo "ERROR: Could not find built binary"
             exit 1
           fi
+          echo "Found binary: $BINARY"
           MARKERS=("AgentStore" "SkillsStore" "sendPrompt" "MCP Gateway")
           for marker in "${MARKERS[@]}"; do
             if ! strings "$BINARY" | grep -q "$marker"; then
