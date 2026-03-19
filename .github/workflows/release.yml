@@ -304,6 +304,52 @@ jobs:
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING != 'true'
         run: pnpm tauri build --target ${{ matrix.target }}
 
+      # Verify the built binary contains current frontend code.
+      # Catches stale dist/ bundles that bypass beforeBuildCommand.
+      - name: Verify frontend is embedded in binary
+        shell: bash
+        run: |
+          echo "Checking that built binary contains current frontend code..."
+
+          # Find the built binary
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            BINARY=$(find src-tauri/target/${{ matrix.target }}/release/bundle -name "Seren" -type f | head -1)
+            if [ -z "$BINARY" ]; then
+              BINARY="src-tauri/target/${{ matrix.target }}/release/Seren"
+            fi
+          elif [[ "${{ matrix.os }}" == *"windows"* ]]; then
+            BINARY="src-tauri/target/${{ matrix.target }}/release/Seren.exe"
+          else
+            BINARY="src-tauri/target/${{ matrix.target }}/release/seren"
+          fi
+
+          if [ ! -f "$BINARY" ]; then
+            echo "ERROR: Built binary not found at $BINARY"
+            exit 1
+          fi
+
+          # Check for key frontend identifiers that must be in every build.
+          # These are stable function/variable names from the TypeScript source
+          # that survive minification because they're used as string literals
+          # in console.log/info statements.
+          MARKERS=("AgentStore" "SkillsStore" "sendPrompt" "MCP Gateway")
+          MISSING=0
+          for marker in "${MARKERS[@]}"; do
+            if ! strings "$BINARY" | grep -q "$marker"; then
+              echo "ERROR: Frontend marker '$marker' not found in binary — dist/ may be stale"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+
+          if [ "$MISSING" -gt 0 ]; then
+            echo ""
+            echo "FATAL: $MISSING frontend markers missing from binary."
+            echo "The embedded frontend is likely stale. Run 'pnpm build' before 'pnpm tauri build'."
+            exit 1
+          fi
+
+          echo "All frontend markers verified in binary."
+
       # Upload macOS DMG immediately (before notarization so we always have an artifact)
       - name: Upload macOS DMG (pre-notarization)
         if: matrix.os == 'macos-latest'
