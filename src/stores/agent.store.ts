@@ -2715,11 +2715,26 @@ Summary:`;
         // Track agent usage metadata for compaction decisions
         if (!isHistoryReplay && event.data.meta) {
           const inputTokens = event.data.meta.usage?.input_tokens;
+          // Update context window size from model metadata when available
+          const reportedContextWindow = event.data.meta.contextWindow;
+          if (
+            typeof reportedContextWindow === "number" &&
+            reportedContextWindow > 0
+          ) {
+            setState(
+              "sessions",
+              sessionId,
+              "contextWindowSize",
+              reportedContextWindow,
+            );
+          }
           if (inputTokens != null) {
             setState("sessions", sessionId, "lastInputTokens", inputTokens);
+            const ctxSize =
+              state.sessions[sessionId]?.contextWindowSize ?? 200_000;
             console.log(
               `[AgentStore] Agent usage: ${inputTokens} input tokens`,
-              `(${Math.round((inputTokens / (state.sessions[sessionId]?.contextWindowSize ?? 200_000)) * 100)}% of context)`,
+              `(${Math.round((inputTokens / ctxSize) * 100)}% of ${ctxSize.toLocaleString()} context)`,
             );
           }
         }

@@ -612,10 +612,10 @@ function buildClaudeArgs({
 
 function buildPromptMeta(result) {
   const usage = result?.usage ?? {};
-  // input_tokens only counts non-cached tokens. The actual context
-  // consumption includes cache_creation_input_tokens (newly cached) and
-  // cache_read_input_tokens (previously cached). Sum all three to get
-  // the real context window usage for autocompact decisions.
+  // result.usage reports CUMULATIVE tokens across all iterations (tool
+  // call round-trips) in this prompt. For autocompact we need the
+  // approximate context window fill — the input for a single API call.
+  // Divide cumulative total by num_turns to approximate per-turn usage.
   const rawInput =
     typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
   const cacheCreation =
@@ -626,12 +626,23 @@ function buildPromptMeta(result) {
     typeof usage.cache_read_input_tokens === "number"
       ? usage.cache_read_input_tokens
       : 0;
+  const cumulativeInput = rawInput + cacheCreation + cacheRead;
+  const numTurns =
+    typeof result?.num_turns === "number" && result.num_turns > 0
+      ? result.num_turns
+      : 1;
   const inputTokens =
-    rawInput + cacheCreation + cacheRead > 0
-      ? rawInput + cacheCreation + cacheRead
-      : undefined;
+    cumulativeInput > 0 ? Math.round(cumulativeInput / numTurns) : undefined;
   const outputTokens =
     typeof usage.output_tokens === "number" ? usage.output_tokens : undefined;
+
+  // Extract context window size from modelUsage if available.
+  const modelUsage = result?.modelUsage ?? {};
+  const firstModel = Object.values(modelUsage)[0];
+  const contextWindow =
+    typeof firstModel?.contextWindow === "number"
+      ? firstModel.contextWindow
+      : undefined;
 
   return {
     meta: {
@@ -643,6 +654,7 @@ function buildPromptMeta(result) {
             },
           }
         : {}),
+      ...(contextWindow != null ? { contextWindow } : {}),
       ...(typeof result?.num_turns === "number" ? { numTurns: result.num_turns } : {}),
     },
   };
