@@ -1179,7 +1179,7 @@ function handleLine(emit, session, line) {
   }
 }
 
-function attachProcessListeners(emit, sessions, session) {
+function attachProcessListeners(emit, sessions, session, exitPromises) {
   session.output.on("line", (line) => handleLine(emit, session, line));
 
   session.process.stderr.on("data", (chunk) => {
@@ -1189,9 +1189,23 @@ function attachProcessListeners(emit, sessions, session) {
     }
   });
 
+  // Register an exit promise so spawnSession can wait for full cleanup
+  // before reusing the same session ID.
+  let resolveExit;
+  exitPromises.set(session.id, new Promise((r) => { resolveExit = r; }));
+
   session.process.on("exit", () => {
     const wasTracked = sessions.delete(session.id);
+
+    // Resolve the exit promise AFTER cleanup so waiters know it's safe
+    // to reuse this session ID.
+    const finish = () => {
+      exitPromises.delete(session.id);
+      resolveExit();
+    };
+
     if (!wasTracked) {
+      finish();
       return;
     }
 
@@ -1217,11 +1231,17 @@ function attachProcessListeners(emit, sessions, session) {
       status: "terminated",
       agentSessionId: session.agentSessionId,
     });
+
+    finish();
   });
 }
 
 export function createClaudeRuntime({ emit }) {
   const sessions = new Map();
+  // Tracks pending exit cleanup per session ID. When a process exits,
+  // the promise resolves. Before spawning with a reused ID, we await
+  // this to prevent the old exit handler from deleting the new session.
+  const exitPromises = new Map();
   const silentEmit = () => {};
 
   function createSessionRecord({
@@ -1286,6 +1306,15 @@ export function createClaudeRuntime({ emit }) {
     } = params;
 
     const sessionId = localSessionId ?? randomUUID();
+
+    // Wait for any previous process using this session ID to fully exit.
+    // Without this, the old exit handler fires after the new session is
+    // registered and deletes it from the sessions Map.
+    const pendingExit = exitPromises.get(sessionId);
+    if (pendingExit) {
+      await pendingExit;
+    }
+
     const remoteSessionId = resumeAgentSessionId ?? randomUUID();
     const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
     const claudeBin = resolveClaudeBinary();
@@ -1340,7 +1369,7 @@ export function createClaudeRuntime({ emit }) {
     });
 
     sessions.set(sessionId, session);
-    attachProcessListeners(emit, sessions, session);
+    attachProcessListeners(emit, sessions, session, exitPromises);
 
     try {
       const initResult = await sendControlRequest(
@@ -1669,7 +1698,7 @@ export function createClaudeRuntime({ emit }) {
       spawnEnv: session.spawnEnv,
     });
     const tempSessions = new Map([[tempSession.id, tempSession]]);
-    attachProcessListeners(silentEmit, tempSessions, tempSession);
+    attachProcessListeners(silentEmit, tempSessions, tempSession, new Map());
 
     try {
       const initResult = await sendControlRequest(
