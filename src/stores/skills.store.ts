@@ -10,8 +10,8 @@ import type {
   SkillsState,
 } from "@/lib/skills";
 import {
-  type ProjectSkillsConfig,
   isUpstreamManagedSkill,
+  type ProjectSkillsConfig,
   skills,
 } from "@/services/skills";
 import { getFileTreeState } from "@/stores/fileTree";
@@ -465,10 +465,17 @@ export const skillsStore = {
         if (status.updateAvailable) {
           await skills.refreshInstalledSkill(installed);
           await this.refreshInstalled();
-          log.info("[SkillsStore] Refreshed stale skill on toggle-on:", installed.slug);
+          log.info(
+            "[SkillsStore] Refreshed stale skill on toggle-on:",
+            installed.slug,
+          );
         }
       } catch (err) {
-        log.warn("[SkillsStore] Upstream check failed on toggle-on:", installed.slug, err);
+        log.warn(
+          "[SkillsStore] Upstream check failed on toggle-on:",
+          installed.slug,
+          err,
+        );
       }
     }
 
@@ -604,10 +611,17 @@ export const skillsStore = {
     // Backfill sync state for skills installed before the sync feature
     // existed (pre-v2.3.16). Non-blocking — failures are logged and skipped.
     const needsBackfill = state.installed.some(
-      (s) => !s.syncState && state.available.some((a) => a.slug === s.slug && a.source === "serenorg"),
+      (s) =>
+        !s.syncState &&
+        state.available.some(
+          (a) => a.slug === s.slug && a.source === "serenorg",
+        ),
     );
     if (needsBackfill) {
-      const count = await skills.backfillSyncState(state.installed, state.available);
+      const count = await skills.backfillSyncState(
+        state.installed,
+        state.available,
+      );
       if (count > 0) {
         log.info("[SkillsStore] Backfilled sync state for", count, "skills");
         await this.refreshInstalled();
@@ -621,13 +635,18 @@ export const skillsStore = {
       if (!isUpstreamManagedSkill(skill)) continue;
       try {
         const status = await skills.inspectSyncStatus(skill);
-        if (status.updateAvailable) {
+        if (!status || status.hasLocalChanges) continue;
+        if (status.updateAvailable || status.state === "bootstrap-required") {
           await skills.refreshInstalledSkill(skill);
           autoRefreshed++;
           log.info("[SkillsStore] Auto-refreshed stale skill:", skill.slug);
         }
       } catch (err) {
-        log.warn("[SkillsStore] Failed to check/refresh skill:", skill.slug, err);
+        log.warn(
+          "[SkillsStore] Failed to check/refresh skill:",
+          skill.slug,
+          err,
+        );
       }
     }
     if (autoRefreshed > 0) {

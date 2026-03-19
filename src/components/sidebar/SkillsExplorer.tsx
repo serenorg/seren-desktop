@@ -131,9 +131,10 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
   };
 
   const updateCount = () =>
-    skillsStore.installed.filter(
-      (skill) => syncStatusFor(skill)?.updateAvailable,
-    ).length;
+    skillsStore.installed.filter((skill) => {
+      const status = syncStatusFor(skill);
+      return status?.updateAvailable || status?.state === "bootstrap-required";
+    }).length;
 
   const localChangesCount = () =>
     skillsStore.installed.filter(
@@ -171,6 +172,8 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     switch (status.state) {
       case "current":
         return "Current";
+      case "bootstrap-required":
+        return "Sync required";
       case "update-available":
         return "Update available";
       case "local-changes":
@@ -190,6 +193,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     switch (status.state) {
       case "current":
         return "bg-success/10 text-success";
+      case "bootstrap-required":
       case "update-available":
         return "bg-warning/10 text-warning";
       case "local-changes":

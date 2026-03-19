@@ -72,4 +72,55 @@ describe("skills auto-sync on refresh (#1155)", () => {
     expect(mockSkillsService.inspectSyncStatus).toHaveBeenCalledWith(staleSkill);
     expect(mockSkillsService.refreshInstalledSkill).toHaveBeenCalledWith(staleSkill);
   });
+
+  it("calls refreshInstalledSkill when an upstream-managed skill needs bootstrap refresh", async () => {
+    const backfilledSkill = {
+      slug: "polymarket-maker-rebate-bot",
+      scope: "serenorg" as const,
+      path: "/skills/polymarket-maker-rebate-bot",
+      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: null, syncedAt: 1, managedFiles: { "SKILL.md": "hash" } },
+    };
+
+    mockSkillsService.fetchAllSkills.mockResolvedValue([]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([backfilledSkill]);
+    mockSkillsService.isUpstreamManagedSkill.mockReturnValue(true);
+    mockSkillsService.inspectSyncStatus.mockResolvedValue({
+      state: "bootstrap-required",
+      updateAvailable: false,
+      hasLocalChanges: false,
+      syncedRevision: null,
+    });
+    mockSkillsService.refreshInstalledSkill.mockResolvedValue({ installed: backfilledSkill, syncStatus: null });
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refresh();
+
+    expect(mockSkillsService.inspectSyncStatus).toHaveBeenCalledWith(backfilledSkill);
+    expect(mockSkillsService.refreshInstalledSkill).toHaveBeenCalledWith(backfilledSkill);
+  });
+
+  it("does not auto-refresh when local managed files have changed", async () => {
+    const editedSkill = {
+      slug: "polymarket-maker-rebate-bot",
+      scope: "serenorg" as const,
+      path: "/skills/polymarket-maker-rebate-bot",
+      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "abc123", syncedAt: 1, managedFiles: { "SKILL.md": "hash" } },
+    };
+
+    mockSkillsService.fetchAllSkills.mockResolvedValue([]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([editedSkill]);
+    mockSkillsService.isUpstreamManagedSkill.mockReturnValue(true);
+    mockSkillsService.inspectSyncStatus.mockResolvedValue({
+      state: "local-changes",
+      updateAvailable: true,
+      hasLocalChanges: true,
+      syncedRevision: "abc123",
+    });
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refresh();
+
+    expect(mockSkillsService.inspectSyncStatus).toHaveBeenCalledWith(editedSkill);
+    expect(mockSkillsService.refreshInstalledSkill).not.toHaveBeenCalled();
+  });
 });
