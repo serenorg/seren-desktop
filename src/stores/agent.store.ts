@@ -230,6 +230,17 @@ export interface ActiveSession {
 
 const FORK_BOOTSTRAP_MAX_MSG_CHARS = 2_000;
 
+function agentDisplayName(agentType?: string): string {
+  switch (agentType) {
+    case "codex":
+      return "Codex";
+    case "claude-code":
+      return "Claude Code";
+    default:
+      return agentType ?? "Agent";
+  }
+}
+
 function truncateBootstrapText(content: string): string {
   return content.length > FORK_BOOTSTRAP_MAX_MSG_CHARS
     ? `${content.slice(0, FORK_BOOTSTRAP_MAX_MSG_CHARS)}... [truncated]`
@@ -1300,7 +1311,7 @@ export const agentStore = {
 
       return info.id;
     } catch (error) {
-      console.error("[AgentStore] Spawn error:", error);
+      console.error(`[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`, error);
       tempUnsubscribe();
       const message = error instanceof Error ? error.message : String(error);
       setState("error", message);
@@ -2095,7 +2106,8 @@ Summary:`;
       this.clearBootstrapPromptContext(sessionId);
       console.log("[AgentStore] sendPrompt completed successfully");
     } catch (error) {
-      console.error("[AgentStore] sendPrompt error:", error);
+      const agentLabel = agentDisplayName(state.sessions[sessionId]?.info.agentType);
+      console.error(`[AgentStore] sendPrompt error (${agentLabel}):`, error);
       const message = error instanceof Error ? error.message : String(error);
 
       // Auto-recover from dead/zombie sessions.
@@ -2266,10 +2278,15 @@ Summary:`;
         this.addErrorMessage(sessionId, message);
       }
 
-      // Ensure the session is not stuck in "prompting" after any error.
-      // The promptComplete event never fires when sendPrompt rejects, so
-      // without this the input stays locked forever.
-      if (state.sessions[sessionId]?.info.status === "prompting") {
+      // Ensure the session is not stuck in "prompting" after any error —
+      // UNLESS it's a transient reconnection attempt where the agent will
+      // resume on its own. Setting "ready" during reconnection triggers
+      // premature queue drain, injecting pending messages mid-reconnect.
+      const isReconnecting = /^Reconnecting\.\.\.\s*\d+\/\d+$/i.test(message);
+      if (
+        !isReconnecting &&
+        state.sessions[sessionId]?.info.status === "prompting"
+      ) {
         setState(
           "sessions",
           sessionId,
@@ -2786,7 +2803,7 @@ Summary:`;
       case "error":
         // Log full error content for diagnostics (helps debug cascade crashes)
         console.error(
-          `[AgentStore] Error event for session ${sessionId}:`,
+          `[AgentStore] Error event for session ${sessionId} (${agentDisplayName(state.sessions[sessionId]?.info.agentType)}):`,
           event.data.error,
         );
 
@@ -2931,6 +2948,14 @@ Summary:`;
           this.acceptRateLimitFallback().catch((err) => {
             console.error("[AgentStore] Auto-failover failed:", err);
           });
+        } else if (/^Reconnecting\.\.\.\s*\d+\/\d+$/i.test(String(event.data.error))) {
+          // Transient reconnection attempt — show in chat but keep session
+          // in "prompting" state so the queue doesn't drain prematurely.
+          // The agent will resume its task after reconnecting.
+          console.info(
+            `[AgentStore] (${agentDisplayName(state.sessions[sessionId]?.info.agentType)}) Transient reconnection: ${event.data.error}`,
+          );
+          this.addErrorMessage(sessionId, event.data.error);
         } else {
           this.addErrorMessage(sessionId, event.data.error);
         }
@@ -3619,18 +3644,22 @@ Summary:`;
   },
 
   addErrorMessage(sessionId: string, error: string) {
+    const session = state.sessions[sessionId];
+    const agentLabel = agentDisplayName(session?.info.agentType);
+    const prefixedError = `[${agentLabel}] ${error}`;
+
     const message: AgentMessage = {
       id: crypto.randomUUID(),
       type: "error",
-      content: error,
+      content: prefixedError,
       timestamp: Date.now(),
     };
 
     setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
-    const errConvoId = state.sessions[sessionId]?.conversationId;
+    const errConvoId = session?.conversationId;
     if (errConvoId) persistAgentMessage(errConvoId, message);
     // Set session-specific error instead of global error
-    setState("sessions", sessionId, "error", error);
+    setState("sessions", sessionId, "error", prefixedError);
   },
 
   // ============================================================================
