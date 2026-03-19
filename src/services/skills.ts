@@ -1154,13 +1154,21 @@ export const skills = {
       );
       const hasLocalChanges =
         changedLocalFiles.length > 0 || missingManagedFiles.length > 0;
+      const bootstrapRequired = Boolean(
+        remoteRevision?.sha &&
+          syncedRevision === null &&
+          !hasLocalChanges &&
+          managedPaths.length > 0,
+      );
 
       return {
         state: hasLocalChanges
           ? "local-changes"
-          : updateAvailable
-            ? "update-available"
-            : "current",
+          : bootstrapRequired
+            ? "bootstrap-required"
+            : updateAvailable
+              ? "update-available"
+              : "current",
         updateAvailable,
         hasLocalChanges,
         syncedRevision,

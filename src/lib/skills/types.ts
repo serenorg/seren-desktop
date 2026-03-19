@@ -77,7 +77,12 @@ export interface RemoteSkillRevision {
 }
 
 export interface SkillSyncStatus {
-  state: "current" | "update-available" | "local-changes" | "error";
+  state:
+    | "current"
+    | "bootstrap-required"
+    | "update-available"
+    | "local-changes"
+    | "error";
   updateAvailable: boolean;
   hasLocalChanges: boolean;
   syncedRevision: string | null;
