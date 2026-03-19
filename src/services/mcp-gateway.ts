@@ -116,6 +116,71 @@ function convertToGatewayTool(tool: McpTool): GatewayTool {
 }
 
 /**
+ * Discover dynamic publisher tools by calling `list_mcp_tools` on the gateway.
+ * These tools (Gmail, Google Calendar, etc.) are not in the static `list_tools()`
+ * response — they're only available as data returned by calling `list_mcp_tools`.
+ * We synthesize MCP-format tool names (`mcp__{publisher}__{toolName}`) so they
+ * integrate seamlessly with the existing gateway tool routing.
+ */
+async function discoverPublisherTools(): Promise<GatewayTool[]> {
+  const result: McpToolResult = await mcpClient.callToolHttp(
+    SEREN_MCP_SERVER_NAME,
+    { name: "list_mcp_tools", arguments: {} },
+  );
+
+  if (result.isError || !result.content) return [];
+
+  // Parse the response — list_mcp_tools returns publisher objects with tools
+  let publishers: Array<{
+    name: string;
+    description?: string;
+    tools?: Array<{
+      name: string;
+      description?: string;
+      inputSchema?: McpToolInfo["inputSchema"];
+    }>;
+  }> = [];
+
+  try {
+    // MCP tool results come as content array with text entries
+    const contentArray = result.content as Array<{
+      type: string;
+      text?: string;
+    }>;
+    const textContent = contentArray?.find((c) => c.type === "text")?.text;
+    if (textContent) {
+      const parsed = JSON.parse(textContent);
+      publishers = parsed.publishers ?? parsed ?? [];
+    }
+  } catch {
+    return [];
+  }
+
+  const gatewayTools: GatewayTool[] = [];
+  for (const pub of publishers) {
+    if (!pub.tools || !Array.isArray(pub.tools)) continue;
+    for (const tool of pub.tools) {
+      // Synthesize MCP-format tool name for gateway routing
+      const mcpToolName = `mcp__${pub.name}__${tool.name}`;
+      gatewayTools.push({
+        publisher: pub.name,
+        publisherName: pub.name,
+        tool: {
+          name: mcpToolName,
+          description: tool.description ?? `${tool.name} from ${pub.name}`,
+          inputSchema: tool.inputSchema ?? {
+            type: "object",
+            properties: {},
+          },
+        },
+      });
+    }
+  }
+
+  return gatewayTools;
+}
+
+/**
  * Check if MCP authentication is available.
  * With API key auth, this just checks if we have an API key stored.
  * Returns true if user needs to authenticate (no API key).
@@ -173,8 +238,31 @@ export async function initializeGateway(): Promise<void> {
         throw new Error("Connection not found after connecting");
       }
 
-      // Convert MCP tools to GatewayTool format
+      // Convert static MCP tools to GatewayTool format
       cachedTools = connection.tools.map(convertToGatewayTool);
+
+      // Discover dynamic publisher tools (Gmail, Google Calendar, etc.)
+      // that aren't in the static list_tools() response.
+      try {
+        const publisherTools = await discoverPublisherTools();
+        if (publisherTools.length > 0) {
+          // Merge, deduplicating by tool name
+          const existingNames = new Set(
+            cachedTools.map((t) => t.tool.name),
+          );
+          const newTools = publisherTools.filter(
+            (t) => !existingNames.has(t.tool.name),
+          );
+          cachedTools = [...cachedTools, ...newTools];
+          console.log(
+            `[MCP Gateway] Discovered ${newTools.length} additional publisher tools`,
+          );
+        }
+      } catch (err) {
+        // Non-fatal — static tools still work
+        console.warn("[MCP Gateway] Failed to discover publisher tools:", err);
+      }
+
       lastFetchedAt = Date.now();
 
       console.log(
