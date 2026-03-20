@@ -134,4 +134,75 @@ describe("MCP Gateway Caching", () => {
     const serenTools = tools.filter((t) => t.publisher === "seren");
     expect(serenTools).toHaveLength(0);
   });
+
+  it("should discover publisher tools regardless of publisher_type (#1217)", async () => {
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const callToolMock = vi.mocked(mcpClient.callToolHttp);
+
+    // Mock list_agent_publishers → returns publisher with type "individual"
+    // Mock list_mcp_tools for gmail → returns gmail tools
+    callToolMock.mockImplementation(async (_server, request) => {
+      if (request.name === "list_agent_publishers") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                publishers: [
+                  {
+                    slug: "gmail",
+                    name: "GMail",
+                    publisher_type: "individual",
+                    integration_type: "api",
+                  },
+                ],
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+      if (
+        request.name === "list_mcp_tools" &&
+        request.arguments?.publisher === "gmail"
+      ) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                tools: [
+                  {
+                    name: "get_messages",
+                    description: "List messages in mailbox",
+                    inputSchema: { type: "object", properties: {} },
+                  },
+                  {
+                    name: "post_messages_send",
+                    description: "Send a new email",
+                    inputSchema: { type: "object", properties: {} },
+                  },
+                ],
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+      return { content: [], isError: true };
+    });
+
+    const { initializeGateway, getGatewayTools } = await import(
+      "@/services/mcp-gateway"
+    );
+
+    await initializeGateway();
+    const tools = getGatewayTools();
+
+    // Should have: 1 static tool (mcp__test__test-tool) + 2 gmail tools
+    const gmailTools = tools.filter((t) => t.publisher === "gmail");
+    expect(gmailTools).toHaveLength(2);
+    expect(gmailTools[0].tool.name).toBe("mcp__gmail__get_messages");
+    expect(gmailTools[1].tool.name).toBe("mcp__gmail__post_messages_send");
+  });
 });
