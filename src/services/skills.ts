@@ -449,7 +449,9 @@ export function isPublisherManagedSkill(
 
 /**
  * Fetch all payload files (excluding SKILL.md) from a skill's GitHub directory.
- * Uses the cached repo tree to discover files, then fetches their raw content.
+ * Fetches a fresh repo tree (cache-busted) to discover files, then fetches
+ * their raw content.  If the tree fetch fails, the error propagates so callers
+ * never silently install from a stale tree.
  */
 async function fetchRepoSkillPayloadFiles(
   sourceUrl: string,
@@ -457,25 +459,28 @@ async function fetchRepoSkillPayloadFiles(
   const dirPrefix = deriveRepoDirPrefix(sourceUrl);
   if (!dirPrefix) return [];
 
-  // Always fetch a fresh tree for install/refresh operations so we pick up
-  // newly added files and don't serve stale content from a cached tree that
-  // was fetched at app startup (before the upstream merge landed).
-  try {
-    const response = await appFetch(SKILLS_INDEX_URL, {
-      headers: githubApiHeaders(),
-    });
-    if (response.ok) {
-      const payload = (await response.json()) as GitHubTreeResponse;
-      cachedRepoTree = payload.tree ?? [];
-    }
-  } catch {
-    log.warn("[Skills] Failed to fetch repo tree for payload files");
+  // Fetch a fresh tree with cache-bust to avoid GitHub API CDN staleness.
+  // On failure this throws — callers must not fall back to a stale tree
+  // because recording a new syncedRevision with old file content would mask
+  // an incomplete sync and prevent future retries.
+  const cacheBustedTreeUrl = `${SKILLS_INDEX_URL}&t=${Date.now()}`;
+  const response = await appFetch(cacheBustedTreeUrl, {
+    headers: githubApiHeaders(),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch repo tree for payload files: ${response.status}`,
+    );
   }
+  const payload = (await response.json()) as GitHubTreeResponse;
+  const freshTree = payload.tree ?? [];
+  // Also update the global cache so subsequent operations benefit
+  cachedRepoTree = freshTree;
 
-  if (!cachedRepoTree) return [];
+  if (freshTree.length === 0) return [];
 
   // Find all blob files under the skill directory (excluding SKILL.md itself)
-  const siblingFiles = cachedRepoTree.filter(
+  const siblingFiles = freshTree.filter(
     (node) =>
       node.type === "blob" &&
       typeof node.path === "string" &&
