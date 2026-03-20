@@ -699,6 +699,38 @@ export const skillsStore = {
         "stale publisher skill(s)",
       );
     }
+
+    // Rename skill directories where the resolved slug (from SKILL.md name)
+    // no longer matches the filesystem directory name. This happens when a
+    // skill is renamed upstream — the content syncs but the directory retains
+    // the old name, causing the agent to not find the skill by its new slug.
+    let renamedDirs = 0;
+    for (const skill of [...state.installed]) {
+      if (skill.dirName === skill.slug) continue;
+      if (!skill.syncState) continue;
+      try {
+        await skills.renameSkillDir(skill, skill.slug);
+        renamedDirs++;
+        log.info(
+          "[SkillsStore] Renamed skill dir:",
+          skill.dirName,
+          "→",
+          skill.slug,
+        );
+      } catch (err) {
+        // Target may already exist or rename failed — not fatal
+        log.debug(
+          "[SkillsStore] Could not rename skill dir:",
+          skill.dirName,
+          "→",
+          skill.slug,
+          err,
+        );
+      }
+    }
+    if (renamedDirs > 0) {
+      await this.refreshInstalled();
+    }
   },
 
   /**
