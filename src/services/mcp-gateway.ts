@@ -120,13 +120,9 @@ function convertToGatewayTool(tool: McpTool): GatewayTool | null {
 /**
  * Discover dynamic publisher tools via the gateway.
  *
- * `list_mcp_tools` requires a `publisher` parameter (one publisher at a time).
- * We first identify publishers already known from the static tool list, then
- * call `list_mcp_tools` for each to discover any additional tools not already
- * in the static `list_tools()` response (e.g. Gmail, Google Calendar).
- *
- * Uses `list_agent_publishers` to discover publishers, then queries each
- * MCP-type publisher for its tools.
+ * Queries `list_agent_publishers` for all active publishers, then calls
+ * `list_mcp_tools` for each to discover tools (Gmail, Google Calendar, etc.).
+ * Publishers that don't expose tools return empty/error and are skipped.
  */
 async function discoverPublisherTools(): Promise<GatewayTool[]> {
   // Get all available publishers from the gateway
@@ -148,10 +144,6 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
       const parsed = JSON.parse(textContent);
       const pubs = parsed.publishers ?? parsed.data ?? parsed ?? [];
       publisherSlugs = pubs
-        .filter(
-          (p: { publisher_type?: string }) =>
-            p.publisher_type === "mcp" || p.publisher_type === "api",
-        )
         .map((p: { slug?: string; name?: string }) => p.slug ?? p.name)
         .filter(Boolean);
     }
