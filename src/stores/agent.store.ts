@@ -1104,7 +1104,15 @@ export const agentStore = {
       };
 
       setState("sessions", info.id, session);
-      setState("activeSessionId", info.id);
+
+      // Only take focus if no session is currently active. Background spawns
+      // (e.g. compaction of an inactive thread) must not steal focus from
+      // the user's current thread. The caller (threadStore.selectThread,
+      // resumeAgentConversation, etc.) is responsible for setting focus
+      // after spawn when the user explicitly navigates to the thread.
+      if (!state.activeSessionId) {
+        setState("activeSessionId", info.id);
+      }
 
       const pendingEvents = pendingSessionEvents.get(info.id);
       if (pendingEvents?.length) {
