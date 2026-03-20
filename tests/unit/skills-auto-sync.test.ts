@@ -14,6 +14,7 @@ const mockSkillsService = vi.hoisted(() => ({
   refreshInstalledSkill: vi.fn().mockResolvedValue({ installed: {}, syncStatus: null }),
   isUpstreamManagedSkill: vi.fn().mockReturnValue(false),
   isPublisherManagedSkill: vi.fn().mockReturnValue(false),
+  renameSkillDir: vi.fn().mockResolvedValue("/skills/renamed/SKILL.md"),
 }));
 
 vi.mock("solid-js/store", () => ({
@@ -34,7 +35,7 @@ vi.mock("@/stores/fileTree", () => ({
 }));
 
 vi.mock("@/lib/logger", () => ({
-  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock("@/services/skills", () => ({
@@ -44,6 +45,7 @@ vi.mock("@/services/skills", () => ({
     backfillSyncState: mockSkillsService.backfillSyncState,
     inspectSyncStatus: mockSkillsService.inspectSyncStatus,
     refreshInstalledSkill: mockSkillsService.refreshInstalledSkill,
+    renameSkillDir: mockSkillsService.renameSkillDir,
   },
   isUpstreamManagedSkill: mockSkillsService.isUpstreamManagedSkill,
   isPublisherManagedSkill: mockSkillsService.isPublisherManagedSkill,
