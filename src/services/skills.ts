@@ -426,6 +426,26 @@ export function isUpstreamManagedSkill(
 }
 
 /**
+ * Check if an installed skill is managed by a Seren publisher (has sync state
+ * with source "seren"). Used to detect stale publisher skills whose publisher
+ * has been deleted.
+ */
+export function isPublisherManagedSkill(
+  skill: InstalledSkill,
+): skill is InstalledSkill & {
+  syncState: SkillSyncState;
+  upstreamSource: "seren";
+  upstreamSourceUrl: string;
+} {
+  return (
+    !!skill.syncState &&
+    skill.upstreamSource === "seren" &&
+    typeof skill.upstreamSourceUrl === "string" &&
+    skill.upstreamSourceUrl.length > 0
+  );
+}
+
+/**
  * Fetch all payload files (excluding SKILL.md) from a skill's GitHub directory.
  * Uses the cached repo tree to discover files, then fetches their raw content.
  */
@@ -974,6 +994,16 @@ export const skills = {
         installContent,
         extraFiles,
       );
+    } else if (skill.source === "seren" && skill.sourceUrl) {
+      // Publisher-installed skills also get sync state so they can be
+      // detected and cleaned up when the publisher is deleted.
+      syncState = await computeUpstreamSyncState(
+        skill.source,
+        skill.sourceUrl,
+        null,
+        installContent,
+        [],
+      );
     }
 
     const path = await invoke<string>("install_skill", {
@@ -1374,9 +1404,12 @@ export const skills = {
     if (!isTauriRuntime()) return 0;
 
     const repoSkillsBySlug = new Map<string, Skill>();
+    const publisherSkillsBySlug = new Map<string, Skill>();
     for (const skill of available) {
       if (skill.source === "serenorg" && skill.sourceUrl) {
         repoSkillsBySlug.set(skill.slug, skill);
+      } else if (skill.source === "seren" && skill.sourceUrl) {
+        publisherSkillsBySlug.set(skill.slug, skill);
       }
     }
 
@@ -1386,8 +1419,51 @@ export const skills = {
       // Skip skills that already have sync state
       if (skill.syncState) continue;
 
+      // Try matching to upstream repo first, then publisher catalog
       const repoMatch = repoSkillsBySlug.get(skill.slug);
-      if (!repoMatch?.sourceUrl) continue;
+      const publisherMatch = publisherSkillsBySlug.get(skill.slug);
+      const match = repoMatch ?? publisherMatch;
+      if (!match?.sourceUrl) {
+        // Also detect publisher skills by SKILL.md metadata (publisher_slug)
+        const content = await this.readContent(skill);
+        if (!content) continue;
+        const slugMatch = content.match(/"publisher_slug"\s*:\s*"([^"]+)"/);
+        if (slugMatch) {
+          const publisherSlug = slugMatch[1];
+          const contentHash = await computeContentHash(content);
+          const syncState: SkillSyncState = {
+            version: 1,
+            upstreamSource: "seren" as SkillSource,
+            upstreamSourceUrl: `${apiBase}/publishers/${publisherSlug}/skill.md`,
+            syncedRevision: null,
+            syncedAt: Date.now(),
+            managedFiles: { "SKILL.md": contentHash },
+          };
+          try {
+            await invoke("write_skill_sync_state", {
+              skillsDir: skill.skillsDir,
+              slug: skill.dirName,
+              stateJson: JSON.stringify(syncState),
+            });
+            backfilled++;
+            log.info(
+              "[Skills] Backfilled publisher sync state for",
+              skill.slug,
+              "→ publisher:",
+              publisherSlug,
+            );
+          } catch (err) {
+            log.warn(
+              "[Skills] Failed to backfill publisher sync state for",
+              skill.slug,
+              err,
+            );
+          }
+        }
+        continue;
+      }
+
+      const source: SkillSource = repoMatch ? "serenorg" : "seren";
 
       // Read current content to compute managed file hash
       const content = await this.readContent(skill);
@@ -1396,8 +1472,8 @@ export const skills = {
       const contentHash = await computeContentHash(content);
       const syncState: SkillSyncState = {
         version: 1,
-        upstreamSource: "serenorg" as SkillSource,
-        upstreamSourceUrl: repoMatch.sourceUrl,
+        upstreamSource: source,
+        upstreamSourceUrl: match.sourceUrl,
         syncedRevision: null,
         syncedAt: Date.now(),
         managedFiles: { "SKILL.md": contentHash },
@@ -1414,7 +1490,7 @@ export const skills = {
           "[Skills] Backfilled sync state for",
           skill.slug,
           "→",
-          repoMatch.sourceUrl,
+          match.sourceUrl,
         );
       } catch (err) {
         log.warn("[Skills] Failed to backfill sync state for", skill.slug, err);
