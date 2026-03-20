@@ -13,6 +13,7 @@ const mockSkillsService = vi.hoisted(() => ({
   inspectSyncStatus: vi.fn().mockResolvedValue({ updateAvailable: false }),
   refreshInstalledSkill: vi.fn().mockResolvedValue({ installed: {}, syncStatus: null }),
   isUpstreamManagedSkill: vi.fn().mockReturnValue(false),
+  isPublisherManagedSkill: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("solid-js/store", () => ({
@@ -45,6 +46,7 @@ vi.mock("@/services/skills", () => ({
     refreshInstalledSkill: mockSkillsService.refreshInstalledSkill,
   },
   isUpstreamManagedSkill: mockSkillsService.isUpstreamManagedSkill,
+  isPublisherManagedSkill: mockSkillsService.isPublisherManagedSkill,
 }));
 
 describe("skills auto-sync on refresh (#1155)", () => {
