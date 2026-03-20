@@ -1114,6 +1114,21 @@ export const skills = {
   },
 
   /**
+   * Rename a skill directory when the resolved slug no longer matches the
+   * filesystem directory name. Returns the new SKILL.md path.
+   */
+  async renameSkillDir(
+    skill: InstalledSkill,
+    newDirName: string,
+  ): Promise<string> {
+    return invoke<string>("rename_skill_dir", {
+      skillsDir: skill.skillsDir,
+      oldDirName: skill.dirName,
+      newDirName,
+    });
+  },
+
+  /**
    * Read a relative file from an installed skill directory.
    */
   async readFile(

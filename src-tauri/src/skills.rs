@@ -780,6 +780,39 @@ pub fn validate_skill_payload(skills_dir: String, slug: String) -> Result<Vec<St
     Ok(missing)
 }
 
+/// Rename a skill directory when the resolved slug no longer matches the
+/// filesystem directory name (e.g. after an upstream SKILL.md name change).
+/// Returns the new SKILL.md path on success.
+#[tauri::command]
+pub fn rename_skill_dir(
+    skills_dir: String,
+    old_dir_name: String,
+    new_dir_name: String,
+) -> Result<String, String> {
+    let base = PathBuf::from(&skills_dir);
+    let old_path = base.join(&old_dir_name);
+    let new_path = base.join(&new_dir_name);
+
+    if !old_path.is_dir() {
+        return Err(format!(
+            "Source directory does not exist: {}",
+            old_path.display()
+        ));
+    }
+    if new_path.exists() {
+        return Err(format!(
+            "Target directory already exists: {}",
+            new_path.display()
+        ));
+    }
+
+    fs::rename(&old_path, &new_path)
+        .map_err(|e| format!("Failed to rename skill directory: {}", e))?;
+
+    let skill_md = new_path.join("SKILL.md");
+    Ok(skill_md.to_string_lossy().to_string())
+}
+
 #[derive(serde::Deserialize)]
 struct ExtraFile {
     path: String,
