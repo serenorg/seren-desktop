@@ -953,13 +953,16 @@ export const agentStore = {
           // DevTools. Other event types (sessionStatus, toolCall, etc.) are
           // still logged for debugging.
           if (event.type !== "messageChunk") {
+            const session = state.sessions[eventSessionId];
             console.log(
               "[AgentRuntime] Event received - type:",
               event.type,
+              "agent:",
+              session?.info?.agentType ?? "unknown",
               "sessionId:",
               eventSessionId,
               "conversationId:",
-              state.sessions[eventSessionId]?.conversationId,
+              session?.conversationId,
             );
           }
           if (state.sessions[eventSessionId]) {
