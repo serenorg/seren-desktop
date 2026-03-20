@@ -17,7 +17,7 @@ vi.mock("@/services/mcp-oauth", () => ({
   clearStoredTokens: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock MCP client
+// Mock MCP client — includes a publisher tool AND a built-in tool (no mcp__ prefix)
 vi.mock("@/lib/mcp/client", () => ({
   mcpClient: {
     connectHttp: vi.fn().mockResolvedValue(undefined),
@@ -26,7 +26,17 @@ vi.mock("@/lib/mcp/client", () => ({
       tools: [
         {
           name: "mcp__test__test-tool",
-          description: "Test tool",
+          description: "Test publisher tool",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "list_mcp_tools",
+          description: "Built-in gateway management tool",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "call_publisher",
+          description: "Another built-in tool",
           inputSchema: { type: "object", properties: {} },
         },
       ],
@@ -43,27 +53,6 @@ vi.mock("@/services/mcp-oauth", () => ({
   getValidAccessToken: vi.fn().mockResolvedValue("mock-mcp-token"),
   isMcpAuthenticated: vi.fn().mockResolvedValue(true),
   clearStoredTokens: vi.fn().mockResolvedValue(undefined),
-}));
-
-// Mock MCP client
-vi.mock("@/lib/mcp/client", () => ({
-  mcpClient: {
-    connectHttp: vi.fn().mockResolvedValue(undefined),
-    disconnectHttp: vi.fn().mockResolvedValue(undefined),
-    getConnection: vi.fn().mockReturnValue({
-      tools: [
-        {
-          name: "mcp__test__test-tool",
-          description: "Test tool",
-          inputSchema: { type: "object", properties: {} },
-        },
-      ],
-    }),
-    callToolHttp: vi.fn().mockResolvedValue({
-      content: [{ type: "text", text: "result" }],
-      isError: false,
-    }),
-  },
 }));
 
 describe("MCP Gateway Caching", () => {
@@ -125,5 +114,24 @@ describe("MCP Gateway Caching", () => {
     await resetGateway();
     expect(getGatewayTools()).toHaveLength(0);
     expect(isGatewayInitialized()).toBe(false);
+  });
+
+  it("should exclude built-in tools without mcp__ prefix (#1210)", async () => {
+    const { initializeGateway, getGatewayTools } = await import(
+      "@/services/mcp-gateway"
+    );
+
+    await initializeGateway();
+    const tools = getGatewayTools();
+
+    // Only the mcp__test__test-tool should survive; list_mcp_tools and
+    // call_publisher are built-in gateway tools and must not be converted
+    expect(tools).toHaveLength(1);
+    expect(tools[0].publisher).toBe("test");
+    expect(tools[0].tool.name).toBe("mcp__test__test-tool");
+
+    // Verify no tool has the fallback "seren" publisher
+    const serenTools = tools.filter((t) => t.publisher === "seren");
+    expect(serenTools).toHaveLength(0);
   });
 });
