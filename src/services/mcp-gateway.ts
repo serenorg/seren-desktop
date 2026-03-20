@@ -85,28 +85,30 @@ function isCacheValid(): boolean {
 
 /**
  * Parse publisher slug from MCP tool name.
- * Seren MCP tools are named like "mcp__publisher-slug__tool-name"
+ * Publisher tools are named like "mcp__publisher-slug__tool-name".
+ * Returns null for built-in gateway tools (no mcp__ prefix).
  */
 function parsePublisherFromToolName(toolName: string): {
   publisher: string;
   originalName: string;
-} {
+} | null {
   const match = toolName.match(/^mcp__([^_]+)__(.+)$/);
   if (match) {
     return { publisher: match[1], originalName: match[2] };
   }
-  // Fallback for tools without publisher prefix
-  return { publisher: "seren", originalName: toolName };
+  return null;
 }
 
 /**
  * Convert MCP tool to GatewayTool format.
+ * Returns null for built-in gateway tools (no publisher prefix).
  */
-function convertToGatewayTool(tool: McpTool): GatewayTool {
-  const { publisher } = parsePublisherFromToolName(tool.name);
+function convertToGatewayTool(tool: McpTool): GatewayTool | null {
+  const parsed = parsePublisherFromToolName(tool.name);
+  if (!parsed) return null;
   return {
-    publisher,
-    publisherName: publisher, // We don't have the display name from MCP
+    publisher: parsed.publisher,
+    publisherName: parsed.publisher,
     tool: {
       name: tool.name,
       description: tool.description,
@@ -270,8 +272,10 @@ export async function initializeGateway(): Promise<void> {
         throw new Error("Connection not found after connecting");
       }
 
-      // Convert static MCP tools to GatewayTool format
-      cachedTools = connection.tools.map(convertToGatewayTool);
+      // Convert publisher MCP tools to GatewayTool format (skip built-in tools)
+      cachedTools = connection.tools
+        .map(convertToGatewayTool)
+        .filter((t): t is GatewayTool => t !== null);
 
       // Discover dynamic publisher tools (Gmail, Google Calendar, etc.)
       // that aren't in the static list_tools() response.
@@ -279,9 +283,7 @@ export async function initializeGateway(): Promise<void> {
         const publisherTools = await discoverPublisherTools();
         if (publisherTools.length > 0) {
           // Merge, deduplicating by tool name
-          const existingNames = new Set(
-            cachedTools.map((t) => t.tool.name),
-          );
+          const existingNames = new Set(cachedTools.map((t) => t.tool.name));
           const newTools = publisherTools.filter(
             (t) => !existingNames.has(t.tool.name),
           );
