@@ -320,8 +320,10 @@ async function fetchUpstreamSkillBundle(skill: {
 }): Promise<UpstreamSkillBundle | null> {
   if (!skill.sourceUrl) return null;
 
+  // Cache-bust raw.githubusercontent.com CDN to ensure we get latest content
+  const cacheBustedUrl = `${skill.sourceUrl}${skill.sourceUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
   const [skillMd, payloadFiles, remoteRevision] = await Promise.all([
-    appFetch(skill.sourceUrl).then(async (response) => {
+    appFetch(cacheBustedUrl).then(async (response) => {
       if (!response.ok) {
         throw new Error(`Failed to fetch skill content: ${response.status}`);
       }
@@ -455,20 +457,19 @@ async function fetchRepoSkillPayloadFiles(
   const dirPrefix = deriveRepoDirPrefix(sourceUrl);
   if (!dirPrefix) return [];
 
-  // Re-fetch tree if not cached
-  if (!cachedRepoTree) {
-    try {
-      const response = await appFetch(SKILLS_INDEX_URL, {
-        headers: githubApiHeaders(),
-      });
-      if (response.ok) {
-        const payload = (await response.json()) as GitHubTreeResponse;
-        cachedRepoTree = payload.tree ?? [];
-      }
-    } catch {
-      log.warn("[Skills] Failed to fetch repo tree for payload files");
-      return [];
+  // Always fetch a fresh tree for install/refresh operations so we pick up
+  // newly added files and don't serve stale content from a cached tree that
+  // was fetched at app startup (before the upstream merge landed).
+  try {
+    const response = await appFetch(SKILLS_INDEX_URL, {
+      headers: githubApiHeaders(),
+    });
+    if (response.ok) {
+      const payload = (await response.json()) as GitHubTreeResponse;
+      cachedRepoTree = payload.tree ?? [];
     }
+  } catch {
+    log.warn("[Skills] Failed to fetch repo tree for payload files");
   }
 
   if (!cachedRepoTree) return [];
@@ -496,7 +497,8 @@ async function fetchRepoSkillPayloadFiles(
       const filePath = node.path ?? "";
       const relativePath = filePath.slice(dirPrefix.length);
       const segments = filePath.split("/").map((s) => encodeURIComponent(s));
-      const rawUrl = `${SKILLS_RAW_URL}/${segments.join("/")}`;
+      // Cache-bust raw.githubusercontent.com CDN (caches up to 300s)
+      const rawUrl = `${SKILLS_RAW_URL}/${segments.join("/")}?t=${Date.now()}`;
 
       try {
         const resp = await appFetch(rawUrl);
