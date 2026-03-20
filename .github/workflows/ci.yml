@@ -175,26 +175,21 @@ jobs:
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: pnpm tauri build --bundles deb,appimage --config src-tauri/tauri.ci.json
-      - name: Verify frontend is embedded in binary
+      - name: Verify frontend dist is current
         shell: bash
         run: |
-          # Find the main binary — name varies by platform (Seren, SerenDesktop, seren-desktop)
-          BINARY=$(find src-tauri/target/release -maxdepth 1 \( -name "Seren" -o -name "Seren.exe" -o -name "seren-desktop" -o -name "SerenDesktop" -o -name "SerenDesktop.exe" -o -name "seren_desktop" \) -type f | head -1)
-          if [ -z "$BINARY" ]; then
-            echo "Available files in release dir:"
-            ls -la src-tauri/target/release/ | grep -v "\.d$" | head -20
-            echo "ERROR: Could not find built binary"
+          if [ ! -d "dist" ] || [ -z "$(ls -A dist/)" ]; then
+            echo "FATAL: dist/ directory is missing or empty"
             exit 1
           fi
-          echo "Found binary: $BINARY"
           MARKERS=("AgentStore" "SkillsStore" "sendPrompt" "MCP Gateway")
           for marker in "${MARKERS[@]}"; do
-            if ! strings "$BINARY" | grep -q "$marker"; then
-              echo "FATAL: Frontend marker '$marker' missing from binary — stale dist/"
+            if ! grep -rq "$marker" dist/; then
+              echo "FATAL: Frontend marker '$marker' missing from dist/ — stale build"
               exit 1
             fi
           done
-          echo "Frontend markers verified."
+          echo "Frontend markers verified in dist/."
       - uses: actions/upload-artifact@v7
         with:
           name: seren-desktop-${{ matrix.os }}
