@@ -72,7 +72,7 @@ function App() {
     }
 
     await initAuthRuntimeBindings();
-    checkAuth();
+    await checkAuth();
 
     if (runtime.capabilities.updater) {
       const { updaterStore } = await import("@/stores/updater.store");

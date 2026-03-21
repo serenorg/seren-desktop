@@ -1028,8 +1028,17 @@ export const agentStore = {
         setState("installStatus", null);
       }
 
-      // Get Seren API key to enable MCP tools for the agent
-      const apiKey = await getSerenApiKey();
+      // Get Seren API key to enable MCP tools for the agent.
+      // If null, auth may still be initializing — wait briefly and retry
+      // so the agent gets publisher access on cold start.
+      let apiKey = await getSerenApiKey();
+      if (!apiKey) {
+        await new Promise((r) => setTimeout(r, 3000));
+        apiKey = await getSerenApiKey();
+        if (apiKey) {
+          console.info("[AgentStore] API key became available after waiting for auth");
+        }
+      }
       const enabledMcpServers = getEnabledMcpServers();
 
       // No inactivity timeout — agent sessions wait indefinitely.
