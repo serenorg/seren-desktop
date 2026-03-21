@@ -429,13 +429,13 @@ export const skillsStore = {
     threadId: string | null,
   ): InstalledSkill[] {
     if (!projectRoot || !threadId) {
-      return this.getProjectSkills(projectRoot);
+      return [];
     }
 
     const key = threadKey(projectRoot, threadId);
     const refs = threadSkillsState[key];
     if (!Array.isArray(refs)) {
-      return this.getProjectSkills(projectRoot);
+      return [];
     }
 
     return this.resolveRefs(refs);
@@ -470,9 +470,7 @@ export const skillsStore = {
 
     const key = threadKey(projectRoot, threadId);
     const current = threadSkillsState[key];
-    const base = Array.isArray(current)
-      ? [...current]
-      : this.getProjectSkills(projectRoot).map((s) => skillRef(s));
+    const base = Array.isArray(current) ? [...current] : [];
 
     const isAdding = !base.includes(target);
     const next = isAdding
