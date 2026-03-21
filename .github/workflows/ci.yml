@@ -176,20 +176,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: pnpm tauri build --bundles deb,appimage --config src-tauri/tauri.ci.json
       - name: Verify frontend dist is current
-        shell: bash
-        run: |
-          if [ ! -d "dist" ] || [ -z "$(ls -A dist/)" ]; then
-            echo "FATAL: dist/ directory is missing or empty"
-            exit 1
-          fi
-          MARKERS=("AgentStore" "SkillsStore" "sendPrompt" "MCP Gateway")
-          for marker in "${MARKERS[@]}"; do
-            if ! grep -rq "$marker" dist/; then
-              echo "FATAL: Frontend marker '$marker' missing from dist/ — stale build"
-              exit 1
-            fi
-          done
-          echo "Frontend markers verified in dist/."
+        run: pnpm verify:frontend-build
       - uses: actions/upload-artifact@v7
         with:
           name: seren-desktop-${{ matrix.os }}

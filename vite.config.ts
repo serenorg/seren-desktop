@@ -1,14 +1,82 @@
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type PluginOption } from "vite";
 import solid from "vite-plugin-solid";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+const BUILD_TIMESTAMP = new Date().toISOString();
+const BUILD_COMMIT = resolveBuildCommit();
+
+function resolveBuildCommit(): string {
+  const envCommit =
+    process.env.VITE_BUILD_COMMIT?.trim() || process.env.GITHUB_SHA?.trim();
+  if (envCommit) {
+    return envCommit;
+  }
+
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
+function buildMetadataPlugin(): PluginOption {
+  const manifest = `${JSON.stringify(
+    {
+      commit: BUILD_COMMIT,
+      builtAt: BUILD_TIMESTAMP,
+    },
+    null,
+    2,
+  )}\n`;
+
+  return {
+    name: "seren-build-metadata",
+    apply: "build",
+    transformIndexHtml() {
+      return {
+        tags: [
+          {
+            tag: "meta",
+            attrs: {
+              name: "seren-build-commit",
+              content: BUILD_COMMIT,
+            },
+            injectTo: "head",
+          },
+          {
+            tag: "meta",
+            attrs: {
+              name: "seren-build-timestamp",
+              content: BUILD_TIMESTAMP,
+            },
+            injectTo: "head",
+          },
+        ],
+      };
+    },
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "build-manifest.json",
+        source: manifest,
+      });
+    },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [tailwindcss(), solid()],
+  plugins: [tailwindcss(), solid(), buildMetadataPlugin()],
+  define: {
+    __SEREN_BUILD_COMMIT__: JSON.stringify(BUILD_COMMIT),
+    __SEREN_BUILD_TIMESTAMP__: JSON.stringify(BUILD_TIMESTAMP),
+  },
 
   // Path aliases
   resolve: {
