@@ -246,7 +246,7 @@ async fn execute_single_task(
         .is_some_and(|m| !m.is_empty());
 
     // Route with rankings-enriched capabilities
-    let mut routing = router::route(&subtask.classification, &capabilities);
+    let mut routing = router::route(&subtask.classification, &capabilities, &subtask.prompt);
 
     // Trust graduation
     let app_for_trust = app.clone();
@@ -648,14 +648,14 @@ async fn execute_multi_task(
     let subtasks_for_db: Vec<(String, String, String)> = subtasks
         .iter()
         .map(|st| {
-            let routing = router::route(&st.classification, capabilities);
+            let routing = router::route(&st.classification, capabilities, &st.prompt);
             (st.id.clone(), st.prompt.clone(), routing.model_id.clone())
         })
         .collect();
     let subtask_meta: Vec<(String, String, String, String)> = subtasks
         .iter()
         .map(|st| {
-            let routing = router::route(&st.classification, capabilities);
+            let routing = router::route(&st.classification, capabilities, &st.prompt);
             (
                 st.id.clone(),
                 st.classification.task_type.clone(),
@@ -785,7 +785,7 @@ async fn execute_multi_task(
                 .collect();
 
             // Route each subtask independently with rankings
-            let mut routing = router::route(&subtask.classification, &subtask_caps);
+            let mut routing = router::route(&subtask.classification, &subtask_caps, &subtask.prompt);
 
             // Trust graduation per subtask
             let app_for_trust = app.clone();
