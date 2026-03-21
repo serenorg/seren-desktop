@@ -10,6 +10,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "verify:frontend-build": "node ./scripts/verify-frontend-build.mjs",
     "browser:local": "node ./bin/seren-desktop.mjs",
     "serve": "vite preview",
     "tauri": "tauri",

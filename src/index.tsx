@@ -4,6 +4,9 @@ import { installExternalLinkInterceptor } from "@/lib/external-link";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import App from "./App";
 
+document.documentElement.dataset.buildCommit = __SEREN_BUILD_COMMIT__;
+document.documentElement.dataset.buildTimestamp = __SEREN_BUILD_TIMESTAMP__;
+
 // Bridge browser console output to the Rust log backend.
 // In production, this persists console.log/error/warn to log files.
 if (isTauriRuntime()) {

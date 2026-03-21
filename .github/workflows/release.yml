@@ -306,34 +306,8 @@ jobs:
 
       # Verify dist/ contains current frontend code.
       # Catches stale dist/ bundles that bypass beforeBuildCommand.
-      # Note: Tauri compresses embedded assets, so we check dist/ not the binary.
       - name: Verify frontend dist is current
-        shell: bash
-        run: |
-          echo "Checking that dist/ contains current frontend code..."
-
-          if [ ! -d "dist" ] || [ -z "$(ls -A dist/)" ]; then
-            echo "FATAL: dist/ directory is missing or empty"
-            exit 1
-          fi
-
-          MARKERS=("AgentStore" "SkillsStore" "sendPrompt" "MCP Gateway")
-          MISSING=0
-          for marker in "${MARKERS[@]}"; do
-            if ! grep -rq "$marker" dist/; then
-              echo "ERROR: Frontend marker '$marker' not found in dist/ — frontend may be stale"
-              MISSING=$((MISSING + 1))
-            fi
-          done
-
-          if [ "$MISSING" -gt 0 ]; then
-            echo ""
-            echo "FATAL: $MISSING frontend markers missing from dist/."
-            echo "The frontend build may have failed or produced stale output."
-            exit 1
-          fi
-
-          echo "All frontend markers verified in dist/."
+        run: pnpm verify:frontend-build
 
       # Upload macOS DMG immediately (before notarization so we always have an artifact)
       - name: Upload macOS DMG (pre-notarization)
