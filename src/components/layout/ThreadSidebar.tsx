@@ -784,9 +784,10 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                             }
                           >
                             {/* Star toggle — add/remove skill from thread */}
-                            <button
-                              type="button"
-                              class="w-5 h-5 flex items-center justify-center rounded shrink-0 mt-0.5 transition-colors cursor-pointer border-none bg-transparent"
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              class="w-5 h-5 flex items-center justify-center rounded shrink-0 mt-0.5 transition-colors cursor-pointer"
                               classList={{
                                 "text-primary hover:text-primary/70":
                                   isActive(),
@@ -796,6 +797,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleSkillThread(skill);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.stopPropagation();
+                                  handleSkillThread(skill);
+                                }
                               }}
                               title={
                                 isActive()
@@ -822,7 +829,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                                   stroke-linejoin="round"
                                 />
                               </svg>
-                            </button>
+                            </span>
 
                             <div class="flex-1 min-w-0">
                               <div class="text-[13px] font-medium text-foreground">
