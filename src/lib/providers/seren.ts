@@ -3,6 +3,7 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 import { updateBalanceFromError } from "@/stores/wallet.store";
 import type {
@@ -152,12 +153,25 @@ const DEFAULT_MODELS: ProviderModel[] = [
   },
 ];
 
-async function requireToken(): Promise<string> {
-  const token = await getToken();
-  if (!token) {
-    throw new Error("Not authenticated with Seren");
+async function getGatewayHeaders(
+  url: string,
+  includeJsonContentType = false,
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {};
+
+  if (includeJsonContentType) {
+    headers["Content-Type"] = "application/json";
   }
-  return token;
+
+  if (!shouldUseRustGatewayAuth(url)) {
+    const token = await getToken();
+    if (!token) {
+      throw new Error("Not authenticated with Seren");
+    }
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
 }
 
 function extractContent(data: unknown): string {
@@ -309,8 +323,8 @@ export const serenProvider: ProviderAdapter = {
     request: ChatRequest,
     _auth: string | AuthOptions,
   ): Promise<string> {
-    const token = await requireToken();
     const model = normalizeModelId(request.model);
+    const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/chat/completions`;
 
     const payload: ChatCompletionRequest = {
       model,
@@ -320,17 +334,11 @@ export const serenProvider: ProviderAdapter = {
       tool_choice: request.tool_choice,
     };
 
-    const response = await appFetch(
-      `${apiBase}/publishers/${PUBLISHER_SLUG}/chat/completions`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      },
-    );
+    const response = await appFetch(url, {
+      method: "POST",
+      headers: await getGatewayHeaders(url, true),
+      body: JSON.stringify(payload),
+    });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
@@ -371,8 +379,8 @@ export const serenProvider: ProviderAdapter = {
     request: ChatRequest,
     _auth: string | AuthOptions,
   ): AsyncGenerator<string, void, unknown> {
-    const token = await requireToken();
     const model = normalizeModelId(request.model);
+    const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/chat/completions`;
 
     const payload: ChatCompletionRequest = {
       model,
@@ -380,17 +388,11 @@ export const serenProvider: ProviderAdapter = {
       stream: true,
     };
 
-    const response = await appFetch(
-      `${apiBase}/publishers/${PUBLISHER_SLUG}/chat/completions`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      },
-    );
+    const response = await appFetch(url, {
+      method: "POST",
+      headers: await getGatewayHeaders(url, true),
+      body: JSON.stringify(payload),
+    });
 
     if (!response.ok || !response.body) {
       const errorText = await response.text().catch(() => "");
@@ -452,18 +454,12 @@ export const serenProvider: ProviderAdapter = {
   async getModels(_apiKey: string): Promise<ProviderModel[]> {
     // Try to fetch from Seren's models endpoint
     try {
-      const token = await getToken();
-      if (!token) return DEFAULT_MODELS;
+      const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/models`;
 
-      const response = await appFetch(
-        `${apiBase}/publishers/${PUBLISHER_SLUG}/models`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
+      const response = await appFetch(url, {
+        method: "GET",
+        headers: await getGatewayHeaders(url),
+      });
 
       if (!response.ok) {
         return DEFAULT_MODELS;
@@ -508,8 +504,8 @@ export async function sendMessageWithTools(
   tools?: ToolDefinition[],
   toolChoice?: ToolChoice,
 ): Promise<ChatResponse> {
-  const token = await requireToken();
   const normalizedModel = normalizeModelId(model);
+  const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/chat/completions`;
 
   const payload: ChatCompletionRequest = {
     model: normalizedModel,
@@ -519,17 +515,11 @@ export async function sendMessageWithTools(
     tool_choice: toolChoice,
   };
 
-  const response = await appFetch(
-    `${apiBase}/publishers/${PUBLISHER_SLUG}/chat/completions`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    },
-  );
+  const response = await appFetch(url, {
+    method: "POST",
+    headers: await getGatewayHeaders(url, true),
+    body: JSON.stringify(payload),
+  });
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");

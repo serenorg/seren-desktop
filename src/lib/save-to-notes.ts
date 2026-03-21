@@ -4,6 +4,7 @@
 import { API_BASE } from "@/lib/config";
 import { openExternalLink } from "@/lib/external-link";
 import { appFetch } from "@/lib/fetch";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
 const RETRY_DELAYS_MS = [10_000, 20_000];
@@ -12,21 +13,22 @@ export async function saveToSerenNotes(
   title: string,
   content: string,
 ): Promise<void> {
-  const token = await getToken();
-  if (!token) throw new Error("Not authenticated");
+  const url = `${API_BASE}/publishers/seren-notes/notes`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (!shouldUseRustGatewayAuth(url)) {
+    const token = await getToken();
+    if (!token) throw new Error("Not authenticated");
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    const response = await appFetch(
-      `${API_BASE}/publishers/seren-notes/notes`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title, content, format: "markdown" }),
-      },
-    );
+    const response = await appFetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ title, content, format: "markdown" }),
+    });
 
     if (response.status === 408) {
       if (attempt < RETRY_DELAYS_MS.length) {

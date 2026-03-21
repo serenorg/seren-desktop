@@ -2,7 +2,7 @@
 // ABOUTME: Provides API calls for task lifecycle and SSE streaming.
 
 import { API_BASE } from "@/lib/config";
-import { getTauriFetch } from "@/lib/tauri-fetch";
+import { getTauriFetch, shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -49,14 +49,16 @@ export interface AgentTaskEvent {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function authHeaders(
+  url: string,
   includeJsonContentType = false,
 ): Promise<HeadersInit> {
-  const token = await getToken();
-  if (!token) throw new Error("Not authenticated");
+  const headers: Record<string, string> = {};
 
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-  };
+  if (!shouldUseRustGatewayAuth(url)) {
+    const token = await getToken();
+    if (!token) throw new Error("Not authenticated");
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   if (includeJsonContentType) {
     headers["Content-Type"] = "application/json";
@@ -67,8 +69,9 @@ async function authHeaders(
 
 async function apiGet<T>(path: string): Promise<T> {
   const fetchFn = await getTauriFetch();
-  const resp = await fetchFn(`${API_BASE}${path}`, {
-    headers: await authHeaders(),
+  const url = `${API_BASE}${path}`;
+  const resp = await fetchFn(url, {
+    headers: await authHeaders(url),
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
@@ -83,9 +86,10 @@ async function apiPost<T>(
   body?: unknown,
 ): Promise<{ data: T; status: number }> {
   const fetchFn = await getTauriFetch();
-  const resp = await fetchFn(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  const resp = await fetchFn(url, {
     method: "POST",
-    headers: await authHeaders(true),
+    headers: await authHeaders(url, true),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!resp.ok && resp.status !== 202) {
@@ -198,7 +202,7 @@ export function streamTask(
 
   (async () => {
     try {
-      const headers = await authHeaders();
+      const headers = await authHeaders(url);
       const fetchFn = await getTauriFetch();
       const resp = await fetchFn(url, {
         headers: { ...headers, Accept: "text/event-stream" },

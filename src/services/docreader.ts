@@ -3,6 +3,7 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import type { Attachment } from "@/lib/providers/types";
 import { getToken } from "@/services/auth";
 import { updateBalanceFromError } from "@/stores/wallet.store";
@@ -69,23 +70,25 @@ export async function readDocument(attachment: Attachment): Promise<string> {
     "KB base64",
   );
 
-  const token = await getToken();
-  if (!token) {
-    console.error("[DocReader] No auth token available");
-    throw new Error(
-      "Document processing requires a Seren account. Sign in to continue.",
-    );
-  }
-
   const url = `${apiBase}/publishers/seren-docreader/process`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (!shouldUseRustGatewayAuth(url)) {
+    const token = await getToken();
+    if (!token) {
+      console.error("[DocReader] No auth token available");
+      throw new Error(
+        "Document processing requires a Seren account. Sign in to continue.",
+      );
+    }
+    headers.Authorization = `Bearer ${token}`;
+  }
   console.log("[DocReader] POST", url);
 
   const response = await appFetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
     body: JSON.stringify({ file: attachment.base64 }),
   });
 

@@ -3,6 +3,7 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
 const PUBLISHER_SLUG = "seren-embed";
@@ -61,28 +62,28 @@ export async function embedTexts(
   texts: string[],
   model?: string,
 ): Promise<EmbeddingResponse> {
-  const token = await getToken();
-  if (!token) {
-    throw new Error("Not authenticated - please log in");
-  }
-
   const payload: EmbeddingRequest = {
     input: texts,
     model: model || DEFAULT_MODEL,
   };
+  const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/embeddings`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (!shouldUseRustGatewayAuth(url)) {
+    const token = await getToken();
+    if (!token) {
+      throw new Error("Not authenticated - please log in");
+    }
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   // Use unified /publishers endpoint
-  const response = await appFetch(
-    `${apiBase}/publishers/${PUBLISHER_SLUG}/embeddings`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    },
-  );
+  const response = await appFetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
 
   if (!response.ok) {
     const errorText = await response.text();
