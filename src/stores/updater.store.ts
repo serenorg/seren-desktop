@@ -1,3 +1,4 @@
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import { createStore } from "solid-js/store";
@@ -98,6 +99,24 @@ async function checkForUpdates(_manual = false): Promise<void> {
   }
 }
 
+async function clearBrowsingDataBeforeRestart(): Promise<void> {
+  try {
+    console.log("[Updater] Clearing webview browsing data before restart...");
+    await getCurrentWebview().clearAllBrowsingData();
+    console.log("[Updater] Webview browsing data cleared");
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.warn(
+      "[Updater] Failed to clear webview browsing data before restart:",
+      err.message,
+    );
+    telemetry.captureError(err, {
+      type: "updater",
+      phase: "clear_browsing_data",
+    });
+  }
+}
+
 async function installAvailableUpdate(): Promise<void> {
   if (!isTauriRuntime()) {
     console.warn("[Updater] Install skipped: not Tauri runtime");
@@ -146,7 +165,9 @@ async function installAvailableUpdate(): Promise<void> {
       console.log("[Updater] Download finished, installing...");
       setState({ status: "installing", progressPercent: 100 });
     });
-    console.log("[Updater] Install complete, relaunching...");
+    console.log("[Updater] Install complete");
+    await clearBrowsingDataBeforeRestart();
+    console.log("[Updater] Relaunching after install...");
     await relaunch();
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
