@@ -4,6 +4,7 @@
 import { getCurrentUser } from "@/api";
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import {
   clearDefaultOrganizationId,
   clearRefreshToken,
@@ -233,17 +234,21 @@ interface ApiKeyCreateResponse {
  * @throws Error if not authenticated or request fails
  */
 export async function createApiKey(): Promise<string> {
-  const token = await getToken();
-  if (!token) {
-    throw new Error("Not authenticated");
+  const url = `${apiBase}/organizations/default/api-keys`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (!shouldUseRustGatewayAuth(url)) {
+    const token = await getToken();
+    if (!token) {
+      throw new Error("Not authenticated");
+    }
+    headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await appFetch(`${apiBase}/organizations/default/api-keys`, {
+  const response = await appFetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({ name: DESKTOP_API_KEY_NAME }),
   });
 

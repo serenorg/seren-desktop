@@ -5,6 +5,7 @@ import { API_BASE } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getErrorKey, RateLimiter } from "@/lib/rate-limiter";
 import { scrubSensitive } from "@/lib/scrub-sensitive";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/lib/tauri-bridge";
 
 export interface ErrorReport {
@@ -125,12 +126,15 @@ class TelemetryService {
     const batch = this.errorQueue.splice(0, this.config.maxBatchSize);
 
     try {
-      const token = await getToken();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
+
+      if (!shouldUseRustGatewayAuth(`${API_BASE}/diagnostics/errors`)) {
+        const token = await getToken();
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
       }
 
       await appFetch(`${API_BASE}/diagnostics/errors`, {

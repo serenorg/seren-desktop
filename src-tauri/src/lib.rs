@@ -9,6 +9,7 @@ use tauri_plugin_store::StoreExt;
 pub mod commands {
     pub mod chat;
     pub mod cli_installer;
+    pub mod gateway_http;
     pub mod indexing;
     pub mod memory;
     pub mod orchestrator;
@@ -629,6 +630,9 @@ pub fn run() {
                 app.manage(pool);
             }
 
+            // Track Rust-bridged Gateway HTTP requests so the frontend can abort streams.
+            app.manage(commands::gateway_http::GatewayHttpState::default());
+
             // Initialize memory state for cloud + local cache operations.
             // Token is read fresh from the auth store on each request.
             {
@@ -677,6 +681,9 @@ pub fn run() {
             shell::diagnose_shell_network,
             // Web fetch command
             commands::web::web_fetch,
+            // Rust-backed Gateway API bridge
+            commands::gateway_http::gateway_http_start,
+            commands::gateway_http::gateway_http_cancel,
             // Conversation commands
             commands::chat::create_conversation,
             commands::chat::get_conversations,

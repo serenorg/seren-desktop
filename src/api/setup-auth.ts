@@ -2,6 +2,7 @@
 // ABOUTME: Adds bearer token to every outbound request.
 
 import { getToken } from "@/lib/tauri-bridge";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 
 type ClientWithRequestInterceptor = {
   interceptors?: {
@@ -21,6 +22,10 @@ export function attachAuthInterceptor(
     return;
   }
   client.interceptors.request.use(async (request: Request) => {
+    if (shouldUseRustGatewayAuth(request)) {
+      return request;
+    }
+
     const token = await getToken();
     if (token) {
       request.headers.set("Authorization", `Bearer ${token}`);
