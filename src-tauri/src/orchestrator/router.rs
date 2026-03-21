@@ -45,13 +45,14 @@ pub const LARGE_CONTEXT_FALLBACK_MODELS: &[&str] = &[
 pub fn route(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
+    query: &str,
 ) -> RoutingDecision {
     let worker_type = select_worker_type(classification, capabilities);
     let model_id = select_model(classification, capabilities);
     let selected_skills = resolve_skills(classification, capabilities);
     let reason = build_reason(classification, &worker_type, &model_id);
 
-    let publisher_slug = extract_publisher_slug(&worker_type, capabilities);
+    let publisher_slug = extract_publisher_slug(&worker_type, capabilities, query);
 
     let delegation = match worker_type {
         WorkerType::LocalAgent => DelegationType::FullHandoff,
@@ -90,7 +91,7 @@ fn select_worker_type(
     // publishers cannot satisfy local file operations.
     if classification.requires_tools
         && !classification.requires_file_system
-        && extract_gateway_slug(capabilities).is_some()
+        && has_any_gateway_tool(capabilities)
     {
         return WorkerType::McpPublisher;
     }
@@ -109,13 +110,78 @@ fn parse_gateway_slug(tool_name: &str) -> Option<&str> {
     Some(&rest[..slug_end])
 }
 
-/// Extract the first valid publisher slug from available gateway tools.
-fn extract_gateway_slug(capabilities: &UserCapabilities) -> Option<String> {
+/// Check if any gateway tool exists in the available tools.
+fn has_any_gateway_tool(capabilities: &UserCapabilities) -> bool {
     capabilities
         .available_tools
         .iter()
-        .filter_map(|t| parse_gateway_slug(t))
-        .next()
+        .any(|t| parse_gateway_slug(t).is_some())
+}
+
+/// Extract the most relevant publisher slug from available gateway tools
+/// based on the user's query. Falls back to the first gateway slug when
+/// no query-based match is found.
+fn extract_gateway_slug(
+    capabilities: &UserCapabilities,
+    query: &str,
+) -> Option<String> {
+    // Collect all unique publisher slugs from gateway tools
+    let mut slug_tools: std::collections::HashMap<&str, Vec<&str>> =
+        std::collections::HashMap::new();
+    for tool_name in &capabilities.available_tools {
+        if let Some(slug) = parse_gateway_slug(tool_name) {
+            slug_tools.entry(slug).or_default().push(tool_name.as_str());
+        }
+    }
+
+    if slug_tools.is_empty() {
+        return None;
+    }
+
+    // If only one publisher, return it
+    if slug_tools.len() == 1 {
+        return slug_tools.keys().next().map(|s| s.to_string());
+    }
+
+    // Score each publisher by how many of its tool names match query terms.
+    // Normalize query terms to lowercase for case-insensitive matching.
+    let query_lower = query.to_lowercase();
+    let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
+
+    if query_terms.is_empty() {
+        return slug_tools.keys().next().map(|s| s.to_string());
+    }
+
+    let mut best_slug: Option<&str> = None;
+    let mut best_score: usize = 0;
+
+    for (slug, tools) in &slug_tools {
+        let mut score: usize = 0;
+        // Score the slug itself against query terms
+        let slug_lower = slug.to_lowercase();
+        for term in &query_terms {
+            if slug_lower.contains(term) {
+                score += 10; // Strong signal: slug matches query
+            }
+        }
+        // Score individual tool names
+        for tool_name in tools {
+            let tool_lower = tool_name.to_lowercase();
+            for term in &query_terms {
+                if tool_lower.contains(term) {
+                    score += 1;
+                }
+            }
+        }
+        if score > best_score {
+            best_score = score;
+            best_slug = Some(slug);
+        }
+    }
+
+    // Fall back to first slug if no query match
+    best_slug
+        .or_else(|| slug_tools.keys().next().copied())
         .map(String::from)
 }
 
@@ -126,11 +192,12 @@ fn extract_gateway_slug(capabilities: &UserCapabilities) -> Option<String> {
 fn extract_publisher_slug(
     worker_type: &WorkerType,
     capabilities: &UserCapabilities,
+    query: &str,
 ) -> Option<String> {
     if *worker_type != WorkerType::McpPublisher {
         return None;
     }
-    extract_gateway_slug(capabilities)
+    extract_gateway_slug(capabilities, query)
 }
 
 /// Select the best available model for the task.
@@ -491,7 +558,7 @@ mod tests {
     fn routes_code_generation_with_agent_to_local_agent() {
         let classification = make_classification("code_generation", true, true);
         let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &["firecrawl"]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::LocalAgent);
     }
 
@@ -502,7 +569,7 @@ mod tests {
             make_capabilities(true, &["anthropic/claude-opus-4-6"], &["firecrawl"]);
         // Agent is available but no active session — should fall back to ChatModel
         capabilities.active_agent_session_id = None;
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
 
@@ -510,7 +577,7 @@ mod tests {
     fn routes_code_generation_without_agent_to_chat_model() {
         let classification = make_classification("code_generation", true, true);
         let capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &["firecrawl"]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
 
@@ -518,7 +585,7 @@ mod tests {
     fn routes_general_chat_to_chat_model() {
         let classification = make_classification("general_chat", false, false);
         let capabilities = make_capabilities(true, &["anthropic/claude-sonnet-4"], &[]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
 
@@ -527,7 +594,7 @@ mod tests {
         let classification = make_classification("research", true, false);
         let capabilities =
             make_capabilities(false, &["anthropic/claude-sonnet-4"], &["web_search"]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
     }
 
@@ -539,7 +606,7 @@ mod tests {
             &["anthropic/claude-sonnet-4"],
             &["gateway__firecrawl-serenai__scrape"],
         );
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::McpPublisher);
         assert_eq!(
             decision.publisher_slug,
@@ -555,7 +622,7 @@ mod tests {
             &["anthropic/claude-sonnet-4"],
             &["mcp__playwright__click"],
         );
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.publisher_slug, None);
     }
@@ -568,7 +635,7 @@ mod tests {
             &["anthropic/claude-sonnet-4"],
             &["gateway__firecrawl-serenai__scrape"],
         );
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.publisher_slug, None);
     }
@@ -583,7 +650,7 @@ mod tests {
             &["anthropic/claude-sonnet-4"],
             &["gateway__firecrawl-serenai__scrape"],
         );
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.publisher_slug, None);
     }
@@ -597,7 +664,7 @@ mod tests {
             &["anthropic/claude-sonnet-4"],
             &["gateway__firecrawl-serenai__scrape"],
         );
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.publisher_slug, None);
     }
@@ -611,13 +678,13 @@ mod tests {
             &["anthropic/claude-sonnet-4"],
             &["gateway__badtool"],
         );
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.publisher_slug, None);
     }
 
     #[test]
-    fn multiple_gateway_publishers_extracts_first_valid_slug() {
+    fn multiple_gateway_publishers_selects_most_relevant_by_query() {
         let classification = make_classification("research", true, false);
         let capabilities = make_capabilities(
             false,
@@ -627,13 +694,41 @@ mod tests {
                 "gateway__perplexity-serenai__search",
             ],
         );
-        let decision = route(&classification, &capabilities);
+        // Query matches "search" → perplexity (has search tool)
+        let decision = route(&classification, &capabilities, "search the web for Rust tutorials");
         assert_eq!(decision.worker_type, WorkerType::McpPublisher);
-        // Deterministic: picks first valid gateway slug in tool order
+        assert_eq!(
+            decision.publisher_slug,
+            Some("perplexity-serenai".to_string())
+        );
+
+        // Query matches "scrape" → firecrawl
+        let decision = route(&classification, &capabilities, "scrape the homepage");
         assert_eq!(
             decision.publisher_slug,
             Some("firecrawl-serenai".to_string())
         );
+    }
+
+    #[test]
+    fn routes_gmail_query_to_gmail_publisher_not_polymarket() {
+        let classification = make_classification("research", true, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &[
+                "gateway__polymarket-data__get_markets",
+                "gateway__gmail__get_messages",
+                "gateway__gmail__post_messages_send",
+            ],
+        );
+        let decision = route(
+            &classification,
+            &capabilities,
+            "Summarize my five most recent emails in Gmail",
+        );
+        assert_eq!(decision.worker_type, WorkerType::McpPublisher);
+        assert_eq!(decision.publisher_slug, Some("gmail".to_string()));
     }
 
     // =========================================================================
@@ -648,7 +743,7 @@ mod tests {
             &["anthropic/claude-sonnet-4", "anthropic/claude-opus-4-6"],
             &[],
         );
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "anthropic/claude-opus-4-6");
     }
 
@@ -660,7 +755,7 @@ mod tests {
             &["anthropic/claude-sonnet-4", "google/gemini-2.5-flash"],
             &[],
         );
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "google/gemini-2.5-flash");
     }
 
@@ -668,7 +763,7 @@ mod tests {
     fn falls_back_to_first_available_model() {
         let classification = make_classification("general_chat", false, false);
         let capabilities = make_capabilities(false, &["some/unknown-model"], &[]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "some/unknown-model");
     }
 
@@ -676,7 +771,7 @@ mod tests {
     fn falls_back_to_default_when_no_models() {
         let classification = make_classification("general_chat", false, false);
         let capabilities = make_capabilities(false, &[], &[]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
     }
 
@@ -693,12 +788,12 @@ mod tests {
             &[],
         );
         // Without selection, router picks gemini flash for simple tasks
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "google/gemini-2.5-flash");
 
         // With explicit selection, router respects the user's choice
         capabilities.selected_model = Some("openai/gpt-5".to_string());
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "openai/gpt-5");
         assert!(decision.reason.contains("GPT-5"));
     }
@@ -711,7 +806,7 @@ mod tests {
     fn local_agent_uses_full_handoff_delegation() {
         let classification = make_classification("code_generation", true, true);
         let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &[]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::LocalAgent);
         assert_eq!(decision.delegation, DelegationType::FullHandoff);
     }
@@ -720,7 +815,7 @@ mod tests {
     fn chat_model_uses_in_loop_delegation() {
         let classification = make_classification("general_chat", false, false);
         let capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &[]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.delegation, DelegationType::InLoop);
     }
@@ -733,7 +828,7 @@ mod tests {
     fn reason_is_human_readable() {
         let classification = make_classification("code_generation", true, true);
         let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &[]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert!(decision.reason.contains("agent"));
         assert!(decision.reason.contains("code generation"));
     }
@@ -742,7 +837,7 @@ mod tests {
     fn reason_includes_model_name_for_chat() {
         let classification = make_classification("research", true, false);
         let capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &[]);
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert!(decision.reason.contains("Claude Sonnet"));
         assert!(decision.reason.contains("research"));
     }
@@ -762,7 +857,7 @@ mod tests {
             vec![make_skill("prose", "Prose")],
         );
 
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.selected_skills.len(), 1);
         assert_eq!(decision.selected_skills[0].slug, "prose");
     }
@@ -778,7 +873,7 @@ mod tests {
             vec![make_skill("prose", "Prose")],
         );
 
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert!(decision.selected_skills.is_empty());
     }
 
@@ -796,7 +891,7 @@ mod tests {
             ],
         );
 
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.selected_skills.len(), 2);
     }
 
@@ -823,7 +918,7 @@ mod tests {
             ("google/gemini-2.5-flash".to_string(), 0.60),
         ];
 
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "openai/gpt-5");
     }
 
@@ -841,7 +936,7 @@ mod tests {
             ("anthropic/claude-sonnet-4".to_string(), 0.80),
         ];
 
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
     }
 
@@ -859,7 +954,7 @@ mod tests {
         ];
         capabilities.selected_model = Some("anthropic/claude-sonnet-4".to_string());
 
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
     }
 
@@ -874,7 +969,7 @@ mod tests {
         // model_rankings is empty (default) — cold start behavior
         assert!(capabilities.model_rankings.is_empty());
 
-        let decision = route(&classification, &capabilities);
+        let decision = route(&classification, &capabilities, "test query");
         // Should use SIMPLE_PREFERRED_MODELS fallback
         assert_eq!(decision.model_id, "google/gemini-2.5-flash");
     }
