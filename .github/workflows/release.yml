@@ -61,7 +61,8 @@ jobs:
             echo "- **macOS (Apple Silicon)**: \`Seren-Desktop_*_aarch64.dmg\`"
             echo "- **macOS (Intel)**: \`Seren-Desktop_*_x64.dmg\`"
             echo "- **Windows**: \`Seren-Desktop_*_x64-setup.exe\` or \`.msi\`"
-            echo "- **Linux**: \`.deb\` or \`.AppImage\`"
+            echo "- **Linux (x64)**: \`.deb\` or \`.AppImage\`"
+            echo "- **Linux (ARM64 / Raspberry Pi)**: \`.deb\` or \`.AppImage\`"
             echo ""
             echo "## Note"
             echo ""
@@ -109,6 +110,10 @@ jobs:
             target: x86_64-unknown-linux-gnu
             name: Linux-x64
             updater_platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            name: Linux-arm64
+            updater_platform: linux-aarch64
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -254,6 +259,9 @@ jobs:
       - name: Prepare embedded runtime (Linux x64)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: pnpm prepare:runtime:linux-x64
+      - name: Prepare embedded runtime (Linux arm64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: pnpm prepare:runtime:linux-arm64
 
       # macOS: Import certificates and setup keychain (skip if no certificate)
       - name: Import macOS certificates
@@ -794,7 +802,8 @@ jobs:
               'darwin-aarch64',
               'darwin-x86_64',
               'windows-x86_64',
-              'linux-x86_64'
+              'linux-x86_64',
+              'linux-aarch64'
             ];
 
             const manifest = {
@@ -912,9 +921,15 @@ jobs:
               --content-type "application/x-executable"
 
             # Create version-less symlink for easier linking
-            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_amd64.AppImage" \
-              --endpoint-url="${AWS_ENDPOINT_URL}" \
-              --content-type "application/x-executable"
+            if echo "$filename" | grep -Eq "aarch64|arm64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_arm64.AppImage" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/x-executable"
+            elif echo "$filename" | grep -Eq "amd64|x86_64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_amd64.AppImage" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/x-executable"
+            fi
             echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
           done
 
@@ -931,8 +946,14 @@ jobs:
               --content-type "application/vnd.debian.binary-package"
 
             # Create version-less symlink for easier linking
-            aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_amd64.deb" \
-              --endpoint-url="${AWS_ENDPOINT_URL}" \
-              --content-type "application/vnd.debian.binary-package"
+            if echo "$filename" | grep -Eq "arm64|aarch64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_arm64.deb" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/vnd.debian.binary-package"
+            elif echo "$filename" | grep -Eq "amd64|x86_64"; then
+              aws s3 cp "$file" "s3://${R2_BUCKET}/latest/SerenDesktop_amd64.deb" \
+                --endpoint-url="${AWS_ENDPOINT_URL}" \
+                --content-type "application/vnd.debian.binary-package"
+            fi
             echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
           done
