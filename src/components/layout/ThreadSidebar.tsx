@@ -1,6 +1,7 @@
 // ABOUTME: Left sidebar with project header and unified thread list.
 // ABOUTME: Displays all chat and agent threads for the active project, sorted by recency.
 
+import { confirm } from "@tauri-apps/plugin-dialog";
 import {
   type Component,
   createMemo,
@@ -31,6 +32,8 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     Set<string | null>
   >(new Set());
   const [spawning, setSpawning] = createSignal(false);
+  const [showCreateMenu, setShowCreateMenu] = createSignal(false);
+  const [showCatalog, setShowCatalog] = createSignal(false);
   let launcherRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
 
@@ -532,207 +535,356 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               class="w-full px-3 py-2 text-[13px] bg-surface-2 border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
             />
 
-            {/* Create New Skill button */}
-            <button
-              type="button"
-              class="flex items-center justify-center gap-2 w-full mt-2 py-2 px-3 bg-primary/8 border border-primary/15 rounded-md text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/15 hover:border-primary/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!threadStore.activeThread}
-              onClick={async () => {
-                // Find Skill Creator in installed or available skills
-                const skillCreator =
-                  skillsStore.installed.find(
-                    (s) => s.slug === "seren-skill-creator",
-                  ) ||
-                  skillsStore.available.find(
-                    (s) => s.slug === "seren-skill-creator",
-                  );
-
-                if (skillCreator) {
-                  // Activate skill-creator for the current thread
-                  const cwd = fileTreeState.rootPath;
-                  const thread = threadStore.activeThread;
-                  if (!cwd || !thread) return;
-
-                  // Check if skill-creator is already active
-                  const isAlreadyActive = isSkillActiveInThread(skillCreator);
-
-                  if (!isAlreadyActive) {
-                    // Activate it if not already active
-                    await handleSkillThread(skillCreator);
-                  }
-
-                  // Trigger the interactive chat with skill creator prompt
-                  window.dispatchEvent(
-                    new CustomEvent("seren:set-chat-input", {
-                      detail: "What skill do you want to create today?",
-                    }),
-                  );
-                }
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                aria-label="Plus icon"
-                role="img"
+            {/* + Create New Skill dropdown */}
+            <div class="relative mt-2">
+              <button
+                type="button"
+                class="flex items-center justify-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-md text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/15 hover:border-primary/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!threadStore.activeThread}
+                onClick={() => setShowCreateMenu((v) => !v)}
               >
-                <path d="M8 3v10M3 8h10" />
-              </svg>
-              <span>Create New Skill</span>
-            </button>
-
-            {/* Skills list */}
-            <div class="mt-2 max-h-[300px] overflow-y-auto">
-              <Show
-                when={filteredSkills().length > 0}
-                fallback={
-                  <div class="w-full px-3 py-4 text-[13px] text-center text-muted-foreground">
-                    No matching skills
-                  </div>
-                }
-              >
-                <For each={filteredSkills()}>
-                  {(skill) => {
-                    const isActive = createMemo(() =>
-                      isSkillActiveInThread(skill),
-                    );
-                    const isSearching = launcherQuery().trim().length > 0;
-
-                    const handleClick = () => {
-                      console.log("[ThreadSidebar] handleClick:", {
-                        skillName: skill.name,
-                        isActive: isActive(),
-                        isSearching,
-                      });
-
-                      if (isActive()) {
-                        // Active skill (in thread) = Invoke the skill
-                        const skillSlug = "slug" in skill ? skill.slug : "";
-                        console.log(
-                          "[ThreadSidebar] Invoking skill:",
-                          skillSlug,
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  aria-label="Plus icon"
+                  role="img"
+                >
+                  <path d="M8 3v10M3 8h10" />
+                </svg>
+                <span>Create New Skill</span>
+              </button>
+              <Show when={showCreateMenu()}>
+                <div class="absolute left-0 right-0 top-full mt-1 bg-surface-2 border border-border rounded-lg shadow-lg z-50 py-1">
+                  <button
+                    type="button"
+                    class="w-full flex items-center gap-2 px-3 py-2 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                    onClick={() => {
+                      setShowCreateMenu(false);
+                      setShowCatalog(true);
+                    }}
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      role="img"
+                      aria-label="Browse"
+                    >
+                      <circle cx="7" cy="7" r="5" />
+                      <path d="M14 14l-3.5-3.5" />
+                    </svg>
+                    Browse Skills Catalog
+                  </button>
+                  <button
+                    type="button"
+                    class="w-full flex items-center gap-2 px-3 py-2 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
+                    onClick={async () => {
+                      setShowCreateMenu(false);
+                      const skillCreator =
+                        skillsStore.installed.find(
+                          (s) => s.slug === "seren-skill-creator",
+                        ) ||
+                        skillsStore.available.find(
+                          (s) => s.slug === "seren-skill-creator",
                         );
-                        if (skillSlug) {
-                          window.dispatchEvent(
-                            new CustomEvent("seren:set-chat-input", {
-                              detail: {
-                                text: `/${skillSlug} `,
-                                autoSend: true,
-                              },
-                            }),
-                          );
+                      if (skillCreator) {
+                        const cwd = fileTreeState.rootPath;
+                        const thread = threadStore.activeThread;
+                        if (!cwd || !thread) return;
+                        if (!isSkillActiveInThread(skillCreator)) {
+                          await handleSkillThread(skillCreator);
                         }
-                      } else {
-                        // Inactive skill (not in thread) = Add to thread
-                        console.log("[ThreadSidebar] Adding skill to thread");
-                        handleSkillThread(skill);
+                        window.dispatchEvent(
+                          new CustomEvent("seren:set-chat-input", {
+                            detail: "What skill do you want to create today?",
+                          }),
+                        );
                       }
-                    };
+                    }}
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      stroke-linecap="round"
+                      role="img"
+                      aria-label="Create"
+                    >
+                      <path d="M8 3v10M3 8h10" />
+                    </svg>
+                    Create with Skill Creator
+                  </button>
+                </div>
+              </Show>
+            </div>
 
-                    return (
-                      <div class="relative group">
-                        <button
-                          type="button"
-                          class="flex items-start gap-2 w-full px-2.5 py-2 mb-1 border rounded-md cursor-pointer text-left transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                          classList={{
-                            "bg-primary/5 border-primary/20 hover:bg-primary/10":
-                              isActive(),
-                            "bg-transparent border-transparent hover:bg-surface-2 hover:border-border":
-                              !isActive(),
-                          }}
-                          disabled={!threadStore.activeThread}
-                          onClick={handleClick}
-                          title={
-                            isActive()
-                              ? "Click to invoke skill in chat"
-                              : "Click to add to thread"
-                          }
-                        >
-                          {/* Star icon - filled if active, outline if inactive */}
-                          <span
-                            class="w-5 h-5 flex items-center justify-center rounded shrink-0 mt-0.5 transition-colors"
-                            classList={{
-                              "bg-primary/15 text-primary": isActive(),
-                              "bg-surface-2 text-muted-foreground": !isActive(),
-                            }}
-                          >
-                            <svg
-                              width="11"
-                              height="11"
-                              viewBox="0 0 16 16"
-                              fill={isActive() ? "currentColor" : "none"}
-                              role="img"
-                              aria-label={
-                                isActive() ? "Active skill" : "Inactive skill"
-                              }
-                            >
-                              <path
-                                d="M8 2L9.5 6H14L10.5 8.5L12 13L8 10L4 13L5.5 8.5L2 6H6.5L8 2Z"
-                                stroke="currentColor"
-                                stroke-width="1.2"
-                                stroke-linejoin="round"
-                              />
-                            </svg>
-                          </span>
-
+            {/* Catalog view — shows all available skills for re-install */}
+            <Show when={showCatalog()}>
+              <div class="mt-2">
+                <div class="flex items-center gap-2 mb-2">
+                  <button
+                    type="button"
+                    class="flex items-center gap-1 px-2 py-1 bg-transparent border-none text-[12px] text-muted-foreground cursor-pointer transition-colors hover:text-foreground"
+                    onClick={() => setShowCatalog(false)}
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      role="img"
+                      aria-label="Back"
+                    >
+                      <path d="M10 4L6 8l4 4" />
+                    </svg>
+                    Back to skills
+                  </button>
+                  <span class="text-[11px] text-muted-foreground/50">
+                    {skillsStore.available.length} available
+                  </span>
+                </div>
+                <div class="max-h-[300px] overflow-y-auto">
+                  <For
+                    each={skillsStore.available.filter(
+                      (s) =>
+                        !launcherQuery().trim() ||
+                        s.name
+                          .toLowerCase()
+                          .includes(launcherQuery().trim().toLowerCase()) ||
+                        s.slug
+                          .toLowerCase()
+                          .includes(launcherQuery().trim().toLowerCase()),
+                    )}
+                  >
+                    {(skill) => {
+                      const alreadyInstalled = () =>
+                        skillsStore.isInstalled(skill.id);
+                      return (
+                        <div class="flex items-center gap-2 px-2.5 py-2 mb-1 rounded-md hover:bg-surface-2 transition-colors">
                           <div class="flex-1 min-w-0">
-                            <div class="text-[13px] font-medium text-foreground">
+                            <div class="text-[13px] font-medium text-foreground truncate">
                               {skill.name}
-                              {isActive() && isSearching && (
-                                <span class="ml-1.5 text-[10px] text-primary font-semibold">
-                                  ●
-                                </span>
-                              )}
                             </div>
                             <Show when={skill.description}>
-                              <div class="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
+                              <div class="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
                                 {skill.description}
                               </div>
                             </Show>
                           </div>
-                        </button>
+                          <Show
+                            when={!alreadyInstalled()}
+                            fallback={
+                              <span class="text-[10px] text-muted-foreground/60 shrink-0">
+                                Installed
+                              </span>
+                            }
+                          >
+                            <button
+                              type="button"
+                              class="shrink-0 px-2 py-1 bg-primary text-primary-foreground rounded text-[11px] font-medium cursor-pointer transition-colors hover:bg-primary/80"
+                              onClick={() => {
+                                handleSkillThread(skill);
+                                setShowCatalog(false);
+                              }}
+                            >
+                              Install
+                            </button>
+                          </Show>
+                        </div>
+                      );
+                    }}
+                  </For>
+                </div>
+              </div>
+            </Show>
 
-                        {/* X button for active skills */}
-                        <Show when={isActive()}>
+            {/* Skills list — active thread skills */}
+            <Show when={!showCatalog()}>
+              <div class="mt-2 max-h-[300px] overflow-y-auto">
+                <Show
+                  when={filteredSkills().length > 0}
+                  fallback={
+                    <div class="w-full px-3 py-4 text-[13px] text-center text-muted-foreground">
+                      No matching skills
+                    </div>
+                  }
+                >
+                  <For each={filteredSkills()}>
+                    {(skill) => {
+                      const isActive = createMemo(() =>
+                        isSkillActiveInThread(skill),
+                      );
+                      const isSearching = launcherQuery().trim().length > 0;
+
+                      const handleClick = () => {
+                        console.log("[ThreadSidebar] handleClick:", {
+                          skillName: skill.name,
+                          isActive: isActive(),
+                          isSearching,
+                        });
+
+                        if (isActive()) {
+                          // Active skill (in thread) = Invoke the skill
+                          const skillSlug = "slug" in skill ? skill.slug : "";
+                          console.log(
+                            "[ThreadSidebar] Invoking skill:",
+                            skillSlug,
+                          );
+                          if (skillSlug) {
+                            window.dispatchEvent(
+                              new CustomEvent("seren:set-chat-input", {
+                                detail: {
+                                  text: `/${skillSlug} `,
+                                  autoSend: true,
+                                },
+                              }),
+                            );
+                          }
+                        } else {
+                          // Inactive skill (not in thread) = Add to thread
+                          console.log("[ThreadSidebar] Adding skill to thread");
+                          handleSkillThread(skill);
+                        }
+                      };
+
+                      return (
+                        <div class="flex items-start gap-1 mb-1">
                           <button
                             type="button"
-                            class="absolute top-2 right-2 w-5 h-5 flex items-center justify-center rounded bg-muted text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted-foreground/20"
-                            onClick={(e) => {
-                              console.log(
-                                "[ThreadSidebar] X button clicked:",
-                                skill.name,
-                              );
-                              e.stopPropagation();
-                              handleSkillThread(skill);
+                            class="flex items-start gap-2 flex-1 min-w-0 px-2.5 py-2 border rounded-md cursor-pointer text-left transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            classList={{
+                              "bg-primary/5 border-primary/20 hover:bg-primary/10":
+                                isActive(),
+                              "bg-transparent border-transparent hover:bg-surface-2 hover:border-border":
+                                !isActive(),
                             }}
-                            title="Remove skill from thread"
+                            disabled={!threadStore.activeThread}
+                            onClick={handleClick}
+                            title={
+                              isActive()
+                                ? "Click to invoke skill in chat"
+                                : "Click to add to thread"
+                            }
                           >
-                            <svg
-                              width="10"
-                              height="10"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              stroke-linecap="round"
-                              role="img"
-                              aria-label="Remove"
+                            {/* Star toggle — add/remove skill from thread */}
+                            <button
+                              type="button"
+                              class="w-5 h-5 flex items-center justify-center rounded shrink-0 mt-0.5 transition-colors cursor-pointer border-none bg-transparent"
+                              classList={{
+                                "text-primary hover:text-primary/70":
+                                  isActive(),
+                                "text-muted-foreground hover:text-primary":
+                                  !isActive(),
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSkillThread(skill);
+                              }}
+                              title={
+                                isActive()
+                                  ? "Remove from thread"
+                                  : "Add to thread"
+                              }
                             >
-                              <path d="M12 4L4 12M4 4l8 8" />
-                            </svg>
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 16 16"
+                                fill={isActive() ? "currentColor" : "none"}
+                                role="img"
+                                aria-label={
+                                  isActive()
+                                    ? "Remove from thread"
+                                    : "Add to thread"
+                                }
+                              >
+                                <path
+                                  d="M8 2L9.5 6H14L10.5 8.5L12 13L8 10L4 13L5.5 8.5L2 6H6.5L8 2Z"
+                                  stroke="currentColor"
+                                  stroke-width="1.2"
+                                  stroke-linejoin="round"
+                                />
+                              </svg>
+                            </button>
+
+                            <div class="flex-1 min-w-0">
+                              <div class="text-[13px] font-medium text-foreground">
+                                {skill.name}
+                                {isActive() && isSearching && (
+                                  <span class="ml-1.5 text-[10px] text-primary font-semibold">
+                                    ●
+                                  </span>
+                                )}
+                              </div>
+                              <Show when={skill.description}>
+                                <div class="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
+                                  {skill.description}
+                                </div>
+                              </Show>
+                            </div>
                           </button>
-                        </Show>
-                      </div>
-                    );
-                  }}
-                </For>
-              </Show>
-            </div>
+
+                          {/* Trash icon — delete skill files + hide from catalog */}
+                          <Show when={isActive() && "path" in skill}>
+                            <button
+                              type="button"
+                              class="w-6 h-6 flex items-center justify-center rounded shrink-0 mt-2 bg-transparent border-none text-muted-foreground/50 cursor-pointer transition-colors hover:text-destructive hover:bg-destructive/10"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const ok = await confirm(
+                                  "Remove skill and delete local files?",
+                                  {
+                                    title: "Delete Skill",
+                                    kind: "warning",
+                                  },
+                                );
+                                if (!ok) return;
+                                const installed = skill as InstalledSkill;
+                                await skillsStore.remove(installed);
+                                skillsStore.hideSkill(installed.slug);
+                              }}
+                              title="Delete skill permanently"
+                            >
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.3"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                role="img"
+                                aria-label="Delete"
+                              >
+                                <path d="M2 4h12M5.5 4V2.5h5V4M6.5 7v5M9.5 7v5M3.5 4l.5 9.5a1 1 0 001 .5h6a1 1 0 001-.5L12.5 4" />
+                              </svg>
+                            </button>
+                          </Show>
+                        </div>
+                      );
+                    }}
+                  </For>
+                </Show>
+              </div>
+            </Show>
           </div>
         </Show>
       </div>
