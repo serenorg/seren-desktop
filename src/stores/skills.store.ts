@@ -18,6 +18,7 @@ import {
 import { getFileTreeState } from "@/stores/fileTree";
 
 const ENABLED_SKILLS_KEY = "seren:enabled_skills";
+const HIDDEN_SKILLS_KEY = "seren:hidden_skills";
 
 /**
  * Load enabled skills state from localStorage.
@@ -40,6 +41,24 @@ function loadEnabledState(): Record<string, boolean> {
 function saveEnabledState(state: Record<string, boolean>): void {
   try {
     localStorage.setItem(ENABLED_SKILLS_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function loadHiddenSkills(): string[] {
+  try {
+    const stored = localStorage.getItem(HIDDEN_SKILLS_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+function saveHiddenSkills(slugs: string[]): void {
+  try {
+    localStorage.setItem(HIDDEN_SKILLS_KEY, JSON.stringify(slugs));
   } catch {
     // Ignore storage errors
   }
@@ -111,6 +130,7 @@ const [state, setState] = createStore<SkillsState>({
  * Track enabled state separately (not part of the skill data).
  */
 const enabledState: Record<string, boolean> = loadEnabledState();
+let hiddenSkillSlugs: string[] = loadHiddenSkills();
 
 /**
  * Project defaults cache.
@@ -829,5 +849,21 @@ export const skillsStore = {
   async clearCacheAndRefresh(): Promise<void> {
     skills.clearCache();
     await this.refreshAvailable();
+  },
+
+  hideSkill(slug: string): void {
+    if (!hiddenSkillSlugs.includes(slug)) {
+      hiddenSkillSlugs = [...hiddenSkillSlugs, slug];
+      saveHiddenSkills(hiddenSkillSlugs);
+    }
+  },
+
+  unhideSkill(slug: string): void {
+    hiddenSkillSlugs = hiddenSkillSlugs.filter((s) => s !== slug);
+    saveHiddenSkills(hiddenSkillSlugs);
+  },
+
+  isHidden(slug: string): boolean {
+    return hiddenSkillSlugs.includes(slug);
   },
 };
