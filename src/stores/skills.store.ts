@@ -1,6 +1,7 @@
 // ABOUTME: Skills store for managing skills state in the UI.
 // ABOUTME: Handles available skills, installed skills, and thread/project/global resolution.
 
+import { invoke } from "@tauri-apps/api/core";
 import { createStore } from "solid-js/store";
 import { log } from "@/lib/logger";
 import type {
@@ -660,6 +661,7 @@ export const skillsStore = {
     let autoRefreshed = 0;
     for (const skill of state.installed) {
       if (!isUpstreamManagedSkill(skill)) continue;
+      if (skill.syncState?.upstreamDeleted) continue;
       try {
         const status = await skills.inspectSyncStatus(skill);
         if (!status || status.hasLocalChanges) continue;
@@ -669,11 +671,26 @@ export const skillsStore = {
           log.info("[SkillsStore] Auto-refreshed stale skill:", skill.slug);
         }
       } catch (err) {
-        log.warn(
-          "[SkillsStore] Failed to check/refresh skill:",
-          skill.slug,
-          err,
-        );
+        const is404 = err instanceof Error && err.message.includes(": 404");
+        if (is404 && skill.syncState) {
+          // Upstream skill was deleted — mark as orphaned so we stop retrying.
+          skill.syncState.upstreamDeleted = true;
+          await invoke("write_skill_sync_state", {
+            skillsDir: skill.skillsDir,
+            slug: skill.dirName,
+            stateJson: JSON.stringify(skill.syncState),
+          });
+          log.info(
+            "[SkillsStore] Upstream skill deleted, marked orphaned:",
+            skill.slug,
+          );
+        } else {
+          log.warn(
+            "[SkillsStore] Failed to check/refresh skill:",
+            skill.slug,
+            err,
+          );
+        }
       }
     }
     if (autoRefreshed > 0) {

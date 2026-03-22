@@ -65,6 +65,8 @@ export interface SkillSyncState {
   syncedAt: number;
   /** SHA-256 hashes for upstream-managed files, keyed by relative path */
   managedFiles: Record<string, string>;
+  /** True when the upstream source returned 404 (skill deleted from repo) */
+  upstreamDeleted?: boolean;
 }
 
 export interface RemoteSkillRevision {
