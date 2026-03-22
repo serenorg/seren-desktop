@@ -461,7 +461,6 @@ jobs:
       - name: Notarize macOS .app bundle and re-pack updater
         id: notarize_app
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
-        continue-on-error: true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
