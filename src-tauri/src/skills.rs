@@ -800,10 +800,18 @@ pub fn rename_skill_dir(
         ));
     }
     if new_path.exists() {
-        return Err(format!(
-            "Target directory already exists: {}",
-            new_path.display()
-        ));
+        // Target already has the correct content (synced under the new name).
+        // Remove the stale source directory instead of failing.
+        fs::remove_dir_all(&old_path).map_err(|e| {
+            format!(
+                "Target {} exists but failed to remove stale source {}: {}",
+                new_path.display(),
+                old_path.display(),
+                e
+            )
+        })?;
+        let skill_md = new_path.join("SKILL.md");
+        return Ok(skill_md.to_string_lossy().to_string());
     }
 
     fs::rename(&old_path, &new_path)
