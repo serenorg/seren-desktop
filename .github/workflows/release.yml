@@ -325,9 +325,10 @@ jobs:
           name: Seren-Desktop-${{ matrix.name }}.dmg
           path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
 
-      # macOS: Notarize the app (non-blocking - continues even if notarization fails/times out)
+      # macOS: Notarize the DMG (non-blocking - continues even if notarization fails/times out)
       # Uses polling with retries to handle Apple's notary service issues
-      - name: Notarize macOS app
+      # Note: the .app bundle is notarized separately in the step below
+      - name: Notarize macOS DMG
         id: notarize
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
         continue-on-error: true
@@ -451,6 +452,89 @@ jobs:
           name: Seren-Desktop-${{ matrix.name }}.dmg
           path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           overwrite: true
+
+      # macOS: Notarize the .app bundle and re-pack the updater artifact.
+      # The Tauri build code-signs the .app but does not notarize it.
+      # The DMG gets its own notarization (above), but the in-app updater
+      # delivers .app.tar.gz which contains the raw .app — without a stapled
+      # notarization ticket, Gatekeeper on Sequoia+ rejects it as "damaged".
+      - name: Notarize macOS .app bundle and re-pack updater
+        id: notarize_app
+        if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
+        continue-on-error: true
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          APP_PATH=$(find "$BUNDLE_DIR" -maxdepth 1 -name "*.app" -type d | head -1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app bundle found in $BUNDLE_DIR"
+            exit 1
+          fi
+
+          APP_NAME=$(basename "$APP_PATH")
+          echo "Notarizing .app bundle: $APP_PATH"
+
+          # Zip the .app for submission (notarytool requires zip/dmg/pkg)
+          ZIP_PATH="${APP_PATH}.zip"
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+
+          # Submit and wait (up to 30 minutes per attempt, 3 attempts)
+          MAX_ATTEMPTS=3
+          ATTEMPT=0
+          NOTARIZATION_SUCCESS=false
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ] && [ "$NOTARIZATION_SUCCESS" = "false" ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "=== .app notarization attempt $ATTEMPT/$MAX_ATTEMPTS ==="
+
+            if xcrun notarytool submit "$ZIP_PATH" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait --timeout 1800; then
+              NOTARIZATION_SUCCESS=true
+              echo ".app notarization accepted!"
+            else
+              echo ".app notarization attempt $ATTEMPT failed"
+              if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+                echo "Retrying in 30 seconds..."
+                sleep 30
+              fi
+            fi
+          done
+
+          rm -f "$ZIP_PATH"
+
+          if [ "$NOTARIZATION_SUCCESS" = "false" ]; then
+            echo ".app notarization failed after $MAX_ATTEMPTS attempts"
+            exit 1
+          fi
+
+          # Staple the notarization ticket to the .app
+          echo "Stapling notarization ticket to .app..."
+          xcrun stapler staple "$APP_PATH"
+          echo ".app stapling complete!"
+
+          # Re-pack the updater .app.tar.gz from the now-notarized .app
+          echo "Re-packing updater artifact with notarized .app..."
+          TAR_PATH="$BUNDLE_DIR/SerenDesktop.app.tar.gz"
+          rm -f "$TAR_PATH" "${TAR_PATH}.sig"
+          tar -czf "$TAR_PATH" -C "$BUNDLE_DIR" "$APP_NAME"
+          echo "Created: $TAR_PATH ($(wc -c < "$TAR_PATH") bytes)"
+
+          # Re-sign the new .app.tar.gz with the Tauri updater key
+          echo "Re-signing updater artifact with Tauri key..."
+          pnpm tauri signer sign -k "$TAURI_SIGNING_PRIVATE_KEY" \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            "$TAR_PATH"
+          echo "Re-signed: ${TAR_PATH}.sig"
+
+          echo "Files in $BUNDLE_DIR:"
+          ls -la "$BUNDLE_DIR/"
 
       # Move updater artifacts (.sig, .nsis.zip) out of NSIS dir before code signing
       # so SSL.com's batch_sign doesn't choke on non-exe files
