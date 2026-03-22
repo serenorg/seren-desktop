@@ -13,13 +13,13 @@ const AVG_TOOL_WORDS: f32 = 60.0;
 const CHARS_PER_TOKEN: usize = 4;
 
 /// Token budget for selected tools sent to the model per request.
-const TOOL_TOKEN_BUDGET: usize = 2_000;
+const TOOL_TOKEN_BUDGET: usize = 4_000;
 
 /// Minimum tools always included regardless of BM25 score.
-const MIN_TOOLS: usize = 3;
+const MIN_TOOLS: usize = 5;
 
 /// Soft cap: never send more than this many tools even if budget allows.
-const MAX_TOOLS: usize = 20;
+const MAX_TOOLS: usize = 40;
 
 /// Hard byte budget as a final safety net against HTTP 413 responses from the
 /// Gateway. BM25 selection is the primary mechanism; this catches edge cases.
@@ -343,8 +343,8 @@ mod tests {
 
     #[test]
     fn respects_max_tools_cap() {
-        // 26 tools: 25 irrelevant + 1 relevant. Result must be <= MAX_TOOLS.
-        let mut tools: Vec<serde_json::Value> = (0..25)
+        // 51 tools: 50 irrelevant + 1 relevant. Result must be <= MAX_TOOLS.
+        let mut tools: Vec<serde_json::Value> = (0..50)
             .map(|i| make_tool(&format!("irrelevant_{i}"), "unrelated XYZ functionality"))
             .collect();
         tools.push(make_tool("send_email", "Send email message to a recipient"));
