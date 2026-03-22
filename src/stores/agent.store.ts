@@ -1698,27 +1698,19 @@ export const agentStore = {
    * own internal context, so the old session remains full. We terminate the
    * CLI session and spawn a fresh one to actually free up context.
    */
-  async clearSessionMessages(sessionId: string) {
+  clearSessionMessages(sessionId: string) {
     const session = state.sessions[sessionId];
     if (!session) return;
 
-    const { conversationId, info } = session;
-    const cwd = info.cwd;
-    const agentType = info.agentType;
-
-    // Clear persisted messages from SQLite
-    clearConversationHistory(conversationId).catch((err) =>
+    // Clear UI messages and persisted history. The CLI session stays alive —
+    // its internal context is independent of our message store. Killing and
+    // respawning caused an infinite loop: the new session got a different ID,
+    // selectThread couldn't find it, triggered resumeAgentConversation on the
+    // old conversation, which replayed all old messages and re-triggered clear.
+    setState("sessions", sessionId, "messages", []);
+    clearConversationHistory(session.conversationId).catch((err) =>
       console.error("[AgentStore] Failed to clear persisted messages:", err),
     );
-
-    // Terminate the old CLI session (kills the process)
-    await this.terminateSession(sessionId);
-
-    // Spawn a fresh CLI session for the same conversation
-    console.info(
-      `[AgentStore] Clear history: respawning fresh session for conversation ${conversationId}`,
-    );
-    await this.spawnSession(cwd, agentType);
   },
 
   /**
