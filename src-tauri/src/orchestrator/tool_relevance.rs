@@ -103,11 +103,23 @@ pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<se
 /// Extract indexable text from an OpenAI-format tool definition.
 ///
 /// Concatenates: function name + description + parameter names + parameter descriptions.
+/// For MCP tools with the `mcp__<publisher>__<action>` naming convention, the publisher
+/// name is extracted and repeated to boost its BM25 term frequency — so queries
+/// mentioning "google" or "slack" naturally rank that publisher's tools higher.
 fn tool_text(tool: &serde_json::Value) -> String {
     let mut parts: Vec<&str> = Vec::new();
 
+    let publisher_boost: String;
     if let Some(name) = tool.pointer("/function/name").and_then(|v| v.as_str()) {
         parts.push(name);
+
+        // Boost publisher name for MCP tools: mcp__<publisher>__<action>
+        if let Some(publisher) = extract_mcp_publisher(name) {
+            // Repeat publisher 3x to give it strong BM25 weight without
+            // overwhelming the description/param signals.
+            publisher_boost = format!("{publisher} {publisher} {publisher}");
+            parts.push(&publisher_boost);
+        }
     }
     if let Some(desc) = tool.pointer("/function/description").and_then(|v| v.as_str()) {
         parts.push(desc);
@@ -135,6 +147,17 @@ fn tool_text(tool: &serde_json::Value) -> String {
     }
 
     parts.join(" ").to_lowercase()
+}
+
+/// Extract the publisher name from an MCP tool name following the
+/// `mcp__<publisher>__<action>` convention. Returns None for non-MCP tools.
+fn extract_mcp_publisher(tool_name: &str) -> Option<&str> {
+    let rest = tool_name.strip_prefix("mcp__")?;
+    let publisher = rest.split("__").next()?;
+    if publisher.is_empty() {
+        return None;
+    }
+    Some(publisher)
 }
 
 /// Tokenize text into lowercase alphanumeric tokens, filtering single chars.
@@ -422,5 +445,45 @@ mod tests {
         assert!(text.contains("execute_bash"));
         assert!(text.contains("run a shell command"));
         assert!(text.contains("command"));
+    }
+
+    #[test]
+    fn extract_mcp_publisher_parses_convention() {
+        assert_eq!(extract_mcp_publisher("mcp__google__get_messages"), Some("google"));
+        assert_eq!(extract_mcp_publisher("mcp__slack__post_message"), Some("slack"));
+        assert_eq!(extract_mcp_publisher("execute_bash"), None);
+        assert_eq!(extract_mcp_publisher("mcp__"), None);
+    }
+
+    #[test]
+    fn mcp_publisher_tools_score_higher_for_publisher_query() {
+        let tools = vec![
+            make_tool("mcp__google__get_messages", "Retrieve email messages"),
+            make_tool("mcp__google__send_message", "Send an email"),
+            make_tool("execute_bash", "Run a shell command"),
+            make_tool("file_read", "Read file contents from disk"),
+        ];
+        let query_terms = tokenize("google email");
+        let docs: Vec<String> = tools.iter().map(tool_text).collect();
+        let scores = bm25_scores(&query_terms, &docs);
+
+        assert!(
+            scores[0] > scores[2],
+            "mcp__google__get_messages ({:.3}) should outscore execute_bash ({:.3})",
+            scores[0], scores[2]
+        );
+        assert!(
+            scores[1] > scores[3],
+            "mcp__google__send_message ({:.3}) should outscore file_read ({:.3})",
+            scores[1], scores[3]
+        );
+    }
+
+    #[test]
+    fn publisher_boost_in_tool_text() {
+        let tool = make_tool("mcp__slack__post_message", "Post a message to a channel");
+        let text = tool_text(&tool);
+        // Publisher "slack" should appear multiple times due to boosting
+        assert!(text.matches("slack").count() >= 3, "publisher should be boosted in tool text");
     }
 }
