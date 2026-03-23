@@ -271,6 +271,7 @@ async fn execute_single_task(
     let mut reroute_count: usize = 0;
     let mut same_model_retry_count: usize = 0;
     const MAX_SAME_MODEL_RETRIES: usize = 1;
+    let mut network_retry_count: usize = 0;
 
     // Wrap cancel_rx in Arc<Mutex> so it survives reroute iterations
     let cancel_rx = Arc::new(Mutex::new(Some(cancel_rx)));
@@ -418,6 +419,39 @@ async fn execute_single_task(
                 let _ = app.emit("orchestrator://event", &error_event);
             }
         }
+
+        // Network transport errors (connection refused, DNS, etc.) should be
+        // retried on the same model with exponential backoff — rerouting to a
+        // different model won't help since all models share the same gateway.
+        let is_network_error = reroutable_error
+            .as_ref()
+            .is_some_and(|msg| router::is_network_transport_error(msg));
+
+        if is_network_error {
+            network_retry_count += 1;
+            if network_retry_count <= router::MAX_NETWORK_RETRIES {
+                let backoff_secs = 2u64.pow(network_retry_count as u32); // 2, 4, 8, 16, 32
+                log::warn!(
+                    "[Orchestrator] Network error (attempt {}/{}), retrying in {}s: {}",
+                    network_retry_count,
+                    router::MAX_NETWORK_RETRIES,
+                    backoff_secs,
+                    reroutable_error.as_deref().unwrap_or("unknown"),
+                );
+                reroutable_error = None;
+                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                continue;
+            }
+            log::error!(
+                "[Orchestrator] Network error persists after {} retries, giving up: {}",
+                router::MAX_NETWORK_RETRIES,
+                reroutable_error.as_deref().unwrap_or("unknown"),
+            );
+            break;
+        }
+
+        // Reset network retry counter on non-network outcomes (success or other errors)
+        network_retry_count = 0;
 
         // Check if we got a transient error eligible for retry/reroute
         let is_transient = reroutable_error
