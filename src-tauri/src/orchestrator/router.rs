@@ -344,6 +344,27 @@ pub fn is_reroutable_error(error_message: &str) -> bool {
         .any(|code| error_message.contains(&code.to_string()))
 }
 
+/// Maximum number of retries for network transport errors before giving up.
+pub const MAX_NETWORK_RETRIES: usize = 5;
+
+/// Check whether an error is a network transport failure (not an HTTP status error).
+///
+/// These errors occur when the HTTP request cannot be sent at all — DNS resolution
+/// failure, connection refused, TLS handshake error, stream reset, etc.  They should
+/// be retried on the **same model** with exponential backoff rather than rerouted to a
+/// different model, because all models share the same gateway endpoint.
+pub fn is_network_transport_error(error_message: &str) -> bool {
+    let lower = error_message.to_lowercase();
+    lower.contains("error sending request")
+        || lower.contains("connection refused")
+        || lower.contains("connection reset")
+        || lower.contains("dns error")
+        || lower.contains("timed out")
+        || lower.contains("connection closed before message completed")
+        || lower.contains("broken pipe")
+        || lower.contains("network is unreachable")
+}
+
 /// Check whether an error indicates the prompt exceeded the model's context window.
 pub fn is_context_overflow_error(error_message: &str) -> bool {
     error_message.contains("prompt is too long")
@@ -1048,6 +1069,54 @@ mod tests {
     #[test]
     fn rejects_generic_error_as_not_reroutable() {
         assert!(!is_reroutable_error("Something went wrong"));
+    }
+
+    // =========================================================================
+    // Network Transport Errors
+    // =========================================================================
+
+    #[test]
+    fn detects_reqwest_send_error_as_network() {
+        assert!(is_network_transport_error(
+            "Request failed: error sending request for url (https://api.serendb.com/publishers/seren-models/chat/completions)"
+        ));
+    }
+
+    #[test]
+    fn detects_connection_refused_as_network() {
+        assert!(is_network_transport_error("connection refused"));
+    }
+
+    #[test]
+    fn detects_dns_error_as_network() {
+        assert!(is_network_transport_error(
+            "dns error: failed to lookup address information"
+        ));
+    }
+
+    #[test]
+    fn detects_timeout_as_network() {
+        assert!(is_network_transport_error("operation timed out"));
+    }
+
+    #[test]
+    fn detects_broken_pipe_as_network() {
+        assert!(is_network_transport_error("broken pipe"));
+    }
+
+    #[test]
+    fn network_error_is_not_reroutable() {
+        // Network errors should NOT be reroutable — rerouting to a different
+        // model won't help when the gateway itself is unreachable.
+        assert!(!is_reroutable_error(
+            "Request failed: error sending request for url (https://api.serendb.com/...)"
+        ));
+    }
+
+    #[test]
+    fn http_status_error_is_not_network() {
+        // HTTP 502 is a server error, not a network transport error
+        assert!(!is_network_transport_error("Gateway returned HTTP 502"));
     }
 
     // =========================================================================
