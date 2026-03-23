@@ -149,10 +149,13 @@ fn tool_text(tool: &serde_json::Value) -> String {
     parts.join(" ").to_lowercase()
 }
 
-/// Extract the publisher name from an MCP tool name following the
-/// `mcp__<publisher>__<action>` convention. Returns None for non-MCP tools.
+/// Extract the publisher name from a tool name following the
+/// `mcp__<publisher>__<action>` or `gateway__<publisher>__<action>` convention.
+/// Returns None for tools that don't use either prefix.
 fn extract_mcp_publisher(tool_name: &str) -> Option<&str> {
-    let rest = tool_name.strip_prefix("mcp__")?;
+    let rest = tool_name
+        .strip_prefix("mcp__")
+        .or_else(|| tool_name.strip_prefix("gateway__"))?;
     let publisher = rest.split("__").next()?;
     if publisher.is_empty() {
         return None;
@@ -448,42 +451,64 @@ mod tests {
     }
 
     #[test]
-    fn extract_mcp_publisher_parses_convention() {
+    fn extract_mcp_publisher_parses_both_prefixes() {
         assert_eq!(extract_mcp_publisher("mcp__google__get_messages"), Some("google"));
         assert_eq!(extract_mcp_publisher("mcp__slack__post_message"), Some("slack"));
+        assert_eq!(extract_mcp_publisher("gateway__gmail__get_messages"), Some("gmail"));
+        assert_eq!(extract_mcp_publisher("gateway__firecrawl-serenai__scrape"), Some("firecrawl-serenai"));
         assert_eq!(extract_mcp_publisher("execute_bash"), None);
         assert_eq!(extract_mcp_publisher("mcp__"), None);
+        assert_eq!(extract_mcp_publisher("gateway__"), None);
     }
 
     #[test]
-    fn mcp_publisher_tools_score_higher_for_publisher_query() {
-        let tools = vec![
-            make_tool("mcp__google__get_messages", "Retrieve email messages"),
-            make_tool("mcp__google__send_message", "Send an email"),
-            make_tool("execute_bash", "Run a shell command"),
-            make_tool("file_read", "Read file contents from disk"),
+    fn gateway_gmail_tools_selected_for_gmail_query() {
+        // Simulate real scenario: 120+ tools, 17 Gmail with gateway__ prefix
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+
+        let gmail_names = [
+            "get_health", "get_messages", "get_messages_by_message_id",
+            "post_messages_send", "delete_messages_by_message_id",
+            "post_messages_by_message_id_trash", "post_messages_by_message_id_modify",
+            "get_labels", "get_labels_by_label_id", "post_labels",
+            "delete_labels_by_label_id", "get_threads", "get_threads_by_thread_id",
+            "post_threads_by_thread_id_trash", "get_drafts", "post_drafts",
+            "post_drafts_by_draft_id_send",
         ];
-        let query_terms = tokenize("google email");
-        let docs: Vec<String> = tools.iter().map(tool_text).collect();
-        let scores = bm25_scores(&query_terms, &docs);
+        for name in &gmail_names {
+            tools.push(make_tool(
+                &format!("gateway__gmail__{name}"),
+                "Email operation",
+            ));
+        }
 
-        assert!(
-            scores[0] > scores[2],
-            "mcp__google__get_messages ({:.3}) should outscore execute_bash ({:.3})",
-            scores[0], scores[2]
-        );
-        assert!(
-            scores[1] > scores[3],
-            "mcp__google__send_message ({:.3}) should outscore file_read ({:.3})",
-            scores[1], scores[3]
-        );
+        // Fill with other publisher tools to exceed MAX_TOOLS
+        for i in 0..50 { tools.push(make_tool(&format!("gateway__firecrawl-serenai__action_{i}"), "Web scraping")); }
+        for i in 0..50 { tools.push(make_tool(&format!("gateway__perplexity-serenai__search_{i}"), "AI search")); }
+        tools.push(make_tool("file_read", "Read file contents from disk"));
+        tools.push(make_tool("execute_bash", "Run a shell command"));
+
+        assert!(tools.len() > 100);
+
+        let result = select_relevant_tools("Do you have access to my gmail?", &tools);
+        let gmail_count = result.iter().filter(|t| {
+            t.pointer("/function/name").and_then(|v| v.as_str())
+                .map(|n| n.starts_with("gateway__gmail__"))
+                .unwrap_or(false)
+        }).count();
+
+        assert!(gmail_count >= 5, "Expected >=5 Gmail tools, got {gmail_count} of {} selected", result.len());
     }
 
     #[test]
-    fn publisher_boost_in_tool_text() {
-        let tool = make_tool("mcp__slack__post_message", "Post a message to a channel");
-        let text = tool_text(&tool);
-        // Publisher "slack" should appear multiple times due to boosting
-        assert!(text.matches("slack").count() >= 3, "publisher should be boosted in tool text");
+    fn publisher_boost_works_for_both_prefixes() {
+        let mcp_tool = make_tool("mcp__slack__post_message", "Post a message to a channel");
+        let gateway_tool = make_tool("gateway__gmail__get_messages", "List messages in mailbox");
+
+        let mcp_text = tool_text(&mcp_tool);
+        let gateway_text = tool_text(&gateway_tool);
+
+        assert!(mcp_text.matches("slack").count() >= 3, "mcp__ publisher should be boosted");
+        assert!(gateway_text.matches("gmail").count() >= 3, "gateway__ publisher should be boosted");
     }
 }
