@@ -101,6 +101,8 @@ function parsePublisherFromToolName(toolName: string): {
 
 /**
  * Convert MCP tool to GatewayTool format.
+ * Stores the bare tool name (without mcp__publisher__ prefix) so that
+ * callGatewayTool() can dispatch through call_publisher correctly.
  * Returns null for built-in gateway tools (no publisher prefix).
  */
 function convertToGatewayTool(tool: McpTool): GatewayTool | null {
@@ -110,7 +112,7 @@ function convertToGatewayTool(tool: McpTool): GatewayTool | null {
     publisher: parsed.publisher,
     publisherName: parsed.publisher,
     tool: {
-      name: tool.name,
+      name: parsed.originalName,
       description: tool.description,
       inputSchema: tool.inputSchema as McpToolInfo["inputSchema"],
     },
@@ -186,7 +188,7 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
         publisher: slug,
         publisherName: slug,
         tool: {
-          name: `mcp__${slug}__${tool.name}`,
+          name: tool.name,
           description: tool.description ?? `${tool.name} from ${slug}`,
           inputSchema: tool.inputSchema ?? {
             type: "object" as const,
@@ -371,10 +373,13 @@ function parsePaymentProxyError(content: unknown): PaymentProxyInfo | null {
 }
 
 /**
- * Call a tool via the MCP Gateway.
+ * Call a tool via the MCP Gateway using the call_publisher dispatch mechanism.
+ *
+ * Publisher tools are not first-class MCP tools on the gateway — they must be
+ * invoked through the `call_publisher` meta-tool with `tool` + `tool_args`.
  */
 export async function callGatewayTool(
-  _publisherSlug: string,
+  publisherSlug: string,
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<McpToolCallResponse> {
@@ -389,9 +394,20 @@ export async function callGatewayTool(
   const startTime = Date.now();
 
   try {
+    // Separate x402 payment from tool args (call_publisher accepts it at top level)
+    const { _x402_payment, ...toolArgs } = args;
+    const dispatchArgs: Record<string, unknown> = {
+      publisher: publisherSlug,
+      tool: toolName,
+      tool_args: toolArgs,
+    };
+    if (_x402_payment !== undefined) {
+      dispatchArgs._x402_payment = _x402_payment;
+    }
+
     const result: McpToolResult = await mcpClient.callToolHttp(
       SEREN_MCP_SERVER_NAME,
-      { name: toolName, arguments: args },
+      { name: "call_publisher", arguments: dispatchArgs },
     );
 
     const executionTime = Date.now() - startTime;
