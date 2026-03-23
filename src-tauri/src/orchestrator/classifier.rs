@@ -129,6 +129,8 @@ const RESEARCH_KEYWORDS: &[&str] = &[
 
 /// Keywords that indicate the user explicitly wants to use publishers/tools.
 /// Highest priority for tool routing — overrides general_chat classification.
+/// Only intentional phrases — bare "publisher"/"publishers" would match
+/// informational queries like "check the publishers" or "list publishers".
 const PUBLISHER_KEYWORDS: &[&str] = &[
     "use publisher",
     "use publishers",
@@ -141,8 +143,8 @@ const PUBLISHER_KEYWORDS: &[&str] = &[
     "with publishers",
     "using publisher",
     "using publishers",
-    "publisher",
-    "publishers",
+    "via publisher",
+    "via publishers",
 ];
 
 const DOCUMENT_KEYWORDS: &[&str] = &[
@@ -580,6 +582,16 @@ mod tests {
         // "published" should NOT match "publisher" because of word boundary check
         let result = classify("The book was published last year", &[]);
         assert_eq!(result.task_type, "general_chat");
+    }
+
+    #[test]
+    fn bare_publishers_does_not_trigger_publisher_routing() {
+        // Asking ABOUT publishers, not asking to USE them
+        let result = classify("Check the seren mcp publishers", &[]);
+        assert_eq!(result.task_type, "general_chat");
+
+        let result2 = classify("List all available publishers", &[]);
+        assert_eq!(result2.task_type, "general_chat");
     }
 
     #[test]
