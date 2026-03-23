@@ -125,10 +125,11 @@ describe("MCP Gateway Caching", () => {
     const tools = getGatewayTools();
 
     // Only the mcp__test__test-tool should survive; list_mcp_tools and
-    // call_publisher are built-in gateway tools and must not be converted
+    // call_publisher are built-in gateway tools and must not be converted.
+    // convertToGatewayTool strips the mcp__publisher__ prefix, storing bare name.
     expect(tools).toHaveLength(1);
     expect(tools[0].publisher).toBe("test");
-    expect(tools[0].tool.name).toBe("mcp__test__test-tool");
+    expect(tools[0].tool.name).toBe("test-tool");
 
     // Verify no tool has the fallback "seren" publisher
     const serenTools = tools.filter((t) => t.publisher === "seren");
@@ -199,10 +200,11 @@ describe("MCP Gateway Caching", () => {
     await initializeGateway();
     const tools = getGatewayTools();
 
-    // Should have: 1 static tool (mcp__test__test-tool) + 2 gmail tools
+    // Should have: 1 static tool (test-tool) + 2 gmail tools.
+    // discoverPublisherTools now stores bare tool names (no mcp__publisher__ prefix).
     const gmailTools = tools.filter((t) => t.publisher === "gmail");
     expect(gmailTools).toHaveLength(2);
-    expect(gmailTools[0].tool.name).toBe("mcp__gmail__get_messages");
-    expect(gmailTools[1].tool.name).toBe("mcp__gmail__post_messages_send");
+    expect(gmailTools[0].tool.name).toBe("get_messages");
+    expect(gmailTools[1].tool.name).toBe("post_messages_send");
   });
 });
