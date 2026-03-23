@@ -25,6 +25,27 @@ const MAX_TOOLS: usize = 40;
 /// Gateway. BM25 selection is the primary mechanism; this catches edge cases.
 const HARD_BYTE_BUDGET: usize = 400 * 1024;
 
+/// Local tools that are always included regardless of BM25 score.
+/// These are fundamental capabilities the model needs constant access to —
+/// without them it cannot read/write files or execute commands.
+const PINNED_TOOL_NAMES: &[&str] = &[
+    "read_file",
+    "write_file",
+    "list_directory",
+    "path_exists",
+    "create_directory",
+    "seren_web_fetch",
+    "execute_command",
+];
+
+/// Check if a tool definition matches a pinned tool name.
+fn is_pinned_tool(tool: &serde_json::Value) -> bool {
+    tool.pointer("/function/name")
+        .and_then(|v| v.as_str())
+        .map(|name| PINNED_TOOL_NAMES.contains(&name))
+        .unwrap_or(false)
+}
+
 /// Select the most relevant tools for the given query within the token budget.
 ///
 /// Tools are in OpenAI function-calling format:
@@ -32,11 +53,12 @@ const HARD_BYTE_BUDGET: usize = 400 * 1024;
 ///
 /// # Algorithm
 /// 1. Fast-path: if the tool list already fits the budget, return it as-is.
-/// 2. Score each tool with BM25 against name + description + parameter names/descriptions.
-/// 3. Sort by score descending; greedily select within the token budget,
-///    guaranteeing at least `MIN_TOOLS`.
-/// 4. Restore original frontend priority ordering in the final selection.
-/// 5. Apply the hard byte budget as a final safety net.
+/// 2. Separate pinned tools (local tools) from the pool — they are always included.
+/// 3. Score remaining tools with BM25 against name + description + parameter names/descriptions.
+/// 4. Sort by score descending; greedily select within the remaining token budget,
+///    guaranteeing at least `MIN_TOOLS` total (including pinned).
+/// 5. Restore original frontend priority ordering in the final selection.
+/// 6. Apply the hard byte budget as a final safety net.
 pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
     // Fast path: no scoring needed when the set is small enough.
     let total_bytes = serde_json::to_string(tools)
@@ -50,34 +72,58 @@ pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<se
         return Vec::new();
     }
 
+    // Partition into pinned (always-included) and non-pinned (BM25-scored) tools,
+    // preserving original indices for ordering restoration.
+    let mut pinned_indices: Vec<usize> = Vec::new();
+    let mut pool_indices: Vec<usize> = Vec::new();
+    for (i, tool) in tools.iter().enumerate() {
+        if is_pinned_tool(tool) {
+            pinned_indices.push(i);
+        } else {
+            pool_indices.push(i);
+        }
+    }
+
+    // Account for pinned tools in the budget.
+    let pinned_tokens: usize = pinned_indices
+        .iter()
+        .map(|&i| approximate_tokens(&tool_text(&tools[i])))
+        .sum();
+
     let query_terms = tokenize(query);
     if query_terms.is_empty() {
         return apply_hard_budget(tools);
     }
 
-    let docs: Vec<String> = tools.iter().map(tool_text).collect();
-    let scores = bm25_scores(&query_terms, &docs);
+    // Score only the non-pinned pool.
+    let pool_docs: Vec<String> = pool_indices.iter().map(|&i| tool_text(&tools[i])).collect();
+    let pool_scores = bm25_scores(&query_terms, &pool_docs);
 
-    // Rank tools by score descending.
-    let mut ranked: Vec<(usize, f32)> = scores.into_iter().enumerate().collect();
+    // Rank pool tools by score descending.
+    let mut ranked: Vec<(usize, f32)> = pool_scores.into_iter().enumerate().collect();
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Greedily pick tools into the token budget.
-    let mut selected_indices: Vec<usize> = Vec::with_capacity(MAX_TOOLS);
-    let mut token_count: usize = 0;
+    // Greedily pick pool tools into the remaining budget.
+    let mut selected_indices: Vec<usize> = pinned_indices.clone();
+    let mut token_count: usize = pinned_tokens;
+    let remaining_slots = MAX_TOOLS.saturating_sub(pinned_indices.len());
+    let total_min = MIN_TOOLS.saturating_sub(pinned_indices.len());
 
-    for (idx, _score) in &ranked {
-        if selected_indices.len() >= MAX_TOOLS {
+    let mut pool_picked: usize = 0;
+    for (pool_idx, _score) in &ranked {
+        if pool_picked >= remaining_slots {
             break;
         }
-        let tool_tokens = approximate_tokens(&docs[*idx]);
+        let original_idx = pool_indices[*pool_idx];
+        let tool_tokens = approximate_tokens(&pool_docs[*pool_idx]);
         let budget_exceeded =
-            token_count + tool_tokens > TOOL_TOKEN_BUDGET && selected_indices.len() >= MIN_TOOLS;
+            token_count + tool_tokens > TOOL_TOKEN_BUDGET && pool_picked >= total_min;
         if budget_exceeded {
             break;
         }
-        selected_indices.push(*idx);
+        selected_indices.push(original_idx);
         token_count += tool_tokens;
+        pool_picked += 1;
     }
 
     // Restore original ordering so the frontend's priority ranking is preserved.
@@ -87,9 +133,11 @@ pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<se
         selected_indices.iter().map(|&i| tools[i].clone()).collect();
 
     log::info!(
-        "[ToolRelevance] Selected {} of {} tools (~{} tokens)",
+        "[ToolRelevance] Selected {} of {} tools ({} pinned + {} scored, ~{} tokens)",
         result.len(),
         tools.len(),
+        pinned_indices.len(),
+        pool_picked,
         token_count,
     );
 
@@ -510,5 +558,40 @@ mod tests {
 
         assert!(mcp_text.matches("slack").count() >= 3, "mcp__ publisher should be boosted");
         assert!(gateway_text.matches("gmail").count() >= 3, "gateway__ publisher should be boosted");
+    }
+
+    #[test]
+    fn pinned_local_tools_always_included() {
+        // Simulate 138 tools: 7 local + 131 gateway tools.
+        // Query is domain-specific with zero overlap with local tool names.
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+
+        // Add all 7 pinned local tools
+        tools.push(make_tool("read_file", "Read file contents from the filesystem"));
+        tools.push(make_tool("write_file", "Write content to a file on disk"));
+        tools.push(make_tool("list_directory", "List entries in a directory"));
+        tools.push(make_tool("path_exists", "Check whether a filesystem path exists"));
+        tools.push(make_tool("create_directory", "Create a new directory"));
+        tools.push(make_tool("seren_web_fetch", "Fetch a URL and return its content"));
+        tools.push(make_tool("execute_command", "Execute a shell command on the user machine"));
+
+        // Fill with 131 gateway tools so total exceeds MAX_TOOLS
+        for i in 0..65 { tools.push(make_tool(&format!("gateway__polymarket-data__action_{i}"), "Polymarket prediction market data")); }
+        for i in 0..66 { tools.push(make_tool(&format!("gateway__firecrawl-serenai__scrape_{i}"), "Web scraping and crawling")); }
+
+        assert!(tools.len() > 100);
+
+        // Query has no overlap with local tool keywords
+        let result = select_relevant_tools("scan polymarket prediction markets for mispriced bets", &tools);
+
+        // All 7 pinned tools must be present
+        for pinned_name in PINNED_TOOL_NAMES {
+            let found = result.iter().any(|t| {
+                t.pointer("/function/name").and_then(|v| v.as_str()) == Some(pinned_name)
+            });
+            assert!(found, "pinned tool '{}' must always be included, but was dropped", pinned_name);
+        }
+
+        assert!(result.len() <= MAX_TOOLS, "must respect MAX_TOOLS cap");
     }
 }
