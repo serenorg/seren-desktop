@@ -25,6 +25,17 @@ pub fn decompose(
     classification: &TaskClassification,
     skills: &[SkillRef],
 ) -> Vec<SubTask> {
+    // Skill invocations are always a single task — the SKILL.md body contains
+    // numbered lists and code keywords that would cause spurious decomposition.
+    if classification.task_type == "skill_execution" {
+        return vec![SubTask {
+            id: Uuid::new_v4().to_string(),
+            prompt: prompt.to_string(),
+            classification: classification.clone(),
+            depends_on: vec![],
+        }];
+    }
+
     // Try numbered list first
     if let Some(subtasks) = try_numbered_list(prompt, skills) {
         if subtasks.len() > 1 {
@@ -733,5 +744,29 @@ mod tests {
         assert_eq!(result.len(), 2);
         // Second task should depend on first (sequential, not parallel)
         assert_eq!(result[1].depends_on, vec![result[0].id.clone()]);
+    }
+
+    // =========================================================================
+    // Skill Invocation — No Decomposition
+    // =========================================================================
+
+    #[test]
+    fn skill_execution_never_decomposes() {
+        let classification = TaskClassification {
+            task_type: "skill_execution".to_string(),
+            requires_tools: true,
+            requires_file_system: false,
+            complexity: TaskComplexity::Simple,
+            relevant_skills: vec!["polymarket-bot".to_string()],
+        };
+        // Prompt has numbered list + code keywords — must still be 1 task
+        let prompt = r#"<skill-invocation name="polymarket-bot">
+1. Check prerequisites
+2. Run python3 scripts/agent.py
+3. Report results
+</skill-invocation>"#;
+        let result = decompose(prompt, &classification, &[]);
+        assert_eq!(result.len(), 1, "skill_execution must never be decomposed");
+        assert_eq!(result[0].classification.task_type, "skill_execution");
     }
 }
