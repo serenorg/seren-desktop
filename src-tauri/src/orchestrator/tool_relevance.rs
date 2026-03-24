@@ -13,13 +13,17 @@ const AVG_TOOL_WORDS: f32 = 60.0;
 const CHARS_PER_TOKEN: usize = 4;
 
 /// Token budget for selected tools sent to the model per request.
-const TOOL_TOKEN_BUDGET: usize = 4_000;
+/// At ~49 tokens/tool average, 12,000 supports ~245 tools.
+/// The frontend already caps at model-specific limits (Gemini 256, GPT 128).
+const TOOL_TOKEN_BUDGET: usize = 12_000;
 
 /// Minimum tools always included regardless of BM25 score.
 const MIN_TOOLS: usize = 5;
 
 /// Soft cap: never send more than this many tools even if budget allows.
-const MAX_TOOLS: usize = 40;
+/// Set high because the frontend already enforces per-model limits;
+/// the backend should not aggressively re-filter.
+const MAX_TOOLS: usize = 200;
 
 /// Hard byte budget as a final safety net against HTTP 413 responses from the
 /// Gateway. BM25 selection is the primary mechanism; this catches edge cases.
@@ -417,9 +421,9 @@ mod tests {
 
     #[test]
     fn respects_max_tools_cap() {
-        // 51 tools: 50 irrelevant + 1 relevant. Result must be <= MAX_TOOLS.
-        let mut tools: Vec<serde_json::Value> = (0..50)
-            .map(|i| make_tool(&format!("irrelevant_{i}"), "unrelated XYZ functionality"))
+        // 250 tools: exceeds MAX_TOOLS. Result must be <= MAX_TOOLS.
+        let mut tools: Vec<serde_json::Value> = (0..249)
+            .map(|i| make_tool(&format!("gateway__pub_{i}__action"), "some API functionality"))
             .collect();
         tools.push(make_tool("send_email", "Send email message to a recipient"));
 
