@@ -130,6 +130,71 @@ impl ChatModelWorker {
         }
     }
 
+    /// Build a tool publisher inventory from the actual tools being sent.
+    ///
+    /// Extracts publisher names from gateway/MCP tool naming conventions and
+    /// produces a system prompt section that tells the model exactly which
+    /// services it has access to. This prevents the model from denying access
+    /// to tools that are in its function definitions but not mentioned in the
+    /// Active Skills section.
+    fn build_tool_inventory(tools: &[serde_json::Value]) -> String {
+        let mut publisher_tools: HashMap<String, Vec<String>> = HashMap::new();
+        let mut local_tools: Vec<String> = Vec::new();
+
+        for tool in tools {
+            let name = match tool.pointer("/function/name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            if let Some(publisher) = tool_relevance::extract_mcp_publisher(name) {
+                publisher_tools
+                    .entry(publisher.to_string())
+                    .or_default()
+                    .push(name.to_string());
+            } else {
+                local_tools.push(name.to_string());
+            }
+        }
+
+        if publisher_tools.is_empty() && local_tools.is_empty() {
+            return String::new();
+        }
+
+        let mut lines = vec![
+            "# Available Tools".to_string(),
+            String::new(),
+            "You have access to ALL tools listed in your function definitions. \
+             Always check your available tools before saying you cannot perform an action."
+                .to_string(),
+            String::new(),
+        ];
+
+        if !publisher_tools.is_empty() {
+            lines.push("## Connected Services".to_string());
+            lines.push(String::new());
+
+            // Sort for deterministic output.
+            let mut publishers: Vec<_> = publisher_tools.iter().collect();
+            publishers.sort_by_key(|(name, _)| name.clone());
+
+            for (publisher, tools) in &publishers {
+                lines.push(format!("- **{}** ({} tools)", publisher, tools.len()));
+            }
+            lines.push(String::new());
+        }
+
+        if !local_tools.is_empty() {
+            lines.push(format!(
+                "## Local Tools\n\n{} core tools: {}",
+                local_tools.len(),
+                local_tools.join(", ")
+            ));
+            lines.push(String::new());
+        }
+
+        lines.join("\n")
+    }
+
     /// Build the request body for the Gateway API.
     fn build_request_body(
         &self,
@@ -142,12 +207,19 @@ impl ChatModelWorker {
     ) -> serde_json::Value {
         let mut messages: Vec<serde_json::Value> = Vec::new();
 
-        // System prompt with optional skill content
-        let system_content = if skill_content.is_empty() {
-            "You are a helpful AI assistant.".to_string()
-        } else {
-            format!("You are a helpful AI assistant.\n\n{}", skill_content)
-        };
+        // System prompt: base + tool inventory + skill content.
+        // The tool inventory ensures the model knows about ALL connected services,
+        // not just the skills matched by the classifier.
+        let tool_inventory = Self::build_tool_inventory(tools);
+        let mut system_parts = vec!["You are a helpful AI assistant.".to_string()];
+        if !tool_inventory.is_empty() {
+            system_parts.push(tool_inventory);
+        }
+        if !skill_content.is_empty() {
+            system_parts.push(skill_content.to_string());
+        }
+        let system_content = system_parts.join("\n\n");
+
         messages.push(serde_json::json!({
             "role": "system",
             "content": system_content
@@ -1797,5 +1869,103 @@ mod tests {
         let worker = ChatModelWorker::with_tools(tools.clone());
         assert_eq!(worker.tool_definitions.len(), 1);
         assert_eq!(worker.tool_definitions[0]["function"]["name"], "read_file");
+    }
+
+    fn make_tool(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": "A tool",
+                "parameters": {"type": "object", "properties": {}}
+            }
+        })
+    }
+
+    #[test]
+    fn tool_inventory_lists_all_publishers() {
+        let tools = vec![
+            make_tool("gateway__gmail__get_messages"),
+            make_tool("gateway__gmail__send_message"),
+            make_tool("gateway__google-calendar__list_events"),
+            make_tool("gateway__google-contacts__search"),
+            make_tool("gateway__firecrawl-serenai__scrape"),
+            make_tool("read_file"),
+            make_tool("write_file"),
+        ];
+        let inventory = ChatModelWorker::build_tool_inventory(&tools);
+
+        // All publishers must appear
+        assert!(inventory.contains("gmail"), "gmail missing from inventory");
+        assert!(inventory.contains("google-calendar"), "google-calendar missing");
+        assert!(inventory.contains("google-contacts"), "google-contacts missing");
+        assert!(inventory.contains("firecrawl-serenai"), "firecrawl missing");
+
+        // Tool counts must be correct
+        assert!(inventory.contains("gmail** (2 tools)"), "gmail should have 2 tools");
+        assert!(inventory.contains("google-calendar** (1 tools)"), "calendar should have 1 tool");
+
+        // Local tools listed
+        assert!(inventory.contains("read_file"));
+        assert!(inventory.contains("write_file"));
+
+        // Must contain the instruction
+        assert!(inventory.contains("Always check your available tools"));
+    }
+
+    #[test]
+    fn tool_inventory_injected_into_system_prompt() {
+        let worker = ChatModelWorker::new();
+        let routing = RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "anthropic/claude-sonnet-4".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "Chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+            reasoning_effort: None,
+        };
+        let tools = vec![
+            make_tool("gateway__gmail__get_messages"),
+            make_tool("gateway__google-calendar__list_events"),
+            make_tool("read_file"),
+        ];
+
+        let body = worker.build_request_body("Hello", &[], &routing, "", &tools, &[]);
+        let system_msg = body["messages"][0]["content"].as_str().unwrap();
+
+        assert!(system_msg.contains("gmail"), "system prompt must list gmail publisher");
+        assert!(
+            system_msg.contains("google-calendar"),
+            "system prompt must list google-calendar publisher"
+        );
+        assert!(
+            system_msg.contains("Always check your available tools"),
+            "system prompt must instruct model to check tools"
+        );
+    }
+
+    #[test]
+    fn tool_inventory_coexists_with_skill_content() {
+        let worker = ChatModelWorker::new();
+        let routing = RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "anthropic/claude-sonnet-4".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "Chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+            reasoning_effort: None,
+        };
+        let tools = vec![make_tool("gateway__gmail__send_message")];
+        let skill_content = "# Active Skills\n\n## Skill: Google Docs\n\nCreate documents.";
+
+        let body = worker.build_request_body("Hello", &[], &routing, skill_content, &tools, &[]);
+        let system_msg = body["messages"][0]["content"].as_str().unwrap();
+
+        // Both sections present
+        assert!(system_msg.contains("gmail"), "tool inventory must be present");
+        assert!(system_msg.contains("Active Skills"), "skill content must be present");
+        assert!(system_msg.contains("Google Docs"), "skill details must be present");
     }
 }

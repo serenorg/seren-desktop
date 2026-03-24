@@ -204,7 +204,7 @@ fn tool_text(tool: &serde_json::Value) -> String {
 /// Extract the publisher name from a tool name following the
 /// `mcp__<publisher>__<action>` or `gateway__<publisher>__<action>` convention.
 /// Returns None for tools that don't use either prefix.
-fn extract_mcp_publisher(tool_name: &str) -> Option<&str> {
+pub fn extract_mcp_publisher(tool_name: &str) -> Option<&str> {
     let rest = tool_name
         .strip_prefix("mcp__")
         .or_else(|| tool_name.strip_prefix("gateway__"))?;
