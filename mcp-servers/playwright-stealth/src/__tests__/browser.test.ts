@@ -6,6 +6,7 @@ import {
   createSafeStealthPlugin,
   detectDefaultBrowser,
   isChromiumBased,
+  launchBrowserWithFallback,
   listInstalledBrowsers,
   parseBrowserType,
   resolveBrowserName,
@@ -172,6 +173,113 @@ describe("createSafeStealthPlugin", () => {
     expect(plugin.enabledEvasions.has("chrome.runtime")).toBe(true);
     expect(plugin.enabledEvasions.has("navigator.webdriver")).toBe(true);
     expect(plugin.enabledEvasions.size).toBeGreaterThan(5);
+  });
+});
+
+describe("launchBrowserWithFallback", () => {
+  it("retries the next installed browser in preference order after a launch failure", async () => {
+    const launchedBrowser = { close: vi.fn() } as never;
+    const launchBrowser = vi
+      .fn<
+        (
+          browserName: string,
+          engine: string,
+          launchOptions: Record<string, unknown>,
+        ) => Promise<unknown>
+      >()
+      .mockRejectedValueOnce(new Error("chrome failed"))
+      .mockResolvedValueOnce(launchedBrowser);
+
+    const result = await launchBrowserWithFallback(
+      "chrome",
+      [
+        {
+          name: "chrome",
+          browserName: "chromium",
+          executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          isChromiumBased: true,
+          stealthSupported: true,
+        },
+        {
+          name: "moz-firefox",
+          browserName: "firefox",
+          executablePath: "/Applications/Firefox.app/Contents/MacOS/firefox",
+          isChromiumBased: false,
+          stealthSupported: false,
+        },
+      ],
+      launchBrowser as never,
+    );
+
+    expect(result).toEqual({
+      browser: launchedBrowser,
+      browserName: "moz-firefox",
+    });
+    expect(launchBrowser).toHaveBeenNthCalledWith(
+      1,
+      "chrome",
+      "chromium",
+      expect.objectContaining({
+        executablePath:
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      }),
+    );
+    expect(launchBrowser).toHaveBeenNthCalledWith(
+      2,
+      "moz-firefox",
+      "firefox",
+      expect.objectContaining({
+        executablePath: "/Applications/Firefox.app/Contents/MacOS/firefox",
+      }),
+    );
+  });
+
+  it("surfaces a combined error when every launch candidate fails", async () => {
+    const launchBrowser = vi
+      .fn<
+        (
+          browserName: string,
+          engine: string,
+          launchOptions: Record<string, unknown>,
+        ) => Promise<unknown>
+      >()
+      .mockRejectedValueOnce(new Error("chrome failed"))
+      .mockRejectedValueOnce(new Error("edge failed"))
+      .mockRejectedValueOnce(new Error("firefox failed"));
+
+    await expect(
+      launchBrowserWithFallback(
+        "chrome",
+        [
+          {
+            name: "chrome",
+            browserName: "chromium",
+            executablePath:
+              "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            isChromiumBased: true,
+            stealthSupported: true,
+          },
+          {
+            name: "msedge",
+            browserName: "chromium",
+            executablePath:
+              "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            isChromiumBased: true,
+            stealthSupported: true,
+          },
+          {
+            name: "moz-firefox",
+            browserName: "firefox",
+            executablePath: "/Applications/Firefox.app/Contents/MacOS/firefox",
+            isChromiumBased: false,
+            stealthSupported: false,
+          },
+        ],
+        launchBrowser as never,
+      ),
+    ).rejects.toThrow(
+      "Failed to launch any supported browser. Tried 3 candidate(s): chrome: chrome failed; msedge: edge failed; moz-firefox: firefox failed.",
+    );
   });
 });
 
