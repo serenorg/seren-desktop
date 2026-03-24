@@ -88,6 +88,32 @@ enum StreamOutcome {
     },
 }
 
+/// Extract unique publisher names from tool calls in recent conversation messages.
+/// Scans assistant messages for `tool_calls[].function.name` and extracts publisher
+/// names using the `mcp__<publisher>__` / `gateway__<publisher>__` convention.
+fn extract_recent_publishers(conversation_context: &[serde_json::Value]) -> Vec<String> {
+    let mut publishers = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for msg in conversation_context.iter().rev() {
+        if msg.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+            continue;
+        }
+        if let Some(tool_calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+            for tc in tool_calls {
+                if let Some(name) = tc.pointer("/function/name").and_then(|v| v.as_str()) {
+                    if let Some(publisher) = tool_relevance::extract_mcp_publisher(name) {
+                        if seen.insert(publisher.to_string()) {
+                            publishers.push(publisher.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    publishers
+}
+
 // =============================================================================
 // ChatModelWorker
 // =============================================================================
@@ -174,7 +200,7 @@ impl ChatModelWorker {
 
             // Sort for deterministic output.
             let mut publishers: Vec<_> = publisher_tools.iter().collect();
-            publishers.sort_by_key(|(name, _)| name.clone());
+            publishers.sort_by_key(|(name, _)| (*name).clone());
 
             for (publisher, tools) in &publishers {
                 lines.push(format!("- **{}** ({} tools)", publisher, tools.len()));
@@ -1068,9 +1094,19 @@ impl Worker for ChatModelWorker {
         // Reset cancellation flag
         *self.cancelled.lock().await = false;
 
+        // Extract publishers whose tools were called in recent conversation turns.
+        // This feeds Phase 3 (conversation-aware boosting) of tool relevance.
+        let recent_publishers = extract_recent_publishers(conversation_context);
+
         // Select tools relevant to this query via BM25 scoring.
-        // Falls back to the hard byte budget as a safety net against HTTP 413.
-        let budgeted_tools = tool_relevance::select_relevant_tools(prompt, &self.tool_definitions);
+        // Model-aware budgets (Phase 1), publisher-set scoping (Phase 2),
+        // and conversation-aware boosting (Phase 3).
+        let budgeted_tools = tool_relevance::select_relevant_tools(
+            prompt,
+            &self.tool_definitions,
+            &routing.model_id,
+            &recent_publishers,
+        );
 
         log::info!(
             "[ChatModelWorker] Executing with model: {}, tools: {}",
