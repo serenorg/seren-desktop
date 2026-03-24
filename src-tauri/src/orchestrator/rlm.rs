@@ -37,18 +37,17 @@ const REQUEST_TIMEOUT_SECS: u64 = 600;
 // =============================================================================
 
 fn model_context_limit_chars(model: &str) -> usize {
-    let tokens: usize = if model.contains("gemini-1.5")
-        || model.contains("gemini-2")
-        || model.contains("gemini-3")
-    {
-        1_000_000
-    } else if model.contains("claude") {
-        200_000
-    } else if model.contains("gpt-4") {
-        128_000
-    } else {
-        100_000
-    };
+    let tokens: usize =
+        if model.contains("gemini-1.5") || model.contains("gemini-2") || model.contains("gemini-3")
+        {
+            1_000_000
+        } else if model.contains("claude") {
+            200_000
+        } else if model.contains("gpt-4") {
+            128_000
+        } else {
+            100_000
+        };
     tokens * 4
 }
 
@@ -124,10 +123,12 @@ pub async fn process(
     let (content, question) = split_content_and_question(prompt);
 
     // 2. Classify the task
-    let strategy = classify_task(app, &question, model).await.unwrap_or_else(|e| {
-        log::warn!("[RLM] Classification failed ({e}), defaulting to sequential");
-        RlmStrategy::Sequential
-    });
+    let strategy = classify_task(app, &question, model)
+        .await
+        .unwrap_or_else(|e| {
+            log::warn!("[RLM] Classification failed ({e}), defaulting to sequential");
+            RlmStrategy::Sequential
+        });
     log::info!("[RLM] Strategy: {strategy:?}");
 
     // 3. Chunk the content
@@ -136,9 +137,7 @@ pub async fn process(
     log::info!("[RLM] Split into {chunk_count} chunks");
 
     // Emit RlmStart so the frontend can show the status indicator
-    let _ = event_tx
-        .send(WorkerEvent::RlmStart { chunk_count })
-        .await;
+    let _ = event_tx.send(WorkerEvent::RlmStart { chunk_count }).await;
 
     // 4. Process chunks
     let (final_answer, chunk_results) = match strategy {
@@ -672,7 +671,12 @@ mod tests {
         let prompt = "What is the capital of France?";
         let history: Vec<serde_json::Value> = vec![];
         let images: Vec<ImageAttachment> = vec![];
-        assert!(!needs_rlm(prompt, &history, &images, "anthropic/claude-sonnet-4"));
+        assert!(!needs_rlm(
+            prompt,
+            &history,
+            &images,
+            "anthropic/claude-sonnet-4"
+        ));
     }
 
     #[test]
@@ -681,7 +685,12 @@ mod tests {
         let prompt = "a".repeat(700_000);
         let history: Vec<serde_json::Value> = vec![];
         let images: Vec<ImageAttachment> = vec![];
-        assert!(needs_rlm(&prompt, &history, &images, "anthropic/claude-sonnet-4"));
+        assert!(needs_rlm(
+            &prompt,
+            &history,
+            &images,
+            "anthropic/claude-sonnet-4"
+        ));
     }
 
     #[test]

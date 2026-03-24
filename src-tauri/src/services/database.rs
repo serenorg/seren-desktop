@@ -25,7 +25,10 @@ impl DbPool {
     where
         F: FnOnce(&Connection) -> Result<T>,
     {
-        let conn = self.0.lock().map_err(|e| format!("DB mutex poisoned: {}", e))?;
+        let conn = self
+            .0
+            .lock()
+            .map_err(|e| format!("DB mutex poisoned: {}", e))?;
         f(&conn).map_err(|e| e.to_string())
     }
 }

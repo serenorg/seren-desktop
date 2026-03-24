@@ -102,6 +102,33 @@ pub async fn orchestrate(
         .unwrap_or("anthropic/claude-sonnet-4");
 
     if rlm::needs_rlm(&prompt, &history, &images, model_for_limit) {
+        // When the org forces private chat, RLM would route through a public model,
+        // violating the policy. Return a clear error rather than silently bypassing it.
+        if capabilities.force_private_chat {
+            log::warn!(
+                "[Orchestrator] force_private_chat is enabled but message exceeds context limit — rejecting"
+            );
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<WorkerEvent>(4);
+            let app_clone = app.clone();
+            let _ = event_tx
+                .send(WorkerEvent::Error {
+                    message: "This message is too large for your organization's private chat \
+                              deployment. Please shorten your message or start a new conversation."
+                        .to_string(),
+                })
+                .await;
+            drop(event_tx);
+            while let Some(event) = event_rx.recv().await {
+                let orch_event = OrchestratorEvent {
+                    conversation_id: conversation_id.clone(),
+                    worker_event: event,
+                    subtask_id: None,
+                };
+                let _ = app_clone.emit("orchestrator://event", &orch_event);
+            }
+            return Ok(());
+        }
+
         log::info!("[Orchestrator] Input exceeds context threshold — activating RLM");
 
         // Create an event channel and forward events to the frontend.
@@ -298,7 +325,7 @@ async fn execute_single_task(
 
         // Create channel and spawn worker
         let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
-        let worker = create_worker(&routing, app, &capabilities);
+        let worker = create_worker(&routing, app, &capabilities)?;
         let worker_for_cancel = Arc::clone(&worker);
         let worker_prompt = subtask.prompt.clone();
         let worker_routing = routing.clone();
@@ -862,7 +889,7 @@ async fn execute_multi_task(
                 .map_err(|e| format!("Failed to emit transition: {}", e))?;
 
             // Spawn worker
-            let worker = create_worker(&routing, app, capabilities);
+            let worker = create_worker(&routing, app, capabilities)?;
             let subtask_prompt = subtask.prompt.clone();
             let subtask_id = subtask.id.clone();
             let worker_routing = routing.clone();
@@ -1030,22 +1057,26 @@ fn create_worker(
     routing: &RoutingDecision,
     _app: &AppHandle,
     capabilities: &UserCapabilities,
-) -> Arc<dyn Worker> {
+) -> Result<Arc<dyn Worker>, String> {
     match routing.worker_type {
-        WorkerType::ChatModel => Arc::new(ChatModelWorker::with_tools(
+        WorkerType::ChatModel => Ok(Arc::new(ChatModelWorker::with_tools(
             capabilities.tool_definitions.clone(),
-        )),
-        WorkerType::CloudAgent => Arc::new(CloudAgentWorker::new(
-            capabilities
+        ))),
+        WorkerType::CloudAgent => {
+            let deployment_id = capabilities
                 .private_chat_deployment_id
                 .clone()
-                .unwrap_or_default(),
+                .unwrap_or_default();
+            let worker = CloudAgentWorker::new(deployment_id)?;
+            Ok(Arc::new(worker))
+        }
+        WorkerType::LocalAgent => Ok(Arc::new(
+            super::provider_worker::ProviderRuntimeWorker::new(
+                _app.clone(),
+                capabilities.active_agent_session_id.clone(),
+            ),
         )),
-        WorkerType::LocalAgent => Arc::new(super::provider_worker::ProviderRuntimeWorker::new(
-            _app.clone(),
-            capabilities.active_agent_session_id.clone(),
-        )),
-        WorkerType::McpPublisher => Arc::new(McpPublisherWorker::new()),
+        WorkerType::McpPublisher => Ok(Arc::new(McpPublisherWorker::new())),
     }
 }
 

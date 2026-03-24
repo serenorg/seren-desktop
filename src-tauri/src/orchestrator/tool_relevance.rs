@@ -173,7 +173,10 @@ fn tool_text(tool: &serde_json::Value) -> String {
             parts.push(&publisher_boost);
         }
     }
-    if let Some(desc) = tool.pointer("/function/description").and_then(|v| v.as_str()) {
+    if let Some(desc) = tool
+        .pointer("/function/description")
+        .and_then(|v| v.as_str())
+    {
         parts.push(desc);
     }
 
@@ -323,11 +326,18 @@ mod tests {
         })
     }
 
-    fn make_tool_with_params(name: &str, description: &str, params: &[(&str, &str)]) -> serde_json::Value {
+    fn make_tool_with_params(
+        name: &str,
+        description: &str,
+        params: &[(&str, &str)],
+    ) -> serde_json::Value {
         let props: serde_json::Map<String, serde_json::Value> = params
             .iter()
             .map(|(k, desc)| {
-                (k.to_string(), json!({ "type": "string", "description": desc }))
+                (
+                    k.to_string(),
+                    json!({ "type": "string", "description": desc }),
+                )
             })
             .collect();
         json!({
@@ -346,7 +356,11 @@ mod tests {
             .map(|i| make_tool(&format!("tool_{i}"), "short desc"))
             .collect();
         let result = select_relevant_tools("any query", &tools);
-        assert_eq!(result.len(), tools.len(), "small set should pass through unchanged");
+        assert_eq!(
+            result.len(),
+            tools.len(),
+            "small set should pass through unchanged"
+        );
     }
 
     #[test]
@@ -361,7 +375,10 @@ mod tests {
             .map(|i| make_tool(&format!("tool_{i}"), "some description"))
             .collect();
         let result = select_relevant_tools("", &tools);
-        assert!(!result.is_empty(), "should still return tools on empty query");
+        assert!(
+            !result.is_empty(),
+            "should still return tools on empty query"
+        );
     }
 
     #[test]
@@ -403,7 +420,10 @@ mod tests {
             make_tool_with_params(
                 "generic_action",
                 "Perform an action",
-                &[("email", "recipient email address"), ("subject", "email subject line")],
+                &[
+                    ("email", "recipient email address"),
+                    ("subject", "email subject line"),
+                ],
             ),
             make_tool("file_read", "Read file contents from disk"),
         ];
@@ -423,7 +443,12 @@ mod tests {
     fn respects_max_tools_cap() {
         // 250 tools: exceeds MAX_TOOLS. Result must be <= MAX_TOOLS.
         let mut tools: Vec<serde_json::Value> = (0..249)
-            .map(|i| make_tool(&format!("gateway__pub_{i}__action"), "some API functionality"))
+            .map(|i| {
+                make_tool(
+                    &format!("gateway__pub_{i}__action"),
+                    "some API functionality",
+                )
+            })
             .collect();
         tools.push(make_tool("send_email", "Send email message to a recipient"));
 
@@ -448,19 +473,31 @@ mod tests {
     #[test]
     fn selects_relevant_tool_over_budget_noise() {
         let mut tools: Vec<serde_json::Value> = (0..200)
-            .map(|i| make_tool(&format!("unrelated_{i}"), &format!("does something unrelated {i}")))
+            .map(|i| {
+                make_tool(
+                    &format!("unrelated_{i}"),
+                    &format!("does something unrelated {i}"),
+                )
+            })
             .collect();
-        tools.push(make_tool("read_file", "read a file from the filesystem path"));
+        tools.push(make_tool(
+            "read_file",
+            "read a file from the filesystem path",
+        ));
 
         let result = select_relevant_tools("read file from filesystem", &tools);
 
-        let has_read_file = result.iter().any(|t| {
-            t.pointer("/function/name")
-                .and_then(|v| v.as_str())
-                == Some("read_file")
-        });
-        assert!(has_read_file, "read_file should be selected for a file-reading query");
-        assert!(result.len() < tools.len(), "should filter tools when over budget");
+        let has_read_file = result
+            .iter()
+            .any(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some("read_file"));
+        assert!(
+            has_read_file,
+            "read_file should be selected for a file-reading query"
+        );
+        assert!(
+            result.len() < tools.len(),
+            "should filter tools when over budget"
+        );
     }
 
     #[test]
@@ -473,10 +510,22 @@ mod tests {
         // All 3 are tiny — fast path returns them as-is.
         let result = select_relevant_tools("gamma functionality", &tools);
         for window in result.windows(2) {
-            let a_name = window[0].pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("");
-            let b_name = window[1].pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("");
-            let a_pos = tools.iter().position(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some(a_name)).unwrap();
-            let b_pos = tools.iter().position(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some(b_name)).unwrap();
+            let a_name = window[0]
+                .pointer("/function/name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let b_name = window[1]
+                .pointer("/function/name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let a_pos = tools
+                .iter()
+                .position(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some(a_name))
+                .unwrap();
+            let b_pos = tools
+                .iter()
+                .position(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some(b_name))
+                .unwrap();
             assert!(a_pos < b_pos, "original ordering must be preserved");
         }
     }
@@ -504,10 +553,22 @@ mod tests {
 
     #[test]
     fn extract_mcp_publisher_parses_both_prefixes() {
-        assert_eq!(extract_mcp_publisher("mcp__google__get_messages"), Some("google"));
-        assert_eq!(extract_mcp_publisher("mcp__slack__post_message"), Some("slack"));
-        assert_eq!(extract_mcp_publisher("gateway__gmail__get_messages"), Some("gmail"));
-        assert_eq!(extract_mcp_publisher("gateway__firecrawl-serenai__scrape"), Some("firecrawl-serenai"));
+        assert_eq!(
+            extract_mcp_publisher("mcp__google__get_messages"),
+            Some("google")
+        );
+        assert_eq!(
+            extract_mcp_publisher("mcp__slack__post_message"),
+            Some("slack")
+        );
+        assert_eq!(
+            extract_mcp_publisher("gateway__gmail__get_messages"),
+            Some("gmail")
+        );
+        assert_eq!(
+            extract_mcp_publisher("gateway__firecrawl-serenai__scrape"),
+            Some("firecrawl-serenai")
+        );
         assert_eq!(extract_mcp_publisher("execute_bash"), None);
         assert_eq!(extract_mcp_publisher("mcp__"), None);
         assert_eq!(extract_mcp_publisher("gateway__"), None);
@@ -519,12 +580,22 @@ mod tests {
         let mut tools: Vec<serde_json::Value> = Vec::new();
 
         let gmail_names = [
-            "get_health", "get_messages", "get_messages_by_message_id",
-            "post_messages_send", "delete_messages_by_message_id",
-            "post_messages_by_message_id_trash", "post_messages_by_message_id_modify",
-            "get_labels", "get_labels_by_label_id", "post_labels",
-            "delete_labels_by_label_id", "get_threads", "get_threads_by_thread_id",
-            "post_threads_by_thread_id_trash", "get_drafts", "post_drafts",
+            "get_health",
+            "get_messages",
+            "get_messages_by_message_id",
+            "post_messages_send",
+            "delete_messages_by_message_id",
+            "post_messages_by_message_id_trash",
+            "post_messages_by_message_id_modify",
+            "get_labels",
+            "get_labels_by_label_id",
+            "post_labels",
+            "delete_labels_by_label_id",
+            "get_threads",
+            "get_threads_by_thread_id",
+            "post_threads_by_thread_id_trash",
+            "get_drafts",
+            "post_drafts",
             "post_drafts_by_draft_id_send",
         ];
         for name in &gmail_names {
@@ -535,21 +606,39 @@ mod tests {
         }
 
         // Fill with other publisher tools to exceed MAX_TOOLS
-        for i in 0..50 { tools.push(make_tool(&format!("gateway__firecrawl-serenai__action_{i}"), "Web scraping")); }
-        for i in 0..50 { tools.push(make_tool(&format!("gateway__perplexity-serenai__search_{i}"), "AI search")); }
+        for i in 0..50 {
+            tools.push(make_tool(
+                &format!("gateway__firecrawl-serenai__action_{i}"),
+                "Web scraping",
+            ));
+        }
+        for i in 0..50 {
+            tools.push(make_tool(
+                &format!("gateway__perplexity-serenai__search_{i}"),
+                "AI search",
+            ));
+        }
         tools.push(make_tool("file_read", "Read file contents from disk"));
         tools.push(make_tool("execute_bash", "Run a shell command"));
 
         assert!(tools.len() > 100);
 
         let result = select_relevant_tools("Do you have access to my gmail?", &tools);
-        let gmail_count = result.iter().filter(|t| {
-            t.pointer("/function/name").and_then(|v| v.as_str())
-                .map(|n| n.starts_with("gateway__gmail__"))
-                .unwrap_or(false)
-        }).count();
+        let gmail_count = result
+            .iter()
+            .filter(|t| {
+                t.pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .map(|n| n.starts_with("gateway__gmail__"))
+                    .unwrap_or(false)
+            })
+            .count();
 
-        assert!(gmail_count >= 5, "Expected >=5 Gmail tools, got {gmail_count} of {} selected", result.len());
+        assert!(
+            gmail_count >= 5,
+            "Expected >=5 Gmail tools, got {gmail_count} of {} selected",
+            result.len()
+        );
     }
 
     #[test]
@@ -560,8 +649,14 @@ mod tests {
         let mcp_text = tool_text(&mcp_tool);
         let gateway_text = tool_text(&gateway_tool);
 
-        assert!(mcp_text.matches("slack").count() >= 3, "mcp__ publisher should be boosted");
-        assert!(gateway_text.matches("gmail").count() >= 3, "gateway__ publisher should be boosted");
+        assert!(
+            mcp_text.matches("slack").count() >= 3,
+            "mcp__ publisher should be boosted"
+        );
+        assert!(
+            gateway_text.matches("gmail").count() >= 3,
+            "gateway__ publisher should be boosted"
+        );
     }
 
     #[test]
@@ -571,29 +666,58 @@ mod tests {
         let mut tools: Vec<serde_json::Value> = Vec::new();
 
         // Add all 7 pinned local tools
-        tools.push(make_tool("read_file", "Read file contents from the filesystem"));
+        tools.push(make_tool(
+            "read_file",
+            "Read file contents from the filesystem",
+        ));
         tools.push(make_tool("write_file", "Write content to a file on disk"));
         tools.push(make_tool("list_directory", "List entries in a directory"));
-        tools.push(make_tool("path_exists", "Check whether a filesystem path exists"));
+        tools.push(make_tool(
+            "path_exists",
+            "Check whether a filesystem path exists",
+        ));
         tools.push(make_tool("create_directory", "Create a new directory"));
-        tools.push(make_tool("seren_web_fetch", "Fetch a URL and return its content"));
-        tools.push(make_tool("execute_command", "Execute a shell command on the user machine"));
+        tools.push(make_tool(
+            "seren_web_fetch",
+            "Fetch a URL and return its content",
+        ));
+        tools.push(make_tool(
+            "execute_command",
+            "Execute a shell command on the user machine",
+        ));
 
         // Fill with 131 gateway tools so total exceeds MAX_TOOLS
-        for i in 0..65 { tools.push(make_tool(&format!("gateway__polymarket-data__action_{i}"), "Polymarket prediction market data")); }
-        for i in 0..66 { tools.push(make_tool(&format!("gateway__firecrawl-serenai__scrape_{i}"), "Web scraping and crawling")); }
+        for i in 0..65 {
+            tools.push(make_tool(
+                &format!("gateway__polymarket-data__action_{i}"),
+                "Polymarket prediction market data",
+            ));
+        }
+        for i in 0..66 {
+            tools.push(make_tool(
+                &format!("gateway__firecrawl-serenai__scrape_{i}"),
+                "Web scraping and crawling",
+            ));
+        }
 
         assert!(tools.len() > 100);
 
         // Query has no overlap with local tool keywords
-        let result = select_relevant_tools("scan polymarket prediction markets for mispriced bets", &tools);
+        let result = select_relevant_tools(
+            "scan polymarket prediction markets for mispriced bets",
+            &tools,
+        );
 
         // All 7 pinned tools must be present
         for pinned_name in PINNED_TOOL_NAMES {
-            let found = result.iter().any(|t| {
-                t.pointer("/function/name").and_then(|v| v.as_str()) == Some(pinned_name)
-            });
-            assert!(found, "pinned tool '{}' must always be included, but was dropped", pinned_name);
+            let found = result
+                .iter()
+                .any(|t| t.pointer("/function/name").and_then(|v| v.as_str()) == Some(pinned_name));
+            assert!(
+                found,
+                "pinned tool '{}' must always be included, but was dropped",
+                pinned_name
+            );
         }
 
         assert!(result.len() <= MAX_TOOLS, "must respect MAX_TOOLS cap");

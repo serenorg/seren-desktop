@@ -17,6 +17,10 @@ use super::worker::Worker;
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const CONNECT_TIMEOUT_SECS: u64 = 30;
+/// Maximum time to wait for any chunk of data from the stream before giving up.
+/// Cloud agent runs are expected to complete within 10 minutes; this gives headroom
+/// while still bounding hangs from dead connections.
+const READ_TIMEOUT_SECS: u64 = 600;
 const RUN_STREAM_ACCEPT: &str = "text/event-stream";
 
 #[derive(Debug, Deserialize)]
@@ -116,16 +120,17 @@ pub struct CloudAgentWorker {
 }
 
 impl CloudAgentWorker {
-    pub fn new(deployment_id: impl Into<String>) -> Self {
+    pub fn new(deployment_id: impl Into<String>) -> Result<Self, String> {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .timeout(Duration::from_secs(READ_TIMEOUT_SECS))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        Self {
+            .map_err(|error| format!("Failed to build HTTP client: {}", error))?;
+        Ok(Self {
             client,
             deployment_id: deployment_id.into(),
             cancelled: Arc::new(Mutex::new(false)),
-        }
+        })
     }
 
     async fn send_event(

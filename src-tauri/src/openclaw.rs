@@ -320,7 +320,11 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
     // Add embedded runtime to PATH
     let embedded_path = crate::embedded_runtime::get_embedded_path();
     if !embedded_path.is_empty() {
-        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
         let system_path = std::env::var("PATH").unwrap_or_default();
         let combined = if system_path.is_empty() {
             embedded_path.to_string()
@@ -719,7 +723,10 @@ fn handle_ws_message(app: &AppHandle, text: &str) {
         }
         "message:received" => {
             if let Err(err) = app.emit(events::MESSAGE_RECEIVED, &msg) {
-                log::warn!("[OpenClaw WS] Failed to emit message received event: {}", err);
+                log::warn!(
+                    "[OpenClaw WS] Failed to emit message received event: {}",
+                    err
+                );
             }
         }
         _ => {
@@ -795,7 +802,11 @@ async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
         .stderr(std::process::Stdio::piped());
 
     if !embedded_path.is_empty() {
-        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
         let system_path = std::env::var("PATH").unwrap_or_default();
         let combined = if system_path.is_empty() {
             embedded_path.to_string()
@@ -1233,7 +1244,10 @@ fn launch_channel_login(platform: &str) -> Result<(), String> {
     // Build the command with embedded PATH so `node` is found
     let embedded_path = crate::embedded_runtime::get_embedded_path();
     let shell_cmd = if embedded_path.is_empty() {
-        format!("node '{}' channels login --channel {}", openclaw_path, platform)
+        format!(
+            "node '{}' channels login --channel {}",
+            openclaw_path, platform
+        )
     } else {
         format!(
             "export PATH='{}'; node '{}' channels login --channel {}",
@@ -1273,10 +1287,7 @@ end tell"#,
             Ok(())
         }
         Err(e) => {
-            log::warn!(
-                "[OpenClaw] Failed to launch channel login terminal: {}",
-                e
-            );
+            log::warn!("[OpenClaw] Failed to launch channel login terminal: {}", e);
             Err(format!("Failed to open terminal: {}", e))
         }
     }
@@ -1353,7 +1364,11 @@ pub async fn openclaw_disconnect_channel(
         .stderr(std::process::Stdio::piped());
 
     if !embedded_path.is_empty() {
-        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
         let system_path = std::env::var("PATH").unwrap_or_default();
         let combined = if system_path.is_empty() {
             embedded_path.to_string()

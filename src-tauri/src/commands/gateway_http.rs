@@ -92,7 +92,10 @@ fn build_header_map(raw_headers: &HashMap<String, String>) -> Result<HeaderMap, 
 
     for (name, value) in raw_headers {
         let lower = name.to_ascii_lowercase();
-        if matches!(lower.as_str(), "host" | "origin" | "content-length" | "connection") {
+        if matches!(
+            lower.as_str(),
+            "host" | "origin" | "content-length" | "connection"
+        ) {
             continue;
         }
 
@@ -180,7 +183,14 @@ pub async fn gateway_http_start(
 
     let response = if should_use_stored_auth(&url, &headers) {
         crate::auth::authenticated_request(&app, &client, |client, token| {
-            build_request(client, &method, &url, &headers, body.as_deref(), Some(token))
+            build_request(
+                client,
+                &method,
+                &url,
+                &headers,
+                body.as_deref(),
+                Some(token),
+            )
         })
         .await?
     } else {
@@ -202,7 +212,11 @@ pub async fn gateway_http_start(
 
     let request_id = request.request_id;
     let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
-    state.active.lock().await.insert(request_id.clone(), cancel_tx);
+    state
+        .active
+        .lock()
+        .await
+        .insert(request_id.clone(), cancel_tx);
 
     let app_for_stream = app.clone();
     let app_for_cleanup = app.clone();
