@@ -269,8 +269,15 @@ export async function getBrowser(): Promise<Browser> {
       ];
     }
 
-    // Channel browsers (chrome, msedge, etc.) need the channel option
-    if (activeBrowserName !== engine) {
+    // Use executablePath from the registry instead of channel.
+    // channel requires Playwright's internal browser plugin binaries;
+    // executablePath launches the system binary directly — no plugins needed.
+    const installed = listInstalledBrowsers();
+    const match = installed.find((b) => b.name === activeBrowserName);
+    if (match) {
+      launchOptions.executablePath = match.executablePath;
+    } else if (activeBrowserName !== engine) {
+      // Fallback to channel if somehow the browser isn't in the registry
       launchOptions.channel = activeBrowserName;
     }
 
@@ -278,11 +285,10 @@ export async function getBrowser(): Promise<Browser> {
       browser = await launcher.launch(launchOptions);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      const isChannel = activeBrowserName !== engine;
-      const hint = isChannel
-        ? `Ensure ${activeBrowserName} is installed on this system.`
-        : `Run 'npx playwright install ${activeBrowserName}' to install it.`;
-      throw new Error(`Failed to launch ${activeBrowserName}: ${msg}. ${hint}`);
+      throw new Error(
+        `Failed to launch ${activeBrowserName}: ${msg}. ` +
+          `Ensure ${activeBrowserName} is installed on this system.`,
+      );
     }
   }
   return browser;
