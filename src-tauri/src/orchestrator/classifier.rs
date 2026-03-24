@@ -226,6 +226,21 @@ pub fn classify(prompt: &str, skills: &[SkillRef]) -> TaskClassification {
 
     let relevant_skills = select_relevant_skills(prompt, skills);
 
+    // Rule 0: Skill invocation — the frontend wraps invoked skills in
+    // <skill-invocation> tags with the full SKILL.md content inlined.
+    // This MUST be checked before any keyword rules because the SKILL.md
+    // body contains code keywords, numbered lists, and other patterns
+    // that would cause misclassification and unwanted decomposition.
+    if prompt.contains("<skill-invocation") {
+        return TaskClassification {
+            task_type: "skill_execution".to_string(),
+            requires_tools: true,
+            requires_file_system: false,
+            complexity: TaskComplexity::Simple,
+            relevant_skills,
+        };
+    }
+
     // Rule 1: Code generation
     if contains_code_fence(prompt)
         || CODE_KEYWORDS
@@ -598,6 +613,39 @@ mod tests {
     fn latest_does_not_match_in_code_context() {
         // Code keywords take priority over research keywords
         let result = classify("Get the latest version of the function from git", &[]);
+        assert_eq!(result.task_type, "code_generation");
+    }
+
+    // =========================================================================
+    // Skill Invocation Classification
+    // =========================================================================
+
+    #[test]
+    fn skill_invocation_overrides_code_keywords() {
+        // The SKILL.md body contains "python", "script", code fences, etc.
+        // Skill invocation must win over code_generation.
+        let prompt = r#"<skill-invocation name="polymarket-bot">
+The user has invoked the /polymarket-bot skill. Execute it by following the skill instructions below.
+
+## Scanning for Opportunities
+```bash
+cd ~/.config/seren/skills/polymarket-bot && python3 scripts/agent.py --config config.json --dry-run
+```
+
+1. Check prerequisites
+2. Run the scan
+3. Report results
+</skill-invocation>"#;
+        let result = classify(prompt, &[]);
+        assert_eq!(result.task_type, "skill_execution");
+        assert_eq!(result.complexity, TaskComplexity::Simple);
+        assert!(result.requires_tools);
+        assert!(!result.requires_file_system);
+    }
+
+    #[test]
+    fn non_skill_prompt_with_code_keywords_still_classifies_as_code() {
+        let result = classify("Write a python function to sort a list", &[]);
         assert_eq!(result.task_type, "code_generation");
     }
 }
