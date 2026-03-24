@@ -103,6 +103,9 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
       if (currentKey === "alwaysAllow") {
         metadata.alwaysAllow = [...(metadata.alwaysAllow ?? []), value];
       }
+      if (currentKey === "includes") {
+        metadata.includes = [...(metadata.includes ?? []), value];
+      }
       continue;
     }
 
@@ -120,6 +123,7 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
         if (key === "requires") metadata.requires = [];
         if (key === "globs") metadata.globs = [];
         if (key === "alwaysAllow") metadata.alwaysAllow = [];
+        if (key === "includes") metadata.includes = [];
         continue;
       }
 
@@ -137,6 +141,7 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
         if (key === "requires") metadata.requires = items;
         if (key === "globs") metadata.globs = items;
         if (key === "alwaysAllow") metadata.alwaysAllow = items;
+        if (key === "includes") metadata.includes = items;
         continue;
       }
 
