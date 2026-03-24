@@ -203,6 +203,86 @@ function getLauncher(
   return chromium as BrowserType & { use(plugin: unknown): void };
 }
 
+function getLaunchCandidateNames(
+  preferredName: string,
+  installed: InstalledBrowser[],
+): string[] {
+  const installedNames = new Set(installed.map((b) => b.name));
+  const candidates = [preferredName];
+
+  for (const name of SYSTEM_BROWSER_PREFERENCE) {
+    if (name === preferredName) continue;
+    if (installedNames.has(name)) candidates.push(name);
+  }
+
+  for (const browser of installed) {
+    if (!candidates.includes(browser.name)) candidates.push(browser.name);
+  }
+
+  return candidates;
+}
+
+function buildLaunchOptions(
+  browserName: string,
+  engine: BrowserEngine,
+  installed: InstalledBrowser[],
+): Record<string, unknown> {
+  const launchOptions: Record<string, unknown> = {
+    headless: true,
+  };
+
+  if (isChromiumBased(engine)) {
+    launchOptions.args = [
+      "--disable-blink-features=AutomationControlled",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+    ];
+  }
+
+  const match = installed.find((b) => b.name === browserName);
+  if (match) {
+    launchOptions.executablePath = match.executablePath;
+  } else if (browserName !== engine) {
+    launchOptions.channel = browserName;
+  }
+
+  return launchOptions;
+}
+
+export async function launchBrowserWithFallback(
+  preferredName: string,
+  installed: InstalledBrowser[],
+  launchBrowser: (
+    browserName: string,
+    engine: BrowserEngine,
+    launchOptions: Record<string, unknown>,
+  ) => Promise<Browser>,
+): Promise<{ browser: Browser; browserName: string }> {
+  const candidates = getLaunchCandidateNames(preferredName, installed);
+  const failures: string[] = [];
+
+  for (const browserName of candidates) {
+    const engine = resolveBrowserName(browserName);
+    const launchOptions = buildLaunchOptions(browserName, engine, installed);
+
+    try {
+      const launchedBrowser = await launchBrowser(
+        browserName,
+        engine,
+        launchOptions,
+      );
+      return { browser: launchedBrowser, browserName };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      failures.push(`${browserName}: ${msg}`);
+    }
+  }
+
+  throw new Error(
+    `Failed to launch any supported browser. Tried ${failures.length} candidate(s): ${failures.join("; ")}.`,
+  );
+}
+
 // ── State ──────────────────────────────────────────────────────────────────────
 
 let activeBrowserName: string = parseBrowserType(process.env.BROWSER_TYPE);
@@ -262,47 +342,30 @@ export function createSafeStealthPlugin(): ReturnType<typeof StealthPlugin> {
 
 export async function getBrowser(): Promise<Browser> {
   if (!browser) {
-    const engine = resolveBrowserName(activeBrowserName);
-    const launcher = getLauncher(engine);
-
-    if (isChromiumBased(engine) && !stealthApplied) {
-      (chromium as BrowserType & { use(plugin: unknown): void }).use(
-        createSafeStealthPlugin(),
-      );
-      stealthApplied = true;
-    }
-
-    const launchOptions: Record<string, unknown> = {
-      headless: true,
-    };
-
-    if (isChromiumBased(engine)) {
-      launchOptions.args = [
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-      ];
-    }
-
-    // Use executablePath from the registry instead of channel.
-    // channel requires Playwright's internal browser plugin binaries;
-    // executablePath launches the system binary directly — no plugins needed.
     const installed = listInstalledBrowsers();
-    const match = installed.find((b) => b.name === activeBrowserName);
-    if (match) {
-      launchOptions.executablePath = match.executablePath;
-    } else if (activeBrowserName !== engine) {
-      // Fallback to channel if somehow the browser isn't in the registry
-      launchOptions.channel = activeBrowserName;
-    }
 
     try {
-      browser = await launcher.launch(launchOptions);
+      const launched = await launchBrowserWithFallback(
+        activeBrowserName,
+        installed,
+        async (browserName, engine, launchOptions) => {
+          if (isChromiumBased(engine) && !stealthApplied) {
+            (chromium as BrowserType & { use(plugin: unknown): void }).use(
+              createSafeStealthPlugin(),
+            );
+            stealthApplied = true;
+          }
+
+          const launcher = getLauncher(engine);
+          return launcher.launch(launchOptions);
+        },
+      );
+      browser = launched.browser;
+      activeBrowserName = launched.browserName;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `Failed to launch ${activeBrowserName}: ${msg}. ` +
-          `Ensure ${activeBrowserName} is installed on this system.`,
+        `${msg} Ensure at least one supported system browser is installed and launchable.`,
       );
     }
   }
