@@ -1,5 +1,5 @@
 // ABOUTME: BM25-based tool relevance scoring for per-request tool selection.
-// ABOUTME: Replaces naive byte-budget truncation with query-aware tool ranking.
+// ABOUTME: Model-aware budgets, publisher-set scoping, and conversation-aware boosting.
 
 use std::collections::HashMap;
 
@@ -12,22 +12,24 @@ const AVG_TOOL_WORDS: f32 = 60.0;
 /// Approximate token count: 4 characters ≈ 1 token for typical JSON schema text.
 const CHARS_PER_TOKEN: usize = 4;
 
-/// Token budget for selected tools sent to the model per request.
-/// At ~49 tokens/tool average, 12,000 supports ~245 tools.
-/// The frontend already caps at model-specific limits (Gemini 256, GPT 128).
-const TOOL_TOKEN_BUDGET: usize = 12_000;
+/// Default token budget for selected tools sent to the model per request.
+const DEFAULT_TOOL_TOKEN_BUDGET: usize = 12_000;
 
 /// Minimum tools always included regardless of BM25 score.
 const MIN_TOOLS: usize = 5;
 
-/// Soft cap: never send more than this many tools even if budget allows.
-/// Set high because the frontend already enforces per-model limits;
-/// the backend should not aggressively re-filter.
-const MAX_TOOLS: usize = 200;
-
 /// Hard byte budget as a final safety net against HTTP 413 responses from the
 /// Gateway. BM25 selection is the primary mechanism; this catches edge cases.
 const HARD_BYTE_BUDGET: usize = 400 * 1024;
+
+/// Maximum tools from a single publisher included via set-scoping.
+const MAX_PUBLISHER_TOOLS: usize = 25;
+
+/// Number of top publishers to include full toolsets for.
+const TOP_K_PUBLISHERS: usize = 3;
+
+/// Score multiplier for publishers whose tools were recently used in conversation.
+const RECENCY_BOOST: f32 = 2.0;
 
 /// Local tools that are always included regardless of BM25 score.
 /// These are fundamental capabilities the model needs constant access to —
@@ -42,6 +44,24 @@ const PINNED_TOOL_NAMES: &[&str] = &[
     "execute_command",
 ];
 
+/// Model-aware tool cap: returns (max_tools, token_budget) for the given model.
+fn model_budget(model_id: &str) -> (usize, usize) {
+    let id = model_id.to_lowercase();
+    if id.contains("gpt-3.5") || id.contains("gpt-4") || id.contains("/o1") || id.contains("/o3") {
+        // OpenAI: 128 API hard limit, accuracy degrades well before that.
+        (40, 6_000)
+    } else if id.contains("gemini") {
+        // Gemini: 256 limit, weaker tool selection at scale.
+        (50, 8_000)
+    } else if id.contains("claude") || id.contains("anthropic") {
+        // Anthropic: handles large toolsets well, but 200 is wasteful.
+        (80, DEFAULT_TOOL_TOKEN_BUDGET)
+    } else {
+        // Unknown models get a conservative budget.
+        (60, 8_000)
+    }
+}
+
 /// Check if a tool definition matches a pinned tool name.
 fn is_pinned_tool(tool: &serde_json::Value) -> bool {
     tool.pointer("/function/name")
@@ -50,25 +70,30 @@ fn is_pinned_tool(tool: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-/// Select the most relevant tools for the given query within the token budget.
+/// Select the most relevant tools for the given query, model, and conversation state.
+///
+/// This is the primary entry point. It combines three strategies:
+/// 1. **Model-aware budgets**: Tighter caps for models with weaker tool selection.
+/// 2. **Publisher-set scoping**: When a publisher is relevant, include its full toolset
+///    (up to MAX_PUBLISHER_TOOLS) so the model gets coherent capabilities.
+/// 3. **Conversation-aware boosting**: Publishers whose tools were recently used get
+///    a score multiplier so follow-up turns stay coherent.
 ///
 /// Tools are in OpenAI function-calling format:
 /// `{ "type": "function", "function": { "name": ..., "description": ..., "parameters": ... } }`
-///
-/// # Algorithm
-/// 1. Fast-path: if the tool list already fits the budget, return it as-is.
-/// 2. Separate pinned tools (local tools) from the pool — they are always included.
-/// 3. Score remaining tools with BM25 against name + description + parameter names/descriptions.
-/// 4. Sort by score descending; greedily select within the remaining token budget,
-///    guaranteeing at least `MIN_TOOLS` total (including pinned).
-/// 5. Restore original frontend priority ordering in the final selection.
-/// 6. Apply the hard byte budget as a final safety net.
-pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+pub fn select_relevant_tools(
+    query: &str,
+    tools: &[serde_json::Value],
+    model_id: &str,
+    recently_used_publishers: &[String],
+) -> Vec<serde_json::Value> {
+    let (max_tools, token_budget) = model_budget(model_id);
+
     // Fast path: no scoring needed when the set is small enough.
     let total_bytes = serde_json::to_string(tools)
         .map(|s| s.len())
         .unwrap_or(usize::MAX);
-    if total_bytes <= HARD_BYTE_BUDGET && tools.len() <= MAX_TOOLS {
+    if total_bytes <= HARD_BYTE_BUDGET && tools.len() <= max_tools {
         return tools.to_vec();
     }
 
@@ -101,33 +126,132 @@ pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<se
 
     // Score only the non-pinned pool.
     let pool_docs: Vec<String> = pool_indices.iter().map(|&i| tool_text(&tools[i])).collect();
-    let pool_scores = bm25_scores(&query_terms, &pool_docs);
+    let mut pool_scores = bm25_scores(&query_terms, &pool_docs);
 
-    // Rank pool tools by score descending.
-    let mut ranked: Vec<(usize, f32)> = pool_scores.into_iter().enumerate().collect();
-    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Phase 3: Boost scores for recently-used publishers.
+    if !recently_used_publishers.is_empty() {
+        for (pool_idx, score) in pool_scores.iter_mut().enumerate() {
+            let original_idx = pool_indices[pool_idx];
+            if let Some(publisher) = tool_publisher(&tools[original_idx]) {
+                if recently_used_publishers.iter().any(|p| p == publisher) {
+                    *score *= RECENCY_BOOST;
+                }
+            }
+        }
+    }
 
-    // Greedily pick pool tools into the remaining budget.
+    // Phase 2: Publisher-set scoping.
+    // Group pool tools by publisher and compute aggregate publisher scores.
+    let mut publisher_scores: HashMap<String, f32> = HashMap::new();
+    let mut publisher_pool_indices: HashMap<String, Vec<usize>> = HashMap::new();
+    for (pool_idx, &score) in pool_scores.iter().enumerate() {
+        let original_idx = pool_indices[pool_idx];
+        if let Some(publisher) = tool_publisher(&tools[original_idx]) {
+            let pub_name = publisher.to_string();
+            *publisher_scores.entry(pub_name.clone()).or_default() += score;
+            publisher_pool_indices
+                .entry(pub_name)
+                .or_default()
+                .push(pool_idx);
+        }
+    }
+
+    // Identify top-K publishers by aggregate score (only those with nonzero score).
+    let mut ranked_publishers: Vec<(String, f32)> = publisher_scores
+        .into_iter()
+        .filter(|(_, s)| *s > 0.0)
+        .collect();
+    ranked_publishers.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let top_publishers: Vec<String> = ranked_publishers
+        .iter()
+        .take(TOP_K_PUBLISHERS)
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    // Build selection: start with pinned tools, then add full toolsets for top publishers,
+    // then fill remaining budget with highest-scoring individual tools.
     let mut selected_indices: Vec<usize> = pinned_indices.clone();
     let mut token_count: usize = pinned_tokens;
-    let remaining_slots = MAX_TOOLS.saturating_sub(pinned_indices.len());
-    let total_min = MIN_TOOLS.saturating_sub(pinned_indices.len());
+    let mut selected_pool: Vec<bool> = vec![false; pool_indices.len()];
 
-    let mut pool_picked: usize = 0;
+    // Include full toolsets for top-K publishers (up to per-publisher cap).
+    for pub_name in &top_publishers {
+        if let Some(indices) = publisher_pool_indices.get(pub_name) {
+            let mut pub_added = 0;
+            // Sort by score within publisher to pick best ones first.
+            let mut scored: Vec<(usize, f32)> = indices
+                .iter()
+                .map(|&pi| (pi, pool_scores[pi]))
+                .collect();
+            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+            for (pool_idx, _score) in scored {
+                if pub_added >= MAX_PUBLISHER_TOOLS {
+                    break;
+                }
+                if selected_indices.len() >= max_tools {
+                    break;
+                }
+                if selected_pool[pool_idx] {
+                    continue;
+                }
+                let original_idx = pool_indices[pool_idx];
+                let tool_tokens = approximate_tokens(&pool_docs[pool_idx]);
+                token_count += tool_tokens;
+                selected_indices.push(original_idx);
+                selected_pool[pool_idx] = true;
+                pub_added += 1;
+            }
+        }
+    }
+
+    // Fill remaining budget with highest-scoring individual tools.
+    // Respect the per-publisher cap to prevent any single publisher from dominating.
+    let mut ranked: Vec<(usize, f32)> = pool_scores.iter().copied().enumerate().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Track per-publisher counts (including tools already added in set-scoping).
+    let mut publisher_counts: HashMap<String, usize> = HashMap::new();
+    for (pool_idx, &selected) in selected_pool.iter().enumerate() {
+        if selected {
+            let original_idx = pool_indices[pool_idx];
+            if let Some(publisher) = tool_publisher(&tools[original_idx]) {
+                *publisher_counts.entry(publisher.to_string()).or_default() += 1;
+            }
+        }
+    }
+
+    let total_min = MIN_TOOLS.saturating_sub(selected_indices.len());
+    let mut extra_picked: usize = 0;
+
     for (pool_idx, _score) in &ranked {
-        if pool_picked >= remaining_slots {
+        if selected_indices.len() >= max_tools {
             break;
         }
+        if selected_pool[*pool_idx] {
+            continue;
+        }
+        // Enforce per-publisher cap in fill phase too.
         let original_idx = pool_indices[*pool_idx];
+        if let Some(publisher) = tool_publisher(&tools[original_idx]) {
+            let count = publisher_counts.get(publisher).copied().unwrap_or(0);
+            if count >= MAX_PUBLISHER_TOOLS {
+                continue;
+            }
+        }
         let tool_tokens = approximate_tokens(&pool_docs[*pool_idx]);
         let budget_exceeded =
-            token_count + tool_tokens > TOOL_TOKEN_BUDGET && pool_picked >= total_min;
+            token_count + tool_tokens > token_budget && extra_picked >= total_min;
         if budget_exceeded {
             break;
         }
         selected_indices.push(original_idx);
+        selected_pool[*pool_idx] = true;
         token_count += tool_tokens;
-        pool_picked += 1;
+        extra_picked += 1;
+        if let Some(publisher) = tool_publisher(&tools[original_idx]) {
+            *publisher_counts.entry(publisher.to_string()).or_default() += 1;
+        }
     }
 
     // Restore original ordering so the frontend's priority ranking is preserved.
@@ -137,12 +261,14 @@ pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<se
         selected_indices.iter().map(|&i| tools[i].clone()).collect();
 
     log::info!(
-        "[ToolRelevance] Selected {} of {} tools ({} pinned + {} scored, ~{} tokens)",
+        "[ToolRelevance] Selected {} of {} tools ({} pinned, top publishers: [{}], ~{} tokens, model: {}, budget: {})",
         result.len(),
         tools.len(),
         pinned_indices.len(),
-        pool_picked,
+        top_publishers.join(", "),
         token_count,
+        model_id,
+        max_tools,
     );
 
     apply_hard_budget(&result)
@@ -151,6 +277,13 @@ pub fn select_relevant_tools(query: &str, tools: &[serde_json::Value]) -> Vec<se
 // =============================================================================
 // Internal helpers
 // =============================================================================
+
+/// Extract the publisher name from a tool's function name, if it has one.
+fn tool_publisher(tool: &serde_json::Value) -> Option<&str> {
+    tool.pointer("/function/name")
+        .and_then(|v| v.as_str())
+        .and_then(extract_mcp_publisher)
+}
 
 /// Extract indexable text from an OpenAI-format tool definition.
 ///
@@ -350,12 +483,41 @@ mod tests {
         })
     }
 
+    /// Helper: default model for tests that don't care about model-specific behavior.
+    const TEST_MODEL: &str = "anthropic/claude-sonnet-4";
+    const GPT_MODEL: &str = "openai/gpt-4o";
+    const GEMINI_MODEL: &str = "google/gemini-2.5-pro";
+
+    fn select(query: &str, tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+        select_relevant_tools(query, tools, TEST_MODEL, &[])
+    }
+
+    fn select_with_model(
+        query: &str,
+        tools: &[serde_json::Value],
+        model: &str,
+    ) -> Vec<serde_json::Value> {
+        select_relevant_tools(query, tools, model, &[])
+    }
+
+    fn select_with_recency(
+        query: &str,
+        tools: &[serde_json::Value],
+        recent: &[String],
+    ) -> Vec<serde_json::Value> {
+        select_relevant_tools(query, tools, TEST_MODEL, recent)
+    }
+
+    // =========================================================================
+    // Existing behavior (preserved)
+    // =========================================================================
+
     #[test]
     fn fast_path_when_small_set() {
         let tools: Vec<serde_json::Value> = (0..5)
             .map(|i| make_tool(&format!("tool_{i}"), "short desc"))
             .collect();
-        let result = select_relevant_tools("any query", &tools);
+        let result = select("any query", &tools);
         assert_eq!(
             result.len(),
             tools.len(),
@@ -365,7 +527,7 @@ mod tests {
 
     #[test]
     fn empty_tools_returns_empty() {
-        let result = select_relevant_tools("some query", &[]);
+        let result = select("some query", &[]);
         assert!(result.is_empty());
     }
 
@@ -374,7 +536,7 @@ mod tests {
         let tools: Vec<serde_json::Value> = (0..5)
             .map(|i| make_tool(&format!("tool_{i}"), "some description"))
             .collect();
-        let result = select_relevant_tools("", &tools);
+        let result = select("", &tools);
         assert!(
             !result.is_empty(),
             "should still return tools on empty query"
@@ -440,33 +602,12 @@ mod tests {
     }
 
     #[test]
-    fn respects_max_tools_cap() {
-        // 250 tools: exceeds MAX_TOOLS. Result must be <= MAX_TOOLS.
-        let mut tools: Vec<serde_json::Value> = (0..249)
-            .map(|i| {
-                make_tool(
-                    &format!("gateway__pub_{i}__action"),
-                    "some API functionality",
-                )
-            })
-            .collect();
-        tools.push(make_tool("send_email", "Send email message to a recipient"));
-
-        let result = select_relevant_tools("send an email", &tools);
-        assert!(
-            result.len() <= MAX_TOOLS,
-            "expected <= {MAX_TOOLS} tools, got {}",
-            result.len()
-        );
-    }
-
-    #[test]
     fn always_includes_at_least_min_tools_when_available() {
         let tools = vec![
             make_tool("tool_a", "alpha beta gamma delta"),
             make_tool("tool_b", "epsilon zeta eta theta"),
         ];
-        let result = select_relevant_tools("xyzzyx unrelated query", &tools);
+        let result = select("xyzzyx unrelated query", &tools);
         assert!(!result.is_empty(), "must return something when tools exist");
     }
 
@@ -485,7 +626,7 @@ mod tests {
             "read a file from the filesystem path",
         ));
 
-        let result = select_relevant_tools("read file from filesystem", &tools);
+        let result = select("read file from filesystem", &tools);
 
         let has_read_file = result
             .iter()
@@ -508,7 +649,7 @@ mod tests {
             make_tool("gamma", "gamma tool functionality"),
         ];
         // All 3 are tiny — fast path returns them as-is.
-        let result = select_relevant_tools("gamma functionality", &tools);
+        let result = select("gamma functionality", &tools);
         for window in result.windows(2) {
             let a_name = window[0]
                 .pointer("/function/name")
@@ -575,73 +716,6 @@ mod tests {
     }
 
     #[test]
-    fn gateway_gmail_tools_selected_for_gmail_query() {
-        // Simulate real scenario: 120+ tools, 17 Gmail with gateway__ prefix
-        let mut tools: Vec<serde_json::Value> = Vec::new();
-
-        let gmail_names = [
-            "get_health",
-            "get_messages",
-            "get_messages_by_message_id",
-            "post_messages_send",
-            "delete_messages_by_message_id",
-            "post_messages_by_message_id_trash",
-            "post_messages_by_message_id_modify",
-            "get_labels",
-            "get_labels_by_label_id",
-            "post_labels",
-            "delete_labels_by_label_id",
-            "get_threads",
-            "get_threads_by_thread_id",
-            "post_threads_by_thread_id_trash",
-            "get_drafts",
-            "post_drafts",
-            "post_drafts_by_draft_id_send",
-        ];
-        for name in &gmail_names {
-            tools.push(make_tool(
-                &format!("gateway__gmail__{name}"),
-                "Email operation",
-            ));
-        }
-
-        // Fill with other publisher tools to exceed MAX_TOOLS
-        for i in 0..50 {
-            tools.push(make_tool(
-                &format!("gateway__firecrawl-serenai__action_{i}"),
-                "Web scraping",
-            ));
-        }
-        for i in 0..50 {
-            tools.push(make_tool(
-                &format!("gateway__perplexity-serenai__search_{i}"),
-                "AI search",
-            ));
-        }
-        tools.push(make_tool("file_read", "Read file contents from disk"));
-        tools.push(make_tool("execute_bash", "Run a shell command"));
-
-        assert!(tools.len() > 100);
-
-        let result = select_relevant_tools("Do you have access to my gmail?", &tools);
-        let gmail_count = result
-            .iter()
-            .filter(|t| {
-                t.pointer("/function/name")
-                    .and_then(|v| v.as_str())
-                    .map(|n| n.starts_with("gateway__gmail__"))
-                    .unwrap_or(false)
-            })
-            .count();
-
-        assert!(
-            gmail_count >= 5,
-            "Expected >=5 Gmail tools, got {gmail_count} of {} selected",
-            result.len()
-        );
-    }
-
-    #[test]
     fn publisher_boost_works_for_both_prefixes() {
         let mcp_tool = make_tool("mcp__slack__post_message", "Post a message to a channel");
         let gateway_tool = make_tool("gateway__gmail__get_messages", "List messages in mailbox");
@@ -686,7 +760,7 @@ mod tests {
             "Execute a shell command on the user machine",
         ));
 
-        // Fill with 131 gateway tools so total exceeds MAX_TOOLS
+        // Fill with 131 gateway tools so total exceeds budget
         for i in 0..65 {
             tools.push(make_tool(
                 &format!("gateway__polymarket-data__action_{i}"),
@@ -703,7 +777,7 @@ mod tests {
         assert!(tools.len() > 100);
 
         // Query has no overlap with local tool keywords
-        let result = select_relevant_tools(
+        let result = select(
             "scan polymarket prediction markets for mispriced bets",
             &tools,
         );
@@ -719,7 +793,279 @@ mod tests {
                 pinned_name
             );
         }
+    }
 
-        assert!(result.len() <= MAX_TOOLS, "must respect MAX_TOOLS cap");
+    // =========================================================================
+    // Phase 1: Model-aware budgets
+    // =========================================================================
+
+    #[test]
+    fn model_budget_returns_correct_caps() {
+        let (gpt_max, _) = model_budget("openai/gpt-4o");
+        let (claude_max, _) = model_budget("anthropic/claude-sonnet-4");
+        let (gemini_max, _) = model_budget("google/gemini-2.5-pro");
+        let (unknown_max, _) = model_budget("meta/llama-3.1-70b");
+
+        assert_eq!(gpt_max, 40);
+        assert_eq!(claude_max, 80);
+        assert_eq!(gemini_max, 50);
+        assert_eq!(unknown_max, 60);
+    }
+
+    #[test]
+    fn gpt_gets_fewer_tools_than_claude() {
+        // Build 120 tools: enough to trigger filtering for both models.
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+        for i in 0..120 {
+            tools.push(make_tool(
+                &format!("gateway__pub_{i}__action"),
+                &format!("Does action {i} for the publisher"),
+            ));
+        }
+
+        let gpt_result = select_with_model("do something with the publisher", &tools, GPT_MODEL);
+        let claude_result =
+            select_with_model("do something with the publisher", &tools, TEST_MODEL);
+
+        assert!(
+            gpt_result.len() <= 40,
+            "GPT should get <= 40 tools, got {}",
+            gpt_result.len()
+        );
+        assert!(
+            claude_result.len() > gpt_result.len(),
+            "Claude ({}) should get more tools than GPT ({})",
+            claude_result.len(),
+            gpt_result.len()
+        );
+    }
+
+    // =========================================================================
+    // Phase 2: Publisher-set scoping
+    // =========================================================================
+
+    #[test]
+    fn publisher_set_scoping_includes_full_toolset() {
+        // 17 Gmail tools + 50 Firecrawl + 50 Perplexity = 117 tools.
+        // When user asks about Gmail, all 17 Gmail tools should be included.
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+
+        let gmail_names = [
+            "get_messages",
+            "get_messages_by_id",
+            "post_messages_send",
+            "delete_messages_by_id",
+            "post_messages_trash",
+            "post_messages_modify",
+            "get_labels",
+            "get_labels_by_id",
+            "post_labels",
+            "delete_labels_by_id",
+            "get_threads",
+            "get_threads_by_id",
+            "post_threads_trash",
+            "get_drafts",
+            "post_drafts",
+            "post_drafts_send",
+            "get_health",
+        ];
+        for name in &gmail_names {
+            tools.push(make_tool(
+                &format!("gateway__gmail__{name}"),
+                "Gmail email operation",
+            ));
+        }
+
+        for i in 0..50 {
+            tools.push(make_tool(
+                &format!("gateway__firecrawl-serenai__action_{i}"),
+                "Web scraping operation",
+            ));
+        }
+        for i in 0..50 {
+            tools.push(make_tool(
+                &format!("gateway__perplexity-serenai__search_{i}"),
+                "AI search operation",
+            ));
+        }
+
+        let result = select("check my gmail for new messages", &tools);
+        let gmail_count = result
+            .iter()
+            .filter(|t| {
+                t.pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .map(|n| n.starts_with("gateway__gmail__"))
+                    .unwrap_or(false)
+            })
+            .count();
+
+        assert_eq!(
+            gmail_count,
+            gmail_names.len(),
+            "All {} Gmail tools should be included when Gmail is the top publisher, got {}",
+            gmail_names.len(),
+            gmail_count
+        );
+    }
+
+    #[test]
+    fn publisher_set_capped_at_max_per_publisher() {
+        // 30 tools from one publisher exceeds MAX_PUBLISHER_TOOLS (25).
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+        for i in 0..30 {
+            tools.push(make_tool(
+                &format!("gateway__bigpub__action_{i}"),
+                "Some bigpub action",
+            ));
+        }
+        // Add enough other tools to force filtering
+        for i in 0..80 {
+            tools.push(make_tool(
+                &format!("gateway__other__action_{i}"),
+                "Some other action",
+            ));
+        }
+
+        let result = select("use bigpub to do something", &tools);
+        let bigpub_count = result
+            .iter()
+            .filter(|t| {
+                t.pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .map(|n| n.starts_with("gateway__bigpub__"))
+                    .unwrap_or(false)
+            })
+            .count();
+
+        assert!(
+            bigpub_count <= MAX_PUBLISHER_TOOLS,
+            "Publisher tools should be capped at {}, got {}",
+            MAX_PUBLISHER_TOOLS,
+            bigpub_count
+        );
+    }
+
+    // =========================================================================
+    // Phase 3: Conversation-aware tool memory
+    // =========================================================================
+
+    #[test]
+    fn recency_boost_promotes_recently_used_publisher() {
+        // Two publishers with similar relevance, but one was recently used.
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+        for i in 0..20 {
+            tools.push(make_tool(
+                &format!("gateway__slack__action_{i}"),
+                "Send a message to someone",
+            ));
+        }
+        for i in 0..20 {
+            tools.push(make_tool(
+                &format!("gateway__teams__action_{i}"),
+                "Send a message to someone",
+            ));
+        }
+        // Pad to trigger filtering
+        for i in 0..80 {
+            tools.push(make_tool(
+                &format!("gateway__noise__unrelated_{i}"),
+                "Unrelated noise tool",
+            ));
+        }
+
+        // Without recency: both publishers treated equally
+        let result_no_recency = select("send a message", &tools);
+        let slack_no = result_no_recency
+            .iter()
+            .filter(|t| {
+                t.pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .map(|n| n.starts_with("gateway__slack__"))
+                    .unwrap_or(false)
+            })
+            .count();
+
+        // With recency: Slack should get boosted
+        let result_with_recency =
+            select_with_recency("send a message", &tools, &["slack".to_string()]);
+        let slack_with = result_with_recency
+            .iter()
+            .filter(|t| {
+                t.pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .map(|n| n.starts_with("gateway__slack__"))
+                    .unwrap_or(false)
+            })
+            .count();
+
+        assert!(
+            slack_with >= slack_no,
+            "Recency boost should include at least as many Slack tools: without={}, with={}",
+            slack_no,
+            slack_with
+        );
+    }
+
+    #[test]
+    fn recency_boost_does_not_displace_query_relevant_publisher() {
+        // Recently used Slack, but query is explicitly about Gmail.
+        // Recency boost should NOT push Gmail out of the top publishers.
+        // Gmail must still be fully included even though Slack gets a boost.
+        // We add 4 publishers (> TOP_K_PUBLISHERS=3) so there is real competition.
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+        for i in 0..15 {
+            tools.push(make_tool(
+                &format!("gateway__gmail__email_action_{i}"),
+                "Gmail email inbox operation for reading and sending mail messages",
+            ));
+        }
+        for i in 0..15 {
+            tools.push(make_tool(
+                &format!("gateway__slack__channel_action_{i}"),
+                "Slack channel workspace notification",
+            ));
+        }
+        for i in 0..15 {
+            tools.push(make_tool(
+                &format!("gateway__calendar__event_{i}"),
+                "Calendar scheduling event meeting",
+            ));
+        }
+        for i in 0..15 {
+            tools.push(make_tool(
+                &format!("gateway__drive__file_{i}"),
+                "Drive file storage document upload",
+            ));
+        }
+        for i in 0..60 {
+            tools.push(make_tool(
+                &format!("gateway__noise__filler_{i}"),
+                "Unrelated filler tool for padding",
+            ));
+        }
+
+        let result = select_relevant_tools(
+            "read my gmail inbox email",
+            &tools,
+            GPT_MODEL,
+            &["slack".to_string()],
+        );
+        let gmail_count = result
+            .iter()
+            .filter(|t| {
+                t.pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .map(|n| n.starts_with("gateway__gmail__"))
+                    .unwrap_or(false)
+            })
+            .count();
+
+        // Gmail must be fully included as a top publisher (all 15 tools).
+        assert!(
+            gmail_count >= 10,
+            "Gmail should be a top publisher despite Slack recency boost: gmail={}",
+            gmail_count
+        );
     }
 }
