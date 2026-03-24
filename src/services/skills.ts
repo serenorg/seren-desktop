@@ -320,18 +320,26 @@ async function fetchUpstreamSkillBundle(skill: {
 }): Promise<UpstreamSkillBundle | null> {
   if (!skill.sourceUrl) return null;
 
-  // Cache-bust raw.githubusercontent.com CDN to ensure we get latest content
+  // Phase 1: Fetch SKILL.md, repo tree, and revision in parallel
   const cacheBustedUrl = `${skill.sourceUrl}${skill.sourceUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
-  const [skillMd, payloadFiles, remoteRevision] = await Promise.all([
+  const [skillMd, freshTree, remoteRevision] = await Promise.all([
     appFetch(cacheBustedUrl).then(async (response) => {
       if (!response.ok) {
         throw new Error(`Failed to fetch skill content: ${response.status}`);
       }
       return response.text();
     }),
-    fetchRepoSkillPayloadFiles(skill.sourceUrl),
+    fetchFreshRepoTree(skill.sourceUrl),
     fetchRemoteSkillRevision(skill.sourceUrl),
   ]);
+
+  // Phase 2: Parse SKILL.md for includes, then fetch payload + includes files
+  const parsed = parseSkillMd(skillMd);
+  const payloadFiles = await fetchPayloadAndIncludes(
+    skill.sourceUrl,
+    freshTree,
+    parsed.metadata.includes,
+  );
 
   return { skillMd, payloadFiles, remoteRevision };
 }
@@ -448,21 +456,14 @@ export function isPublisherManagedSkill(
 }
 
 /**
- * Fetch all payload files (excluding SKILL.md) from a skill's GitHub directory.
- * Fetches a fresh repo tree (cache-busted) to discover files, then fetches
- * their raw content.  If the tree fetch fails, the error propagates so callers
- * never silently install from a stale tree.
+ * Fetch a fresh repo tree with cache-bust to avoid GitHub API CDN staleness.
+ * On failure this throws — callers must not fall back to a stale tree
+ * because recording a new syncedRevision with old file content would mask
+ * an incomplete sync and prevent future retries.
  */
-async function fetchRepoSkillPayloadFiles(
-  sourceUrl: string,
-): Promise<ExtraFile[]> {
-  const dirPrefix = deriveRepoDirPrefix(sourceUrl);
-  if (!dirPrefix) return [];
-
-  // Fetch a fresh tree with cache-bust to avoid GitHub API CDN staleness.
-  // On failure this throws — callers must not fall back to a stale tree
-  // because recording a new syncedRevision with old file content would mask
-  // an incomplete sync and prevent future retries.
+async function fetchFreshRepoTree(
+  _sourceUrl: string,
+): Promise<GitHubTreeNode[]> {
   const cacheBustedTreeUrl = `${SKILLS_INDEX_URL}&t=${Date.now()}`;
   const response = await appFetch(cacheBustedTreeUrl, {
     headers: githubApiHeaders(),
@@ -474,35 +475,57 @@ async function fetchRepoSkillPayloadFiles(
   }
   const payload = (await response.json()) as GitHubTreeResponse;
   const freshTree = payload.tree ?? [];
-  // Also update the global cache so subsequent operations benefit
   cachedRepoTree = freshTree;
+  return freshTree;
+}
 
-  if (freshTree.length === 0) return [];
+/**
+ * Validate an includes path for safety.
+ * Must be relative, no traversal, no absolute paths.
+ */
+function isValidIncludesPath(path: string): boolean {
+  if (!path || path.startsWith("/") || path.startsWith("\\")) return false;
+  if (path.includes("..")) return false;
+  if (path.startsWith(".") && !path.startsWith("./")) return false;
+  return true;
+}
 
-  // Find all blob files under the skill directory (excluding SKILL.md itself)
-  const siblingFiles = freshTree.filter(
-    (node) =>
-      node.type === "blob" &&
-      typeof node.path === "string" &&
-      node.path.startsWith(dirPrefix) &&
-      !node.path.endsWith("/SKILL.md"),
-  );
+/**
+ * Collect blob file nodes from a tree matching a directory prefix.
+ * Returns objects mapping each file's repo path to its install-relative path.
+ */
+function collectTreeFiles(
+  tree: GitHubTreeNode[],
+  dirPrefix: string,
+  relativePrefix: string,
+  excludeSkillMd: boolean,
+): Array<{ repoPath: string; relativePath: string }> {
+  return tree
+    .filter(
+      (node) =>
+        node.type === "blob" &&
+        typeof node.path === "string" &&
+        node.path.startsWith(dirPrefix) &&
+        (!excludeSkillMd || !node.path.endsWith("/SKILL.md")),
+    )
+    .map((node) => ({
+      repoPath: node.path as string,
+      relativePath:
+        relativePrefix + (node.path as string).slice(dirPrefix.length),
+    }));
+}
 
-  if (siblingFiles.length === 0) return [];
-
-  log.info(
-    "[Skills] Fetching",
-    siblingFiles.length,
-    "payload files for",
-    dirPrefix,
-  );
+/**
+ * Fetch raw file contents from GitHub for a list of file nodes.
+ */
+async function fetchRawFilesFromTree(
+  nodes: Array<{ repoPath: string; relativePath: string }>,
+): Promise<ExtraFile[]> {
+  if (nodes.length === 0) return [];
 
   const results = await Promise.allSettled(
-    siblingFiles.map(async (node): Promise<ExtraFile | null> => {
-      const filePath = node.path ?? "";
-      const relativePath = filePath.slice(dirPrefix.length);
-      const segments = filePath.split("/").map((s) => encodeURIComponent(s));
-      // Cache-bust raw.githubusercontent.com CDN (caches up to 300s)
+    nodes.map(async ({ repoPath, relativePath }): Promise<ExtraFile | null> => {
+      const segments = repoPath.split("/").map((s) => encodeURIComponent(s));
       const rawUrl = `${SKILLS_RAW_URL}/${segments.join("/")}?t=${Date.now()}`;
 
       try {
@@ -527,6 +550,64 @@ async function fetchRepoSkillPayloadFiles(
   return results
     .map((r) => (r.status === "fulfilled" ? r.value : null))
     .filter((f): f is ExtraFile => f !== null);
+}
+
+/**
+ * Fetch payload files from a skill's directory plus any declared includes paths.
+ * Includes files are installed under `_deps/{repo-path}/` to keep them
+ * safely within the skill directory while preserving the upstream structure.
+ */
+async function fetchPayloadAndIncludes(
+  sourceUrl: string,
+  tree: GitHubTreeNode[],
+  includes?: string[],
+): Promise<ExtraFile[]> {
+  const dirPrefix = deriveRepoDirPrefix(sourceUrl);
+  if (!dirPrefix || tree.length === 0) return [];
+
+  // Collect files from the skill's own directory (excluding SKILL.md)
+  const fileNodes = collectTreeFiles(tree, dirPrefix, "", true);
+
+  // Collect files from declared includes paths (installed under _deps/)
+  if (includes && includes.length > 0) {
+    for (const includePath of includes) {
+      if (!isValidIncludesPath(includePath)) {
+        log.warn("[Skills] Skipping invalid includes path:", includePath);
+        continue;
+      }
+      const normalizedPath = includePath.endsWith("/")
+        ? includePath
+        : `${includePath}/`;
+      const includeNodes = collectTreeFiles(
+        tree,
+        normalizedPath,
+        `_deps/${normalizedPath}`,
+        false,
+      );
+      if (includeNodes.length === 0) {
+        log.warn("[Skills] No files found for includes path:", includePath);
+      }
+      fileNodes.push(...includeNodes);
+    }
+    if (fileNodes.some((n) => n.relativePath.startsWith("_deps/"))) {
+      log.info(
+        "[Skills] Including shared dependencies from",
+        includes.length,
+        "declared paths",
+      );
+    }
+  }
+
+  if (fileNodes.length === 0) return [];
+
+  log.info(
+    "[Skills] Fetching",
+    fileNodes.length,
+    "payload files for",
+    dirPrefix,
+  );
+
+  return fetchRawFilesFromTree(fileNodes);
 }
 
 /**
@@ -1342,7 +1423,12 @@ export const skills = {
       if (content) {
         const parsed = parseSkillMd(content);
         const runtimeDir = `${skill.skillsDir}/${skill.dirName}`;
-        const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.\n\n`;
+        const hasIncludes =
+          parsed.metadata.includes && parsed.metadata.includes.length > 0;
+        const depsNote = hasIncludes
+          ? `\n> **Shared dependencies:** \`${runtimeDir}/_deps/\` contains shared files from declared \`includes\` paths.\n`
+          : "";
+        const runtimeNote = `> **Skill runtime directory:** \`${runtimeDir}\`\n> Use this absolute path to reference skill files. Do not create local copies or fallback scaffolds.${depsNote}\n\n`;
         contents.push(
           `## Skill: ${skill.name}\n\n${runtimeNote}${parsed.content}`,
         );

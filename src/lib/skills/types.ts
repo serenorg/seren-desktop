@@ -26,6 +26,8 @@ export interface SkillMetadata {
   requires?: string[];
   globs?: string[];
   alwaysAllow?: string[];
+  /** Repo-relative paths to bundle as shared dependencies under _deps/ */
+  includes?: string[];
 }
 
 /**
