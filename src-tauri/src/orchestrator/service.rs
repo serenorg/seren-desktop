@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use super::chat_model_worker::ChatModelWorker;
 use super::classifier;
+use super::cloud_agent_worker::CloudAgentWorker;
 use super::decomposer;
-use super::rlm;
 use super::mcp_publisher_worker::McpPublisherWorker;
+use super::rlm;
 use super::router;
 use super::trust;
 use super::types::{
@@ -114,9 +115,15 @@ pub async fn orchestrate(
         let rlm_history = history.clone();
         let rlm_app = app.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                rlm::process(&rlm_app, &conv_id, &rlm_prompt, &rlm_history, &rlm_model, &event_tx)
-                    .await
+            if let Err(e) = rlm::process(
+                &rlm_app,
+                &conv_id,
+                &rlm_prompt,
+                &rlm_history,
+                &rlm_model,
+                &event_tx,
+            )
+            .await
             {
                 let _ = event_tx.send(WorkerEvent::Error { message: e }).await;
             }
@@ -298,9 +305,11 @@ async fn execute_single_task(
         let worker_app = app.clone();
         let worker_images = images.to_vec();
         let worker_history = history.to_vec();
+        let worker_conversation_id = conversation_id.to_string();
         let worker_handle = tokio::spawn(async move {
             worker
                 .execute(
+                    &worker_conversation_id,
                     &worker_prompt,
                     &worker_history,
                     &worker_routing,
@@ -388,7 +397,10 @@ async fn execute_single_task(
         // If the forward loop exited due to cancellation, signal the worker
         // to stop and abort its task so in-flight HTTP requests don't linger.
         if was_cancelled {
-            log::info!("[Orchestrator] Cancelling worker for conversation {}", conversation_id);
+            log::info!(
+                "[Orchestrator] Cancelling worker for conversation {}",
+                conversation_id
+            );
             let _ = worker_for_cancel.cancel().await;
             worker_handle.abort();
             break;
@@ -438,7 +450,6 @@ async fn execute_single_task(
                     backoff_secs,
                     reroutable_error.as_deref().unwrap_or("unknown"),
                 );
-                reroutable_error = None;
                 tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
                 continue;
             }
@@ -467,9 +478,7 @@ async fn execute_single_task(
         // Context-overflow errors get special handling: reroute to a 1M-context
         // model regardless of whether the user explicitly selected a model.
         if router::is_context_overflow_error(&error_msg) {
-            if let Some(fallback_model_str) =
-                router::get_large_context_fallback(&tried_models)
-            {
+            if let Some(fallback_model_str) = router::get_large_context_fallback(&tried_models) {
                 let failed_model = routing.model_id.clone();
                 let fallback_model = fallback_model_str.to_string();
 
@@ -484,7 +493,9 @@ async fn execute_single_task(
                     worker_event: WorkerEvent::Reroute {
                         from_model: failed_model.clone(),
                         to_model: fallback_model.clone(),
-                        reason: "Switched to larger context model — conversation exceeded model limit".to_string(),
+                        reason:
+                            "Switched to larger context model — conversation exceeded model limit"
+                                .to_string(),
                     },
                     subtask_id: None,
                 };
@@ -497,9 +508,7 @@ async fn execute_single_task(
                 continue;
             }
             // All large-context models exhausted — fall through to give up
-            log::warn!(
-                "[Orchestrator] Context overflow but all large-context fallbacks exhausted"
-            );
+            log::warn!("[Orchestrator] Context overflow but all large-context fallbacks exhausted");
             break;
         }
 
@@ -819,7 +828,8 @@ async fn execute_multi_task(
                 .collect();
 
             // Route each subtask independently with rankings
-            let mut routing = router::route(&subtask.classification, &subtask_caps, &subtask.prompt);
+            let mut routing =
+                router::route(&subtask.classification, &subtask_caps, &subtask.prompt);
 
             // Trust graduation per subtask
             let app_for_trust = app.clone();
@@ -860,6 +870,7 @@ async fn execute_multi_task(
             let worker_history = history.to_vec();
             let worker_images = images.to_vec();
             let layer_tx = shared_tx.clone();
+            let worker_conversation_id = conversation_id.to_string();
 
             let handle = tokio::spawn(async move {
                 let (tx, mut rx) = mpsc::channel::<WorkerEvent>(64);
@@ -868,6 +879,7 @@ async fn execute_multi_task(
                 let exec_handle = tokio::spawn(async move {
                     worker
                         .execute(
+                            &worker_conversation_id,
                             &subtask_prompt,
                             &worker_history,
                             &worker_routing,
@@ -895,7 +907,7 @@ async fn execute_multi_task(
         // Wait for all workers in this layer before starting next
         let mut layer_had_success = false;
         let mut layer_fatal_error: Option<String> = None;
-        let mut cancel_check = cancel_watch_rx.clone();
+        let cancel_check = cancel_watch_rx.clone();
         for handle in handles {
             // If already cancelled, abort this handle immediately
             if *cancel_check.borrow() {
@@ -1022,6 +1034,12 @@ fn create_worker(
     match routing.worker_type {
         WorkerType::ChatModel => Arc::new(ChatModelWorker::with_tools(
             capabilities.tool_definitions.clone(),
+        )),
+        WorkerType::CloudAgent => Arc::new(CloudAgentWorker::new(
+            capabilities
+                .private_chat_deployment_id
+                .clone()
+                .unwrap_or_default(),
         )),
         WorkerType::LocalAgent => Arc::new(super::provider_worker::ProviderRuntimeWorker::new(
             _app.clone(),

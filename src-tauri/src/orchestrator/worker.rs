@@ -22,6 +22,7 @@ pub trait Worker: Send + Sync {
     /// `images` contains base64-encoded image attachments from the user.
     async fn execute(
         &self,
+        conversation_id: &str,
         prompt: &str,
         conversation_context: &[serde_json::Value],
         routing: &RoutingDecision,

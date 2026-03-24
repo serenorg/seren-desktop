@@ -75,6 +75,10 @@ fn select_worker_type(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
 ) -> WorkerType {
+    if capabilities.force_private_chat && capabilities.private_chat_deployment_id.is_some() {
+        return WorkerType::CloudAgent;
+    }
+
     // Code generation with file system access + active local agent session → LocalAgent
     if classification.task_type == "code_generation"
         && classification.requires_file_system
@@ -121,10 +125,7 @@ fn has_any_gateway_tool(capabilities: &UserCapabilities) -> bool {
 /// Extract the most relevant publisher slug from available gateway tools
 /// based on the user's query. Falls back to the first gateway slug when
 /// no query-based match is found.
-fn extract_gateway_slug(
-    capabilities: &UserCapabilities,
-    query: &str,
-) -> Option<String> {
+fn extract_gateway_slug(capabilities: &UserCapabilities, query: &str) -> Option<String> {
     // Collect all unique publisher slugs from gateway tools
     let mut slug_tools: std::collections::HashMap<&str, Vec<&str>> =
         std::collections::HashMap::new();
@@ -207,6 +208,10 @@ fn extract_publisher_slug(
 /// 2. Thompson sampling rankings (satisfaction-driven, computed by service layer)
 /// 3. Hardcoded preference lists (cold start fallback)
 fn select_model(classification: &TaskClassification, capabilities: &UserCapabilities) -> String {
+    if capabilities.force_private_chat && capabilities.private_chat_deployment_id.is_some() {
+        return "organization/private-agent".to_string();
+    }
+
     // 1. Respect the user's explicit model selection
     if let Some(ref selected) = capabilities.selected_model {
         if !selected.is_empty() {
@@ -279,6 +284,9 @@ fn build_reason(
     let task_desc = humanize_task_type(&classification.task_type);
 
     match worker_type {
+        WorkerType::CloudAgent => {
+            "Working with your organization's private cloud agent".to_string()
+        }
         WorkerType::LocalAgent => {
             format!("Working with agent on {}", task_desc)
         }
@@ -507,6 +515,8 @@ mod tests {
                 None
             },
             selected_model: None,
+            force_private_chat: false,
+            private_chat_deployment_id: None,
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: tools.iter().map(|t| t.to_string()).collect(),
             tool_definitions: vec![],
@@ -534,6 +544,8 @@ mod tests {
                 None
             },
             selected_model: None,
+            force_private_chat: false,
+            private_chat_deployment_id: None,
             available_models: models.iter().map(|m| m.to_string()).collect(),
             available_tools: vec![],
             tool_definitions: vec![],
@@ -581,6 +593,16 @@ mod tests {
         let capabilities = make_capabilities(true, &["anthropic/claude-opus-4-6"], &["firecrawl"]);
         let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::LocalAgent);
+    }
+
+    #[test]
+    fn routes_private_org_policy_to_cloud_agent() {
+        let classification = make_classification("general_chat", false, false);
+        let mut capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &[]);
+        capabilities.force_private_chat = true;
+        capabilities.private_chat_deployment_id = Some("deployment_123".to_string());
+        let decision = route(&classification, &capabilities, "test query");
+        assert_eq!(decision.worker_type, WorkerType::CloudAgent);
     }
 
     #[test]
@@ -694,11 +716,8 @@ mod tests {
     fn malformed_gateway_tool_does_not_trigger_publisher_routing() {
         // gateway__badtool (no second __) should not route to McpPublisher
         let classification = make_classification("research", true, false);
-        let capabilities = make_capabilities(
-            false,
-            &["anthropic/claude-sonnet-4"],
-            &["gateway__badtool"],
-        );
+        let capabilities =
+            make_capabilities(false, &["anthropic/claude-sonnet-4"], &["gateway__badtool"]);
         let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
         assert_eq!(decision.publisher_slug, None);
@@ -716,7 +735,11 @@ mod tests {
             ],
         );
         // Query matches "search" → perplexity (has search tool)
-        let decision = route(&classification, &capabilities, "search the web for Rust tutorials");
+        let decision = route(
+            &classification,
+            &capabilities,
+            "search the web for Rust tutorials",
+        );
         assert_eq!(decision.worker_type, WorkerType::McpPublisher);
         assert_eq!(
             decision.publisher_slug,
@@ -1040,9 +1063,7 @@ mod tests {
 
     #[test]
     fn context_length_exceeded_is_reroutable() {
-        assert!(is_reroutable_error(
-            "HTTP 400: context_length_exceeded"
-        ));
+        assert!(is_reroutable_error("HTTP 400: context_length_exceeded"));
     }
 
     #[test]

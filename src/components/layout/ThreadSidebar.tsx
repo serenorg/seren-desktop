@@ -15,6 +15,7 @@ import { openFolder } from "@/lib/files/service";
 import type { InstalledSkill, Skill } from "@/lib/skills";
 import { skills as skillsService } from "@/services/skills";
 import { agentStore } from "@/stores/agent.store";
+import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { skillsStore } from "@/stores/skills.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
@@ -352,7 +353,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
           </Show>
           {spawning()
             ? (agentStore.installStatus ?? "Starting...")
-            : "New Agent"}
+            : authStore.privateChatPolicy?.disable_local_agents
+              ? "New Chat"
+              : "New Agent"}
         </button>
 
         <Show when={showLauncher()}>
@@ -369,9 +372,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
             {/* Claude Agent */}
             <Show
-              when={agentStore.availableAgents.some(
-                (a) => a.type === "claude-code" && a.available,
-              )}
+              when={
+                !authStore.privateChatPolicy?.disable_local_agents &&
+                agentStore.availableAgents.some(
+                  (a) => a.type === "claude-code" && a.available,
+                )
+              }
             >
               <button
                 type="button"
@@ -395,9 +401,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
             {/* Codex Agent */}
             <Show
-              when={agentStore.availableAgents.some(
-                (a) => a.type === "codex" && a.available,
-              )}
+              when={
+                !authStore.privateChatPolicy?.disable_local_agents &&
+                agentStore.availableAgents.some(
+                  (a) => a.type === "codex" && a.available,
+                )
+              }
             >
               <button
                 type="button"

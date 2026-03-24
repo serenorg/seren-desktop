@@ -122,11 +122,29 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "mcp", label: "MCP Servers", icon: "🔌" },
     { id: "openclaw", label: "OpenClaw", icon: "🦞" },
   ];
+  const visibleSections = () =>
+    sections.filter((section) => {
+      if (
+        section.id === "providers" &&
+        (authStore.privateChatPolicy?.force_private_model ||
+          authStore.privateChatPolicy?.disable_external_model_providers ||
+          authStore.privateChatPolicy?.disable_seren_models)
+      ) {
+        return false;
+      }
+      if (
+        section.id === "agent" &&
+        authStore.privateChatPolicy?.disable_local_agents
+      ) {
+        return false;
+      }
+      return true;
+    });
 
   const handleOpenSection = (event: Event) => {
     const custom = event as CustomEvent<SettingsSection>;
     const section = custom.detail;
-    if (sections.some((s) => s.id === section)) {
+    if (visibleSections().some((s) => s.id === section)) {
       setActiveSection(section);
     }
   };
@@ -152,7 +170,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
           Settings
         </h2>
         <nav class="flex-1 flex flex-col px-2 py-1 gap-0.5">
-          <For each={sections}>
+          <For each={visibleSections()}>
             {(section) => (
               <button
                 type="button"
@@ -196,14 +214,25 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   Default Model
                 </span>
                 <span class="text-[0.8rem] text-muted-foreground">
-                  AI model for chat conversations
+                  {authStore.privateChatPolicy?.force_private_model
+                    ? "Managed by your organization"
+                    : "AI model for chat conversations"}
                 </span>
               </label>
-              <SearchableModelSelect
-                value={settingsState.app.chatDefaultModel}
-                onChange={handleDefaultModelChange}
-                placeholder="Select a model"
-              />
+              <Show
+                when={!authStore.privateChatPolicy?.hide_model_picker}
+                fallback={
+                  <div class="px-3 py-2 text-[0.85rem] text-muted-foreground bg-surface-3/60 border border-border-strong rounded-md">
+                    Organization-managed private backend
+                  </div>
+                }
+              >
+                <SearchableModelSelect
+                  value={settingsState.app.chatDefaultModel}
+                  onChange={handleDefaultModelChange}
+                  placeholder="Select a model"
+                />
+              </Show>
             </div>
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-border">

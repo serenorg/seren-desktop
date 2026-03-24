@@ -40,7 +40,6 @@ const REQUEST_TIMEOUT_SECS: u64 = 600;
 /// via `WorkerEvent::ToolResult`.
 const MAX_TOOL_RESULT_CONTEXT_BYTES: usize = 30_000;
 
-
 // =============================================================================
 // Types for SSE Parsing and Tool Execution
 // =============================================================================
@@ -261,11 +260,7 @@ impl ChatModelWorker {
                         .ok()
                         .and_then(|bytes| String::from_utf8(bytes).ok());
                     if let Some(text_content) = decoded {
-                        let ext = image
-                            .name
-                            .rsplit('.')
-                            .next()
-                            .unwrap_or("");
+                        let ext = image.name.rsplit('.').next().unwrap_or("");
                         content_parts.push(serde_json::json!({
                             "type": "text",
                             "text": format!("```{} ({})\n{}\n```", ext, image.name, text_content)
@@ -1061,6 +1056,7 @@ impl Worker for ChatModelWorker {
 
     async fn execute(
         &self,
+        _conversation_id: &str,
         prompt: &str,
         conversation_context: &[serde_json::Value],
         routing: &RoutingDecision,
@@ -1074,8 +1070,7 @@ impl Worker for ChatModelWorker {
 
         // Select tools relevant to this query via BM25 scoring.
         // Falls back to the hard byte budget as a safety net against HTTP 413.
-        let budgeted_tools =
-            tool_relevance::select_relevant_tools(prompt, &self.tool_definitions);
+        let budgeted_tools = tool_relevance::select_relevant_tools(prompt, &self.tool_definitions);
 
         log::info!(
             "[ChatModelWorker] Executing with model: {}, tools: {}",
@@ -1146,7 +1141,10 @@ impl Worker for ChatModelWorker {
                 let body_text = response.text().await.unwrap_or_default();
                 // Check cancellation before logging — a 504 after cancel is expected
                 if *self.cancelled.lock().await {
-                    log::debug!("[ChatModelWorker] HTTP {} after cancellation (expected)", status);
+                    log::debug!(
+                        "[ChatModelWorker] HTTP {} after cancellation (expected)",
+                        status
+                    );
                     return Ok(());
                 }
                 log::error!("[ChatModelWorker] HTTP {} from Gateway", status);
@@ -1201,7 +1199,10 @@ impl Worker for ChatModelWorker {
                         })
                         .await
                     {
-                        log::debug!("[ChatModelWorker] Channel closed, cannot send Complete: {}", e);
+                        log::debug!(
+                            "[ChatModelWorker] Channel closed, cannot send Complete: {}",
+                            e
+                        );
                         return Ok(());
                     }
                     log::info!("[ChatModelWorker] Execution complete, breaking from tool loop");

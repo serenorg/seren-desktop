@@ -85,6 +85,8 @@ interface UserCapabilities {
   agent_type: string | null;
   active_agent_session_id: string | null;
   selected_model: string | null;
+  force_private_chat: boolean;
+  private_chat_deployment_id: string | null;
   available_models: string[];
   available_tools: string[];
   tool_definitions: ToolDefinition[];
@@ -662,6 +664,10 @@ function serializeHistory(
  * Passes lightweight skill metadata — the Rust side reads actual content from disk.
  */
 function buildCapabilities(threadId: string | null): UserCapabilities {
+  const privateChatPolicy = authStore.privateChatPolicy;
+  const forcePrivateChat =
+    privateChatPolicy?.mode === "private_org_agent" &&
+    !!privateChatPolicy.deployment_id;
   const enabledSkills = skillsStore.getThreadSkills(
     fileTreeState.rootPath,
     threadId,
@@ -671,18 +677,23 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
   const tools = getAllTools();
 
   return {
-    has_local_agent: agentStore.availableAgents.length > 0,
+    has_local_agent:
+      !forcePrivateChat &&
+      !privateChatPolicy?.disable_local_agents &&
+      agentStore.availableAgents.length > 0,
     agent_type: agentStore.selectedAgentType ?? null,
     active_agent_session_id: agentStore.agentModeEnabled
       ? (agentStore.activeSessionId ?? null)
       : null,
     selected_model:
-      providerStore.activeModel === AUTO_MODEL_ID
+      forcePrivateChat || providerStore.activeModel === AUTO_MODEL_ID
         ? null
         : providerStore.activeModel,
-    available_models: activeModels.map((m) => m.id),
-    available_tools: tools.map((t) => t.function.name),
-    tool_definitions: tools,
+    force_private_chat: forcePrivateChat,
+    private_chat_deployment_id: privateChatPolicy?.deployment_id ?? null,
+    available_models: forcePrivateChat ? [] : activeModels.map((m) => m.id),
+    available_tools: forcePrivateChat ? [] : tools.map((t) => t.function.name),
+    tool_definitions: forcePrivateChat ? [] : tools,
     installed_skills: enabledSkills.map((s) => ({
       slug: s.slug,
       name: s.name,

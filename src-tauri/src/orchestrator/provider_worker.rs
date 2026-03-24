@@ -38,6 +38,7 @@ impl Worker for ProviderRuntimeWorker {
 
     async fn execute(
         &self,
+        _conversation_id: &str,
         prompt: &str,
         _conversation_context: &[Value],
         _routing: &RoutingDecision,
@@ -53,7 +54,8 @@ impl Worker for ProviderRuntimeWorker {
             .clone()
             .ok_or_else(|| "No active local provider session".to_string())?;
 
-        let state: tauri::State<'_, crate::provider_runtime::ProviderRuntimeState> = self.app.state();
+        let state: tauri::State<'_, crate::provider_runtime::ProviderRuntimeState> =
+            self.app.state();
         let config = state.ensure_started(&self.app).await?;
 
         let (mut socket, _response) = connect_async(config.ws_base_url.clone())
@@ -107,7 +109,8 @@ impl Worker for ProviderRuntimeWorker {
 
         let mut saw_complete = false;
         while let Some(message) = socket.next().await {
-            let message = message.map_err(|err| format!("Provider runtime socket error: {}", err))?;
+            let message =
+                message.map_err(|err| format!("Provider runtime socket error: {}", err))?;
             let Message::Text(text) = message else {
                 continue;
             };
@@ -196,7 +199,8 @@ impl Worker for ProviderRuntimeWorker {
             .clone()
             .ok_or_else(|| "No active local provider session".to_string())?;
 
-        let state: tauri::State<'_, crate::provider_runtime::ProviderRuntimeState> = self.app.state();
+        let state: tauri::State<'_, crate::provider_runtime::ProviderRuntimeState> =
+            self.app.state();
         let config = state.ensure_started(&self.app).await?;
         let (mut socket, _response) = connect_async(config.ws_base_url.clone())
             .await

@@ -83,7 +83,6 @@ impl<R: Runtime> PolymarketWebSocket<R> {
 
         // Spawn message listener task
         let app = self.app.clone();
-        let subscriptions = self.subscriptions.clone();
 
         tokio::spawn(async move {
             while let Some(msg) = read.next().await {

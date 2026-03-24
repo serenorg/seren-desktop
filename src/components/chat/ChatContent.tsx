@@ -202,6 +202,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [showDepositFromError, setShowDepositFromError] = createSignal(false);
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [isAttaching, setIsAttaching] = createSignal(false);
+  const privateChatLocked = () =>
+    authStore.privateChatPolicy?.force_private_model ||
+    authStore.privateChatPolicy?.hide_model_picker;
   const { isDragging } = createDragDrop((files) =>
     setAttachedImages((prev) => [...prev, ...files]),
   );
@@ -1570,9 +1573,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             </Show>
             <div class="flex justify-between items-center">
               <div class="flex items-center gap-3">
-                <ModelSelector />
-                <ToolsetSelector />
-                <ReasoningEffortSelector />
+                <Show when={!privateChatLocked()}>
+                  <ModelSelector />
+                  <ToolsetSelector />
+                  <ReasoningEffortSelector />
+                </Show>
                 <Show when={conversationStore.isLoading}>
                   <ThinkingStatus />
                 </Show>

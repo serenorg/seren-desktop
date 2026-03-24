@@ -1,7 +1,6 @@
 // ABOUTME: CLI installer commands for auto-installing Claude Code and Codex CLIs
 // ABOUTME: Detects missing CLIs and downloads/installs them automatically
 
-use std::path::PathBuf;
 use std::process::Command;
 use tauri::{AppHandle, Emitter};
 

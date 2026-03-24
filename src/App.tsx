@@ -57,8 +57,12 @@ function App() {
   let destroyOpenclawStoreFn: (() => void) | null = null;
 
   onMount(async () => {
+    await initAuthRuntimeBindings();
+    await checkAuth();
+
     if (
       runtime.capabilities.agents &&
+      !authStore.privateChatPolicy?.disable_local_agents &&
       (runtime.mode === "browser-local" || runtime.mode === "desktop-native")
     ) {
       try {
@@ -70,9 +74,6 @@ function App() {
         );
       }
     }
-
-    await initAuthRuntimeBindings();
-    await checkAuth();
 
     if (runtime.capabilities.updater) {
       const { updaterStore } = await import("@/stores/updater.store");
@@ -111,7 +112,9 @@ function App() {
 
     // Detect available agents (Claude, Codex)
     if (runtime.capabilities.agents) {
-      await agentStore.initialize();
+      if (!authStore.privateChatPolicy?.disable_local_agents) {
+        await agentStore.initialize();
+      }
     }
 
     // Load skills and threads after auth check completes
@@ -134,6 +137,7 @@ function App() {
     destroyOpenclawStoreFn?.();
     if (
       runtime.capabilities.agents &&
+      !authStore.privateChatPolicy?.disable_local_agents &&
       (runtime.mode === "browser-local" || runtime.mode === "desktop-native")
     ) {
       disconnectLocalProviderRuntime();

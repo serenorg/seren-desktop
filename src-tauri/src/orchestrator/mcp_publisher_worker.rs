@@ -293,6 +293,7 @@ impl Worker for McpPublisherWorker {
 
     async fn execute(
         &self,
+        _conversation_id: &str,
         prompt: &str,
         conversation_context: &[serde_json::Value],
         routing: &RoutingDecision,

@@ -3,6 +3,7 @@
 
 pub mod chat_model_worker;
 pub mod classifier;
+pub mod cloud_agent_worker;
 pub mod decomposer;
 pub mod eval;
 pub mod mcp_publisher_worker;

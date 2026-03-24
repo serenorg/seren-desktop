@@ -40,7 +40,10 @@ impl ProviderRuntimeState {
         }
     }
 
-    pub(crate) async fn ensure_started(&self, app: &AppHandle) -> Result<ProviderRuntimeConfig, String> {
+    pub(crate) async fn ensure_started(
+        &self,
+        app: &AppHandle,
+    ) -> Result<ProviderRuntimeConfig, String> {
         let mut guard = self.process.lock().await;
 
         if let Some(process) = guard.as_mut() {
@@ -217,8 +220,8 @@ fn resolve_node_binary(app: &AppHandle) -> PathBuf {
 }
 
 fn find_provider_runtime_mjs() -> Result<PathBuf, String> {
-    let exe_path =
-        std::env::current_exe().map_err(|err| format!("Failed to get current exe path: {}", err))?;
+    let exe_path = std::env::current_exe()
+        .map_err(|err| format!("Failed to get current exe path: {}", err))?;
     let exe_dir = exe_path
         .parent()
         .ok_or_else(|| "Failed to get exe directory".to_string())?;
@@ -323,7 +326,7 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                 match guard.as_mut() {
                     None => break, // Process was intentionally stopped
                     Some(proc) => match proc.child.try_wait() {
-                        Ok(None) => false,     // Still running
+                        Ok(None) => false, // Still running
                         Ok(Some(status)) => {
                             log::warn!("[ProviderRuntime] Process exited unexpectedly: {}", status);
                             *guard = None;
@@ -363,7 +366,6 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                     Ok(_) => {
                         log::info!("[ProviderRuntime] Restarted successfully");
                         let _ = app.emit("provider-runtime://restarted", serde_json::json!({}));
-                        restart_attempts = 0;
                         return; // ensure_started spawns a new monitor
                     }
                     Err(err) => {
@@ -384,9 +386,7 @@ pub async fn provider_runtime_get_config(
 }
 
 #[tauri::command]
-pub async fn provider_runtime_stop(
-    state: State<'_, ProviderRuntimeState>,
-) -> Result<(), String> {
+pub async fn provider_runtime_stop(state: State<'_, ProviderRuntimeState>) -> Result<(), String> {
     if let Some(handle) = state.monitor_handle.lock().await.take() {
         handle.abort();
     }

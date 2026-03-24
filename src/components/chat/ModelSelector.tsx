@@ -17,10 +17,18 @@ import {
   type ProviderId,
 } from "@/lib/providers";
 import { type Model, modelsService } from "@/services/models";
+import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 
 export const ModelSelector: Component = () => {
+  if (
+    authStore.privateChatPolicy?.hide_model_picker ||
+    authStore.privateChatPolicy?.force_private_model
+  ) {
+    return null;
+  }
+
   const [isOpen, setIsOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [openRouterModels, setOpenRouterModels] = createSignal<Model[]>([]);

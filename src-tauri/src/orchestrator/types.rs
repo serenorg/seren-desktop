@@ -110,6 +110,7 @@ pub struct RoutingDecision {
 #[serde(rename_all = "snake_case")]
 pub enum WorkerType {
     ChatModel,
+    CloudAgent,
     LocalAgent,
     McpPublisher,
 }
@@ -141,6 +142,12 @@ pub struct UserCapabilities {
     /// The model the user explicitly selected in the UI.
     #[serde(default)]
     pub selected_model: Option<String>,
+    /// When true, all chat must route through the organization's private cloud agent.
+    #[serde(default)]
+    pub force_private_chat: bool,
+    /// Deployment ID for the organization's private chat backend.
+    #[serde(default)]
+    pub private_chat_deployment_id: Option<String>,
     pub available_models: Vec<String>,
     pub available_tools: Vec<String>,
     /// Full OpenAI-format tool definitions from the frontend.
@@ -370,6 +377,9 @@ mod tests {
         let json = serde_json::to_value(WorkerType::ChatModel).unwrap();
         assert_eq!(json, "chat_model");
 
+        let json = serde_json::to_value(WorkerType::CloudAgent).unwrap();
+        assert_eq!(json, "cloud_agent");
+
         let json = serde_json::to_value(WorkerType::LocalAgent).unwrap();
         assert_eq!(json, "local_agent");
 
@@ -405,6 +415,8 @@ mod tests {
         let json = r#"{
             "has_local_agent": true,
             "agent_type": "claude-code",
+            "force_private_chat": true,
+            "private_chat_deployment_id": "dep_123",
             "available_models": ["anthropic/claude-opus-4-6", "anthropic/claude-sonnet-4"],
             "available_tools": ["firecrawl", "run_sql"],
             "installed_skills": [{
@@ -419,6 +431,8 @@ mod tests {
         let caps: UserCapabilities = serde_json::from_str(json).unwrap();
         assert!(caps.has_local_agent);
         assert_eq!(caps.agent_type, Some("claude-code".to_string()));
+        assert!(caps.force_private_chat);
+        assert_eq!(caps.private_chat_deployment_id, Some("dep_123".to_string()));
         assert_eq!(caps.available_models.len(), 2);
         assert_eq!(caps.available_tools.len(), 2);
         assert_eq!(caps.installed_skills.len(), 1);

@@ -10,6 +10,7 @@ import {
   Show,
 } from "solid-js";
 import { agentStore } from "@/stores/agent.store";
+import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -166,34 +167,36 @@ export const ThreadTabBar: Component = () => {
               <span class="text-[13px] w-[18px] text-center">💬</span>
               Chat
             </button>
-            <button
-              type="button"
-              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
-              onClick={() => handleNewAgent("claude-code")}
-              disabled={!fileTreeState.rootPath}
-              title={
-                !fileTreeState.rootPath
-                  ? "Open a folder first to use agents"
-                  : undefined
-              }
-            >
-              <span class="text-[13px] w-[18px] text-center">🤖</span>
-              Claude Agent
-            </button>
-            <button
-              type="button"
-              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
-              onClick={() => handleNewAgent("codex")}
-              disabled={!fileTreeState.rootPath}
-              title={
-                !fileTreeState.rootPath
-                  ? "Open a folder first to use agents"
-                  : undefined
-              }
-            >
-              <span class="text-[13px] w-[18px] text-center">⚡</span>
-              Codex Agent
-            </button>
+            <Show when={!authStore.privateChatPolicy?.disable_local_agents}>
+              <button
+                type="button"
+                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={() => handleNewAgent("claude-code")}
+                disabled={!fileTreeState.rootPath}
+                title={
+                  !fileTreeState.rootPath
+                    ? "Open a folder first to use agents"
+                    : undefined
+                }
+              >
+                <span class="text-[13px] w-[18px] text-center">🤖</span>
+                Claude Agent
+              </button>
+              <button
+                type="button"
+                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={() => handleNewAgent("codex")}
+                disabled={!fileTreeState.rootPath}
+                title={
+                  !fileTreeState.rootPath
+                    ? "Open a folder first to use agents"
+                    : undefined
+                }
+              >
+                <span class="text-[13px] w-[18px] text-center">⚡</span>
+                Codex Agent
+              </button>
+            </Show>
           </div>
         </Show>
       </div>
