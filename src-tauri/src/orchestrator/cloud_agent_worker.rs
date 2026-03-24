@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
+use tokio::time;
 use uuid::Uuid;
 
 use crate::auth::authenticated_request;
@@ -17,10 +18,12 @@ use super::worker::Worker;
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const CONNECT_TIMEOUT_SECS: u64 = 30;
-/// Maximum time to wait for any chunk of data from the stream before giving up.
-/// Cloud agent runs are expected to complete within 10 minutes; this gives headroom
-/// while still bounding hangs from dead connections.
+/// Maximum time to wait between chunks from the SSE stream before giving up.
+/// Applied per-chunk (not as a total request timeout) so long-running agent runs
+/// are not killed at a fixed wall-clock deadline.
 const READ_TIMEOUT_SECS: u64 = 600;
+/// Timeout for the run creation POST request (non-streaming, should return quickly).
+const CREATE_RUN_TIMEOUT_SECS: u64 = 60;
 const RUN_STREAM_ACCEPT: &str = "text/event-stream";
 
 #[derive(Debug, Deserialize)]
@@ -121,14 +124,18 @@ pub struct CloudAgentWorker {
 
 impl CloudAgentWorker {
     pub fn new(deployment_id: impl Into<String>) -> Result<Self, String> {
+        let deployment_id = deployment_id.into();
+        if deployment_id.trim().is_empty() {
+            return Err("Organization private chat deployment is not configured".to_string());
+        }
+
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
-            .timeout(Duration::from_secs(READ_TIMEOUT_SECS))
             .build()
             .map_err(|error| format!("Failed to build HTTP client: {}", error))?;
         Ok(Self {
             client,
-            deployment_id: deployment_id.into(),
+            deployment_id,
             cancelled: Arc::new(Mutex::new(false)),
         })
     }
@@ -165,6 +172,7 @@ impl CloudAgentWorker {
                 .post(&url)
                 .bearer_auth(token)
                 .header("Content-Type", "application/json")
+                .timeout(Duration::from_secs(CREATE_RUN_TIMEOUT_SECS))
                 .body(body.clone())
         })
         .await?;
@@ -398,10 +406,18 @@ impl CloudAgentWorker {
         let mut buffer = String::new();
         let mut state = StreamState::new();
 
-        while let Some(chunk) = stream.next().await {
+        loop {
             if *self.cancelled.lock().await {
                 return Ok(());
             }
+
+            let next_chunk = time::timeout(Duration::from_secs(READ_TIMEOUT_SECS), stream.next())
+                .await
+                .map_err(|_| "Timed out waiting for cloud agent run updates".to_string())?;
+
+            let Some(chunk) = next_chunk else {
+                break;
+            };
 
             let chunk = chunk.map_err(|error| format!("Cloud stream read error: {}", error))?;
             buffer.push_str(&String::from_utf8_lossy(&chunk));

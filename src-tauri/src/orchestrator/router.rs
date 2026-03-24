@@ -75,7 +75,11 @@ fn select_worker_type(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
 ) -> WorkerType {
-    if capabilities.force_private_chat && capabilities.private_chat_deployment_id.is_some() {
+    if capabilities.force_private_chat
+        && capabilities
+            .configured_private_chat_deployment_id()
+            .is_some()
+    {
         return WorkerType::CloudAgent;
     }
 
@@ -208,7 +212,11 @@ fn extract_publisher_slug(
 /// 2. Thompson sampling rankings (satisfaction-driven, computed by service layer)
 /// 3. Hardcoded preference lists (cold start fallback)
 fn select_model(classification: &TaskClassification, capabilities: &UserCapabilities) -> String {
-    if capabilities.force_private_chat && capabilities.private_chat_deployment_id.is_some() {
+    if capabilities.force_private_chat
+        && capabilities
+            .configured_private_chat_deployment_id()
+            .is_some()
+    {
         return "organization/private-agent".to_string();
     }
 
@@ -603,6 +611,17 @@ mod tests {
         capabilities.private_chat_deployment_id = Some("deployment_123".to_string());
         let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::CloudAgent);
+    }
+
+    #[test]
+    fn blank_private_org_deployment_id_does_not_route_to_cloud_agent() {
+        let classification = make_classification("general_chat", false, false);
+        let mut capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &[]);
+        capabilities.force_private_chat = true;
+        capabilities.private_chat_deployment_id = Some("   ".to_string());
+        let decision = route(&classification, &capabilities, "test query");
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
     }
 
     #[test]

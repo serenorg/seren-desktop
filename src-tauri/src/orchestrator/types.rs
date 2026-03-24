@@ -165,6 +165,16 @@ pub struct UserCapabilities {
     pub reasoning_effort: Option<String>,
 }
 
+impl UserCapabilities {
+    /// Returns the configured private-chat deployment ID when present and non-empty.
+    pub fn configured_private_chat_deployment_id(&self) -> Option<&str> {
+        self.private_chat_deployment_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|deployment_id| !deployment_id.is_empty())
+    }
+}
+
 /// Transition event emitted when the orchestrator switches models.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransitionEvent {
@@ -440,5 +450,48 @@ mod tests {
         // Optional fields default when not in JSON (frontend compat)
         assert!(caps.active_agent_session_id.is_none());
         assert!(caps.model_rankings.is_empty());
+    }
+
+    #[test]
+    fn configured_private_chat_deployment_id_trims_whitespace() {
+        let caps = UserCapabilities {
+            has_local_agent: false,
+            agent_type: None,
+            active_agent_session_id: None,
+            selected_model: None,
+            force_private_chat: true,
+            private_chat_deployment_id: Some("  dep_123  ".to_string()),
+            available_models: vec![],
+            available_tools: vec![],
+            tool_definitions: vec![],
+            installed_skills: vec![],
+            model_rankings: vec![],
+            reasoning_effort: None,
+        };
+
+        assert_eq!(
+            caps.configured_private_chat_deployment_id(),
+            Some("dep_123")
+        );
+    }
+
+    #[test]
+    fn configured_private_chat_deployment_id_rejects_blank_values() {
+        let caps = UserCapabilities {
+            has_local_agent: false,
+            agent_type: None,
+            active_agent_session_id: None,
+            selected_model: None,
+            force_private_chat: true,
+            private_chat_deployment_id: Some("   ".to_string()),
+            available_models: vec![],
+            available_tools: vec![],
+            tool_definitions: vec![],
+            installed_skills: vec![],
+            model_rankings: vec![],
+            reasoning_effort: None,
+        };
+
+        assert_eq!(caps.configured_private_chat_deployment_id(), None);
     }
 }
