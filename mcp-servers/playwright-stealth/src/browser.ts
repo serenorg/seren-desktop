@@ -245,6 +245,21 @@ export async function setBrowser(
   };
 }
 
+/**
+ * Creates a StealthPlugin with evasions safe for packaged macOS apps.
+ * The `chrome.app` evasion module lives in a directory named "chrome.app".
+ * macOS notarization rejects unsigned .app bundles, so our signing script
+ * (scripts/sign-embedded-runtime.ts) removes all fake .app directories
+ * inside node_modules.  Disabling this single evasion avoids the missing
+ * dependency error at runtime while keeping all other stealth evasions
+ * intact.  See: https://github.com/serenorg/seren-desktop/issues/1276
+ */
+export function createSafeStealthPlugin(): ReturnType<typeof StealthPlugin> {
+  const stealth = StealthPlugin();
+  stealth.enabledEvasions.delete("chrome.app");
+  return stealth;
+}
+
 export async function getBrowser(): Promise<Browser> {
   if (!browser) {
     const engine = resolveBrowserName(activeBrowserName);
@@ -252,7 +267,7 @@ export async function getBrowser(): Promise<Browser> {
 
     if (isChromiumBased(engine) && !stealthApplied) {
       (chromium as BrowserType & { use(plugin: unknown): void }).use(
-        StealthPlugin(),
+        createSafeStealthPlugin(),
       );
       stealthApplied = true;
     }
