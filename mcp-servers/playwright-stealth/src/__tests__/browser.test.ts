@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  createSafeStealthPlugin,
   detectDefaultBrowser,
   isChromiumBased,
   listInstalledBrowsers,
@@ -154,6 +155,23 @@ describe("resolveBrowserName", () => {
 
   it("defaults unknown names to 'chromium'", () => {
     expect(resolveBrowserName("msedge-canary")).toBe("chromium");
+  });
+});
+
+describe("createSafeStealthPlugin", () => {
+  it("excludes chrome.app evasion for macOS notarization compatibility", () => {
+    const plugin = createSafeStealthPlugin();
+    expect(plugin.enabledEvasions.has("chrome.app")).toBe(false);
+  });
+
+  it("keeps other stealth evasions enabled", () => {
+    const plugin = createSafeStealthPlugin();
+    // These core evasions must remain active for bot detection bypass
+    expect(plugin.enabledEvasions.has("chrome.csi")).toBe(true);
+    expect(plugin.enabledEvasions.has("chrome.loadTimes")).toBe(true);
+    expect(plugin.enabledEvasions.has("chrome.runtime")).toBe(true);
+    expect(plugin.enabledEvasions.has("navigator.webdriver")).toBe(true);
+    expect(plugin.enabledEvasions.size).toBeGreaterThan(5);
   });
 });
 
