@@ -210,4 +210,15 @@ describe("listInstalledBrowsers", () => {
       expect(b.isChromiumBased).toBe(b.browserName === "chromium");
     }
   });
+
+  it("default browser has a valid executablePath in the registry", () => {
+    const browsers = listInstalledBrowsers();
+    const defaultName = detectDefaultBrowser();
+    const match = browsers.find((b) => b.name === defaultName);
+    // The default browser must exist in the registry with a real path —
+    // getBrowser() uses this path to launch directly via executablePath
+    // instead of channel, which avoids Playwright plugin dependencies.
+    expect(match).toBeDefined();
+    expect(match!.executablePath).toBeTruthy();
+  });
 });
