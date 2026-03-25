@@ -3,6 +3,7 @@
 
 import {
   type Component,
+  createMemo,
   createSignal,
   For,
   onCleanup,
@@ -17,6 +18,14 @@ import { type Thread, threadStore } from "@/stores/thread.store";
 export const ThreadTabBar: Component = () => {
   const [showNewMenu, setShowNewMenu] = createSignal(false);
   let menuRef: HTMLDivElement | undefined;
+  const isPrivateOrgChat = createMemo(
+    () =>
+      authStore.privateChatPolicy?.mode === "private_org_agent" &&
+      !!authStore.privateChatPolicy?.deployment_id,
+  );
+  const primaryChatLauncherLabel = createMemo(() =>
+    isPrivateOrgChat() ? "Seren Agent (Private)" : "Seren Agent",
+  );
 
   // Close dropdown on click-outside
   const handleClickOutside = (e: MouseEvent) => {
@@ -165,7 +174,7 @@ export const ThreadTabBar: Component = () => {
               onClick={handleNewChat}
             >
               <span class="text-[13px] w-[18px] text-center">💬</span>
-              Chat
+              {primaryChatLauncherLabel()}
             </button>
             <Show when={!authStore.privateChatPolicy?.disable_local_agents}>
               <button

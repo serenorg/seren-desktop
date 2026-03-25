@@ -43,6 +43,19 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     if (!root) return null;
     return root.split("/").pop() || root;
   };
+  const isPrivateOrgChat = createMemo(
+    () =>
+      authStore.privateChatPolicy?.mode === "private_org_agent" &&
+      !!authStore.privateChatPolicy?.deployment_id,
+  );
+  const primaryChatLauncherLabel = createMemo(() =>
+    isPrivateOrgChat() ? "Seren Agent (Private)" : "Seren Agent",
+  );
+  const primaryChatLauncherDescription = createMemo(() =>
+    isPrivateOrgChat()
+      ? "Organization-managed private backend"
+      : "Seren models chat",
+  );
 
   const handleClickOutside = (e: MouseEvent) => {
     if (
@@ -360,14 +373,19 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
         <Show when={showLauncher()}>
           <div class="absolute top-[calc(100%+4px)] left-3 right-3 bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] overflow-hidden py-1">
-            {/* Seren Agent (Chat) */}
+            {/* Primary Seren chat path */}
             <button
               type="button"
               class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
               onClick={handleNewChat}
             >
               <span class="text-[14px]">{"\u{1F4AC}"}</span>
-              <span class="font-medium">Seren Agent</span>
+              <div class="min-w-0">
+                <div class="font-medium">{primaryChatLauncherLabel()}</div>
+                <div class="text-[11px] text-muted-foreground">
+                  {primaryChatLauncherDescription()}
+                </div>
+              </div>
             </button>
 
             {/* Claude Agent */}
