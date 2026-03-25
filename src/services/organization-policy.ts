@@ -25,6 +25,7 @@ export interface OrganizationPrivateChatPolicy {
   organization_id: string;
   mode: OrganizationPrivateChatMode;
   deployment_id: string | null;
+  deployment_name?: string | null;
   force_private_model: boolean;
   disable_seren_models: boolean;
   disable_local_agents: boolean;

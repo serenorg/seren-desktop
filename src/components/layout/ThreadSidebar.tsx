@@ -48,12 +48,16 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       authStore.privateChatPolicy?.mode === "private_org_agent" &&
       !!authStore.privateChatPolicy?.deployment_id,
   );
+  const privateOrgDeploymentName = createMemo(() => {
+    const name = authStore.privateChatPolicy?.deployment_name?.trim();
+    return name ? name : null;
+  });
   const primaryChatLauncherLabel = createMemo(() =>
     isPrivateOrgChat() ? "Seren Agent (Private)" : "Seren Agent",
   );
   const primaryChatLauncherDescription = createMemo(() =>
     isPrivateOrgChat()
-      ? "Organization-managed private backend"
+      ? privateOrgDeploymentName() || "Organization-managed private backend"
       : "Seren models chat",
   );
 

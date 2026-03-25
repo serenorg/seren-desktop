@@ -23,6 +23,10 @@ export const ThreadTabBar: Component = () => {
       authStore.privateChatPolicy?.mode === "private_org_agent" &&
       !!authStore.privateChatPolicy?.deployment_id,
   );
+  const privateOrgDeploymentName = createMemo(() => {
+    const name = authStore.privateChatPolicy?.deployment_name?.trim();
+    return name ? name : null;
+  });
   const primaryChatLauncherLabel = createMemo(() =>
     isPrivateOrgChat() ? "Seren Agent (Private)" : "Seren Agent",
   );
@@ -170,11 +174,19 @@ export const ThreadTabBar: Component = () => {
           <div class="absolute top-full right-0 min-w-[160px] bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
             <button
               type="button"
-              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
+              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
               onClick={handleNewChat}
             >
               <span class="text-[13px] w-[18px] text-center">💬</span>
-              {primaryChatLauncherLabel()}
+              <div class="min-w-0">
+                <div class="font-medium">{primaryChatLauncherLabel()}</div>
+                <Show when={isPrivateOrgChat()}>
+                  <div class="text-[11px] text-muted-foreground truncate">
+                    {privateOrgDeploymentName() ||
+                      "Organization-managed private backend"}
+                  </div>
+                </Show>
+              </div>
             </button>
             <Show when={!authStore.privateChatPolicy?.disable_local_agents}>
               <button
