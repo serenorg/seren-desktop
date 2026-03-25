@@ -2751,6 +2751,13 @@ Summary:`;
           }
         }
 
+        // A successful prompt completion proves the session is healthy.
+        // Clear any stale error (e.g. auth-expired banner after re-login).
+        if (!isHistoryReplay && state.sessions[sessionId]?.error) {
+          setState("sessions", sessionId, "error", null);
+          setState("error", null);
+        }
+
         // Transition status back to "ready" so queued messages can be processed
         setState(
           "sessions",
