@@ -686,9 +686,11 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
       ? (agentStore.activeSessionId ?? null)
       : null,
     selected_model:
-      forcePrivateChat || providerStore.activeModel === AUTO_MODEL_ID
-        ? null
-        : providerStore.activeModel,
+      forcePrivateChat
+        ? (privateChatPolicy?.model_id ?? null)
+        : providerStore.activeModel === AUTO_MODEL_ID
+          ? null
+          : providerStore.activeModel,
     force_private_chat: forcePrivateChat,
     private_chat_deployment_id: privateChatPolicy?.deployment_id ?? null,
     available_models: forcePrivateChat ? [] : activeModels.map((m) => m.id),

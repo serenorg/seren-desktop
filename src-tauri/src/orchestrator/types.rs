@@ -98,7 +98,8 @@ pub struct RoutingDecision {
     pub delegation: DelegationType,
     pub reason: String,
     pub selected_skills: Vec<SkillRef>,
-    /// Publisher slug for McpPublisher worker (e.g. "firecrawl-serenai").
+    /// Publisher slug for publisher-backed workers (for example "firecrawl-serenai"
+    /// for MCP publisher routing or "seren-private-models" for private chat).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publisher_slug: Option<String>,
     /// Reasoning effort level forwarded from the frontend.

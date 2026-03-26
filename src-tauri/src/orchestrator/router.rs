@@ -6,6 +6,8 @@ use super::types::{
     UserCapabilities, WorkerType,
 };
 
+const PRIVATE_MODELS_PUBLISHER_SLUG: &str = "seren-private-models";
+
 /// Preferred models for code tasks (ordered by capability).
 const CODE_PREFERRED_MODELS: &[&str] = &["anthropic/claude-opus-4-6", "openai/gpt-5.3"];
 
@@ -80,7 +82,7 @@ fn select_worker_type(
             .configured_private_chat_deployment_id()
             .is_some()
     {
-        return WorkerType::CloudAgent;
+        return WorkerType::ChatModel;
     }
 
     // Code generation with file system access + active local agent session → LocalAgent
@@ -200,7 +202,11 @@ fn extract_publisher_slug(
     query: &str,
 ) -> Option<String> {
     if *worker_type != WorkerType::McpPublisher {
-        return None;
+        return if *worker_type == WorkerType::ChatModel && capabilities.force_private_chat {
+            Some(PRIVATE_MODELS_PUBLISHER_SLUG.to_string())
+        } else {
+            None
+        };
     }
     extract_gateway_slug(capabilities, query)
 }
@@ -217,7 +223,12 @@ fn select_model(classification: &TaskClassification, capabilities: &UserCapabili
             .configured_private_chat_deployment_id()
             .is_some()
     {
-        return "organization/private-agent".to_string();
+        return capabilities
+            .selected_model
+            .as_ref()
+            .filter(|selected| !selected.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| "organization/private-model".to_string());
     }
 
     // 1. Respect the user's explicit model selection
@@ -299,6 +310,9 @@ fn build_reason(
             format!("Working with agent on {}", task_desc)
         }
         WorkerType::ChatModel => {
+            if model_id == "organization/private-model" {
+                return "Working with your organization's private models".to_string();
+            }
             format!("Working with {} on {}", model_name, task_desc)
         }
         WorkerType::McpPublisher => {
@@ -320,6 +334,9 @@ fn humanize_model_id(model_id: &str) -> &str {
         "openai/gpt-4o-mini" => "GPT-4o Mini",
         "anthropic/claude-opus-4.6" => "Claude Opus 4.6",
         "anthropic/claude-sonnet-4.6" => "Claude Sonnet 4.6",
+        "us.anthropic.claude-opus-4-6-v1" => "Claude Opus 4.6",
+        "us.anthropic.claude-sonnet-4-6" => "Claude Sonnet 4.6",
+        "us.anthropic.claude-sonnet-4" => "Claude Sonnet 4",
         "google/gemini-3.1-pro-preview" => "Gemini 3.1 Pro",
         "google/gemini-2.5-pro" => "Gemini Pro",
         "google/gemini-2.5-flash" => "Gemini Flash",
@@ -327,6 +344,7 @@ fn humanize_model_id(model_id: &str) -> &str {
         "moonshot/kimi-k2.5" => "Kimi K2.5",
         "thudm/glm-4.7" => "GLM-4.7",
         "thudm/glm-4" => "GLM-4",
+        "organization/private-model" => "Private Models",
         _ => model_id,
     }
 }
@@ -604,13 +622,16 @@ mod tests {
     }
 
     #[test]
-    fn routes_private_org_policy_to_cloud_agent() {
+    fn routes_private_org_policy_to_private_models_chat() {
         let classification = make_classification("general_chat", false, false);
         let mut capabilities = make_capabilities(false, &["anthropic/claude-sonnet-4"], &[]);
         capabilities.force_private_chat = true;
         capabilities.private_chat_deployment_id = Some("deployment_123".to_string());
+        capabilities.selected_model = Some("us.anthropic.claude-opus-4-6-v1".to_string());
         let decision = route(&classification, &capabilities, "test query");
-        assert_eq!(decision.worker_type, WorkerType::CloudAgent);
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, Some(PRIVATE_MODELS_PUBLISHER_SLUG.to_string()));
+        assert_eq!(decision.model_id, "us.anthropic.claude-opus-4-6-v1");
     }
 
     #[test]

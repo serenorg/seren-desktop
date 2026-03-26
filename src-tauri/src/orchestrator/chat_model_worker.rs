@@ -18,7 +18,7 @@ use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
-const PUBLISHER_SLUG: &str = "seren-models";
+const DEFAULT_PUBLISHER_SLUG: &str = "seren-models";
 
 /// Maximum number of tool execution rounds before forcing completion.
 /// Context window limits and cost naturally cap long sessions.
@@ -123,6 +123,7 @@ pub struct ChatModelWorker {
     client: reqwest::Client,
     /// Cancellation flag shared with the streaming loop.
     cancelled: Arc<Mutex<bool>>,
+    publisher_slug: String,
     /// OpenAI-format tool definitions passed to the LLM for function calling.
     tool_definitions: Vec<serde_json::Value>,
 }
@@ -137,12 +138,13 @@ impl ChatModelWorker {
                 .build()
                 .unwrap_or_default(),
             cancelled: Arc::new(Mutex::new(false)),
+            publisher_slug: DEFAULT_PUBLISHER_SLUG.to_string(),
             tool_definitions: Vec::new(),
         }
     }
 
     /// Create a worker with tool definitions for function calling.
-    pub fn with_tools(tools: Vec<serde_json::Value>) -> Self {
+    pub fn with_tools(tools: Vec<serde_json::Value>, publisher_slug: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -151,6 +153,8 @@ impl ChatModelWorker {
         Self {
             client,
             cancelled: Arc::new(Mutex::new(false)),
+            publisher_slug: publisher_slug
+                .unwrap_or_else(|| DEFAULT_PUBLISHER_SLUG.to_string()),
             tool_definitions: tools,
         }
     }
@@ -1120,7 +1124,7 @@ impl Worker for ChatModelWorker {
 
         let url = format!(
             "{}/publishers/{}/chat/completions",
-            GATEWAY_BASE_URL, PUBLISHER_SLUG
+            GATEWAY_BASE_URL, self.publisher_slug
         );
         let tools = &budgeted_tools;
 
@@ -1903,7 +1907,7 @@ mod tests {
                 "parameters": {"type": "object", "properties": {}}
             }
         })];
-        let worker = ChatModelWorker::with_tools(tools.clone());
+        let worker = ChatModelWorker::with_tools(tools.clone(), None);
         assert_eq!(worker.tool_definitions.len(), 1);
         assert_eq!(worker.tool_definitions[0]["function"]["name"], "read_file");
     }

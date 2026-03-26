@@ -5,6 +5,7 @@ export default defineConfig({
     "./openapi/openapi.json",
     "./openapi/openapi-seren-db.json",
     "./openapi/openapi-seren-cloud.json",
+    "./openapi/openapi-seren-private-models.json",
   ],
   output: [
     {
@@ -17,6 +18,10 @@ export default defineConfig({
     },
     {
       path: "src/api/generated/seren-cloud",
+      format: "prettier",
+    },
+    {
+      path: "src/api/generated/seren-private-models",
       format: "prettier",
     },
   ],

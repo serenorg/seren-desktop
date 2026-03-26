@@ -1107,6 +1107,7 @@ fn create_worker(
     match routing.worker_type {
         WorkerType::ChatModel => Ok(Arc::new(ChatModelWorker::with_tools(
             capabilities.tool_definitions.clone(),
+            routing.publisher_slug.clone(),
         ))),
         WorkerType::CloudAgent => {
             let deployment_id = capabilities
