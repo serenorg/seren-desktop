@@ -18,13 +18,36 @@ import { buildProviderMcpConfig } from "./mcp-config.mjs";
  */
 function resolveClaudeBinary() {
   if (process.platform === "win32") {
+    const home = os.homedir();
     const appData = process.env.APPDATA ?? "";
-    if (appData) {
-      const candidate = path.join(appData, "Claude", "claude.exe");
+    const candidates = [
+      // Native installer (install.ps1) places binary here
+      path.join(home, ".claude", "bin", "claude.exe"),
+      // Legacy/alternate location
+      ...(appData ? [path.join(appData, "Claude", "claude.exe")] : []),
+      // npm global install creates a .cmd wrapper here
+      ...(appData ? [path.join(appData, "npm", "claude.cmd")] : []),
+    ];
+
+    for (const candidate of candidates) {
       if (existsSync(candidate)) {
         return candidate;
       }
     }
+
+    // Try PATH lookup via `where`
+    try {
+      const resolved = execFileSync("where", ["claude"], {
+        encoding: "utf8",
+        timeout: 5_000,
+      }).trim().split(/\r?\n/)[0];
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+      // where failed — fall through to bare command name
+    }
+
     return "claude";
   }
 
@@ -57,15 +80,29 @@ function resolveClaudeBinary() {
 }
 
 /**
- * Build a PATH string that includes well-known Node.js install locations.
- * macOS GUI apps don't inherit the user's shell profile, so node/npm from
- * nvm, fnm, Homebrew, or Volta aren't on PATH. Without this, Claude Code
- * hooks that shell out to `node` fail with "command not found".
+ * Build a PATH string that includes well-known CLI install locations.
+ * GUI apps don't inherit the user's shell profile, so tools installed via
+ * native installers or npm global aren't on PATH. Without this, spawned
+ * processes fail with "command not found" / "not recognized".
  */
 function buildExtendedPath() {
   const sep = process.platform === "win32" ? ";" : ":";
   const base = process.env.PATH ?? "";
-  if (process.platform === "win32") return base;
+
+  if (process.platform === "win32") {
+    const home = os.homedir();
+    const appData = process.env.APPDATA ?? "";
+    const winExtra = [
+      // Claude Code native installer (install.ps1)
+      path.join(home, ".claude", "bin"),
+      // npm global bin directory
+      ...(appData ? [path.join(appData, "npm")] : []),
+    ];
+    const winAdditions = winExtra.filter((p) => p && !base.includes(p));
+    return winAdditions.length > 0
+      ? `${winAdditions.join(sep)}${sep}${base}`
+      : base;
+  }
 
   const home = os.homedir();
   const extra = [

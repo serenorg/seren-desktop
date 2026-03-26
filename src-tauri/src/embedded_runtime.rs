@@ -228,21 +228,21 @@ fn extend_path_with_common_bins(current_path: &str, path_separator: &str) -> Str
         .collect();
 
     // Keep the user's order, but append missing common locations.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    // GUI apps don't source shell profiles so CLI install directories
+    // (e.g., ~/.claude/bin, %APPDATA%\npm) are typically missing from PATH.
     {
         use std::collections::HashSet;
 
         let mut seen: HashSet<String> = entries.iter().cloned().collect();
-
-        // Build common bins list including user-local tool directories.
-        // GUI apps don't source shell profiles so ~/.claude/bin and ~/.local/bin
-        // (where native installers place CLIs) are typically missing from PATH.
-        let home = std::env::var("HOME").unwrap_or_default();
         let mut common_bins: Vec<String> = Vec::new();
 
-        if !home.is_empty() {
-            common_bins.push(format!("{}/.claude/bin", home));
-            common_bins.push(format!("{}/.local/bin", home));
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let home = std::env::var("HOME").unwrap_or_default();
+            if !home.is_empty() {
+                common_bins.push(format!("{}/.claude/bin", home));
+                common_bins.push(format!("{}/.local/bin", home));
+            }
         }
 
         #[cfg(target_os = "macos")]
@@ -266,6 +266,20 @@ fn extend_path_with_common_bins(current_path: &str, path_separator: &str) -> Str
                 "/usr/sbin".to_string(),
                 "/sbin".to_string(),
             ]);
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Claude Code native installer (install.ps1) puts binary here
+            let userprofile = std::env::var("USERPROFILE").unwrap_or_default();
+            if !userprofile.is_empty() {
+                common_bins.push(format!("{}\\.claude\\bin", userprofile));
+            }
+            // npm global installs land here
+            let appdata = std::env::var("APPDATA").unwrap_or_default();
+            if !appdata.is_empty() {
+                common_bins.push(format!("{}\\npm", appdata));
+            }
         }
 
         for bin in common_bins {
