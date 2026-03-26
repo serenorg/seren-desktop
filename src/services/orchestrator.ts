@@ -687,7 +687,13 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
       : null,
     selected_model:
       forcePrivateChat
-        ? (privateChatPolicy?.model_id ?? null)
+        ? (() => {
+            const selected = chatStore.selectedModel?.trim();
+            if (!selected || selected === AUTO_MODEL_ID || selected.includes("/")) {
+              return privateChatPolicy?.model_id ?? null;
+            }
+            return selected;
+          })()
         : providerStore.activeModel === AUTO_MODEL_ID
           ? null
           : providerStore.activeModel,
