@@ -223,7 +223,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 when={!authStore.privateChatPolicy?.hide_model_picker}
                 fallback={
                   <div class="px-3 py-2 text-[0.85rem] text-muted-foreground bg-surface-3/60 border border-border-strong rounded-md">
-                    Organization-managed private backend
+                    Organization-managed private models
                   </div>
                 }
               >

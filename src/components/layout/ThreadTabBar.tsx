@@ -23,10 +23,6 @@ export const ThreadTabBar: Component = () => {
       authStore.privateChatPolicy?.mode === "private_org_agent" &&
       !!authStore.privateChatPolicy?.deployment_id,
   );
-  const privateOrgDeploymentName = createMemo(() => {
-    const name = authStore.privateChatPolicy?.deployment_name?.trim();
-    return name ? name : null;
-  });
   const primaryChatLauncherLabel = createMemo(() =>
     isPrivateOrgChat() ? "Seren Agent (Private)" : "Seren Agent",
   );
@@ -178,15 +174,7 @@ export const ThreadTabBar: Component = () => {
               onClick={handleNewChat}
             >
               <span class="text-[13px] w-[18px] text-center">💬</span>
-              <div class="min-w-0">
-                <div class="font-medium">{primaryChatLauncherLabel()}</div>
-                <Show when={isPrivateOrgChat()}>
-                  <div class="text-[11px] text-muted-foreground truncate">
-                    {privateOrgDeploymentName() ||
-                      "Organization-managed private backend"}
-                  </div>
-                </Show>
-              </div>
+              <div class="font-medium">{primaryChatLauncherLabel()}</div>
             </button>
             <Show when={!authStore.privateChatPolicy?.disable_local_agents}>
               <button

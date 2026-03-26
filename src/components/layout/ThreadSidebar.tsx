@@ -48,17 +48,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       authStore.privateChatPolicy?.mode === "private_org_agent" &&
       !!authStore.privateChatPolicy?.deployment_id,
   );
-  const privateOrgDeploymentName = createMemo(() => {
-    const name = authStore.privateChatPolicy?.deployment_name?.trim();
-    return name ? name : null;
-  });
   const primaryChatLauncherLabel = createMemo(() =>
     isPrivateOrgChat() ? "Seren Agent (Private)" : "Seren Agent",
   );
   const primaryChatLauncherDescription = createMemo(() =>
-    isPrivateOrgChat()
-      ? privateOrgDeploymentName() || "Organization-managed private backend"
-      : "Seren models chat",
+    isPrivateOrgChat() ? null : "Seren models chat",
   );
 
   const handleClickOutside = (e: MouseEvent) => {
@@ -386,9 +380,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               <span class="text-[14px]">{"\u{1F4AC}"}</span>
               <div class="min-w-0">
                 <div class="font-medium">{primaryChatLauncherLabel()}</div>
-                <div class="text-[11px] text-muted-foreground">
-                  {primaryChatLauncherDescription()}
-                </div>
+                <Show when={primaryChatLauncherDescription()}>
+                  <div class="text-[11px] text-muted-foreground">
+                    {primaryChatLauncherDescription()}
+                  </div>
+                </Show>
               </div>
             </button>
 
