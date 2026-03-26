@@ -737,6 +737,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     const drainSessionId = threadSessionId();
     if (!drainThreadId || !drainSessionId || !isReady()) return;
 
+    // Don't process queued messages while compaction is in progress —
+    // the session will be terminated and re-spawned, so any sendPrompt
+    // call would fail with "Session terminated" and the message would be
+    // lost. The isReady effect will re-trigger once the new session is up.
+    if (threadSession()?.isCompacting) return;
+
     // Read from the thread-specific Map, NOT the reactive messageQueue()
     // signal. During a thread switch the isReady effect can fire before the
     // thread-switch effect clears messageQueue(), making the signal stale.
@@ -764,7 +770,26 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         drainSessionId,
       );
     } catch (error) {
-      console.error("[AgentChat] Queued message failed:", error);
+      // If the session was terminated (e.g. by compaction), re-queue the
+      // message at the front so it survives the session transition and
+      // gets delivered once the new session is ready.
+      const msg = error instanceof Error ? error.message : String(error);
+      if (
+        msg.includes("Session terminated") ||
+        msg.includes("not found") ||
+        msg.includes("Worker thread dropped")
+      ) {
+        console.warn(
+          "[AgentChat] Re-queuing message after session termination:",
+          nextMessage,
+        );
+        const currentQueue = threadQueues.get(drainThreadId) ?? [];
+        const restored = [nextMessage, ...currentQueue];
+        threadQueues.set(drainThreadId, restored);
+        setMessageQueue(restored);
+      } else {
+        console.error("[AgentChat] Queued message failed:", error);
+      }
     }
 
     queueDraining = false;
@@ -781,12 +806,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // Check threadQueues Map (not the reactive signal) to avoid reading stale
   // messageQueue() values during a thread switch — the root cause of
   // cross-thread message pollution.
+  // Also guard against compaction: the session briefly reports "ready" during
+  // the compaction flow before being terminated — processing queued messages
+  // in that window causes "Session terminated" errors and message loss.
   createEffect(
     on(
       isReady,
       (ready) => {
         const threadId = activeAgentThread()?.id;
-        if (ready && threadId && (threadQueues.get(threadId)?.length ?? 0) > 0) {
+        if (
+          ready &&
+          threadId &&
+          !threadSession()?.isCompacting &&
+          (threadQueues.get(threadId)?.length ?? 0) > 0
+        ) {
           processNextQueuedMessage();
         }
       },
