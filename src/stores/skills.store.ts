@@ -22,6 +22,18 @@ const ENABLED_SKILLS_KEY = "seren:enabled_skills";
 const HIDDEN_SKILLS_KEY = "seren:hidden_skills";
 
 /**
+ * Summary returned by refresh() so callers can display user feedback.
+ */
+export interface RefreshSummary {
+  updated: number;
+  alreadyCurrent: number;
+  failed: number;
+}
+
+/** Concurrency guard: in-flight refresh promise so concurrent calls coalesce. */
+let activeRefreshPromise: Promise<RefreshSummary> | null = null;
+
+/**
  * Load enabled skills state from localStorage.
  */
 function loadEnabledState(): Record<string, boolean> {
@@ -626,8 +638,31 @@ export const skillsStore = {
   /**
    * Refresh all skills (available and installed).
    * Pass skipCache=true for user-triggered refreshes that should bypass cache.
+   * Concurrent calls coalesce — the second caller gets the first caller's result.
    */
-  async refresh(skipCache = false): Promise<void> {
+  async refresh(skipCache = false): Promise<RefreshSummary> {
+    if (activeRefreshPromise) {
+      log.info("[SkillsStore] Refresh already in progress, coalescing");
+      return activeRefreshPromise;
+    }
+
+    const promise = this._refreshInner(skipCache);
+    activeRefreshPromise = promise;
+    try {
+      return await promise;
+    } finally {
+      activeRefreshPromise = null;
+    }
+  },
+
+  /** @internal — the actual refresh logic, called only by refresh(). */
+  async _refreshInner(skipCache: boolean): Promise<RefreshSummary> {
+    const summary: RefreshSummary = {
+      updated: 0,
+      alreadyCurrent: 0,
+      failed: 0,
+    };
+
     await Promise.all([
       this.refreshAvailable(skipCache),
       this.refreshInstalled(),
@@ -668,7 +703,10 @@ export const skillsStore = {
         if (status.updateAvailable || status.state === "bootstrap-required") {
           await skills.refreshInstalledSkill(skill);
           autoRefreshed++;
+          summary.updated++;
           log.info("[SkillsStore] Auto-refreshed stale skill:", skill.slug);
+        } else {
+          summary.alreadyCurrent++;
         }
       } catch (err) {
         const is404 = err instanceof Error && err.message.includes(": 404");
@@ -685,6 +723,7 @@ export const skillsStore = {
             skill.slug,
           );
         } else {
+          summary.failed++;
           log.warn(
             "[SkillsStore] Failed to check/refresh skill:",
             skill.slug,
@@ -771,6 +810,8 @@ export const skillsStore = {
     if (renamedDirs > 0) {
       await this.refreshInstalled();
     }
+
+    return summary;
   },
 
   /**

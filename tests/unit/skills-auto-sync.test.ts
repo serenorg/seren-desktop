@@ -1,5 +1,5 @@
 // ABOUTME: Test that refresh() auto-refreshes stale upstream-managed skills.
-// ABOUTME: Verifies the fix for #1155 — skills must not stay stale after startup/periodic refresh.
+// ABOUTME: Verifies concurrency guard (#1289), summary tracking, and the fix for #1155.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -126,5 +126,81 @@ describe("skills auto-sync on refresh (#1155)", () => {
 
     expect(mockSkillsService.inspectSyncStatus).toHaveBeenCalledWith(editedSkill);
     expect(mockSkillsService.refreshInstalledSkill).not.toHaveBeenCalled();
+  });
+});
+
+describe("refresh() concurrency guard and summary (#1289)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("concurrent refresh() calls coalesce into a single execution", async () => {
+    mockSkillsService.fetchAllSkills.mockResolvedValue([]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([]);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+
+    const [r1, r2, r3] = await Promise.all([
+      skillsStore.refresh(true),
+      skillsStore.refresh(true),
+      skillsStore.refresh(true),
+    ]);
+
+    // All three callers get a result
+    expect(r1).toBeDefined();
+    expect(r2).toBeDefined();
+    expect(r3).toBeDefined();
+
+    // But the underlying fetch only ran once
+    expect(mockSkillsService.fetchAllSkills).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns accurate summary counts", async () => {
+    const updatedSkill = {
+      slug: "skill-a",
+      scope: "serenorg" as const,
+      path: "/skills/skill-a",
+      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "aaa", syncedAt: 1, managedFiles: {} },
+    };
+    const currentSkill = {
+      slug: "skill-b",
+      scope: "serenorg" as const,
+      path: "/skills/skill-b",
+      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "bbb", syncedAt: 1, managedFiles: {} },
+    };
+    const failingSkill = {
+      slug: "skill-c",
+      scope: "serenorg" as const,
+      path: "/skills/skill-c",
+      syncState: { upstreamSource: "serenorg/seren-skills", syncedRevision: "ccc", syncedAt: 1, managedFiles: {} },
+    };
+
+    mockSkillsService.fetchAllSkills.mockResolvedValue([]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([updatedSkill, currentSkill, failingSkill]);
+    mockSkillsService.isUpstreamManagedSkill.mockReturnValue(true);
+    mockSkillsService.inspectSyncStatus
+      .mockResolvedValueOnce({ updateAvailable: true, hasLocalChanges: false })
+      .mockResolvedValueOnce({ updateAvailable: false, hasLocalChanges: false, state: "current" })
+      .mockRejectedValueOnce(new Error("Failed to fetch remote revision: 403"));
+    mockSkillsService.refreshInstalledSkill.mockResolvedValue({ installed: updatedSkill, syncStatus: null });
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    const summary = await skillsStore.refresh();
+
+    expect(summary).toEqual({ updated: 1, alreadyCurrent: 1, failed: 1 });
+  });
+
+  it("allows a new refresh after the previous one completes", async () => {
+    mockSkillsService.fetchAllSkills.mockResolvedValue([]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([]);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+
+    await skillsStore.refresh(true);
+    await skillsStore.refresh(true);
+
+    // Two sequential calls should each execute
+    expect(mockSkillsService.fetchAllSkills).toHaveBeenCalledTimes(2);
   });
 });
