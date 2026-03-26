@@ -3,6 +3,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 function launchLoginCommand(command) {
@@ -178,6 +179,42 @@ async function ensureClaudeCodeViaNativeInstaller(emit) {
     message: "Claude Code CLI installed successfully",
   });
 
+  // Re-resolve the binary path after install. The installer adds the binary
+  // to a well-known location that the current process PATH may not include.
+  return resolveInstalledClaudeBinary();
+}
+
+/**
+ * Resolve the installed Claude Code binary path.
+ * GUI apps don't inherit shell PATH updates made by installers, so check
+ * well-known install locations before falling back to bare command name.
+ */
+function resolveInstalledClaudeBinary() {
+  if (process.platform === "win32") {
+    const home = os.homedir();
+    const appData = process.env.APPDATA ?? "";
+    const candidates = [
+      path.join(home, ".claude", "bin", "claude.exe"),
+      ...(appData ? [path.join(appData, "Claude", "claude.exe")] : []),
+      ...(appData ? [path.join(appData, "npm", "claude.cmd")] : []),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  } else {
+    const home = os.homedir();
+    const candidates = [
+      path.join(home, ".claude", "bin", "claude"),
+      path.join(home, ".local", "bin", "claude"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
   return "claude";
 }
 
