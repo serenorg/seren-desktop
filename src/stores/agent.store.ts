@@ -1831,8 +1831,8 @@ Summary:`;
         .join("\n\n");
 
       const seedPrompt = preservedContext
-        ? `Here is a summary of our prior conversation:\n\n${summary}\n\nHere are the most recent messages:\n\n${preservedContext}\n\nThis context was restored after automatic compaction. Do NOT take any action or make any changes. Wait for the user to send their next message before proceeding.`
-        : `Here is a summary of our prior conversation:\n\n${summary}\n\nThis context was restored after automatic compaction. Do NOT take any action or make any changes. Wait for the user to send their next message before proceeding.`;
+        ? `Here is a summary of our prior conversation:\n\n${summary}\n\nHere are the most recent messages:\n\n${preservedContext}\n\nThis context was restored after automatic compaction. Briefly confirm you have this context (1-2 sentences summarizing where we left off), then wait for the user's next message. Do not read files, edit code, or use any tools until the user sends a new message.`
+        : `Here is a summary of our prior conversation:\n\n${summary}\n\nThis context was restored after automatic compaction. Briefly confirm you have this context (1-2 sentences summarizing where we left off), then wait for the user's next message. Do not read files, edit code, or use any tools until the user sends a new message.`;
 
       // Wait for the new session to be ready, then restore settings and seed
       await waitForSessionReady(newSessionId);
