@@ -114,6 +114,30 @@ fn extract_recent_publishers(conversation_context: &[serde_json::Value]) -> Vec<
     publishers
 }
 
+fn summarize_gateway_error(status: reqwest::StatusCode, body_text: &str) -> String {
+    let trimmed = body_text.trim();
+    if trimmed.is_empty() {
+        return format!("Gateway returned HTTP {}", status);
+    }
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if let Some(message) = value
+            .pointer("/error/message")
+            .and_then(|v| v.as_str())
+            .or_else(|| value.get("message").and_then(|v| v.as_str()))
+            .or_else(|| value.get("error").and_then(|v| v.as_str()))
+        {
+            return format!("Gateway returned HTTP {}: {}", status, message);
+        }
+    }
+
+    format!(
+        "Gateway returned HTTP {}: {}",
+        status,
+        &trimmed[..trimmed.len().min(200)]
+    )
+}
+
 // =============================================================================
 // ChatModelWorker
 // =============================================================================
@@ -1188,9 +1212,10 @@ impl Worker for ChatModelWorker {
                     return Ok(());
                 }
                 log::error!("[ChatModelWorker] HTTP {} from Gateway", status);
+                let display_message = summarize_gateway_error(status, &body_text);
                 if let Err(e) = event_tx
                     .send(WorkerEvent::Error {
-                        message: format!("Gateway returned HTTP {}", status),
+                        message: display_message.clone(),
                     })
                     .await
                 {
@@ -1198,11 +1223,7 @@ impl Worker for ChatModelWorker {
                     log::debug!("[ChatModelWorker] Channel closed, cannot send error: {}", e);
                     return Ok(());
                 }
-                return Err(format!(
-                    "Gateway returned HTTP {}: {}",
-                    status,
-                    &body_text[..body_text.len().min(200)]
-                ));
+                return Err(display_message);
             }
 
             // Stream the response
