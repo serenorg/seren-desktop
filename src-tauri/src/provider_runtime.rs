@@ -93,6 +93,12 @@ impl ProviderRuntimeState {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+
         let embedded_path = crate::embedded_runtime::get_embedded_path();
         if !embedded_path.is_empty() {
             command.env("PATH", embedded_path);

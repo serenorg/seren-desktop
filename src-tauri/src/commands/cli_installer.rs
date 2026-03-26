@@ -21,7 +21,14 @@ pub async fn check_cli_installed(tool: CliTool) -> Result<bool, String> {
 
     // Try to run --version command
     let result = if cfg!(target_os = "windows") {
-        Command::new("where").arg(bin_name).output()
+        let mut c = Command::new("where");
+        c.arg(bin_name);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        c.output()
     } else {
         Command::new("which").arg(bin_name).output()
     };
@@ -127,10 +134,14 @@ fn get_codex_install_script() -> String {
 
 /// Install on Windows using PowerShell
 fn install_windows(script: &str) -> Result<bool, String> {
-    let output = Command::new("powershell")
-        .arg("-NoProfile")
-        .arg("-Command")
-        .arg(script)
+    let mut cmd = Command::new("powershell");
+    cmd.arg("-NoProfile").arg("-Command").arg(script);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to execute PowerShell: {}", e))?;
 

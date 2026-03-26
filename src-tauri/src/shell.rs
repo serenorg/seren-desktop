@@ -41,6 +41,12 @@ pub async fn execute_shell_command(
         c
     };
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
     // Prepend embedded runtime to PATH so shell commands can find bundled Node/Git
     // while preserving access to system-installed tools.
     let embedded_path = crate::embedded_runtime::get_embedded_path();
