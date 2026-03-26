@@ -524,32 +524,38 @@ async function fetchRawFilesFromTree(
   if (nodes.length === 0) return [];
 
   const results = await Promise.allSettled(
-    nodes.map(async ({ repoPath, relativePath }): Promise<ExtraFile | null> => {
+    nodes.map(async ({ repoPath, relativePath }): Promise<ExtraFile> => {
       const segments = repoPath.split("/").map((s) => encodeURIComponent(s));
       const rawUrl = `${SKILLS_RAW_URL}/${segments.join("/")}?t=${Date.now()}`;
 
-      try {
-        const resp = await appFetch(rawUrl);
-        if (!resp.ok) {
-          log.warn(
-            "[Skills] Failed to fetch payload file",
-            rawUrl,
-            resp.status,
-          );
-          return null;
-        }
-        const content = await resp.text();
-        return { path: relativePath, content };
-      } catch (error) {
-        log.warn("[Skills] Error fetching payload file", rawUrl, error);
-        return null;
+      const resp = await appFetch(rawUrl);
+      if (!resp.ok) {
+        throw new Error(
+          `Failed to fetch payload file ${relativePath}: HTTP ${resp.status}`,
+        );
       }
+      const content = await resp.text();
+      return { path: relativePath, content };
     }),
   );
 
-  return results
-    .map((r) => (r.status === "fulfilled" ? r.value : null))
-    .filter((f): f is ExtraFile => f !== null);
+  const files: ExtraFile[] = [];
+  const failures: string[] = [];
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      files.push(result.value);
+    } else {
+      failures.push(result.reason?.message ?? String(result.reason));
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      `Failed to fetch ${failures.length}/${nodes.length} payload files: ${failures.join("; ")}`,
+    );
+  }
+
+  return files;
 }
 
 /**
