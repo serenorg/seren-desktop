@@ -405,6 +405,12 @@ pub fn mcp_connect(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
     // Inject the embedded runtime PATH so child processes can find bundled node/git
     let embedded_path = embedded_runtime::get_embedded_path();
     if !embedded_path.is_empty() {

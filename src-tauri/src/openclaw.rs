@@ -317,6 +317,12 @@ pub async fn openclaw_start(app: AppHandle, state: State<'_, OpenClawState>) -> 
         .stderr(std::process::Stdio::null());
     cmd.kill_on_drop(true);
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
     // Add embedded runtime to PATH
     let embedded_path = crate::embedded_runtime::get_embedded_path();
     if !embedded_path.is_empty() {
@@ -800,6 +806,12 @@ async fn query_channels() -> Result<Vec<ChannelInfo>, String> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
 
     if !embedded_path.is_empty() {
         let sep = if cfg!(target_os = "windows") {
@@ -1362,6 +1374,12 @@ pub async fn openclaw_disconnect_channel(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
 
     if !embedded_path.is_empty() {
         let sep = if cfg!(target_os = "windows") {
