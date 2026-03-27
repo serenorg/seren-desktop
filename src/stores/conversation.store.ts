@@ -138,11 +138,18 @@ export const conversationStore = {
     title: string,
     model: string,
     projectRoot?: string,
+    selectedProvider?: ProviderId | null,
   ): Promise<Conversation> {
     const id = crypto.randomUUID();
 
     try {
-      await createConversationDb(id, title, model, undefined, projectRoot);
+      await createConversationDb(
+        id,
+        title,
+        model,
+        selectedProvider ?? undefined,
+        projectRoot,
+      );
     } catch (error) {
       console.warn("Failed to persist conversation", error);
     }
@@ -152,7 +159,7 @@ export const conversationStore = {
       title,
       createdAt: Date.now(),
       selectedModel: model,
-      selectedProvider: null,
+      selectedProvider: selectedProvider ?? null,
       projectRoot: projectRoot ?? null,
       isArchived: false,
     };
@@ -201,6 +208,35 @@ export const conversationStore = {
 
     setState("conversations", (convos) =>
       convos.map((c) => (c.id === id ? { ...c, title } : c)),
+    );
+  },
+
+  async updateConversationSelection(
+    id: string,
+    selectedModel: string,
+    selectedProvider: ProviderId | null,
+  ) {
+    try {
+      await updateConversationDb(
+        id,
+        undefined,
+        selectedModel,
+        selectedProvider ?? undefined,
+      );
+    } catch (error) {
+      console.warn("Failed to update conversation selection", error);
+    }
+
+    setState("conversations", (convos) =>
+      convos.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              selectedModel,
+              selectedProvider,
+            }
+          : c,
+      ),
     );
   },
 

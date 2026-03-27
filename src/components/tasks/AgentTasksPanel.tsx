@@ -3,6 +3,8 @@
 
 import {
   type Component,
+  createEffect,
+  createMemo,
   createSignal,
   For,
   onCleanup,
@@ -10,6 +12,11 @@ import {
   Show,
 } from "solid-js";
 import { getDefaultOrganizationId } from "@/lib/tauri-bridge";
+import {
+  getCloudAgentPublisherForProvider,
+} from "@/services/agent-tasks";
+import { allowsCloudAgentLaunch } from "@/services/organization-policy";
+import { authStore } from "@/stores/auth.store";
 import {
   agentTasksState,
   cancelTask,
@@ -19,6 +26,8 @@ import {
   runAgent,
   stopFollowing,
 } from "@/stores/agent-tasks.store";
+import { providerStore } from "@/stores/provider.store";
+import { threadStore } from "@/stores/thread.store";
 import { AgentTaskItem } from "./AgentTaskItem";
 
 interface AgentTasksPanelProps {
@@ -33,6 +42,21 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [submitError, setSubmitError] = createSignal<string | null>(null);
   const [orgId, setOrgId] = createSignal("");
+  const cloudLaunchAllowed = createMemo(() =>
+    allowsCloudAgentLaunch(authStore.privateChatPolicy),
+  );
+  const lockedPublisherSlug = createMemo(() =>
+    threadStore.activeThreadKind === "chat"
+      ? getCloudAgentPublisherForProvider(providerStore.activeProvider)
+      : null,
+  );
+
+  createEffect(() => {
+    const lockedSlug = lockedPublisherSlug();
+    if (lockedSlug) {
+      setPublisherSlug(lockedSlug);
+    }
+  });
 
   // Load org ID and tasks on mount
   onMount(async () => {
@@ -52,6 +76,12 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
     e.preventDefault();
     const slug = publisherSlug().trim();
     const msg = messageText().trim();
+    if (!cloudLaunchAllowed()) {
+      setSubmitError(
+        "Your organization has disabled cloud agent launch from Desktop.",
+      );
+      return;
+    }
     if (!slug || !msg || !orgId()) return;
 
     setIsSubmitting(true);
@@ -174,30 +204,56 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
         </div>
 
         <div class="flex gap-2 mb-2">
-          <input
-            type="text"
-            placeholder="Publisher slug"
-            value={publisherSlug()}
-            onInput={(e) => setPublisherSlug(e.currentTarget.value)}
-            class="flex-1 px-2.5 py-1.5 bg-surface-2 border border-border rounded text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors"
-          />
+          <Show
+            when={lockedPublisherSlug()}
+            fallback={
+              <input
+                type="text"
+                placeholder="Publisher slug"
+                value={publisherSlug()}
+                onInput={(e) => setPublisherSlug(e.currentTarget.value)}
+                class="flex-1 px-2.5 py-1.5 bg-surface-2 border border-border rounded text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors"
+                disabled={!cloudLaunchAllowed()}
+              />
+            }
+          >
+            <div class="flex-1 px-2.5 py-1.5 bg-surface-2 border border-border rounded text-[13px] text-foreground">
+              {lockedPublisherSlug()}
+            </div>
+          </Show>
           <button
             type="submit"
             disabled={
-              isSubmitting() || !publisherSlug().trim() || !messageText().trim()
+              isSubmitting() ||
+              !cloudLaunchAllowed() ||
+              !publisherSlug().trim() ||
+              !messageText().trim()
             }
             class="px-3 py-1.5 bg-primary text-background text-[12px] font-semibold rounded hover:bg-primary/85 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isSubmitting() ? "..." : "Run"}
           </button>
         </div>
+        <Show when={lockedPublisherSlug()}>
+          <div class="mb-2 text-[11px] text-muted-foreground">
+            The current chat lane fixes the cloud publisher: Seren Agent uses
+            `seren-models`, and Seren Agent (Private) uses
+            `seren-private-models`.
+          </div>
+        </Show>
         <textarea
           placeholder="Message (JSON or plain text)"
           value={messageText()}
           onInput={(e) => setMessageText(e.currentTarget.value)}
           class="w-full px-2.5 py-2 bg-surface-2 border border-border rounded text-[12px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors resize-none font-mono leading-relaxed"
           rows={2}
+          disabled={!cloudLaunchAllowed()}
         />
+        <Show when={!cloudLaunchAllowed()}>
+          <div class="mt-1.5 px-2 py-1 bg-amber-950/30 border border-amber-400/20 rounded text-[11px] text-amber-300">
+            Cloud agent launch is disabled by your organization policy.
+          </div>
+        </Show>
         <Show when={submitError()}>
           <div class="mt-1.5 px-2 py-1 bg-red-950/30 border border-red-400/20 rounded text-[11px] text-red-400">
             {submitError()}

@@ -13,6 +13,12 @@ import {
 } from "solid-js";
 import { openFolder } from "@/lib/files/service";
 import type { InstalledSkill, Skill } from "@/lib/skills";
+import {
+  allowsClaudeAgent,
+  allowsCodexAgent,
+  allowsSerenAgent,
+  allowsSerenPrivateAgent,
+} from "@/services/organization-policy";
 import { skills as skillsService } from "@/services/skills";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
@@ -43,17 +49,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     if (!root) return null;
     return root.split("/").pop() || root;
   };
-  const isPrivateOrgChat = createMemo(
-    () =>
-      authStore.privateChatPolicy?.mode === "private_org_agent" &&
-      !!authStore.privateChatPolicy?.deployment_id,
-  );
-  const primaryChatLauncherLabel = createMemo(() =>
-    isPrivateOrgChat() ? "Seren Agent (Private)" : "Seren Agent",
-  );
-  const primaryChatLauncherDescription = createMemo(() =>
-    isPrivateOrgChat() ? null : "Seren models chat",
-  );
+  const primaryChatLauncherDescription = createMemo(() => "Seren models chat");
 
   const handleClickOutside = (e: MouseEvent) => {
     if (
@@ -84,7 +80,26 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     setLauncherQuery("");
     setSpawning(true);
     try {
-      await threadStore.createChatThread();
+      await threadStore.createChatThreadWithOptions("New Chat", {
+        provider: "seren",
+      });
+    } finally {
+      setSpawning(false);
+    }
+  };
+
+  const handleNewPrivateChat = async () => {
+    setShowLauncher(false);
+    setLauncherQuery("");
+    setSpawning(true);
+    try {
+      const privateModel =
+        authStore.privateChatPolicy?.model_id?.trim() ||
+        "organization/private-model";
+      await threadStore.createChatThreadWithOptions("New Private Chat", {
+        provider: "seren-private",
+        model: privateModel,
+      });
     } finally {
       setSpawning(false);
     }
@@ -364,34 +379,45 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
           </Show>
           {spawning()
             ? (agentStore.installStatus ?? "Starting...")
-            : authStore.privateChatPolicy?.disable_local_agents
-              ? "New Chat"
-              : "New Agent"}
+            : "New"}
         </button>
 
         <Show when={showLauncher()}>
           <div class="absolute top-[calc(100%+4px)] left-3 right-3 bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] overflow-hidden py-1">
             {/* Primary Seren chat path */}
-            <button
-              type="button"
-              class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-              onClick={handleNewChat}
-            >
-              <span class="text-[14px]">{"\u{1F4AC}"}</span>
-              <div class="min-w-0">
-                <div class="font-medium">{primaryChatLauncherLabel()}</div>
-                <Show when={primaryChatLauncherDescription()}>
-                  <div class="text-[11px] text-muted-foreground">
-                    {primaryChatLauncherDescription()}
-                  </div>
-                </Show>
-              </div>
-            </button>
+            <Show when={allowsSerenAgent(authStore.privateChatPolicy)}>
+              <button
+                type="button"
+                class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                onClick={handleNewChat}
+              >
+                <span class="text-[14px]">{"\u{1F4AC}"}</span>
+                <div class="min-w-0">
+                  <div class="font-medium">Seren Agent</div>
+                  <Show when={primaryChatLauncherDescription()}>
+                    <div class="text-[11px] text-muted-foreground">
+                      {primaryChatLauncherDescription()}
+                    </div>
+                  </Show>
+                </div>
+              </button>
+            </Show>
+
+            <Show when={allowsSerenPrivateAgent(authStore.privateChatPolicy)}>
+              <button
+                type="button"
+                class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                onClick={handleNewPrivateChat}
+              >
+                <span class="text-[14px]">{"\u{1F512}"}</span>
+                <span class="font-medium">Seren Agent (Private)</span>
+              </button>
+            </Show>
 
             {/* Claude Agent */}
             <Show
               when={
-                !authStore.privateChatPolicy?.disable_local_agents &&
+                allowsClaudeAgent(authStore.privateChatPolicy) &&
                 agentStore.availableAgents.some(
                   (a) => a.type === "claude-code" && a.available,
                 )
@@ -420,7 +446,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             {/* Codex Agent */}
             <Show
               when={
-                !authStore.privateChatPolicy?.disable_local_agents &&
+                allowsCodexAgent(authStore.privateChatPolicy) &&
                 agentStore.availableAgents.some(
                   (a) => a.type === "codex" && a.available,
                 )

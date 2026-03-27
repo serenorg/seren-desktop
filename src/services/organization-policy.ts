@@ -26,6 +26,11 @@ export interface OrganizationPrivateChatPolicy {
   mode: OrganizationPrivateChatMode;
   deployment_id: string | null;
   deployment_name?: string | null;
+  allow_seren_agent?: boolean;
+  allow_seren_private_agent?: boolean;
+  allow_claude_agent?: boolean;
+  allow_codex_agent?: boolean;
+  allow_cloud_agent_launch?: boolean;
   model_id?: string | null;
   fallback_models?: string[] | null;
   force_private_model: boolean;
@@ -36,6 +41,36 @@ export interface OrganizationPrivateChatPolicy {
   session_database: ManagedAgentSessionDatabase | null;
   private_output_policy: ManagedAgentPrivateOutputPolicy;
   updated_at: string;
+}
+
+export function allowsSerenAgent(
+  policy: OrganizationPrivateChatPolicy | null | undefined,
+): boolean {
+  return policy?.allow_seren_agent ?? true;
+}
+
+export function allowsSerenPrivateAgent(
+  policy: OrganizationPrivateChatPolicy | null | undefined,
+): boolean {
+  return (policy?.allow_seren_private_agent ?? true) && !!policy?.deployment_id;
+}
+
+export function allowsClaudeAgent(
+  policy: OrganizationPrivateChatPolicy | null | undefined,
+): boolean {
+  return policy?.allow_claude_agent ?? true;
+}
+
+export function allowsCodexAgent(
+  policy: OrganizationPrivateChatPolicy | null | undefined,
+): boolean {
+  return policy?.allow_codex_agent ?? true;
+}
+
+export function allowsCloudAgentLaunch(
+  policy: OrganizationPrivateChatPolicy | null | undefined,
+): boolean {
+  return policy?.allow_cloud_agent_launch ?? false;
 }
 
 async function authHeaders(url: string): Promise<HeadersInit> {

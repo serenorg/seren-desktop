@@ -4,7 +4,12 @@
 /**
  * Supported LLM provider identifiers.
  */
-export type ProviderId = "seren" | "anthropic" | "openai" | "gemini";
+export type ProviderId =
+  | "seren"
+  | "seren-private"
+  | "anthropic"
+  | "openai"
+  | "gemini";
 
 /**
  * Authentication method for a provider.
@@ -294,6 +299,14 @@ export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
     id: "seren",
     name: "Seren Models",
     description: "Use your SerenBucks balance to access multiple AI models",
+    authMethod: "none",
+    baseUrl: "https://api.serendb.com",
+    docsUrl: "https://docs.serendb.com",
+  },
+  "seren-private": {
+    id: "seren-private",
+    name: "Seren Private Models",
+    description: "Organization-managed private models via seren-private-models",
     authMethod: "none",
     baseUrl: "https://api.serendb.com",
     docsUrl: "https://docs.serendb.com",

@@ -22,13 +22,10 @@ import { type Model, modelsService } from "@/services/models";
 import { privateModelsService } from "@/services/private-models";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
+import { conversationStore } from "@/stores/conversation.store";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 
 export const ModelSelector: Component = () => {
-  if (authStore.privateChatPolicy?.hide_model_picker) {
-    return null;
-  }
-
   const [isOpen, setIsOpen] = createSignal(false);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [openRouterModels, setOpenRouterModels] = createSignal<Model[]>([]);
@@ -38,7 +35,7 @@ export const ModelSelector: Component = () => {
   let searchInputRef: HTMLInputElement | undefined;
 
   const isPrivateChat = createMemo(
-    () => !!authStore.privateChatPolicy?.force_private_model,
+    () => providerStore.activeProvider === "seren-private",
   );
   const currentProvider = () => providerStore.activeProvider;
 
@@ -48,7 +45,7 @@ export const ModelSelector: Component = () => {
   // Load full model list from OpenRouter or private models catalog.
   createEffect(() => {
     const privatePolicy = authStore.privateChatPolicy;
-    const privateEnabled = !!privatePolicy?.force_private_model;
+    const privateEnabled = isPrivateChat();
     void (async () => {
       setIsLoadingModels(true);
       try {
@@ -169,10 +166,16 @@ export const ModelSelector: Component = () => {
   };
 
   const selectModel = (modelId: string) => {
-    if (!isPrivateChat()) {
-      providerStore.setActiveModel(modelId);
-    }
+    providerStore.setActiveModel(modelId);
     chatStore.setModel(modelId);
+    const conversationId = conversationStore.activeConversationId;
+    if (conversationId) {
+      void conversationStore.updateConversationSelection(
+        conversationId,
+        modelId,
+        providerStore.activeProvider,
+      );
+    }
     setIsOpen(false);
   };
 
@@ -181,7 +184,16 @@ export const ModelSelector: Component = () => {
     // Update chat store with the first model of the new provider
     const models = providerStore.getModels(providerId);
     if (models.length > 0) {
+      providerStore.setActiveModel(models[0].id);
       chatStore.setModel(models[0].id);
+      const conversationId = conversationStore.activeConversationId;
+      if (conversationId) {
+        void conversationStore.updateConversationSelection(
+          conversationId,
+          models[0].id,
+          providerId,
+        );
+      }
     }
   };
 
@@ -218,6 +230,10 @@ export const ModelSelector: Component = () => {
       chatStore.setModel(model);
     }
   });
+
+  if (isPrivateChat() && authStore.privateChatPolicy?.hide_model_picker) {
+    return null;
+  }
 
   return (
     <div class="relative" ref={containerRef}>
@@ -290,6 +306,18 @@ export const ModelSelector: Component = () => {
             <div class="flex gap-0.5 p-2 bg-surface-3 border-b border-surface-3 flex-wrap">
               <For each={providerStore.configuredProviders}>
                 {(providerId) => (
+                  <Show
+                    when={
+                      providerId !== "seren-private" &&
+                      !(providerId === "seren" &&
+                        authStore.privateChatPolicy?.disable_seren_models) &&
+                      !(
+                        providerId !== "seren" &&
+                        authStore.privateChatPolicy
+                          ?.disable_external_model_providers
+                      )
+                    }
+                  >
                   <button
                     type="button"
                     class={`flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-xs text-muted-foreground cursor-pointer transition-all no-underline hover:bg-border hover:text-foreground ${providerId === currentProvider() ? "bg-primary/15 border-primary/40 text-accent" : ""}`}
@@ -308,6 +336,7 @@ export const ModelSelector: Component = () => {
                       {PROVIDER_CONFIGS[providerId].name}
                     </span>
                   </button>
+                  </Show>
                 )}
               </For>
               <Show when={providerStore.getUnconfiguredProviders().length > 0}>

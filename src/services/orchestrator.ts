@@ -7,6 +7,11 @@ import type { Attachment, ToolDefinition } from "@/lib/providers/types";
 import { getAllTools } from "@/lib/tools";
 import { executeTool } from "@/lib/tools/executor";
 import { storeAssistantResponse } from "@/services/memory";
+import {
+  allowsClaudeAgent,
+  allowsCodexAgent,
+  allowsSerenPrivateAgent,
+} from "@/services/organization-policy";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
@@ -583,6 +588,14 @@ function handleReroute(event: {
   // Update UI to reflect the actual model being used after automatic fallback
   providerStore.setActiveModel(event.to_model);
   chatStore.setModel(event.to_model);
+  const conversationId = conversationStore.activeConversationId;
+  if (conversationId) {
+    void conversationStore.updateConversationSelection(
+      conversationId,
+      event.to_model,
+      providerStore.activeProvider,
+    );
+  }
 
   // Add a reroute announcement message to the conversation
   const rerouteMessage: UnifiedMessage = {
@@ -666,8 +679,8 @@ function serializeHistory(
 function buildCapabilities(threadId: string | null): UserCapabilities {
   const privateChatPolicy = authStore.privateChatPolicy;
   const forcePrivateChat =
-    privateChatPolicy?.mode === "private_org_agent" &&
-    !!privateChatPolicy.deployment_id;
+    providerStore.activeProvider === "seren-private" &&
+    allowsSerenPrivateAgent(privateChatPolicy);
   const enabledSkills = skillsStore.getThreadSkills(
     fileTreeState.rootPath,
     threadId,
@@ -679,7 +692,8 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
   return {
     has_local_agent:
       !forcePrivateChat &&
-      !privateChatPolicy?.disable_local_agents &&
+      (allowsClaudeAgent(privateChatPolicy) ||
+        allowsCodexAgent(privateChatPolicy)) &&
       agentStore.availableAgents.length > 0,
     agent_type: agentStore.selectedAgentType ?? null,
     active_agent_session_id: agentStore.agentModeEnabled

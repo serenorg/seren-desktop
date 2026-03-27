@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
 import { authStore } from "@/stores/auth.store";
+import { allowsSerenAgent } from "@/services/organization-policy";
 import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { providerStore } from "@/stores/provider.store";
@@ -214,16 +215,19 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   Default Model
                 </span>
                 <span class="text-[0.8rem] text-muted-foreground">
-                  {authStore.privateChatPolicy?.force_private_model
-                    ? "Managed by your organization"
+                  {!allowsSerenAgent(authStore.privateChatPolicy)
+                    ? "Unavailable because standard Seren Agent is disabled by policy"
                     : "AI model for chat conversations"}
                 </span>
               </label>
               <Show
-                when={!authStore.privateChatPolicy?.hide_model_picker}
+                when={
+                  allowsSerenAgent(authStore.privateChatPolicy) &&
+                  !authStore.privateChatPolicy?.hide_model_picker
+                }
                 fallback={
                   <div class="px-3 py-2 text-[0.85rem] text-muted-foreground bg-surface-3/60 border border-border-strong rounded-md">
-                    Organization-managed private models
+                    Organization-managed chat configuration
                   </div>
                 }
               >

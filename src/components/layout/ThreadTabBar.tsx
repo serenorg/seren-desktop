@@ -3,7 +3,6 @@
 
 import {
   type Component,
-  createMemo,
   createSignal,
   For,
   onCleanup,
@@ -14,18 +13,16 @@ import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { type Thread, threadStore } from "@/stores/thread.store";
+import {
+  allowsClaudeAgent,
+  allowsCodexAgent,
+  allowsSerenAgent,
+  allowsSerenPrivateAgent,
+} from "@/services/organization-policy";
 
 export const ThreadTabBar: Component = () => {
   const [showNewMenu, setShowNewMenu] = createSignal(false);
   let menuRef: HTMLDivElement | undefined;
-  const isPrivateOrgChat = createMemo(
-    () =>
-      authStore.privateChatPolicy?.mode === "private_org_agent" &&
-      !!authStore.privateChatPolicy?.deployment_id,
-  );
-  const primaryChatLauncherLabel = createMemo(() =>
-    isPrivateOrgChat() ? "Seren Agent (Private)" : "Seren Agent",
-  );
 
   // Close dropdown on click-outside
   const handleClickOutside = (e: MouseEvent) => {
@@ -53,7 +50,19 @@ export const ThreadTabBar: Component = () => {
 
   const handleNewChat = async () => {
     setShowNewMenu(false);
-    await threadStore.createChatThread();
+    await threadStore.createChatThreadWithOptions("New Chat", {
+      provider: "seren",
+    });
+  };
+
+  const handleNewPrivateChat = async () => {
+    setShowNewMenu(false);
+    const privateModel =
+      authStore.privateChatPolicy?.model_id?.trim() || "organization/private-model";
+    await threadStore.createChatThreadWithOptions("New Private Chat", {
+      provider: "seren-private",
+      model: privateModel,
+    });
   };
 
   const handleNewAgent = async (agentType: "claude-code" | "codex") => {
@@ -168,15 +177,27 @@ export const ThreadTabBar: Component = () => {
 
         <Show when={showNewMenu()}>
           <div class="absolute top-full right-0 min-w-[160px] bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
-            <button
-              type="button"
-              class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
-              onClick={handleNewChat}
-            >
-              <span class="text-[13px] w-[18px] text-center">💬</span>
-              <div class="font-medium">{primaryChatLauncherLabel()}</div>
-            </button>
-            <Show when={!authStore.privateChatPolicy?.disable_local_agents}>
+            <Show when={allowsSerenAgent(authStore.privateChatPolicy)}>
+              <button
+                type="button"
+                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                onClick={handleNewChat}
+              >
+                <span class="text-[13px] w-[18px] text-center">💬</span>
+                <div class="font-medium">Seren Agent</div>
+              </button>
+            </Show>
+            <Show when={allowsSerenPrivateAgent(authStore.privateChatPolicy)}>
+              <button
+                type="button"
+                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                onClick={handleNewPrivateChat}
+              >
+                <span class="text-[13px] w-[18px] text-center">🔒</span>
+                <div class="font-medium">Seren Agent (Private)</div>
+              </button>
+            </Show>
+            <Show when={allowsClaudeAgent(authStore.privateChatPolicy)}>
               <button
                 type="button"
                 class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -191,6 +212,8 @@ export const ThreadTabBar: Component = () => {
                 <span class="text-[13px] w-[18px] text-center">🤖</span>
                 Claude Agent
               </button>
+            </Show>
+            <Show when={allowsCodexAgent(authStore.privateChatPolicy)}>
               <button
                 type="button"
                 class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"

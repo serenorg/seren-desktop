@@ -8,6 +8,7 @@ import { anthropicProvider } from "./anthropic";
 import { geminiProvider } from "./gemini";
 import { openaiProvider } from "./openai";
 import { serenProvider } from "./seren";
+import { serenPrivateProvider } from "./seren-private";
 import type {
   ChatMessage,
   ChatRequest,
@@ -25,6 +26,7 @@ export * from "./types";
  */
 const providers: Record<ProviderId, ProviderAdapter> = {
   seren: serenProvider,
+  "seren-private": serenPrivateProvider,
   anthropic: anthropicProvider,
   openai: openaiProvider,
   gemini: geminiProvider,
@@ -50,6 +52,9 @@ async function getAuthToken(
   providerId: ProviderId,
 ): Promise<{ token: string; isOAuth: boolean }> {
   if (providerId === "seren") {
+    return { token: "", isOAuth: false };
+  }
+  if (providerId === "seren-private") {
     return { token: "", isOAuth: false };
   }
 
@@ -166,7 +171,7 @@ export async function getProviderModels(
   // Use provided key or fetch from store
   const key =
     apiKey ||
-    (providerId === "seren"
+    (providerId === "seren" || providerId === "seren-private"
       ? ""
       : (await providerStore.getApiKey(providerId)) || "");
 
@@ -253,6 +258,7 @@ export function buildChatRequest(
 export function getProviderDisplayName(providerId: ProviderId): string {
   const names: Record<ProviderId, string> = {
     seren: "Seren Models",
+    "seren-private": "Seren Private Models",
     anthropic: "Anthropic",
     openai: "OpenAI",
     gemini: "Google Gemini",
@@ -266,6 +272,7 @@ export function getProviderDisplayName(providerId: ProviderId): string {
 export function getProviderIcon(providerId: ProviderId): string {
   const icons: Record<ProviderId, string> = {
     seren: "S",
+    "seren-private": "P",
     anthropic: "A",
     openai: "O",
     gemini: "G",

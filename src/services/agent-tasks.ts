@@ -3,7 +3,25 @@
 
 import { API_BASE } from "@/lib/config";
 import { getTauriFetch, shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
+import type { ProviderId } from "@/lib/providers/types";
 import { getToken } from "@/services/auth";
+
+export const SEREN_CLOUD_AGENT_PUBLISHER_SLUG = "seren-models";
+export const SEREN_PRIVATE_CLOUD_AGENT_PUBLISHER_SLUG =
+  "seren-private-models";
+
+export function getCloudAgentPublisherForProvider(
+  providerId: ProviderId | null | undefined,
+): string | null {
+  switch (providerId) {
+    case "seren":
+      return SEREN_CLOUD_AGENT_PUBLISHER_SLUG;
+    case "seren-private":
+      return SEREN_PRIVATE_CLOUD_AGENT_PUBLISHER_SLUG;
+    default:
+      return null;
+  }
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

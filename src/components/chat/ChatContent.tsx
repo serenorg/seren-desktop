@@ -56,6 +56,10 @@ import { fileTreeState } from "@/stores/fileTree";
 import { openclawStore } from "@/stores/openclaw.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
+import {
+  allowsSerenAgent,
+  allowsSerenPrivateAgent,
+} from "@/services/organization-policy";
 import type { ToolCallData, UnifiedMessage } from "@/types/conversation";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { CompactedMessage } from "./CompactedMessage";
@@ -203,8 +207,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const [isAttaching, setIsAttaching] = createSignal(false);
   const privateChatLocked = () =>
-    authStore.privateChatPolicy?.force_private_model ||
-    authStore.privateChatPolicy?.hide_model_picker;
+    providerStore.activeProvider === "seren-private" &&
+    !!authStore.privateChatPolicy?.hide_model_picker;
   const { isDragging } = createDragDrop((files) =>
     setAttachedImages((prev) => [...prev, ...files]),
   );
@@ -724,7 +728,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
     // If using Seren provider and not authenticated, prompt sign-in
     if (
-      providerStore.activeProvider === "seren" &&
+      (providerStore.activeProvider === "seren" ||
+        providerStore.activeProvider === "seren-private") &&
       !authStore.isAuthenticated
     ) {
       if (opts?.skipAuthGate && opts.command === "discord") {
@@ -732,6 +737,26 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       } else if (!opts?.skipAuthGate) {
         setShowSignInPrompt(true);
       }
+      return;
+    }
+
+    if (
+      providerStore.activeProvider === "seren" &&
+      !allowsSerenAgent(authStore.privateChatPolicy)
+    ) {
+      conversationStore.setError(
+        "Your organization has disabled the standard Seren Agent launcher.",
+      );
+      return;
+    }
+
+    if (
+      providerStore.activeProvider === "seren-private" &&
+      !allowsSerenPrivateAgent(authStore.privateChatPolicy)
+    ) {
+      conversationStore.setError(
+        "Your organization has disabled Seren Agent (Private).",
+      );
       return;
     }
 

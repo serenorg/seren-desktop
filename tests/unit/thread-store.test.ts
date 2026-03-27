@@ -39,7 +39,7 @@ const mockConversations = {
     title: string;
     createdAt: number;
     selectedModel: string;
-    selectedProvider: null;
+    selectedProvider: string | null;
     projectRoot: string | null;
     isArchived: boolean;
   }>,
@@ -57,6 +57,26 @@ vi.mock("@/stores/conversation.store", () => ({
     setActiveConversation: vi.fn((id: string | null) => {
       mockConversations.activeConversationId = id;
     }),
+    createConversationWithModel: vi.fn(
+      async (
+        title: string,
+        selectedModel: string,
+        projectRoot?: string,
+        selectedProvider?: string | null,
+      ) => {
+        const convo = {
+          id: `chat-${mockConversations.conversations.length + 1}`,
+          title,
+          createdAt: Date.now(),
+          selectedModel,
+          selectedProvider: selectedProvider ?? null,
+          projectRoot: projectRoot ?? null,
+          isArchived: false,
+        };
+        mockConversations.conversations.unshift(convo);
+        return convo;
+      },
+    ),
     createConversation: vi.fn(async (title: string, _projectRoot?: string) => {
       const convo = {
         id: `chat-${mockConversations.conversations.length + 1}`,
@@ -126,6 +146,7 @@ import { threadStore } from "@/stores/thread.store";
 import { setRootPath } from "@/stores/fileTree";
 import { conversationStore } from "@/stores/conversation.store";
 import { agentStore } from "@/stores/agent.store";
+import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 
 describe("threadStore", () => {
   beforeEach(() => {
@@ -139,6 +160,10 @@ describe("threadStore", () => {
 
     // Reset thread store internal state
     threadStore.clear();
+
+    // Keep provider-dependent thread creation deterministic in unit tests.
+    providerStore.setActiveProvider("seren");
+    providerStore.setActiveModel(AUTO_MODEL_ID);
   });
 
   afterEach(() => {
@@ -401,9 +426,11 @@ describe("threadStore", () => {
     it("creates conversation with project root and selects it", async () => {
       const id = await threadStore.createChatThread("My Chat");
 
-      expect(conversationStore.createConversation).toHaveBeenCalledWith(
+      expect(conversationStore.createConversationWithModel).toHaveBeenCalledWith(
         "My Chat",
+        "auto",
         "/Users/dev/project-a",
+        "seren",
       );
       expect(id).toBe("chat-1");
       expect(threadStore.activeThreadId).toBe("chat-1");

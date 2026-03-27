@@ -4,6 +4,7 @@
 import { createStore } from "solid-js/store";
 import { type InstalledSkill, parseSkillMd } from "@/lib/skills";
 import { archiveAgentConversation } from "@/lib/tauri-bridge";
+import type { ProviderId } from "@/lib/providers/types";
 import {
   type AgentType,
   listSessions,
@@ -11,8 +12,10 @@ import {
 } from "@/services/providers";
 import { skills as skillsService } from "@/services/skills";
 import { agentStore } from "@/stores/agent.store";
+import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
+import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { skillsStore } from "@/stores/skills.store";
 
 const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
@@ -321,6 +324,14 @@ export const threadStore = {
 
     if (kind === "chat") {
       conversationStore.setActiveConversation(id);
+      const conversation = conversationStore.conversations.find((c) => c.id === id);
+      if (conversation) {
+        providerStore.setActiveProvider(
+          conversation.selectedProvider ?? "seren",
+        );
+        providerStore.setActiveModel(conversation.selectedModel || AUTO_MODEL_ID);
+        chatStore.setModel(conversation.selectedModel || AUTO_MODEL_ID);
+      }
     } else {
       if (
         thread?.agentType &&
@@ -379,10 +390,32 @@ export const threadStore = {
    * Create a new chat thread.
    */
   async createChatThread(title = "New Chat"): Promise<string> {
+    return this.createChatThreadWithOptions(title, {});
+  },
+
+  async createChatThreadWithOptions(
+    title = "New Chat",
+    options: {
+      provider?: ProviderId | null;
+      model?: string;
+    },
+  ): Promise<string> {
     const projectRoot = fileTreeState.rootPath || undefined;
-    const conversation = await conversationStore.createConversation(
+    const provider =
+      options.provider ??
+      (providerStore.activeProvider === "seren-private"
+        ? "seren"
+        : providerStore.activeProvider);
+    const model =
+      options.model ??
+      (provider === "seren-private"
+        ? "organization/private-model"
+        : providerStore.activeModel || AUTO_MODEL_ID);
+    const conversation = await conversationStore.createConversationWithModel(
       title,
+      model,
       projectRoot,
+      provider,
     );
     this.selectThread(conversation.id, "chat");
     return conversation.id;
