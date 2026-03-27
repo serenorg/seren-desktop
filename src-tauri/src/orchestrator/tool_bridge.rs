@@ -12,7 +12,7 @@ pub struct ToolExecutionResult {
 
 /// Shared bridge between the Rust ChatModelWorker and the frontend tool executor.
 ///
-/// When ChatModelWorker encounters a non-local tool (gateway__, mcp__, openclaw__),
+/// When ChatModelWorker encounters a non-local tool (gateway__, mcp__),
 /// it registers a pending request here and waits. The frontend executes the tool
 /// and submits the result via the `submit_tool_result` Tauri command.
 pub struct ToolResultBridge {

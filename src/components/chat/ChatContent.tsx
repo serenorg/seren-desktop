@@ -53,7 +53,6 @@ import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { editorStore } from "@/stores/editor.store";
 import { fileTreeState } from "@/stores/fileTree";
-import { openclawStore } from "@/stores/openclaw.store";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
 import type { ToolCallData, UnifiedMessage } from "@/types/conversation";
@@ -619,58 +618,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     setMessageQueue([]);
   };
 
-  const startDiscordWithoutAuth = async () => {
-    let statusMessage = "Starting OpenClaw Discord setup in chat-only mode.";
-    try {
-      await openclawStore.init();
-      if (!openclawStore.isRunning) {
-        await openclawStore.start();
-        statusMessage += " OpenClaw started";
-      } else {
-        statusMessage += " OpenClaw already running";
-      }
-
-      await openclawStore.refreshChannels();
-      const discord = openclawStore.channels.find(
-        (channel) => channel.platform === "discord",
-      );
-      if (discord?.status === "connected") {
-        statusMessage += ". Discord is connected.";
-      } else {
-        try {
-          await openclawStore.launchChannelLogin("discord");
-          statusMessage +=
-            ". Discord login flow launched. Complete the prompt, then run /discord again.";
-        } catch (loginError) {
-          const loginMessage =
-            loginError instanceof Error
-              ? loginError.message
-              : String(loginError);
-          statusMessage += `.\n\nCould not launch Discord login automatically (${loginMessage}).`;
-          statusMessage +=
-            " You can still connect manually in Settings > OpenClaw when needed.";
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      statusMessage += `\n\nCould not start OpenClaw (${message}).`;
-    }
-
-    const assistantMessage: UnifiedMessage = {
-      id: crypto.randomUUID(),
-      type: "assistant",
-      role: "assistant",
-      content: `${statusMessage}\n\nSign in is only required for cloud orchestration. Local OpenClaw setup can continue now.`,
-      timestamp: Date.now(),
-      modelId: chatStore.selectedModel,
-      status: "complete",
-    };
-
-    conversationStore.addMessage(assistantMessage);
-    await conversationStore.persistMessage(assistantMessage);
-    setCommandStatus("Started Discord setup in chat-only mode.");
-  };
-
   const sendMessage = async (opts?: {
     skipAuthGate?: boolean;
     command?: string;
@@ -727,9 +674,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       providerStore.activeProvider === "seren" &&
       !authStore.isAuthenticated
     ) {
-      if (opts?.skipAuthGate && opts.command === "discord") {
-        await startDiscordWithoutAuth();
-      } else if (!opts?.skipAuthGate) {
+      if (!opts?.skipAuthGate) {
         setShowSignInPrompt(true);
       }
       return;

@@ -910,7 +910,7 @@ impl ChatModelWorker {
     }
 
     /// Check if a tool name refers to a locally-executable tool.
-    /// Non-local tools (gateway__, mcp__, openclaw__) are routed to the frontend.
+    /// Non-local tools (gateway__, mcp__) are routed to the frontend.
     fn is_local_tool(name: &str) -> bool {
         matches!(
             name,
@@ -1352,7 +1352,7 @@ impl Worker for ChatModelWorker {
                         let (result_content, is_error) = if Self::is_local_tool(&tc.name) {
                             Self::execute_tool(&tc.name, &tc.arguments).await
                         } else {
-                            // Route non-local tools (gateway__, mcp__, openclaw__)
+                            // Route non-local tools (gateway__, mcp__)
                             // to the frontend for execution via the tool bridge.
                             Self::execute_frontend_tool(app, &tc.id, &tc.name, &tc.arguments).await
                         };

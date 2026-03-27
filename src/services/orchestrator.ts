@@ -531,7 +531,7 @@ function handleError(message: string): void {
 /**
  * Handle a tool execution request from the Rust ChatModelWorker.
  *
- * The ChatModelWorker encountered a non-local tool (gateway__, mcp__, openclaw__)
+ * The ChatModelWorker encountered a non-local tool (gateway__, mcp__)
  * and is waiting for the frontend to execute it and submit the result back.
  */
 async function handleToolRequest(request: ToolExecutionRequest): Promise<void> {

@@ -30,8 +30,6 @@ mod files;
 mod mcp;
 mod oauth;
 mod oauth_callback_server;
-#[cfg(feature = "openclaw")]
-mod openclaw;
 mod orchestrator;
 mod polymarket;
 mod provider_runtime;
@@ -471,10 +469,7 @@ pub fn run() {
         .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
             as polymarket::commands::PolymarketWsState);
 
-    #[cfg(feature = "openclaw")]
-    {
-        builder = builder.manage(openclaw::OpenClawState::new());
-    }
+
 
     builder
         .on_menu_event(|app, event| {
@@ -762,31 +757,6 @@ pub fn run() {
             commands::indexing::chunk_file,
             commands::indexing::estimate_indexing,
             commands::indexing::compute_file_hash,
-            // OpenClaw commands (conditionally included when openclaw feature is enabled)
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_start,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_stop,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_restart,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_status,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_send,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_list_channels,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_connect_channel,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_get_qr,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_disconnect_channel,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_set_trust,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_grant_approval,
-            #[cfg(feature = "openclaw")]
-            openclaw::openclaw_launch_channel_login,
             // Skills commands
             skills::get_default_project_dir,
             skills::get_seren_skills_dir,

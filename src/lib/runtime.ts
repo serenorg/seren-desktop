@@ -12,7 +12,7 @@ export interface SerenRuntimeCapabilities {
   agents: boolean;
   localFiles: boolean;
   localMcp: boolean;
-  openclaw: boolean;
+
   terminal: boolean;
   updater: boolean;
   remoteSerenAgent: boolean;
@@ -38,7 +38,7 @@ const DESKTOP_CAPABILITIES: SerenRuntimeCapabilities = {
   agents: true,
   localFiles: true,
   localMcp: true,
-  openclaw: true,
+
   terminal: true,
   updater: true,
   remoteSerenAgent: true,
@@ -48,7 +48,7 @@ const BROWSER_LOCAL_CAPABILITIES: SerenRuntimeCapabilities = {
   agents: true,
   localFiles: true,
   localMcp: false,
-  openclaw: false,
+
   terminal: false,
   updater: false,
   remoteSerenAgent: true,
@@ -58,7 +58,7 @@ const BROWSER_HOSTED_CAPABILITIES: SerenRuntimeCapabilities = {
   agents: false,
   localFiles: false,
   localMcp: false,
-  openclaw: false,
+
   terminal: false,
   updater: false,
   remoteSerenAgent: true,

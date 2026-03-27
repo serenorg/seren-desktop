@@ -17,8 +17,6 @@
     "tauri:dev": "pnpm tauri dev",
     "tauri:dev:nowatch": "pnpm tauri dev --no-watch",
     "build:provider-runtime": "tsx scripts/build-provider-runtime.ts",
-    "build:openclaw": "tsx scripts/build-openclaw.ts",
-    "build:openclaw:optional": "tsx scripts/build-openclaw.ts --optional",
     "sign:embedded-runtime": "tsx scripts/sign-embedded-runtime.ts",
     "generate:api": "openapi-ts -f openapi/openapi-ts.config.ts",
     "lint": "biome lint",
