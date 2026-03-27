@@ -721,7 +721,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             ? `/${skill.slug} ${args}`
             : `/${skill.slug}`;
 
-        await sendMessageImmediate(directive, undefined);
+        const displayText = args ? `/${skill.slug} ${args}` : `/${skill.slug}`;
+        await sendMessageImmediate(directive, undefined, displayText);
         return;
       }
     }
@@ -778,6 +779,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const sendMessageImmediate = async (
     messageContent: string,
     images?: Attachment[],
+    displayContent?: string,
   ) => {
     const conversationId = conversationStore.activeConversationId;
     if (!conversationId) return;
@@ -786,7 +788,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       id: crypto.randomUUID(),
       type: "user",
       role: "user",
-      content: messageContent,
+      content: displayContent ?? messageContent,
       images,
       timestamp: Date.now(),
       modelId: chatStore.selectedModel,
