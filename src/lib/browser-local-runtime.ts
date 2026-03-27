@@ -312,6 +312,26 @@ export function disconnectLocalProviderRuntime(): void {
   rejectPendingRpc(new Error("Local provider runtime disconnected."));
 }
 
+/**
+ * Listen for provider-runtime restarts from the Rust backend.
+ * When the runtime crashes and restarts on a new port, the cached config
+ * (host/port/token) is stale. Disconnect so the next call re-fetches config.
+ */
+export async function listenForRuntimeRestart(): Promise<void> {
+  if (!isDesktopNativeRuntime()) return;
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    await listen("provider-runtime://restarted", () => {
+      console.info(
+        "[local-provider-runtime] Runtime restarted, invalidating cached config",
+      );
+      disconnectLocalProviderRuntime();
+    });
+  } catch {
+    // Not in Tauri environment
+  }
+}
+
 export async function runtimeInvoke<T>(
   method: string,
   params?: Record<string, unknown>,

@@ -13,6 +13,7 @@ import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import {
   connectLocalProviderRuntime,
   disconnectLocalProviderRuntime,
+  listenForRuntimeRestart,
 } from "@/lib/browser-local-runtime";
 import { getRuntimeConfig } from "@/lib/runtime";
 import { shortcuts } from "@/lib/shortcuts";
@@ -67,6 +68,7 @@ function App() {
     ) {
       try {
         await connectLocalProviderRuntime();
+        void listenForRuntimeRestart();
       } catch (error) {
         console.error(
           "[App] Failed to connect to local provider runtime:",
