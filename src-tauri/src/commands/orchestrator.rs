@@ -46,7 +46,7 @@ pub async fn cancel_orchestration(
 
 /// Submit a tool execution result from the frontend back to the waiting ChatModelWorker.
 ///
-/// Called by the frontend after executing a non-local tool (gateway, MCP, OpenClaw).
+/// Called by the frontend after executing a non-local tool (gateway, MCP).
 /// The ChatModelWorker is blocked waiting on the bridge for this result.
 #[tauri::command]
 pub async fn submit_tool_result(

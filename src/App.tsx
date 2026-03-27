@@ -7,7 +7,6 @@ import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { GatewayToolApproval } from "@/components/gateway/GatewayToolApproval";
 import { AppShell } from "@/components/layout/AppShell";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
-import { OpenClawApprovalManager } from "@/components/settings/OpenClawApproval";
 import { ShellApproval } from "@/components/shell/ShellApproval";
 import { DailyClaimPopup } from "@/components/wallet/DailyClaimPopup";
 import {
@@ -54,8 +53,6 @@ function App() {
   }
 
   const runtime = getRuntimeConfig();
-  let stopOpenClawAgentFn: (() => void) | null = null;
-  let destroyOpenclawStoreFn: (() => void) | null = null;
 
   onMount(async () => {
     await initAuthRuntimeBindings();
@@ -94,19 +91,6 @@ function App() {
     // Initialize keyboard shortcuts
     shortcuts.init();
 
-    if (runtime.capabilities.openclaw) {
-      const [{ openclawStore }, openClawAgent] = await Promise.all([
-        import("@/stores/openclaw.store"),
-        import("@/services/openclaw-agent"),
-      ]);
-
-      // Initialize OpenClaw store (load setup state + event listeners) before agent
-      await openclawStore.init();
-      openClawAgent.startOpenClawAgent();
-      stopOpenClawAgentFn = openClawAgent.stopOpenClawAgent;
-      destroyOpenclawStoreFn = () => openclawStore.destroy();
-    }
-
     // Set default project root if none is open
     if (runtime.capabilities.localFiles) {
       await initDefaultRootIfNeeded();
@@ -135,8 +119,6 @@ function App() {
   onCleanup(() => {
     clearInterval(skillsRefreshTimer);
     shortcuts.destroy();
-    stopOpenClawAgentFn?.();
-    destroyOpenclawStoreFn?.();
     if (
       runtime.capabilities.agents &&
       !authStore.privateChatPolicy?.disable_local_agents &&
@@ -231,9 +213,6 @@ function App() {
       </Show>
       <Show when={runtime.capabilities.terminal}>
         <ShellApproval />
-      </Show>
-      <Show when={runtime.capabilities.openclaw}>
-        <OpenClawApprovalManager />
       </Show>
       <Show when={runtime.mode === "desktop-native"}>
         <AboutDialog />

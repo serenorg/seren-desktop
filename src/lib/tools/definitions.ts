@@ -66,9 +66,6 @@ export const GATEWAY_TOOL_PREFIX = "gateway__";
  */
 export const MCP_TOOL_PREFIX = "mcp__";
 
-/** Prefix for OpenClaw tools. Format: openclaw__{toolName} */
-export const OPENCLAW_TOOL_PREFIX = "openclaw__";
-
 /**
  * Parse an MCP tool name to extract server name and original tool name.
  * Returns null if the name is not an MCP tool.
@@ -110,167 +107,6 @@ export function parseGatewayToolName(
     toolName: rest.slice(separatorIndex + 2),
   };
 }
-
-/** Parse an OpenClaw tool name to extract the tool name. */
-export function parseOpenClawToolName(
-  name: string,
-): { toolName: string } | null {
-  if (!name.startsWith(OPENCLAW_TOOL_PREFIX)) {
-    return null;
-  }
-  return {
-    toolName: name.slice(OPENCLAW_TOOL_PREFIX.length),
-  };
-}
-
-/**
- * OpenClaw tools available to the AI agent.
- * Includes setup and messaging operations so support flows can run fully in chat.
- */
-export const OPENCLAW_TOOLS: ToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: `${OPENCLAW_TOOL_PREFIX}start`,
-      description:
-        "Start the local OpenClaw service if it is not already running.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: `${OPENCLAW_TOOL_PREFIX}setup_discord`,
-      description:
-        "Chat-only Discord setup helper: starts OpenClaw if needed, connects Discord using a bot token, and marks OpenClaw setup complete.",
-      parameters: {
-        type: "object",
-        properties: {
-          bot_token: {
-            type: "string",
-            description: "Discord bot token to connect the Discord channel",
-          },
-        },
-        required: ["bot_token"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: `${OPENCLAW_TOOL_PREFIX}connect_channel`,
-      description:
-        "Connect an OpenClaw messaging channel using credentials. Starts OpenClaw automatically if needed.",
-      parameters: {
-        type: "object",
-        properties: {
-          platform: {
-            type: "string",
-            description:
-              "Channel platform (supported: discord, telegram, signal, slack)",
-          },
-          credentials: {
-            type: "object",
-            description:
-              'Credential object for the platform. For Discord use {"botToken":"..."} or {"token":"..."}.',
-          },
-        },
-        required: ["platform", "credentials"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: `${OPENCLAW_TOOL_PREFIX}launch_channel_login`,
-      description:
-        "Launch terminal-based channel login for interactive auth flows (for example QR-based channels).",
-      parameters: {
-        type: "object",
-        properties: {
-          platform: {
-            type: "string",
-            description:
-              "Channel platform to log into (for example: whatsapp, signal, telegram)",
-          },
-        },
-        required: ["platform"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: `${OPENCLAW_TOOL_PREFIX}complete_setup`,
-      description: "Mark OpenClaw setup as complete in Seren Desktop settings.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: `${OPENCLAW_TOOL_PREFIX}send_message`,
-      description:
-        "Send a message to a contact on a connected messaging channel (Discord, Telegram, WhatsApp, etc.) via OpenClaw.",
-      parameters: {
-        type: "object",
-        properties: {
-          channel: {
-            type: "string",
-            description:
-              "The channel ID to send through (e.g., 'discord', 'telegram')",
-          },
-          to: {
-            type: "string",
-            description:
-              "The recipient identifier (phone number, username, etc.)",
-          },
-          message: {
-            type: "string",
-            description: "The message text to send",
-          },
-        },
-        required: ["channel", "to", "message"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: `${OPENCLAW_TOOL_PREFIX}list_channels`,
-      description:
-        "List all connected OpenClaw messaging channels with their status.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: `${OPENCLAW_TOOL_PREFIX}channel_status`,
-      description:
-        "Get the detailed status of a specific OpenClaw messaging channel including connection state and platform info.",
-      parameters: {
-        type: "object",
-        properties: {
-          channel: {
-            type: "string",
-            description: "The channel ID to check status for",
-          },
-        },
-        required: ["channel"],
-      },
-    },
-  },
-];
 
 /**
  * Convert a local MCP tool to OpenAI function calling format.
@@ -539,16 +375,6 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
 
     tools.push(toolDef);
     seenNames.add(toolName);
-  }
-
-  // Add OpenClaw tools (setup + messaging) so support flows can run from chat.
-  for (const openclawTool of OPENCLAW_TOOLS) {
-    if (tools.length >= limit) break;
-    const toolName = openclawTool.function.name;
-    if (!seenNames.has(toolName)) {
-      tools.push(openclawTool);
-      seenNames.add(toolName);
-    }
   }
 
   // Add tools from Seren Gateway publishers - fill remaining slots
