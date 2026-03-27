@@ -38,6 +38,20 @@ const LOCAL_PROVIDER_LOGOS: Record<string, string> = {
   attio: attioLogo,
 };
 
+/** Minimal publisher info for display under an OAuth provider card */
+interface LinkedPublisher {
+  name: string;
+  slug: string;
+  description: string | null;
+  logoUrl: string | null;
+}
+
+/** Combined publisher data: logo map + publishers grouped by OAuth provider */
+interface PublisherData {
+  logos: Record<string, string>;
+  byProvider: Record<string, LinkedPublisher[]>;
+}
+
 /** Event payload for oauth-connection-expired */
 interface OAuthExpiredEvent {
   publisherSlug: string;
@@ -82,35 +96,40 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
     return providers;
   });
 
-  // Fetch publishers to get logo URLs keyed by oauth_provider_id
-  const [publisherLogos] = createResource(async () => {
+  // Fetch publishers to build logo map and group by OAuth provider
+  const [publisherData] = createResource(async (): Promise<PublisherData> => {
+    const empty: PublisherData = { logos: {}, byProvider: {} };
     const { data, error } = await listStorePublishers({
       query: { limit: 100 },
       throwOnError: false,
     });
-    if (error) return {} as Record<string, string>;
-    const logos: Record<string, string> = {};
+    if (error) return empty;
     const publishers = data?.data || [];
-    console.log(
-      "[OAuthLogins] Publishers with OAuth:",
-      publishers
-        .filter((p) => p.oauth_provider_id)
-        .map((p) => ({
-          name: p.name,
-          oauth_provider_id: p.oauth_provider_id,
-          logo_url: p.logo_url,
-        })),
-    );
+    const logos: Record<string, string> = {};
+    const byProvider: Record<string, LinkedPublisher[]> = {};
     for (const pub of publishers) {
-      if (pub.oauth_provider_id && pub.logo_url) {
-        const url = pub.logo_url.startsWith("/")
+      if (!pub.oauth_provider_id) continue;
+      const logoUrl = pub.logo_url
+        ? pub.logo_url.startsWith("/")
           ? `${apiBase}${pub.logo_url}`
-          : pub.logo_url;
-        logos[pub.oauth_provider_id] = url;
+          : pub.logo_url
+        : null;
+      // First logo per provider wins (for the provider card fallback)
+      if (logoUrl && !logos[pub.oauth_provider_id]) {
+        logos[pub.oauth_provider_id] = logoUrl;
       }
+      // Group publishers under their OAuth provider
+      if (!byProvider[pub.oauth_provider_id]) {
+        byProvider[pub.oauth_provider_id] = [];
+      }
+      byProvider[pub.oauth_provider_id].push({
+        name: pub.name,
+        slug: pub.slug,
+        description: pub.description ?? null,
+        logoUrl,
+      });
     }
-    console.log("[OAuthLogins] Logo map:", logos);
-    return logos;
+    return { logos, byProvider };
   });
 
   // Fetch user's connected OAuth accounts
@@ -372,118 +391,169 @@ export const OAuthLogins: Component<OAuthLoginsProps> = (props) => {
                 return "border-border-hover";
               };
 
+              const linked = () =>
+                publisherData()?.byProvider[provider.id] ?? [];
+
               return (
                 <div
-                  class={`flex items-center justify-between px-4 py-4 bg-surface-3/60 border rounded-lg transition-all duration-150 ${cardClasses()}`}
+                  class={`bg-surface-3/60 border rounded-lg transition-all duration-150 ${cardClasses()}`}
                 >
-                  <div class="flex items-center gap-4 flex-1 min-w-0">
-                    {/* Publisher Logo — prefer local bundled logos, then
-                         publisher store, then API, with initial-letter fallback */}
-                    <Show
-                      when={
-                        LOCAL_PROVIDER_LOGOS[provider.slug] ||
-                        publisherLogos()?.[provider.id] ||
-                        provider.logo_url
-                      }
-                      fallback={
-                        <div class="w-10 h-10 flex items-center justify-center bg-border rounded-lg text-base font-semibold text-muted-foreground">
-                          {provider.name?.charAt(0).toUpperCase() ?? "?"}
-                        </div>
-                      }
-                    >
-                      {(logoUrl) => (
-                        <img
-                          src={logoUrl()}
-                          alt={provider.name}
-                          class="w-10 h-10 rounded-lg object-contain"
-                          onError={(e) => {
-                            const fallback =
-                              LOCAL_PROVIDER_LOGOS[provider.slug];
-                            if (fallback && e.currentTarget.src !== fallback) {
-                              e.currentTarget.src = fallback;
-                            } else {
-                              // No local fallback — hide broken image
-                              e.currentTarget.style.display = "none";
-                            }
-                          }}
-                        />
-                      )}
-                    </Show>
+                  {/* Provider header row */}
+                  <div class="flex items-center justify-between px-4 py-4">
+                    <div class="flex items-center gap-4 flex-1 min-w-0">
+                      {/* Provider Logo — prefer local bundled logos, then
+                           publisher store, then API, with initial-letter fallback */}
+                      <Show
+                        when={
+                          LOCAL_PROVIDER_LOGOS[provider.slug] ||
+                          publisherData()?.logos[provider.id] ||
+                          provider.logo_url
+                        }
+                        fallback={
+                          <div class="w-10 h-10 flex items-center justify-center bg-border rounded-lg text-base font-semibold text-muted-foreground">
+                            {provider.name?.charAt(0).toUpperCase() ?? "?"}
+                          </div>
+                        }
+                      >
+                        {(logoUrl) => (
+                          <img
+                            src={logoUrl()}
+                            alt={provider.name}
+                            class="w-10 h-10 rounded-lg object-contain"
+                            onError={(e) => {
+                              const fallback =
+                                LOCAL_PROVIDER_LOGOS[provider.slug];
+                              if (
+                                fallback &&
+                                e.currentTarget.src !== fallback
+                              ) {
+                                e.currentTarget.src = fallback;
+                              } else {
+                                e.currentTarget.style.display = "none";
+                              }
+                            }}
+                          />
+                        )}
+                      </Show>
 
-                    <div class="flex flex-col gap-0.5 min-w-0 flex-1">
-                      <div class="flex items-center gap-2">
-                        <span class="font-medium text-foreground">
-                          {provider.name}
-                        </span>
-                        <Show when={expired()}>
-                          <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-warning/20 text-warning/85">
-                            Expired
+                      <div class="flex flex-col gap-0.5 min-w-0 flex-1">
+                        <div class="flex items-center gap-2">
+                          <span class="font-medium text-foreground">
+                            {provider.name}
+                          </span>
+                          <Show when={expired()}>
+                            <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-warning/20 text-warning/85">
+                              Expired
+                            </span>
+                          </Show>
+                          <Show when={connection() && !expired()}>
+                            <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-success/20 text-success">
+                              Connected
+                            </span>
+                          </Show>
+                        </div>
+                        <Show when={provider.description}>
+                          <span class="text-[0.8rem] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
+                            {provider.description}
                           </span>
                         </Show>
-                        <Show when={connection() && !expired()}>
-                          <span class="text-[11px] px-1.5 py-0.5 rounded font-medium bg-success/20 text-success">
-                            Connected
+                        <Show when={expired()}>
+                          <span class="text-[0.75rem] text-warning/85">
+                            Token expired - please reconnect to continue using
+                            this service
                           </span>
+                        </Show>
+                        <Show when={!expired() && connection()}>
+                          {(conn) => (
+                            <span class="text-[0.75rem] text-muted-foreground">
+                              {conn().provider_email
+                                ? `Connected as ${conn().provider_email}`
+                                : `Last used: ${formatDate(conn().last_used_at)}`}
+                            </span>
+                          )}
                         </Show>
                       </div>
-                      <Show when={provider.description}>
-                        <span class="text-[0.8rem] text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
-                          {provider.description}
-                        </span>
-                      </Show>
+                    </div>
+
+                    <div class="flex items-center gap-2 ml-4">
                       <Show when={expired()}>
-                        <span class="text-[0.75rem] text-warning/85">
-                          Token expired - please reconnect to continue using
-                          this service
-                        </span>
+                        <button
+                          type="button"
+                          class="px-4 py-2 bg-warning/85 border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-warning/70 disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => handleConnect(provider)}
+                          disabled={isConnecting()}
+                        >
+                          {isConnecting() ? "Reconnecting..." : "Reconnect"}
+                        </button>
                       </Show>
-                      <Show when={!expired() && connection()}>
-                        {(conn) => (
-                          <span class="text-[0.75rem] text-muted-foreground">
-                            {conn().provider_email
-                              ? `Connected as ${conn().provider_email}`
-                              : `Last used: ${formatDate(conn().last_used_at)}`}
-                          </span>
-                        )}
+                      <Show when={connection() && !expired()}>
+                        <button
+                          type="button"
+                          class="px-4 py-2 bg-transparent border border-destructive/50 rounded-md text-destructive text-[0.9rem] cursor-pointer transition-all duration-150 hover:not-disabled:bg-destructive/10 hover:not-disabled:border-destructive disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => handleDisconnect(provider.slug)}
+                          disabled={isDisconnecting()}
+                        >
+                          {isDisconnecting()
+                            ? "Disconnecting..."
+                            : "Disconnect"}
+                        </button>
+                      </Show>
+                      <Show when={!connection() && !expired()}>
+                        <button
+                          type="button"
+                          class="px-4 py-2 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => handleConnect(provider)}
+                          disabled={isConnecting()}
+                        >
+                          {isConnecting() ? "Connecting..." : "Connect"}
+                        </button>
                       </Show>
                     </div>
                   </div>
 
-                  <div class="flex items-center gap-2 ml-4">
-                    {/* Expired state: show Reconnect button */}
-                    <Show when={expired()}>
-                      <button
-                        type="button"
-                        class="px-4 py-2 bg-warning/85 border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-warning/70 disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={() => handleConnect(provider)}
-                        disabled={isConnecting()}
-                      >
-                        {isConnecting() ? "Reconnecting..." : "Reconnect"}
-                      </button>
-                    </Show>
-                    {/* Connected state (not expired): show Disconnect button */}
-                    <Show when={connection() && !expired()}>
-                      <button
-                        type="button"
-                        class="px-4 py-2 bg-transparent border border-destructive/50 rounded-md text-destructive text-[0.9rem] cursor-pointer transition-all duration-150 hover:not-disabled:bg-destructive/10 hover:not-disabled:border-destructive disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={() => handleDisconnect(provider.slug)}
-                        disabled={isDisconnecting()}
-                      >
-                        {isDisconnecting() ? "Disconnecting..." : "Disconnect"}
-                      </button>
-                    </Show>
-                    {/* Not connected and not expired: show Connect button */}
-                    <Show when={!connection() && !expired()}>
-                      <button
-                        type="button"
-                        class="px-4 py-2 bg-accent border-none rounded-md text-white text-[0.9rem] font-medium cursor-pointer transition-all duration-150 hover:not-disabled:bg-primary/85 disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={() => handleConnect(provider)}
-                        disabled={isConnecting()}
-                      >
-                        {isConnecting() ? "Connecting..." : "Connect"}
-                      </button>
-                    </Show>
-                  </div>
+                  {/* Linked publishers sub-list */}
+                  <Show when={linked().length > 1}>
+                    <div class="px-4 pb-3 pt-0 border-t border-border/50 mt-0">
+                      <span class="block text-[0.7rem] text-muted-foreground/70 uppercase tracking-wider pt-2.5 pb-1.5">
+                        Services using this connection
+                      </span>
+                      <div class="flex flex-col gap-1.5">
+                        <For each={linked()}>
+                          {(pub) => (
+                            <div class="flex items-center gap-2.5 py-1">
+                              <Show
+                                when={pub.logoUrl}
+                                fallback={
+                                  <div class="w-5 h-5 flex items-center justify-center bg-border/60 rounded text-[10px] font-semibold text-muted-foreground">
+                                    {pub.name.charAt(0).toUpperCase()}
+                                  </div>
+                                }
+                              >
+                                {(url) => (
+                                  <img
+                                    src={url()}
+                                    alt={pub.name}
+                                    class="w-5 h-5 rounded object-contain"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = "none";
+                                    }}
+                                  />
+                                )}
+                              </Show>
+                              <span class="text-[0.8rem] text-foreground/90">
+                                {pub.name}
+                              </span>
+                              <Show when={pub.description}>
+                                <span class="text-[0.75rem] text-muted-foreground">
+                                  — {pub.description}
+                                </span>
+                              </Show>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                  </Show>
                 </div>
               );
             }}
