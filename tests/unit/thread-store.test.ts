@@ -146,6 +146,7 @@ import { threadStore } from "@/stores/thread.store";
 import { setRootPath } from "@/stores/fileTree";
 import { conversationStore } from "@/stores/conversation.store";
 import { agentStore } from "@/stores/agent.store";
+import { listSessions } from "@/services/providers";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 
 describe("threadStore", () => {
@@ -345,6 +346,62 @@ describe("threadStore", () => {
       });
 
       expect(threadStore.activeThreadKind).toBe("agent");
+    });
+
+    it("ignores stale session checks after switching threads", async () => {
+      mockConversations.conversations = [
+        {
+          id: "chat-1",
+          title: "Chat One",
+          createdAt: 2000,
+          selectedModel: "test",
+          selectedProvider: null,
+          projectRoot: "/Users/dev/project-a",
+          isArchived: false,
+        },
+      ];
+      mockAgentConversations.push({
+        id: "agent-1",
+        title: "Agent",
+        created_at: 1000,
+        agent_type: "claude-code",
+        agent_session_id: "sess-1",
+        agent_cwd: "/dev",
+        agent_model_id: null,
+        project_id: null,
+        project_root: "/Users/dev/project-a",
+        is_archived: false,
+      });
+      mockSessions["sess-1"] = {
+        conversationId: "agent-1",
+        info: { id: "sess-1", status: "ready", agentType: "claude-code" },
+      };
+
+      let resolveBackendSessions:
+        | ((value: Array<{ id: string }>) => void)
+        | undefined;
+      vi.mocked(listSessions).mockImplementationOnce(
+        () =>
+          new Promise<Array<{ id: string }>>((resolve) => {
+            resolveBackendSessions = resolve;
+          }),
+      );
+
+      threadStore.selectThread("agent-1", "agent");
+      threadStore.selectThread("chat-1", "chat");
+      resolveBackendSessions?.([{ id: "sess-1" }]);
+
+      await vi.waitFor(() => {
+        expect(listSessions).toHaveBeenCalledTimes(1);
+      });
+
+      expect(threadStore.activeThreadId).toBe("chat-1");
+      expect(threadStore.activeThreadKind).toBe("chat");
+      expect(conversationStore.setActiveConversation).toHaveBeenCalledWith(
+        "chat-1",
+      );
+      expect(agentStore.setActiveSession).not.toHaveBeenCalledWith("sess-1");
+      expect(agentStore.resumeAgentConversation).not.toHaveBeenCalled();
     });
 
     it("resumes stale session not present in backend", async () => {
