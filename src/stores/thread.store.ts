@@ -355,6 +355,10 @@ export const threadStore = {
         // After an app restart the JS store may hold stale sessions
         // whose backend process is gone.
         void listSessions().then(async (backendSessions) => {
+          if (state.activeThreadId !== id || state.activeThreadKind !== kind) {
+            return;
+          }
+
           const alive = backendSessions.some(
             (s) => s.id === liveSession.info.id,
           );
@@ -368,6 +372,9 @@ export const threadStore = {
             );
             agentStore.setActiveSession(null);
             await agentStore.terminateSession(liveSession.info.id);
+            if (state.activeThreadId !== id || state.activeThreadKind !== kind) {
+              return;
+            }
             const cwd = thread?.projectRoot || fileTreeState.rootPath;
             if (cwd) {
               void agentStore.resumeAgentConversation(id, cwd);
