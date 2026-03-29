@@ -61,7 +61,6 @@ async function waitForSessionIdle(
 }
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
-import { refreshAccessToken } from "@/services/auth";
 import {
   isPromptTooLongError,
   isRateLimitError,
@@ -80,6 +79,7 @@ import {
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
   setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
+import { refreshAccessToken } from "@/services/auth";
 import { sendMessage } from "@/services/chat";
 import type {
   AgentEvent,
@@ -900,6 +900,22 @@ export const agentStore = {
       resumeAgentSessionId,
     });
 
+    // Preemptively terminate idle Claude sessions for other conversations
+    // before spawning. Claude CLI cannot reliably initialize a second
+    // instance while another is alive (see isRetryableClaudeInitError).
+    // Without this, the new session times out 3x (60s) before the existing
+    // post-failure idle-reclaim logic kicks in.
+    if (resolvedAgentType === "claude-code" && initRetryAttempt === 0) {
+      const idleSessions = getIdleClaudeSessionIds(localSessionId);
+      for (const idleId of idleSessions) {
+        console.log(
+          "[AgentStore] Reclaiming idle Claude session before spawn:",
+          idleId,
+        );
+        await this.terminateSession(idleId);
+      }
+    }
+
     const agentAvailable =
       await providerService.checkAgentAvailable(resolvedAgentType);
     if (!agentAvailable) {
@@ -1036,7 +1052,9 @@ export const agentStore = {
         await new Promise((r) => setTimeout(r, 3000));
         apiKey = await getSerenApiKey();
         if (apiKey) {
-          console.info("[AgentStore] API key became available after waiting for auth");
+          console.info(
+            "[AgentStore] API key became available after waiting for auth",
+          );
         }
       }
       const enabledMcpServers = getEnabledMcpServers();
@@ -1331,7 +1349,10 @@ export const agentStore = {
 
       return info.id;
     } catch (error) {
-      console.error(`[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`, error);
+      console.error(
+        `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`,
+        error,
+      );
       tempUnsubscribe();
       const message = error instanceof Error ? error.message : String(error);
       setState("error", message);
@@ -2118,7 +2139,9 @@ Summary:`;
       this.clearBootstrapPromptContext(sessionId);
       console.log("[AgentStore] sendPrompt completed successfully");
     } catch (error) {
-      const agentLabel = agentDisplayName(state.sessions[sessionId]?.info.agentType);
+      const agentLabel = agentDisplayName(
+        state.sessions[sessionId]?.info.agentType,
+      );
       console.error(`[AgentStore] sendPrompt error (${agentLabel}):`, error);
       const message = error instanceof Error ? error.message : String(error);
 
@@ -2947,20 +2970,27 @@ Summary:`;
 
           // Try compact-and-retry first; fall back to Chat only if it fails.
           // Store the promise so sendPrompt catch block can await it.
-          const compactPromise = this.compactAndRetry(sessionId).then((retried) => {
-            if (!retried) {
-              console.info(
-                "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
-              );
-              setState("sessions", sessionId, "promptTooLong", true);
-              this.addErrorMessage(sessionId, event.data.error);
-              this.acceptRateLimitFallback().catch((err) => {
-                console.error("[AgentStore] Auto-failover failed:", err);
-              });
-            }
-            return retried;
-          });
-          setState("sessions", sessionId, "compactRetryPromise", compactPromise);
+          const compactPromise = this.compactAndRetry(sessionId).then(
+            (retried) => {
+              if (!retried) {
+                console.info(
+                  "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
+                );
+                setState("sessions", sessionId, "promptTooLong", true);
+                this.addErrorMessage(sessionId, event.data.error);
+                this.acceptRateLimitFallback().catch((err) => {
+                  console.error("[AgentStore] Auto-failover failed:", err);
+                });
+              }
+              return retried;
+            },
+          );
+          setState(
+            "sessions",
+            sessionId,
+            "compactRetryPromise",
+            compactPromise,
+          );
         } else if (isRateLimitError(String(event.data.error))) {
           // Rate limit detected — automatically switch to chat mode
           console.info(
@@ -2982,7 +3012,9 @@ Summary:`;
           this.acceptRateLimitFallback().catch((err) => {
             console.error("[AgentStore] Auto-failover failed:", err);
           });
-        } else if (/^Reconnecting\.\.\.\s*\d+\/\d+$/i.test(String(event.data.error))) {
+        } else if (
+          /^Reconnecting\.\.\.\s*\d+\/\d+$/i.test(String(event.data.error))
+        ) {
           // Transient reconnection attempt — show in chat but keep session
           // in "prompting" state so the queue doesn't drain prematurely.
           // The agent will resume its task after reconnecting.
@@ -3545,21 +3577,23 @@ Summary:`;
           "[AgentStore] Prompt too long detected in streamed content",
         );
         setState("sessions", sessionId, "promptTooLongHandled", true);
-        const compactPromise = this.compactAndRetry(sessionId).then((retried) => {
-          if (!retried) {
-            console.info(
-              "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
-            );
-            setState("sessions", sessionId, "promptTooLong", true);
-            this.acceptRateLimitFallback().catch((err) => {
-              console.error(
-                "[AgentStore] Auto-failover from streamed content failed:",
-                err,
+        const compactPromise = this.compactAndRetry(sessionId).then(
+          (retried) => {
+            if (!retried) {
+              console.info(
+                "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
               );
-            });
-          }
-          return retried;
-        });
+              setState("sessions", sessionId, "promptTooLong", true);
+              this.acceptRateLimitFallback().catch((err) => {
+                console.error(
+                  "[AgentStore] Auto-failover from streamed content failed:",
+                  err,
+                );
+              });
+            }
+            return retried;
+          },
+        );
         setState("sessions", sessionId, "compactRetryPromise", compactPromise);
       }
 
