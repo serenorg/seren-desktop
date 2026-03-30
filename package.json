@@ -59,7 +59,7 @@
     "highlight.js": "^11.11.1",
     "marked": "^17.0.5",
     "monaco-editor": "^0.55.1",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "^5.6.205",
     "qrcode": "^1.5.4",
     "solid-js": "^1.9.3",
     "tailwind-merge": "^3.5.0",
