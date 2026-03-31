@@ -31,10 +31,10 @@ describe("stale event filtering for terminated sessions", () => {
     expect(addIndex).toBeLessThan(ipcIndex);
   });
 
-  it("drops events for terminated session IDs in the global subscriber", () => {
-    expect(agentStoreSource).toContain(
-      "if (terminatedSessionIds.has(eventSessionId)) return",
-    );
+  it("drops events for terminated session IDs unless spawn is in progress", () => {
+    expect(agentStoreSource).toContain("terminatedSessionIds.has(eventSessionId)");
+    // Must also check spawnContextMap so respawned sessions get config events
+    expect(agentStoreSource).toContain("!spawnContextMap.has(eventSessionId)");
   });
 
   it("clears terminated session on new session registration", () => {
