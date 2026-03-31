@@ -286,6 +286,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
   return (
     <aside
+      data-testid="thread-sidebar"
       class="flex flex-col bg-card border-r border-border overflow-hidden transition-all duration-200"
       classList={{
         "w-[var(--sidebar-width)] min-w-[var(--sidebar-width)]":
@@ -351,6 +352,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       <div class="px-3 py-2 shrink-0 relative" ref={launcherRef}>
         <button
           type="button"
+          data-testid="new-thread-button"
           class="flex items-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-lg text-primary text-[13px] font-medium cursor-pointer transition-all duration-150 hover:bg-primary/15 hover:border-primary/25 hover:shadow-[0_0_12px_rgba(56,189,248,0.1)] active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait disabled:hover:bg-primary/8"
           onClick={toggleLauncher}
           disabled={spawning()}
@@ -386,6 +388,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             <Show when={allowsSerenAgent(authStore.privateChatPolicy)}>
               <button
                 type="button"
+                data-testid="new-seren-chat"
                 class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
                 onClick={handleNewChat}
               >
@@ -1016,6 +1019,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   <For each={group.threads}>
                     {(thread) => (
                       <div
+                        data-testid="thread-item"
+                        data-thread-id={thread.id}
+                        data-thread-kind={thread.kind}
                         class="group flex items-center gap-2 w-full py-2 px-2.5 bg-transparent border-none border-l-2 border-l-transparent rounded-lg cursor-pointer mb-0.5 text-left transition-all duration-150 hover:bg-surface-2/60"
                         classList={{
                           "!bg-surface-2/80 border-l-2 !border-l-primary !pl-2":
@@ -1120,6 +1126,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
       <div class="border-t border-border shrink-0 bg-surface-0/50">
         <button
           type="button"
+          data-testid="sessions-button"
           class="w-full px-3 py-2 text-left text-[12px] text-muted-foreground hover:text-foreground hover:bg-surface-1/50 transition-colors flex items-center gap-2"
           onClick={() =>
             window.dispatchEvent(

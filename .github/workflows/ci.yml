@@ -80,9 +80,44 @@ jobs:
           workspaces: src-tauri
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
+  test-e2e:
+    name: E2E tests (production bundle)
+    needs: [lint, test-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Build production bundle
+        run: npx vite build
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run e2e tests against production bundle
+        run: pnpm test:e2e
+        env:
+          PLAYWRIGHT_WEB_COMMAND: 'npx vite preview --port 1420'
+          PLAYWRIGHT_WEB_TIMEOUT: '30000'
+          PLAYWRIGHT_PORT: '1420'
+          CI: 'true'
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+
   file-issue-on-failure:
     name: File issue on CI failure
-    needs: [lint, test-frontend, test-rust]
+    needs: [lint, test-frontend, test-rust, test-e2e]
     if: |
       failure() &&
       github.event_name == 'push' &&
@@ -95,10 +130,11 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const failedJobs = ['lint', 'test-frontend', 'test-rust']
+            const failedJobs = ['lint', 'test-frontend', 'test-rust', 'test-e2e']
               .filter(job => '${{ needs.lint.result }}' === 'failure' && job === 'lint' ||
                              '${{ needs.test-frontend.result }}' === 'failure' && job === 'test-frontend' ||
-                             '${{ needs.test-rust.result }}' === 'failure' && job === 'test-rust');
+                             '${{ needs.test-rust.result }}' === 'failure' && job === 'test-rust' ||
+                             '${{ needs.test-e2e.result }}' === 'failure' && job === 'test-e2e');
 
             for (const job of failedJobs) {
               const title = `CI failure: ${job} on main`;
@@ -135,7 +171,7 @@ jobs:
             }
 
   build:
-    needs: [lint, test-frontend, test-rust]
+    needs: [lint, test-frontend, test-rust, test-e2e]
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
     strategy:
