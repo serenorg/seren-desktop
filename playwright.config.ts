@@ -1,8 +1,12 @@
+// ABOUTME: Playwright e2e test configuration for Seren Desktop.
+// ABOUTME: Supports dev server (pnpm tauri dev) and production bundle (vite preview) modes.
+
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 1420;
+const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 1420);
 const HOST = process.env.PLAYWRIGHT_WEB_HOST ?? "localhost";
-const WEB_COMMAND = process.env.PLAYWRIGHT_WEB_COMMAND ?? "pnpm tauri dev";
+const WEB_COMMAND =
+  process.env.PLAYWRIGHT_WEB_COMMAND ?? "pnpm tauri dev";
 const WEB_TIMEOUT = Number(process.env.PLAYWRIGHT_WEB_TIMEOUT ?? 360_000);
 
 export default defineConfig({
