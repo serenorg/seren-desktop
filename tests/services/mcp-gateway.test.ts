@@ -208,3 +208,159 @@ describe("MCP Gateway Caching", () => {
     expect(gmailTools[1].tool.name).toBe("post_messages_send");
   });
 });
+
+describe("MCP Gateway Native Tool Routing (#1329)", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  it("should call native MCP tools directly instead of through call_publisher", async () => {
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const callToolMock = vi.mocked(mcpClient.callToolHttp);
+
+    const { initializeGateway, callGatewayTool } = await import(
+      "@/services/mcp-gateway"
+    );
+
+    await initializeGateway();
+
+    // Reset mock call history after init (which calls connectHttp, callToolHttp, etc.)
+    callToolMock.mockClear();
+    callToolMock.mockResolvedValue({
+      content: [{ type: "text", text: '{"time":"2026-03-31T12:00:00Z"}' }],
+      isError: false,
+    });
+
+    // Call the native MCP tool (test publisher is in connection.tools as mcp__test__test-tool)
+    const result = await callGatewayTool("test", "test-tool", {});
+
+    // Should call directly with the original MCP name, NOT through call_publisher
+    expect(callToolMock).toHaveBeenCalledWith("seren-gateway", {
+      name: "mcp__test__test-tool",
+      arguments: {},
+    });
+    expect(result.is_error).toBe(false);
+  });
+
+  it("should use call_publisher for non-native REST publisher tools", async () => {
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const callToolMock = vi.mocked(mcpClient.callToolHttp);
+
+    // Add a dynamically-discovered publisher tool (not in connection.tools)
+    callToolMock.mockImplementation(async (_server, request) => {
+      if (request.name === "list_agent_publishers") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                publishers: [{ slug: "kraken", name: "Kraken" }],
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+      if (
+        request.name === "list_mcp_tools" &&
+        request.arguments?.publisher === "kraken"
+      ) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                tools: [
+                  {
+                    name: "get_balance",
+                    description: "Get account balance",
+                    inputSchema: { type: "object", properties: {} },
+                  },
+                ],
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+      return { content: [], isError: true };
+    });
+
+    const { initializeGateway, callGatewayTool } = await import(
+      "@/services/mcp-gateway"
+    );
+
+    await initializeGateway();
+
+    // Reset and set up for the actual tool call
+    callToolMock.mockClear();
+    callToolMock.mockResolvedValue({
+      content: [{ type: "text", text: '{"balance":"100.00"}' }],
+      isError: false,
+    });
+
+    // kraken/get_balance is NOT in connection.tools, only discovered dynamically
+    const result = await callGatewayTool("kraken", "get_balance", {
+      currency: "USD",
+    });
+
+    // Should dispatch through call_publisher, not direct MCP call
+    expect(callToolMock).toHaveBeenCalledWith("seren-gateway", {
+      name: "call_publisher",
+      arguments: {
+        publisher: "kraken",
+        tool: "get_balance",
+        tool_args: { currency: "USD" },
+      },
+    });
+    expect(result.is_error).toBe(false);
+  });
+
+  it("should track native tools and clear them on reset", async () => {
+    const { initializeGateway, isNativeMcpTool, resetGateway } = await import(
+      "@/services/mcp-gateway"
+    );
+
+    await initializeGateway();
+
+    // "test" publisher's "test-tool" should be detected as native
+    // (it's in mock connection.tools as mcp__test__test-tool)
+    expect(isNativeMcpTool("test", "test-tool")).toBe(true);
+
+    // Non-existent tool should not be native
+    expect(isNativeMcpTool("kraken", "get_balance")).toBe(false);
+
+    // Reset should clear native tool tracking
+    await resetGateway();
+    expect(isNativeMcpTool("test", "test-tool")).toBe(false);
+  });
+
+  it("should strip _x402_payment from args for native MCP tool calls", async () => {
+    const { mcpClient } = await import("@/lib/mcp/client");
+    const callToolMock = vi.mocked(mcpClient.callToolHttp);
+
+    const { initializeGateway, callGatewayTool } = await import(
+      "@/services/mcp-gateway"
+    );
+
+    await initializeGateway();
+    callToolMock.mockClear();
+    callToolMock.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      isError: false,
+    });
+
+    await callGatewayTool("test", "test-tool", {
+      some_arg: "value",
+      _x402_payment: "payment-header",
+    });
+
+    // Native call should NOT include _x402_payment in arguments
+    expect(callToolMock).toHaveBeenCalledWith("seren-gateway", {
+      name: "mcp__test__test-tool",
+      arguments: { some_arg: "value" },
+    });
+  });
+});
