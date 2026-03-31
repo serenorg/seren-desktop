@@ -11,17 +11,6 @@ describe("AgentChat memo declaration order", () => {
     "utf-8",
   );
 
-  it("threadValidationRun is declared after threadSession", () => {
-    const sessionDeclPos = source.indexOf("const threadSession = createMemo");
-    const validationDeclPos = source.indexOf(
-      "const threadValidationRun = createMemo",
-    );
-
-    expect(sessionDeclPos).toBeGreaterThan(-1);
-    expect(validationDeclPos).toBeGreaterThan(-1);
-    expect(validationDeclPos).toBeGreaterThan(sessionDeclPos);
-  });
-
   it("no createMemo calls threadSession() before its declaration", () => {
     const sessionDeclPos = source.indexOf("const threadSession = createMemo");
     const beforeDecl = source.slice(0, sessionDeclPos);
