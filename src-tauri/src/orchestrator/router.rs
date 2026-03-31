@@ -22,6 +22,20 @@ const SIMPLE_PREFERRED_MODELS: &[&str] = &[
     "anthropic/claude-sonnet-4",
 ];
 
+/// Task types eligible for McpPublisher routing when gateway tools are available.
+/// Explicit allowlist: any task type NOT listed here routes to ChatModel instead.
+///
+/// Currently EMPTY — all tasks route through ChatModel, which has access to the
+/// full tool inventory from all publishers via the gateway tool bridge and supports
+/// multi-round tool calls. McpPublisher sends to a single publisher's chat/completions
+/// endpoint, which fails when a task needs tools from multiple publishers, multi-round
+/// execution, or when no publisher meaningfully matches the query (random fallback).
+///
+/// The McpPublisher infrastructure remains available. Re-enable per-task-type only
+/// when there is high confidence that single-publisher routing is correct for that type
+/// (e.g., a future "direct_publisher_query" task type with an explicit publisher target).
+const MCP_PUBLISHER_ELIGIBLE_TASK_TYPES: &[&str] = &[];
+
 /// Fallback models for context-overflow errors (all have 1M+ token windows).
 /// Tried in order when the primary model rejects a request for exceeding its
 /// context limit (e.g. Claude 4.5 at 200K).
@@ -94,12 +108,12 @@ fn select_worker_type(
         return WorkerType::LocalAgent;
     }
 
-    // Non-file-system tasks requiring tools + a valid gateway publisher → McpPublisher
-    // Note: gateway__ = remote Seren publishers (Firecrawl, Perplexity, etc.)
-    //        mcp__    = local MCP servers (playwright-stealth, etc.) — NOT routable
-    // File-system tasks (code_generation, file_operations) must NOT route here —
-    // publishers cannot satisfy local file operations.
-    if classification.requires_tools
+    // Allowlisted task types + tools required + gateway tools available → McpPublisher.
+    // Only task types in MCP_PUBLISHER_ELIGIBLE_TASK_TYPES can route here.
+    // The requires_file_system guard stays as defense-in-depth: publishers
+    // cannot satisfy local file operations regardless of task type.
+    if MCP_PUBLISHER_ELIGIBLE_TASK_TYPES.contains(&classification.task_type.as_str())
+        && classification.requires_tools
         && !classification.requires_file_system
         && has_any_gateway_tool(capabilities)
     {
@@ -682,7 +696,9 @@ mod tests {
     }
 
     #[test]
-    fn routes_research_with_gateway_tools_to_mcp_publisher() {
+    fn routes_research_with_gateway_tools_to_chat_model_not_publisher() {
+        // Research routes to ChatModel (not McpPublisher) so it has access to
+        // all tools from all publishers, not just one. (#1343)
         let classification = make_classification("research", true, false);
         let capabilities = make_capabilities(
             false,
@@ -690,11 +706,8 @@ mod tests {
             &["gateway__firecrawl-serenai__scrape"],
         );
         let decision = route(&classification, &capabilities, "test query");
-        assert_eq!(decision.worker_type, WorkerType::McpPublisher);
-        assert_eq!(
-            decision.publisher_slug,
-            Some("firecrawl-serenai".to_string())
-        );
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
     }
 
     #[test]
@@ -764,7 +777,56 @@ mod tests {
     }
 
     #[test]
-    fn multiple_gateway_publishers_selects_most_relevant_by_query() {
+    fn skill_execution_routes_to_chat_model_not_publisher() {
+        // skill_execution was silently mis-routed to McpPublisher before #1343.
+        // Skills need ChatModel for full tool inventory and multi-round tool calls.
+        let classification = make_classification("skill_execution", true, false);
+        let capabilities = make_capabilities(
+            false,
+            &["anthropic/claude-sonnet-4"],
+            &[
+                "gateway__firecrawl-serenai__scrape",
+                "gateway__gmail__get_messages",
+            ],
+        );
+        let decision = route(&classification, &capabilities, "/bat-sales-coach");
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
+    }
+
+    #[test]
+    fn non_allowlisted_task_types_never_route_to_mcp_publisher() {
+        // Verify that ALL current task types route to ChatModel when gateway tools
+        // exist. The MCP_PUBLISHER_ELIGIBLE_TASK_TYPES allowlist is empty. (#1343)
+        let task_types = [
+            "skill_execution",
+            "code_generation",
+            "file_operations",
+            "research",
+            "document_generation",
+            "general_chat",
+        ];
+        for task_type in task_types {
+            let classification = make_classification(task_type, true, false);
+            let capabilities = make_capabilities(
+                false,
+                &["anthropic/claude-sonnet-4"],
+                &["gateway__firecrawl-serenai__scrape"],
+            );
+            let decision = route(&classification, &capabilities, "test query");
+            assert_ne!(
+                decision.worker_type,
+                WorkerType::McpPublisher,
+                "task_type '{}' should NOT route to McpPublisher",
+                task_type
+            );
+        }
+    }
+
+    #[test]
+    fn multiple_gateway_publishers_routes_to_chat_model() {
+        // With multiple publishers, ChatModel is the right choice — it can
+        // call tools from any publisher via the gateway tool bridge. (#1343)
         let classification = make_classification("research", true, false);
         let capabilities = make_capabilities(
             false,
@@ -774,28 +836,19 @@ mod tests {
                 "gateway__perplexity-serenai__search",
             ],
         );
-        // Query matches "search" → perplexity (has search tool)
         let decision = route(
             &classification,
             &capabilities,
             "search the web for Rust tutorials",
         );
-        assert_eq!(decision.worker_type, WorkerType::McpPublisher);
-        assert_eq!(
-            decision.publisher_slug,
-            Some("perplexity-serenai".to_string())
-        );
-
-        // Query matches "scrape" → firecrawl
-        let decision = route(&classification, &capabilities, "scrape the homepage");
-        assert_eq!(
-            decision.publisher_slug,
-            Some("firecrawl-serenai".to_string())
-        );
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
     }
 
     #[test]
-    fn routes_gmail_query_to_gmail_publisher_not_polymarket() {
+    fn routes_gmail_query_to_chat_model_not_single_publisher() {
+        // Even when the query clearly targets one publisher, ChatModel handles it
+        // because it has access to all tools and supports multi-round execution. (#1343)
         let classification = make_classification("research", true, false);
         let capabilities = make_capabilities(
             false,
@@ -811,8 +864,8 @@ mod tests {
             &capabilities,
             "Summarize my five most recent emails in Gmail",
         );
-        assert_eq!(decision.worker_type, WorkerType::McpPublisher);
-        assert_eq!(decision.publisher_slug, Some("gmail".to_string()));
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, None);
     }
 
     // =========================================================================
