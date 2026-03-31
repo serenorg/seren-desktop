@@ -19,6 +19,10 @@ const sessionReadyPromises = new Map<
   { promise: Promise<void>; resolve: () => void }
 >();
 
+/** Conversations with a spawn currently in progress. Prevents double-spawn
+ *  when selectThread fires twice before the first spawn registers the session. */
+const spawningConversations = new Set<string>();
+
 /** Max time to wait for a session to become ready before giving up */
 const SESSION_READY_TIMEOUT_MS = 30_000;
 
@@ -1409,6 +1413,18 @@ export const agentStore = {
       return conversationId;
     }
 
+    // If a spawn is already in progress for this conversation, skip.
+    // selectThread can fire multiple times reactively before the first
+    // spawn completes and registers the session in state.
+    if (spawningConversations.has(conversationId)) {
+      console.log(
+        "[AgentStore] Spawn already in progress for",
+        conversationId,
+        "— skipping duplicate",
+      );
+      return null;
+    }
+
     // Prevent infinite spawn-crash-respawn cascades: if this conversation
     // has failed too many times in a short window, stop retrying.
     if (isSpawnCascading(conversationId)) {
@@ -1424,133 +1440,143 @@ export const agentStore = {
     }
 
     setState("error", null);
-
-    // Pre-emptively clean up any stale backend session with this conversation id.
-    // If the frontend lost track of a session (e.g. after a crash or auth error),
-    // the backend may still hold it, causing "Session already exists" on re-spawn.
+    spawningConversations.add(conversationId);
     try {
-      await providerService.terminateSession(conversationId);
-    } catch {
-      // Ignore — session likely doesn't exist in the backend
-    }
+      // Pre-emptively clean up any stale backend session with this conversation id.
+      // If the frontend lost track of a session (e.g. after a crash or auth error),
+      // the backend may still hold it, causing "Session already exists" on re-spawn.
+      try {
+        await providerService.terminateSession(conversationId);
+      } catch {
+        // Ignore — session likely doesn't exist in the backend
+      }
 
-    let convo: DbAgentConversation | null = null;
-    try {
-      convo = await getAgentConversation(conversationId);
-    } catch (error) {
-      console.error("Failed to read agent conversation:", error);
-    }
-    if (!convo) {
-      setState("error", "Agent conversation not found");
-      return null;
-    }
-    const agentType: AgentType =
-      convo.agent_type === "codex" || convo.agent_type === "claude-code"
-        ? (convo.agent_type as AgentType)
-        : state.selectedAgentType;
-    const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);
-    const pendingBootstrapPromptContext =
-      convoMetadata.pendingBootstrapPromptContext;
-    const restoredMessages = Array.isArray(
-      convoMetadata.pendingBootstrapMessages,
-    )
-      ? convoMetadata.pendingBootstrapMessages
-      : [];
-
-    const remoteSessionId = convo.agent_session_id?.trim();
-    if (!remoteSessionId) {
-      console.warn(
-        "[AgentStore] Conversation has no stored remote session id; creating a fresh session.",
-        conversationId,
+      let convo: DbAgentConversation | null = null;
+      try {
+        convo = await getAgentConversation(conversationId);
+      } catch (error) {
+        console.error("Failed to read agent conversation:", error);
+      }
+      if (!convo) {
+        setState("error", "Agent conversation not found");
+        return null;
+      }
+      const agentType: AgentType =
+        convo.agent_type === "codex" || convo.agent_type === "claude-code"
+          ? (convo.agent_type as AgentType)
+          : state.selectedAgentType;
+      const convoMetadata = parseAgentConversationMetadata(
+        convo.agent_metadata,
       );
+      const pendingBootstrapPromptContext =
+        convoMetadata.pendingBootstrapPromptContext;
+      const restoredMessages = Array.isArray(
+        convoMetadata.pendingBootstrapMessages,
+      )
+        ? convoMetadata.pendingBootstrapMessages
+        : [];
+
+      const remoteSessionId = convo.agent_session_id?.trim();
+      if (!remoteSessionId) {
+        console.warn(
+          "[AgentStore] Conversation has no stored remote session id; creating a fresh session.",
+          conversationId,
+        );
+        const convoCwd =
+          convo.project_root?.trim() || convo.agent_cwd?.trim() || undefined;
+        const freshCwd = convoCwd || cwd;
+        if (!freshCwd) {
+          setState(
+            "error",
+            "Unable to determine project path for this conversation.",
+          );
+          return null;
+        }
+        const freshSessionId = await this.spawnSession(freshCwd, agentType, {
+          localSessionId: conversationId,
+          conversationTitle: convo.title,
+          restoredMessages,
+          bootstrapPromptContext: pendingBootstrapPromptContext,
+        });
+        if (freshSessionId) {
+          clearSpawnFailures(conversationId);
+          void this.refreshRecentAgentConversations(200).catch(() => {});
+        } else {
+          recordSpawnFailure(conversationId);
+        }
+        return freshSessionId;
+      }
+      if (
+        agentType === "claude-code" &&
+        LEGACY_CLAUDE_LOCAL_SESSION_ID_RE.test(remoteSessionId)
+      ) {
+        setState(
+          "error",
+          "This conversation references a legacy local Claude id. Use Browse Claude Sessions and resume the real remote session.",
+        );
+        return null;
+      }
+
       const convoCwd =
         convo.project_root?.trim() || convo.agent_cwd?.trim() || undefined;
-      const freshCwd = convoCwd || cwd;
-      if (!freshCwd) {
+      const resumeCwd = convoCwd || cwd;
+      if (!resumeCwd) {
         setState(
           "error",
           "Unable to determine project path for this conversation.",
         );
         return null;
       }
-      const freshSessionId = await this.spawnSession(freshCwd, agentType, {
+
+      const sessionId = await this.spawnSession(resumeCwd, agentType, {
         localSessionId: conversationId,
+        resumeAgentSessionId: remoteSessionId,
         conversationTitle: convo.title,
         restoredMessages,
         bootstrapPromptContext: pendingBootstrapPromptContext,
       });
-      if (freshSessionId) {
+
+      // Legacy Claude conversations can reference session IDs that no longer
+      // exist on disk. In that case, fall back to a fresh session for the same
+      // persisted conversation instead of failing hard.
+      if (!sessionId && agentType === "claude-code") {
+        console.warn(
+          "[AgentStore] Claude resume failed, starting a fresh session for conversation",
+          conversationId,
+          state.error,
+        );
+        const fallbackSessionId = await this.spawnSession(
+          resumeCwd,
+          agentType,
+          {
+            localSessionId: conversationId,
+            conversationTitle: convo.title,
+            restoredMessages,
+            bootstrapPromptContext: pendingBootstrapPromptContext,
+          },
+        );
+        if (fallbackSessionId) {
+          clearSpawnFailures(conversationId);
+          void this.refreshRecentAgentConversations(200).catch(() => {});
+        } else {
+          recordSpawnFailure(conversationId);
+        }
+        return fallbackSessionId;
+      }
+
+      if (sessionId) {
+        if (!pendingBootstrapPromptContext) {
+          clearLegacyAgentTranscript(conversationId);
+        }
         clearSpawnFailures(conversationId);
         void this.refreshRecentAgentConversations(200).catch(() => {});
       } else {
         recordSpawnFailure(conversationId);
       }
-      return freshSessionId;
+      return sessionId;
+    } finally {
+      spawningConversations.delete(conversationId);
     }
-    if (
-      agentType === "claude-code" &&
-      LEGACY_CLAUDE_LOCAL_SESSION_ID_RE.test(remoteSessionId)
-    ) {
-      setState(
-        "error",
-        "This conversation references a legacy local Claude id. Use Browse Claude Sessions and resume the real remote session.",
-      );
-      return null;
-    }
-
-    const convoCwd =
-      convo.project_root?.trim() || convo.agent_cwd?.trim() || undefined;
-    const resumeCwd = convoCwd || cwd;
-    if (!resumeCwd) {
-      setState(
-        "error",
-        "Unable to determine project path for this conversation.",
-      );
-      return null;
-    }
-
-    const sessionId = await this.spawnSession(resumeCwd, agentType, {
-      localSessionId: conversationId,
-      resumeAgentSessionId: remoteSessionId,
-      conversationTitle: convo.title,
-      restoredMessages,
-      bootstrapPromptContext: pendingBootstrapPromptContext,
-    });
-
-    // Legacy Claude conversations can reference session IDs that no longer
-    // exist on disk. In that case, fall back to a fresh session for the same
-    // persisted conversation instead of failing hard.
-    if (!sessionId && agentType === "claude-code") {
-      console.warn(
-        "[AgentStore] Claude resume failed, starting a fresh session for conversation",
-        conversationId,
-        state.error,
-      );
-      const fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
-        localSessionId: conversationId,
-        conversationTitle: convo.title,
-        restoredMessages,
-        bootstrapPromptContext: pendingBootstrapPromptContext,
-      });
-      if (fallbackSessionId) {
-        clearSpawnFailures(conversationId);
-        void this.refreshRecentAgentConversations(200).catch(() => {});
-      } else {
-        recordSpawnFailure(conversationId);
-      }
-      return fallbackSessionId;
-    }
-
-    if (sessionId) {
-      if (!pendingBootstrapPromptContext) {
-        clearLegacyAgentTranscript(conversationId);
-      }
-      clearSpawnFailures(conversationId);
-      void this.refreshRecentAgentConversations(200).catch(() => {});
-    } else {
-      recordSpawnFailure(conversationId);
-    }
-    return sessionId;
   },
   /**
    * Resume a remote agent session from the provider's stored session list.

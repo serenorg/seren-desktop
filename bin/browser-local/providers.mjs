@@ -967,6 +967,18 @@ export function createProviderHandlers({ emit }) {
         modelListResult = await sendRequest(session, "model/list", {}, 10_000);
       } catch (error) {
         console.warn("[browser-local] Codex model/list failed:", error);
+        // If the process was terminated during model/list, don't continue
+        // to thread/start on a dead process — it will just time out.
+        const errMsg = error instanceof Error ? error.message : String(error);
+        if (errMsg.includes("terminated") || errMsg.includes("stopped")) {
+          throw error;
+        }
+      }
+
+      // Verify the session is still tracked before proceeding to thread/start.
+      // A terminated session would cause a 20s timeout on a dead stdin pipe.
+      if (!sessions.has(sessionId)) {
+        throw new Error("Codex session was terminated during initialization.");
       }
 
       session.availableModelRecords = normalizeModelRecords(modelListResult);
