@@ -1152,6 +1152,13 @@ export const agentStore = {
         );
         console.log("[AgentStore] Spawn result:", info);
 
+        // The new session is alive — immediately clear the terminated flag so
+        // early events (configOptionsUpdate, sessionStatus with models/modes)
+        // are NOT dropped by the global subscriber's terminatedSessionIds guard.
+        // Without this, the pre-cleanup terminateSession call marks the ID, and
+        // events from the NEW session get silently dropped before registration.
+        terminatedSessionIds.delete(info.id);
+
         // Persist an agent conversation record (safe to call repeatedly via INSERT OR IGNORE).
         try {
           await createAgentConversation(
