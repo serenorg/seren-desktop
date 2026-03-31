@@ -23,6 +23,7 @@ import { skills as skillsService } from "@/services/skills";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { sessionStore } from "@/stores/session.store";
 import { skillsStore } from "@/stores/skills.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -377,9 +378,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               />
             </svg>
           </Show>
-          {spawning()
-            ? (agentStore.installStatus ?? "Starting...")
-            : "New"}
+          {spawning() ? (agentStore.installStatus ?? "Starting...") : "New"}
         </button>
 
         <Show when={showLauncher()}>
@@ -1118,16 +1117,59 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </Show>
       </div>
 
-      {/* Running agents footer */}
-      <Show when={threadStore.runningCount > 0}>
-        <div class="px-3 py-2 border-t border-border shrink-0 bg-surface-0/50">
-          <span class="text-[11px] text-status-running flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-status-running animate-pulse" />
-            {threadStore.runningCount} agent
-            {threadStore.runningCount > 1 ? "s" : ""} running
-          </span>
-        </div>
-      </Show>
+      {/* Session & running agents footer */}
+      <div class="border-t border-border shrink-0 bg-surface-0/50">
+        <button
+          type="button"
+          class="w-full px-3 py-2 text-left text-[12px] text-muted-foreground hover:text-foreground hover:bg-surface-1/50 transition-colors flex items-center gap-2"
+          onClick={() =>
+            window.dispatchEvent(
+              new CustomEvent("seren:open-panel", { detail: "sessions" }),
+            )
+          }
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            role="img"
+            aria-label="Sessions"
+          >
+            <rect
+              x="2"
+              y="3"
+              width="12"
+              height="10"
+              rx="2"
+              stroke="currentColor"
+              stroke-width="1.2"
+            />
+            <path
+              d="M5 7h6M5 9.5h4"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linecap="round"
+            />
+          </svg>
+          Sessions
+          <Show when={sessionStore.activeSessions.length > 0}>
+            <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
+              {sessionStore.activeSessions.length}
+            </span>
+          </Show>
+        </button>
+
+        <Show when={threadStore.runningCount > 0}>
+          <div class="px-3 py-2 border-t border-border/30">
+            <span class="text-[11px] text-status-running flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-status-running animate-pulse" />
+              {threadStore.runningCount} agent
+              {threadStore.runningCount > 1 ? "s" : ""} running
+            </span>
+          </div>
+        </Show>
+      </div>
     </aside>
   );
 };

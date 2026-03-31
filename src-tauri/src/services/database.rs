@@ -349,6 +349,61 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Runtime sessions table for computer-use sessions
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS runtime_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'idle',
+            environment TEXT NOT NULL DEFAULT 'browser',
+            context TEXT,
+            policy TEXT,
+            thread_id TEXT,
+            project_root TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            resumed_at INTEGER
+        )",
+        [],
+    )?;
+
+    // Session events table for the audit timeline
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS session_events (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT,
+            metadata TEXT,
+            status TEXT NOT NULL DEFAULT 'completed',
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES runtime_sessions(id)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_events_session_id
+         ON session_events(session_id, created_at ASC)",
+        [],
+    )
+    .ok();
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_thread_id
+         ON runtime_sessions(thread_id)",
+        [],
+    )
+    .ok();
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runtime_sessions_status
+         ON runtime_sessions(status, updated_at DESC)",
+        [],
+    )
+    .ok();
+
     // Migration: Create default conversation for orphan messages
     migrate_orphan_messages(conn)?;
 
@@ -577,5 +632,119 @@ mod tests {
             )
             .unwrap();
         assert_eq!(depends_on, Some("[\"s1\"]".to_string()));
+    }
+
+    #[test]
+    fn schema_creates_runtime_sessions_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        // Insert a session
+        conn.execute(
+            "INSERT INTO runtime_sessions (id, title, status, environment, context, policy, thread_id, project_root, created_at, updated_at)
+             VALUES ('s1', 'Test Session', 'idle', 'browser', '{\"url\":\"https://example.com\"}', NULL, 't1', '/home/user', 1000, 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Read it back
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM runtime_sessions WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Test Session");
+
+        let context: Option<String> = conn
+            .query_row(
+                "SELECT context FROM runtime_sessions WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(context.unwrap().contains("example.com"));
+    }
+
+    #[test]
+    fn schema_creates_session_events_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        // Insert a session first (FK constraint)
+        conn.execute(
+            "INSERT INTO runtime_sessions (id, title, status, environment, created_at, updated_at)
+             VALUES ('s1', 'Test', 'idle', 'browser', 1000, 1000)",
+            [],
+        )
+        .unwrap();
+
+        // Insert events
+        conn.execute(
+            "INSERT INTO session_events (id, session_id, event_type, title, content, metadata, status, created_at)
+             VALUES ('e1', 's1', 'navigation', 'Navigate to page', 'Page loaded', '{\"url\":\"https://example.com\"}', 'completed', 1001)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO session_events (id, session_id, event_type, title, content, metadata, status, created_at)
+             VALUES ('e2', 's1', 'action', 'Click button', NULL, '{\"tool_name\":\"click\"}', 'completed', 1002)",
+            [],
+        )
+        .unwrap();
+
+        // Verify order
+        let events: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, event_type FROM session_events WHERE session_id = 's1' ORDER BY created_at ASC")
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, "e1");
+        assert_eq!(events[0].1, "navigation");
+        assert_eq!(events[1].0, "e2");
+        assert_eq!(events[1].1, "action");
+    }
+
+    #[test]
+    fn session_events_cascade_with_session_delete() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO runtime_sessions (id, title, status, environment, created_at, updated_at)
+             VALUES ('s1', 'Test', 'idle', 'browser', 1000, 1000)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO session_events (id, session_id, event_type, title, status, created_at)
+             VALUES ('e1', 's1', 'action', 'Test', 'completed', 1001)",
+            [],
+        )
+        .unwrap();
+
+        // Manually delete events then session (mimicking app behavior)
+        conn.execute("DELETE FROM session_events WHERE session_id = 's1'", [])
+            .unwrap();
+        conn.execute("DELETE FROM runtime_sessions WHERE id = 's1'", [])
+            .unwrap();
+
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_events WHERE session_id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }

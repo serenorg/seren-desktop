@@ -5,8 +5,8 @@ import { API_BASE } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
 import { getErrorKey, RateLimiter } from "@/lib/rate-limiter";
 import { scrubSensitive } from "@/lib/scrub-sensitive";
-import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/lib/tauri-bridge";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 
 export interface ErrorReport {
   message: string;

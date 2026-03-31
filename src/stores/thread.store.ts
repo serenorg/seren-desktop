@@ -2,9 +2,9 @@
 // ABOUTME: Presents chats and agent sessions as a single sorted thread list filtered by project.
 
 import { createStore } from "solid-js/store";
+import type { ProviderId } from "@/lib/providers/types";
 import { type InstalledSkill, parseSkillMd } from "@/lib/skills";
 import { archiveAgentConversation } from "@/lib/tauri-bridge";
-import type { ProviderId } from "@/lib/providers/types";
 import {
   type AgentType,
   listSessions,
@@ -16,11 +16,15 @@ import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
+import { sessionStore } from "@/stores/session.store";
 import { skillsStore } from "@/stores/skills.store";
 
 const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
 
-function persistLastActiveThread(id: string, kind: "chat" | "agent"): void {
+function persistLastActiveThread(
+  id: string,
+  kind: "chat" | "agent" | "session",
+): void {
   try {
     localStorage.setItem(LAST_ACTIVE_THREAD_KEY, JSON.stringify({ id, kind }));
   } catch {
@@ -28,16 +32,21 @@ function persistLastActiveThread(id: string, kind: "chat" | "agent"): void {
   }
 }
 
-function loadLastActiveThread(): { id: string; kind: "chat" | "agent" } | null {
+function loadLastActiveThread(): {
+  id: string;
+  kind: "chat" | "agent" | "session";
+} | null {
   try {
     const raw = localStorage.getItem(LAST_ACTIVE_THREAD_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (
       typeof parsed?.id === "string" &&
-      (parsed?.kind === "chat" || parsed?.kind === "agent")
+      (parsed?.kind === "chat" ||
+        parsed?.kind === "agent" ||
+        parsed?.kind === "session")
     ) {
-      return parsed as { id: string; kind: "chat" | "agent" };
+      return parsed as { id: string; kind: "chat" | "agent" | "session" };
     }
   } catch {
     // Ignore
@@ -54,13 +63,15 @@ export type ThreadStatus = "idle" | "running" | "waiting-input" | "error";
 export interface Thread {
   id: string;
   title: string;
-  kind: "chat" | "agent";
+  kind: "chat" | "agent" | "session";
   agentType?: AgentType;
   status: ThreadStatus;
   projectRoot: string | null;
   timestamp: number;
   /** Whether this thread has an active in-memory agent runtime session. */
   isLive: boolean;
+  /** For session threads, the runtime session ID. */
+  sessionId?: string;
 }
 
 export interface ThreadGroup {
@@ -71,7 +82,7 @@ export interface ThreadGroup {
 
 interface ThreadState {
   activeThreadId: string | null;
-  activeThreadKind: "chat" | "agent" | null;
+  activeThreadKind: "chat" | "agent" | "session" | null;
   /** When true, new threads prefer Seren Chat over any available agent. */
   preferChat: boolean;
 }
@@ -225,8 +236,26 @@ export const threadStore = {
         };
       });
 
+    // Runtime sessions → Thread
+    const sessionThreads: Thread[] = sessionStore.sessions.map((s) => ({
+      id: `session:${s.id}`,
+      title: s.title,
+      kind: "session" as const,
+      status: (s.status === "running"
+        ? "running"
+        : s.status === "waiting_approval"
+          ? "waiting-input"
+          : s.status === "error"
+            ? "error"
+            : "idle") as ThreadStatus,
+      projectRoot: s.project_root,
+      timestamp: s.updated_at,
+      isLive: s.status === "running" || s.status === "waiting_approval",
+      sessionId: s.id,
+    }));
+
     // Merge and sort by recency
-    const all = [...chatThreads, ...agentThreads];
+    const all = [...chatThreads, ...agentThreads, ...sessionThreads];
 
     return all.sort((a, b) => b.timestamp - a.timestamp);
   },
@@ -312,7 +341,7 @@ export const threadStore = {
    * Select a thread by ID. Updates the underlying store (conversation or agent)
    * to match.
    */
-  selectThread(id: string, kind: "chat" | "agent") {
+  selectThread(id: string, kind: "chat" | "agent" | "session") {
     setState({ activeThreadId: id, activeThreadKind: kind });
     persistLastActiveThread(id, kind);
 
@@ -324,14 +353,27 @@ export const threadStore = {
 
     if (kind === "chat") {
       conversationStore.setActiveConversation(id);
-      const conversation = conversationStore.conversations.find((c) => c.id === id);
+      const conversation = conversationStore.conversations.find(
+        (c) => c.id === id,
+      );
       if (conversation) {
         providerStore.setActiveProvider(
           conversation.selectedProvider ?? "seren",
         );
-        providerStore.setActiveModel(conversation.selectedModel || AUTO_MODEL_ID);
+        providerStore.setActiveModel(
+          conversation.selectedModel || AUTO_MODEL_ID,
+        );
         chatStore.setModel(conversation.selectedModel || AUTO_MODEL_ID);
       }
+    } else if (kind === "session") {
+      // For session threads, activate the runtime session.
+      const realSessionId = thread?.sessionId ?? id.replace("session:", "");
+      sessionStore.setActiveSession(realSessionId);
+      void sessionStore.loadEvents(realSessionId);
+      // Open the sessions panel so the user sees the session detail.
+      window.dispatchEvent(
+        new CustomEvent("seren:open-panel", { detail: "sessions" }),
+      );
     } else {
       if (
         thread?.agentType &&
@@ -372,7 +414,10 @@ export const threadStore = {
             );
             agentStore.setActiveSession(null);
             await agentStore.terminateSession(liveSession.info.id);
-            if (state.activeThreadId !== id || state.activeThreadKind !== kind) {
+            if (
+              state.activeThreadId !== id ||
+              state.activeThreadKind !== kind
+            ) {
               return;
             }
             const cwd = thread?.projectRoot || fileTreeState.rootPath;
@@ -532,9 +577,12 @@ export const threadStore = {
   /**
    * Archive a thread.
    */
-  async archiveThread(id: string, kind: "chat" | "agent") {
+  async archiveThread(id: string, kind: "chat" | "agent" | "session") {
     if (kind === "chat") {
       await conversationStore.archiveConversation(id);
+    } else if (kind === "session") {
+      const realSessionId = id.replace("session:", "");
+      await sessionStore.deleteSession(realSessionId);
     } else {
       await archiveAgentConversation(id);
       await agentStore.refreshRecentAgentConversations(200);
@@ -573,6 +621,7 @@ export const threadStore = {
   async refresh() {
     await conversationStore.loadHistory();
     await agentStore.refreshRecentAgentConversations(200);
+    await sessionStore.loadSessions();
 
     // Only restore if no thread is already active (e.g. deep-linked navigation).
     if (state.activeThreadId) return;
@@ -596,6 +645,7 @@ export const threadStore = {
       activeThreadKind: null,
       preferChat: false,
     });
+    sessionStore.clear();
     try {
       localStorage.removeItem(LAST_ACTIVE_THREAD_KEY);
     } catch {

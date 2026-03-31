@@ -196,7 +196,8 @@ describe("launchBrowserWithFallback", () => {
         {
           name: "chrome",
           browserName: "chromium",
-          executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          executablePath:
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
           isChromiumBased: true,
           stealthSupported: true,
         },

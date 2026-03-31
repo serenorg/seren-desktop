@@ -8,9 +8,9 @@ import {
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
 import { runtimeHasCapability } from "@/lib/runtime";
+import { runValidationLoop } from "@/services/validation";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
-import { runValidationLoop } from "@/services/validation";
 import { validationStore } from "@/stores/validation.store";
 
 /** Per-session ready promises — resolved when backend emits "ready" status */
@@ -2857,7 +2857,12 @@ Summary:`;
                   "Please review the failures below and fix the issues:\n",
                   failureSummary,
                 ].join("\n");
-                await this.sendPrompt(repairPrompt, undefined, undefined, sessionId);
+                await this.sendPrompt(
+                  repairPrompt,
+                  undefined,
+                  undefined,
+                  sessionId,
+                );
               },
             );
           }

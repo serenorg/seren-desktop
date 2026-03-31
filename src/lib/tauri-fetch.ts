@@ -55,7 +55,10 @@ function decodeBase64Chunk(base64: string): Uint8Array {
 }
 
 function buildGatewayRequestId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
 
@@ -128,29 +131,32 @@ async function gatewayFetch(request: Request): Promise<Response> {
   let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
   let rejectResponse: ((reason?: unknown) => void) | null = null;
 
-  const unlistenPromise = listen<GatewayHttpEvent>(GATEWAY_HTTP_EVENT, (event) => {
-    const payload = event.payload;
-    if (payload.requestId !== requestId || !controllerRef) {
-      return;
-    }
+  const unlistenPromise = listen<GatewayHttpEvent>(
+    GATEWAY_HTTP_EVENT,
+    (event) => {
+      const payload = event.payload;
+      if (payload.requestId !== requestId || !controllerRef) {
+        return;
+      }
 
-    if (payload.eventType === "chunk" && payload.chunkBase64) {
-      controllerRef.enqueue(decodeBase64Chunk(payload.chunkBase64));
-      return;
-    }
+      if (payload.eventType === "chunk" && payload.chunkBase64) {
+        controllerRef.enqueue(decodeBase64Chunk(payload.chunkBase64));
+        return;
+      }
 
-    if (payload.eventType === "error") {
-      const error = new Error(payload.error || "Gateway request failed");
-      cleanup();
-      controllerRef.error(error);
-      return;
-    }
+      if (payload.eventType === "error") {
+        const error = new Error(payload.error || "Gateway request failed");
+        cleanup();
+        controllerRef.error(error);
+        return;
+      }
 
-    if (payload.eventType === "end") {
-      cleanup();
-      controllerRef.close();
-    }
-  });
+      if (payload.eventType === "end") {
+        cleanup();
+        controllerRef.close();
+      }
+    },
+  );
 
   const cleanup = () => {
     if (cleanedUp) return;
@@ -194,7 +200,9 @@ async function gatewayFetch(request: Request): Promise<Response> {
   const responseMeta = await new Promise<GatewayHttpResponseMeta>(
     (resolve, reject) => {
       rejectResponse = reject;
-      void invoke<GatewayHttpResponseMeta>("gateway_http_start", { request: payload })
+      void invoke<GatewayHttpResponseMeta>("gateway_http_start", {
+        request: payload,
+      })
         .then(resolve)
         .catch((error) => {
           cleanup();

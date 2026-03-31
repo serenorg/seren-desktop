@@ -924,3 +924,169 @@ export async function clearAllHistory(): Promise<void> {
   }
   await invoke("clear_all_history");
 }
+
+// ============================================================================
+// Runtime Session Operations
+// ============================================================================
+
+export interface RawRuntimeSessionRow {
+  id: string;
+  title: string;
+  status: string;
+  environment: string;
+  context: string | null;
+  policy: string | null;
+  thread_id: string | null;
+  project_root: string | null;
+  created_at: number;
+  updated_at: number;
+  resumed_at: number | null;
+}
+
+export interface RawSessionEventRow {
+  id: string;
+  session_id: string;
+  event_type: string;
+  title: string;
+  content: string | null;
+  metadata: string | null;
+  status: string;
+  created_at: number;
+}
+
+export async function createRuntimeSession(
+  id: string,
+  title: string,
+  environment: string,
+  threadId?: string,
+  projectRoot?: string,
+  policy?: string,
+): Promise<RawRuntimeSessionRow> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  return await invoke<RawRuntimeSessionRow>("create_runtime_session", {
+    id,
+    title,
+    environment,
+    threadId: threadId ?? null,
+    projectRoot: projectRoot ?? null,
+    policy: policy ?? null,
+  });
+}
+
+export async function getRuntimeSession(
+  id: string,
+): Promise<RawRuntimeSessionRow | null> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  return await invoke<RawRuntimeSessionRow | null>("get_runtime_session", {
+    id,
+  });
+}
+
+export async function listRuntimeSessions(
+  limit?: number,
+  threadId?: string,
+): Promise<RawRuntimeSessionRow[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  return await invoke<RawRuntimeSessionRow[]>("list_runtime_sessions", {
+    limit: limit ?? null,
+    threadId: threadId ?? null,
+  });
+}
+
+export async function updateRuntimeSession(
+  id: string,
+  updates: {
+    title?: string;
+    status?: string;
+    context?: string;
+    policy?: string;
+    threadId?: string;
+  },
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  await invoke("update_runtime_session", {
+    id,
+    title: updates.title ?? null,
+    status: updates.status ?? null,
+    context: updates.context ?? null,
+    policy: updates.policy ?? null,
+    threadId: updates.threadId ?? null,
+  });
+}
+
+export async function resumeRuntimeSession(id: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  await invoke("resume_runtime_session", { id });
+}
+
+export async function deleteRuntimeSession(id: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  await invoke("delete_runtime_session", { id });
+}
+
+export async function addSessionEvent(
+  id: string,
+  sessionId: string,
+  eventType: string,
+  title: string,
+  content?: string,
+  metadata?: string,
+  status?: string,
+): Promise<RawSessionEventRow> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  return await invoke<RawSessionEventRow>("add_session_event", {
+    id,
+    sessionId,
+    eventType,
+    title,
+    content: content ?? null,
+    metadata: metadata ?? null,
+    status: status ?? null,
+  });
+}
+
+export async function getSessionEvents(
+  sessionId: string,
+  limit?: number,
+): Promise<RawSessionEventRow[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  return await invoke<RawSessionEventRow[]>("get_session_events", {
+    sessionId,
+    limit: limit ?? null,
+  });
+}
+
+export async function updateSessionEventStatus(
+  id: string,
+  status: string,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Session operations require Tauri runtime");
+  }
+  await invoke("update_session_event_status", { id, status });
+}

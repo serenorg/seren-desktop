@@ -12,11 +12,8 @@ import {
   Show,
 } from "solid-js";
 import { getDefaultOrganizationId } from "@/lib/tauri-bridge";
-import {
-  getCloudAgentPublisherForProvider,
-} from "@/services/agent-tasks";
+import { getCloudAgentPublisherForProvider } from "@/services/agent-tasks";
 import { allowsCloudAgentLaunch } from "@/services/organization-policy";
-import { authStore } from "@/stores/auth.store";
 import {
   agentTasksState,
   cancelTask,
@@ -26,6 +23,7 @@ import {
   runAgent,
   stopFollowing,
 } from "@/stores/agent-tasks.store";
+import { authStore } from "@/stores/auth.store";
 import { providerStore } from "@/stores/provider.store";
 import { threadStore } from "@/stores/thread.store";
 import { AgentTaskItem } from "./AgentTaskItem";
