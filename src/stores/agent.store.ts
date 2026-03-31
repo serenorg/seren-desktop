@@ -1012,10 +1012,17 @@ export const agentStore = {
             const eventSessionId = event.data.sessionId;
             if (!eventSessionId) return;
 
-            // Drop events for sessions that have been explicitly terminated.
-            // Without this, late-arriving errors from dead sessions leak into
-            // new sessions that reuse the same conversation ID.
-            if (terminatedSessionIds.has(eventSessionId)) return;
+            // Drop events for sessions that have been explicitly terminated —
+            // UNLESS a new spawn is in progress for this ID (spawnContextMap).
+            // Without the first check, late errors from dead sessions leak in.
+            // Without the second check, config events from a respawned session
+            // (same ID) are silently dropped, losing model/mode/effort data.
+            if (
+              terminatedSessionIds.has(eventSessionId) &&
+              !spawnContextMap.has(eventSessionId)
+            ) {
+              return;
+            }
 
             // Skip logging high-frequency messageChunk events to avoid flooding
             // DevTools. Other event types (sessionStatus, toolCall, etc.) are
