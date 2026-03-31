@@ -92,12 +92,15 @@ export default defineConfig(async () => ({
     include: ["monaco-editor", "qrcode"],
   },
 
-  // Build configuration for Monaco workers
+  // Build configuration for Monaco workers.
+  // Vite 8 uses Rolldown which only supports the function form of manualChunks.
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          "monaco-editor": ["monaco-editor"],
+        manualChunks(id: string) {
+          if (id.includes("monaco-editor")) {
+            return "monaco-editor";
+          }
         },
       },
     },
