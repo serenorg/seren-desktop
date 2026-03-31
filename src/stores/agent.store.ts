@@ -1136,11 +1136,14 @@ export const agentStore = {
 
         // Register spawn context so the global event logger can identify
         // early events that arrive before the session is in state.sessions.
+        // Also clear the terminated flag — this session ID is being reborn;
+        // events from the new process must NOT be dropped by the stale filter.
         if (localSessionId) {
           spawnContextMap.set(localSessionId, {
             agentType: resolvedAgentType,
             conversationId: localSessionId,
           });
+          terminatedSessionIds.delete(localSessionId);
         }
 
         console.log("[AgentStore] Spawning agent process...");
