@@ -1478,18 +1478,6 @@ export const agentStore = {
       return conversationId;
     }
 
-    // If a spawn is already in progress for this conversation, skip.
-    // selectThread can fire multiple times reactively before the first
-    // spawn completes and registers the session in state.
-    if (spawningConversations.has(conversationId)) {
-      console.log(
-        "[AgentStore] Spawn already in progress for",
-        conversationId,
-        "— skipping duplicate",
-      );
-      return null;
-    }
-
     // Prevent infinite spawn-crash-respawn cascades: if this conversation
     // has failed too many times in a short window, stop retrying.
     if (isSpawnCascading(conversationId)) {
@@ -1505,9 +1493,8 @@ export const agentStore = {
     }
 
     setState("error", null);
-    spawningConversations.add(conversationId);
-    try {
-      // Pre-emptively clean up any stale backend session with this conversation id.
+
+    // Pre-emptively clean up any stale backend session with this conversation id.
       // If the frontend lost track of a session (e.g. after a crash or auth error),
       // the backend may still hold it, causing "Session already exists" on re-spawn.
       try {
@@ -1639,9 +1626,6 @@ export const agentStore = {
         recordSpawnFailure(conversationId);
       }
       return sessionId;
-    } finally {
-      spawningConversations.delete(conversationId);
-    }
   },
   /**
    * Resume a remote agent session from the provider's stored session list.

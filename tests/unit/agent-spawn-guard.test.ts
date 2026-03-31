@@ -11,14 +11,25 @@ describe("agent spawn double-spawn guard", () => {
     "utf-8",
   );
 
-  it("tracks spawning conversations to prevent double-spawn", () => {
+  it("spawnSession guards against double-spawn with cleanup", () => {
     expect(agentStoreSource).toContain("spawningConversations");
-    // Must add before spawn
-    expect(agentStoreSource).toContain("spawningConversations.add(conversationId)");
-    // Must check before proceeding
-    expect(agentStoreSource).toContain("spawningConversations.has(conversationId)");
-    // Must clean up in finally
-    expect(agentStoreSource).toContain("spawningConversations.delete(conversationId)");
+    // Must add before spawn in spawnSession
+    expect(agentStoreSource).toContain("spawningConversations.add(spawnKey)");
+    // Must check before proceeding in spawnSession
+    expect(agentStoreSource).toContain("spawningConversations.has(spawnKey)");
+    // Must clean up in finally in spawnSession
+    expect(agentStoreSource).toContain("spawningConversations.delete(spawnKey)");
+  });
+
+  it("resumeAgentConversation does NOT hold spawn guard (avoids blocking retries)", () => {
+    // The guard must only live in spawnSession. If resumeAgentConversation
+    // also holds it, its own retry fallback gets blocked.
+    const resumeFn = agentStoreSource.slice(
+      agentStoreSource.indexOf("async resumeAgentConversation("),
+      agentStoreSource.indexOf("async resumeRemoteSession("),
+    );
+    expect(resumeFn).not.toContain("spawningConversations.add(conversationId)");
+    expect(resumeFn).not.toContain("spawningConversations.delete(conversationId)");
   });
 });
 
