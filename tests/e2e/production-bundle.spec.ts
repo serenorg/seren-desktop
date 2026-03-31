@@ -65,6 +65,75 @@ test.describe("Production Bundle Integrity", () => {
     expect(storeErrors).toEqual([]);
   });
 
+  test("no TDZ crash when restoring a persisted last-active thread", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (err) => errors.push(err.message));
+
+    // Seed localStorage with a last-active thread BEFORE the app loads.
+    // This triggers the threadStore.refresh() → selectThread() code path
+    // that caused TDZ crashes when store chunks evaluated out of order.
+    await page.goto("/");
+    await page.evaluate(() => {
+      localStorage.setItem(
+        "seren:lastActiveThread",
+        JSON.stringify({ id: "fake-thread-id", kind: "chat" }),
+      );
+    });
+
+    // Reload so the app picks up the persisted thread on init
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2_000);
+
+    const tdzErrors = errors.filter(
+      (e) =>
+        e.includes("Cannot access") ||
+        e.includes("before initialization") ||
+        e.includes("ReferenceError"),
+    );
+
+    expect(tdzErrors).toEqual([]);
+
+    // Clean up
+    await page.evaluate(() => {
+      localStorage.removeItem("seren:lastActiveThread");
+    });
+  });
+
+  test("no TDZ crash when restoring a persisted last-active agent thread", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (err) => errors.push(err.message));
+
+    await page.goto("/");
+    await page.evaluate(() => {
+      localStorage.setItem(
+        "seren:lastActiveThread",
+        JSON.stringify({ id: "fake-agent-thread-id", kind: "agent" }),
+      );
+    });
+
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(2_000);
+
+    const tdzErrors = errors.filter(
+      (e) =>
+        e.includes("Cannot access") ||
+        e.includes("before initialization") ||
+        e.includes("ReferenceError"),
+    );
+
+    expect(tdzErrors).toEqual([]);
+
+    await page.evaluate(() => {
+      localStorage.removeItem("seren:lastActiveThread");
+    });
+  });
+
   test("navigating between views does not crash", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (err) => errors.push(err.message));

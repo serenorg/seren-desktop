@@ -92,14 +92,20 @@ export default defineConfig(async () => ({
     include: ["monaco-editor", "qrcode"],
   },
 
-  // Build configuration for Monaco workers.
+  // Build configuration for Monaco workers and store co-location.
   // Vite 8 uses Rolldown which only supports the function form of manualChunks.
+  // All store modules MUST live in a single chunk — Rolldown may split them
+  // into separate chunks whose evaluation order causes TDZ crashes when one
+  // store accesses another before its chunk has been evaluated.
   build: {
     rollupOptions: {
       output: {
         manualChunks(id: string) {
           if (id.includes("monaco-editor")) {
             return "monaco-editor";
+          }
+          if (id.includes("/src/stores/")) {
+            return "stores";
           }
         },
       },
