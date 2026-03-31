@@ -75,6 +75,11 @@ let lastFetchedAt: number | null = null;
 let loadingPromise: Promise<void> | null = null;
 let isConnected = false;
 
+// Track first-class MCP tools from the gateway's list_tools() response.
+// These tools can be called directly via MCP protocol, bypassing call_publisher.
+// Key: "publisher:toolName", Value: original MCP tool name (e.g., "mcp__mcp-time__get_current_time").
+const nativeMcpTools: Map<string, string> = new Map();
+
 /**
  * Check if the cache is still valid (not expired).
  */
@@ -209,6 +214,17 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
 }
 
 /**
+ * Check if a tool is a first-class MCP tool on the gateway.
+ * Native tools are called directly via MCP protocol instead of call_publisher.
+ */
+export function isNativeMcpTool(
+  publisherSlug: string,
+  toolName: string,
+): boolean {
+  return nativeMcpTools.has(`${publisherSlug}:${toolName}`);
+}
+
+/**
  * Check if MCP authentication is available.
  * With API key auth, this just checks if we have an API key stored.
  * Returns true if user needs to authenticate (no API key).
@@ -264,6 +280,19 @@ export async function initializeGateway(): Promise<void> {
       const connection = mcpClient.getConnection(SEREN_MCP_SERVER_NAME);
       if (!connection) {
         throw new Error("Connection not found after connecting");
+      }
+
+      // Index first-class MCP tools from the gateway's tool list.
+      // These can be called directly via MCP protocol without call_publisher.
+      nativeMcpTools.clear();
+      for (const tool of connection.tools) {
+        const parsed = parsePublisherFromToolName(tool.name);
+        if (parsed) {
+          nativeMcpTools.set(
+            `${parsed.publisher}:${parsed.originalName}`,
+            tool.name,
+          );
+        }
       }
 
       // Convert publisher MCP tools to GatewayTool format (skip built-in tools)
@@ -338,6 +367,7 @@ export async function resetGateway(): Promise<void> {
   lastFetchedAt = null;
   loadingPromise = null;
   isConnected = false;
+  nativeMcpTools.clear();
 }
 
 /**
@@ -373,10 +403,11 @@ function parsePaymentProxyError(content: unknown): PaymentProxyInfo | null {
 }
 
 /**
- * Call a tool via the MCP Gateway using the call_publisher dispatch mechanism.
+ * Call a tool via the MCP Gateway.
  *
- * Publisher tools are not first-class MCP tools on the gateway — they must be
- * invoked through the `call_publisher` meta-tool with `tool` + `tool_args`.
+ * Native MCP tools (from the gateway's list_tools response) are called directly
+ * via MCP protocol. REST-proxied publisher tools are dispatched through the
+ * `call_publisher` meta-tool with `tool` + `tool_args`.
  */
 export async function callGatewayTool(
   publisherSlug: string,
@@ -396,19 +427,35 @@ export async function callGatewayTool(
   try {
     // Separate x402 payment from tool args (call_publisher accepts it at top level)
     const { _x402_payment, ...toolArgs } = args;
-    const dispatchArgs: Record<string, unknown> = {
-      publisher: publisherSlug,
-      tool: toolName,
-      tool_args: toolArgs,
-    };
-    if (_x402_payment !== undefined) {
-      dispatchArgs._x402_payment = _x402_payment;
-    }
 
-    const result: McpToolResult = await mcpClient.callToolHttp(
-      SEREN_MCP_SERVER_NAME,
-      { name: "call_publisher", arguments: dispatchArgs },
-    );
+    // Check if this is a first-class MCP tool on the gateway.
+    // Native tools (from the gateway's list_tools response) are called directly
+    // via MCP protocol, bypassing the call_publisher dispatch mechanism.
+    // This is required for MCP-native publishers (e.g., mcp-time) whose tools
+    // are not routable through the REST-oriented call_publisher meta-tool.
+    const nativeName = nativeMcpTools.get(`${publisherSlug}:${toolName}`);
+
+    let result: McpToolResult;
+    if (nativeName) {
+      result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {
+        name: nativeName,
+        arguments: toolArgs,
+      });
+    } else {
+      const dispatchArgs: Record<string, unknown> = {
+        publisher: publisherSlug,
+        tool: toolName,
+        tool_args: toolArgs,
+      };
+      if (_x402_payment !== undefined) {
+        dispatchArgs._x402_payment = _x402_payment;
+      }
+
+      result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {
+        name: "call_publisher",
+        arguments: dispatchArgs,
+      });
+    }
 
     const executionTime = Date.now() - startTime;
 
