@@ -1447,6 +1447,10 @@ export const agentStore = {
           `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`,
           error,
         );
+        // Mark as terminated so the global event subscriber drops any
+        // late-arriving events from this dead session. Without this,
+        // stale errors leak into retried sessions that reuse the same ID.
+        terminatedSessionIds.add(spawnKey);
         tempUnsubscribe();
         const message = error instanceof Error ? error.message : String(error);
         setState("error", message);
@@ -1495,11 +1499,13 @@ export const agentStore = {
     setState("error", null);
 
     // Pre-emptively clean up any stale backend session with this conversation id.
-      // If the frontend lost track of a session (e.g. after a crash or auth error),
-      // the backend may still hold it, causing "Session already exists" on re-spawn.
-      try {
-        await providerService.terminateSession(conversationId);
-      } catch {
+    // If the frontend lost track of a session (e.g. after a crash or auth error),
+    // the backend may still hold it, causing "Session already exists" on re-spawn.
+    // Mark as terminated so late-arriving events from the old session are dropped.
+    terminatedSessionIds.add(conversationId);
+    try {
+      await providerService.terminateSession(conversationId);
+    } catch {
         // Ignore — session likely doesn't exist in the backend
       }
 
