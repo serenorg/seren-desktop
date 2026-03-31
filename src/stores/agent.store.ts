@@ -1629,6 +1629,14 @@ export const agentStore = {
           },
         );
         if (fallbackSessionId) {
+          // Clear error state and remove stale error messages left by the
+          // failed first spawn. Without this, "Claude Code request failed"
+          // banners persist even though the retry session is healthy.
+          setState("error", null);
+          setState("sessions", fallbackSessionId, "error", undefined);
+          setState("sessions", fallbackSessionId, "messages", (msgs) =>
+            msgs.filter((m) => m.type !== "error"),
+          );
           clearSpawnFailures(conversationId);
           void this.refreshRecentAgentConversations(200).catch(() => {});
         } else {
