@@ -918,6 +918,7 @@ export const agentStore = {
       }
     }
 
+    console.log("[AgentStore] Checking agent availability...");
     const agentAvailable =
       await providerService.checkAgentAvailable(resolvedAgentType);
     if (!agentAvailable) {
@@ -955,6 +956,13 @@ export const agentStore = {
             const sessionError =
               state.sessions[data.sessionId]?.error ??
               "Agent session failed during initialization.";
+            rejectReady(new Error(sessionError));
+          } else if (data.status === "terminated" && rejectReady) {
+            // Claude process exited before reaching "ready" — typically an
+            // auth failure or binary-not-found on Windows.
+            const sessionError =
+              state.sessions[data.sessionId]?.error ??
+              "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.";
             rejectReady(new Error(sessionError));
           }
         },
@@ -1008,6 +1016,7 @@ export const agentStore = {
             : null;
 
       if (ensureFn) {
+        console.log("[AgentStore] Ensuring CLI is installed...");
         let progressUnsub: UnlistenFn = () => {};
 
         if (!isLocalProviderRuntime()) {
@@ -1073,6 +1082,7 @@ export const agentStore = {
           ? "on-failure"
           : settingsStore.settings.agentApprovalPolicy;
 
+      console.log("[AgentStore] Spawning agent process...");
       const info = await providerService.spawnAgent(
         resolvedAgentType,
         cwd,
@@ -1199,14 +1209,34 @@ export const agentStore = {
         const message =
           raceError instanceof Error ? raceError.message : String(raceError);
         if (message.toLowerCase().includes("timed out")) {
-          console.warn(
-            "[AgentStore] Timeout waiting for ready, proceeding anyway",
-          );
-          // Resolve the ready promise so sendPrompt doesn't block forever
-          const entry = sessionReadyPromises.get(info.id);
-          if (entry) {
-            entry.resolve();
-            sessionReadyPromises.delete(info.id);
+          // Check if the session has an error or was terminated — if so, this
+          // is a real failure (e.g. unauthenticated Claude on Windows), not a
+          // benign slow start that we can proceed past.
+          const sessionState = state.sessions[info.id];
+          const sessionDead =
+            !sessionState ||
+            sessionState.error ||
+            sessionState.info.status === "error" ||
+            sessionState.info.status === "terminated";
+
+          if (sessionDead) {
+            console.error(
+              "[AgentStore] Session terminated or errored during init wait:",
+              sessionState?.error ?? sessionState?.info.status,
+            );
+            initFailure =
+              sessionState?.error ??
+              "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.";
+          } else {
+            console.warn(
+              "[AgentStore] Timeout waiting for ready, proceeding anyway",
+            );
+            // Resolve the ready promise so sendPrompt doesn't block forever
+            const entry = sessionReadyPromises.get(info.id);
+            if (entry) {
+              entry.resolve();
+              sessionReadyPromises.delete(info.id);
+            }
           }
         } else {
           initFailure = message;
