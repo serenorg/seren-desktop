@@ -565,4 +565,16 @@ describe("threadStore", () => {
       expect(threadStore.runningCount).toBe(1);
     });
   });
+
+  describe("module isolation", () => {
+    it("thread.store.ts does not import session.store (TDZ guard)", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const filePath = path.resolve("src/stores/thread.store.ts");
+      const source = fs.readFileSync(filePath, "utf-8");
+
+      expect(source).not.toContain("session.store");
+      expect(source).not.toContain("sessionStore");
+    });
+  });
 });
