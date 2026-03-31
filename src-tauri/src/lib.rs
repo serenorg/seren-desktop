@@ -13,6 +13,7 @@ pub mod commands {
     pub mod indexing;
     pub mod memory;
     pub mod orchestrator;
+    pub mod session;
     pub mod web;
 }
 
@@ -790,6 +791,16 @@ pub fn run() {
             commands::memory::memory_remember,
             commands::memory::memory_recall,
             commands::memory::memory_sync,
+            // Runtime session commands
+            commands::session::create_runtime_session,
+            commands::session::get_runtime_session,
+            commands::session::list_runtime_sessions,
+            commands::session::update_runtime_session,
+            commands::session::resume_runtime_session,
+            commands::session::delete_runtime_session,
+            commands::session::add_session_event,
+            commands::session::get_session_events,
+            commands::session::update_session_event_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

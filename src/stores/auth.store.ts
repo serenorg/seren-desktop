@@ -17,8 +17,8 @@ import {
 } from "@/services/auth";
 import { initializeGateway, resetGateway } from "@/services/mcp-gateway";
 import {
-  type OrganizationPrivateChatPolicy,
   getDefaultOrganizationPrivateChatPolicy,
+  type OrganizationPrivateChatPolicy,
 } from "@/services/organization-policy";
 
 export interface User {

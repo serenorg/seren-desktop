@@ -4,9 +4,7 @@ import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
 export type OrganizationPrivateChatMode = "standard" | "private_org_agent";
-export type ManagedAgentSessionDatabaseEngine =
-  | "postgres"
-  | "aurora_postgres";
+export type ManagedAgentSessionDatabaseEngine = "postgres" | "aurora_postgres";
 export type ManagedAgentSessionDatabaseProvider =
   | "direct_url"
   | "seren_organization_database";

@@ -46,6 +46,10 @@ import {
   orchestrate,
   retryOrchestration,
 } from "@/services/orchestrator";
+import {
+  allowsSerenAgent,
+  allowsSerenPrivateAgent,
+} from "@/services/organization-policy";
 import type { ToolCallEvent } from "@/services/providers";
 import { skills } from "@/services/skills";
 import { authStore, checkAuth } from "@/stores/auth.store";
@@ -55,10 +59,6 @@ import { editorStore } from "@/stores/editor.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { providerStore } from "@/stores/provider.store";
 import { settingsStore } from "@/stores/settings.store";
-import {
-  allowsSerenAgent,
-  allowsSerenPrivateAgent,
-} from "@/services/organization-policy";
 import type { ToolCallData, UnifiedMessage } from "@/types/conversation";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { CompactedMessage } from "./CompactedMessage";

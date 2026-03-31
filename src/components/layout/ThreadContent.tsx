@@ -1,9 +1,10 @@
 // ABOUTME: Routes to the correct content view based on the active thread type.
-// ABOUTME: Shows ChatContent for chat threads, AgentChat for agent threads, or empty state.
+// ABOUTME: Shows ChatContent for chat, AgentChat for agents, SessionContent for sessions.
 
 import { type Component, Match, Show, Switch } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
+import { SessionContent } from "@/components/session/SessionContent";
 import { openFolder } from "@/lib/files/service";
 import { fileTreeState } from "@/stores/fileTree";
 import { threadStore } from "@/stores/thread.store";
@@ -22,6 +23,9 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
           </Match>
           <Match when={threadStore.activeThreadKind === "agent"}>
             <AgentChat />
+          </Match>
+          <Match when={threadStore.activeThreadKind === "session"}>
+            <SessionContent />
           </Match>
         </Switch>
       </div>

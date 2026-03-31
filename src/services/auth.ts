@@ -4,7 +4,6 @@
 import { getCurrentUser } from "@/api";
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
-import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import {
   clearDefaultOrganizationId,
   clearRefreshToken,
@@ -15,6 +14,7 @@ import {
   storeRefreshToken,
   storeToken,
 } from "@/lib/tauri-bridge";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 
 export interface LoginResponse {
   data: {

@@ -9,16 +9,16 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { agentStore } from "@/stores/agent.store";
-import { authStore } from "@/stores/auth.store";
-import { fileTreeState } from "@/stores/fileTree";
-import { type Thread, threadStore } from "@/stores/thread.store";
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
   allowsSerenAgent,
   allowsSerenPrivateAgent,
 } from "@/services/organization-policy";
+import { agentStore } from "@/stores/agent.store";
+import { authStore } from "@/stores/auth.store";
+import { fileTreeState } from "@/stores/fileTree";
+import { type Thread, threadStore } from "@/stores/thread.store";
 
 export const ThreadTabBar: Component = () => {
   const [showNewMenu, setShowNewMenu] = createSignal(false);
@@ -58,7 +58,8 @@ export const ThreadTabBar: Component = () => {
   const handleNewPrivateChat = async () => {
     setShowNewMenu(false);
     const privateModel =
-      authStore.privateChatPolicy?.model_id?.trim() || "organization/private-model";
+      authStore.privateChatPolicy?.model_id?.trim() ||
+      "organization/private-model";
     await threadStore.createChatThreadWithOptions("New Private Chat", {
       provider: "seren-private",
       model: privateModel,

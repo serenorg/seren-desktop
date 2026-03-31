@@ -15,8 +15,8 @@ import {
 import {
   getProviderIcon,
   PROVIDER_CONFIGS,
-  type ProviderModel,
   type ProviderId,
+  type ProviderModel,
 } from "@/lib/providers";
 import { type Model, modelsService } from "@/services/models";
 import { privateModelsService } from "@/services/private-models";
@@ -309,8 +309,10 @@ export const ModelSelector: Component = () => {
                   <Show
                     when={
                       providerId !== "seren-private" &&
-                      !(providerId === "seren" &&
-                        authStore.privateChatPolicy?.disable_seren_models) &&
+                      !(
+                        providerId === "seren" &&
+                        authStore.privateChatPolicy?.disable_seren_models
+                      ) &&
                       !(
                         providerId !== "seren" &&
                         authStore.privateChatPolicy
@@ -318,24 +320,24 @@ export const ModelSelector: Component = () => {
                       )
                     }
                   >
-                  <button
-                    type="button"
-                    class={`flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-xs text-muted-foreground cursor-pointer transition-all no-underline hover:bg-border hover:text-foreground ${providerId === currentProvider() ? "bg-primary/15 border-primary/40 text-accent" : ""}`}
-                    onClick={() => {
-                      selectProvider(providerId);
-                      setSearchQuery("");
-                    }}
-                    title={PROVIDER_CONFIGS[providerId].name}
-                  >
-                    <span
-                      class={`w-4 h-4 inline-flex items-center justify-center bg-surface-3 rounded-sm text-[10px] font-semibold ${providerId === currentProvider() ? "bg-accent text-white" : ""}`}
+                    <button
+                      type="button"
+                      class={`flex items-center gap-1 px-2.5 py-1.5 bg-transparent border border-transparent rounded text-xs text-muted-foreground cursor-pointer transition-all no-underline hover:bg-border hover:text-foreground ${providerId === currentProvider() ? "bg-primary/15 border-primary/40 text-accent" : ""}`}
+                      onClick={() => {
+                        selectProvider(providerId);
+                        setSearchQuery("");
+                      }}
+                      title={PROVIDER_CONFIGS[providerId].name}
                     >
-                      {getProviderIcon(providerId)}
-                    </span>
-                    <span class="max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">
-                      {PROVIDER_CONFIGS[providerId].name}
-                    </span>
-                  </button>
+                      <span
+                        class={`w-4 h-4 inline-flex items-center justify-center bg-surface-3 rounded-sm text-[10px] font-semibold ${providerId === currentProvider() ? "bg-accent text-white" : ""}`}
+                      >
+                        {getProviderIcon(providerId)}
+                      </span>
+                      <span class="max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">
+                        {PROVIDER_CONFIGS[providerId].name}
+                      </span>
+                    </button>
                   </Show>
                 )}
               </For>

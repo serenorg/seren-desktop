@@ -13,6 +13,7 @@ import { SignIn } from "@/components/auth/SignIn";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
+import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
@@ -27,6 +28,7 @@ export type SlidePanelView =
   | "editor"
   | "account"
   | "tasks"
+  | "sessions"
   | null;
 
 interface AppShellProps {
@@ -68,6 +70,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setSlidePanel("database");
     } else if (p === "tasks") {
       setSlidePanel("tasks");
+    } else if (p === "sessions") {
+      setSlidePanel("sessions");
     }
   }) as EventListener;
 
@@ -147,6 +151,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
             </Match>
             <Match when={slidePanel() === "tasks"}>
               <AgentTasksPanel onClose={handleCloseSlidePanel} />
+            </Match>
+            <Match when={slidePanel() === "sessions"}>
+              <SessionPanel onClose={handleCloseSlidePanel} />
             </Match>
             <Match when={slidePanel() === "account"}>
               <SignIn onSuccess={handleLoginSuccess} />

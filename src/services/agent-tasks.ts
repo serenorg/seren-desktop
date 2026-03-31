@@ -2,13 +2,12 @@
 // ABOUTME: Provides API calls for task lifecycle and SSE streaming.
 
 import { API_BASE } from "@/lib/config";
-import { getTauriFetch, shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import type { ProviderId } from "@/lib/providers/types";
+import { getTauriFetch, shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
 export const SEREN_CLOUD_AGENT_PUBLISHER_SLUG = "seren-models";
-export const SEREN_PRIVATE_CLOUD_AGENT_PUBLISHER_SLUG =
-  "seren-private-models";
+export const SEREN_PRIVATE_CLOUD_AGENT_PUBLISHER_SLUG = "seren-private-models";
 
 export function getCloudAgentPublisherForProvider(
   providerId: ProviderId | null | undefined,

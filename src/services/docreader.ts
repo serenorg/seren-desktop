@@ -3,8 +3,8 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
-import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import type { Attachment } from "@/lib/providers/types";
+import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 import { updateBalanceFromError } from "@/stores/wallet.store";
 

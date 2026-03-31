@@ -699,18 +699,21 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
     active_agent_session_id: agentStore.agentModeEnabled
       ? (agentStore.activeSessionId ?? null)
       : null,
-    selected_model:
-      forcePrivateChat
-        ? (() => {
-            const selected = chatStore.selectedModel?.trim();
-            if (!selected || selected === AUTO_MODEL_ID || selected.includes("/")) {
-              return privateChatPolicy?.model_id ?? null;
-            }
-            return selected;
-          })()
-        : providerStore.activeModel === AUTO_MODEL_ID
-          ? null
-          : providerStore.activeModel,
+    selected_model: forcePrivateChat
+      ? (() => {
+          const selected = chatStore.selectedModel?.trim();
+          if (
+            !selected ||
+            selected === AUTO_MODEL_ID ||
+            selected.includes("/")
+          ) {
+            return privateChatPolicy?.model_id ?? null;
+          }
+          return selected;
+        })()
+      : providerStore.activeModel === AUTO_MODEL_ID
+        ? null
+        : providerStore.activeModel,
     force_private_chat: forcePrivateChat,
     private_chat_deployment_id: privateChatPolicy?.deployment_id ?? null,
     available_models: forcePrivateChat ? [] : activeModels.map((m) => m.id),
