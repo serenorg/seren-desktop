@@ -19,6 +19,13 @@ describe("isAuthError", () => {
     ).toBe(true);
   });
 
+  it("detects missing token errors from orchestrator (#1341)", () => {
+    expect(isAuthError("No refresh token available")).toBe(true);
+    expect(isAuthError("No access token in store")).toBe(true);
+    expect(isAuthError("No refresh token")).toBe(true);
+    expect(isAuthError("no access token")).toBe(true);
+  });
+
   it("returns false for null/undefined/empty", () => {
     expect(isAuthError(null)).toBe(false);
     expect(isAuthError(undefined)).toBe(false);

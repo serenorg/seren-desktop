@@ -17,6 +17,8 @@ const AUTH_ERROR_PATTERNS = [
   /not authenticated/i,
   /please obtain a new token/i,
   /refresh your existing token/i,
+  /no refresh token/i,
+  /no access token/i,
   /please sign in/i,
   /does not have access/i,
   /please login again/i,
