@@ -144,43 +144,135 @@ async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
 }
 
 async function ensureClaudeCodeViaNativeInstaller(emit) {
+  // Check well-known install paths first (bare `which`/`where` can find stale wrappers)
+  const existing = resolveInstalledClaudeBinary();
+  if (existing !== "claude") {
+    return existing;
+  }
+
   if (await isCommandAvailable("claude")) {
     return "claude";
   }
 
+  // Strategy 1: Official native installer (PowerShell on Windows, bash on Unix)
   emit("provider://cli-install-progress", {
     stage: "installing",
     message: "Installing Claude Code CLI via official installer...",
   });
 
-  await new Promise((resolvePromise, rejectPromise) => {
-    let cmd;
-    let args;
+  let nativeInstallerFailed = false;
+  try {
+    await new Promise((resolvePromise, rejectPromise) => {
+      let cmd;
+      let args;
 
-    if (process.platform === "win32") {
-      cmd = "powershell";
-      args = ["-NoProfile", "-Command", "irm https://claude.ai/install.ps1 | iex"];
-    } else {
-      cmd = "bash";
-      args = ["-c", "curl -fsSL https://claude.ai/install.sh | bash"];
+      if (process.platform === "win32") {
+        cmd = "powershell";
+        args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://claude.ai/install.ps1 | iex"];
+      } else {
+        cmd = "bash";
+        args = ["-c", "curl -fsSL https://claude.ai/install.sh | bash"];
+      }
+
+      execFile(cmd, args, { timeout: 120_000 }, (error, stdout, stderr) => {
+        if (error) {
+          rejectPromise(new Error(stderr || error.message));
+          return;
+        }
+        resolvePromise(stdout.trim());
+      });
+    });
+
+    // Verify the binary actually landed where we expect
+    const resolved = resolveInstalledClaudeBinary();
+    if (resolved !== "claude") {
+      emit("provider://cli-install-progress", {
+        stage: "complete",
+        message: "Claude Code CLI installed successfully",
+      });
+      return resolved;
     }
 
-    execFile(cmd, args, { timeout: 120_000 }, (error, stdout, stderr) => {
-      if (error) {
-        rejectPromise(new Error(stderr || error.message));
-        return;
-      }
-      resolvePromise(stdout.trim());
+    // Installer returned success but binary not found — treat as failure
+    console.warn("[agent-registry] Native installer succeeded but binary not found at expected paths");
+    nativeInstallerFailed = true;
+  } catch (nativeError) {
+    console.warn("[agent-registry] Native installer failed:", nativeError.message);
+    nativeInstallerFailed = true;
+  }
+
+  // Strategy 2: npm install via the embedded runtime's own Node.js and npm.
+  // The Seren Desktop bundle ships node.exe and npm — use them directly so the
+  // install works regardless of system PATH, PowerShell execution policy, or
+  // whether the user has Node.js installed globally.
+  if (nativeInstallerFailed) {
+    emit("provider://cli-install-progress", {
+      stage: "installing",
+      message: "Installing Claude Code CLI via npm (bundled runtime)...",
     });
-  });
 
-  emit("provider://cli-install-progress", {
-    stage: "complete",
-    message: "Claude Code CLI installed successfully",
-  });
+    const npmCliScript = resolveNpmCliScript();
+    try {
+      if (npmCliScript) {
+        await new Promise((resolvePromise, rejectPromise) => {
+          execFile(
+            process.execPath,
+            [npmCliScript, "install", "-g", "@anthropic-ai/claude-code"],
+            { timeout: 120_000 },
+            (error, stdout, stderr) => {
+              if (error) {
+                rejectPromise(new Error(stderr || error.message));
+                return;
+              }
+              resolvePromise(stdout.trim());
+            },
+          );
+        });
+      } else if (process.platform === "win32") {
+        // Last resort on Windows: try npm.cmd from PATH
+        await new Promise((resolvePromise, rejectPromise) => {
+          execFile(
+            "npm.cmd",
+            ["install", "-g", "@anthropic-ai/claude-code"],
+            { timeout: 120_000 },
+            (error, stdout, stderr) => {
+              if (error) {
+                rejectPromise(new Error(stderr || error.message));
+                return;
+              }
+              resolvePromise(stdout.trim());
+            },
+          );
+        });
+      } else {
+        throw new Error("npm not available in embedded runtime");
+      }
 
-  // Re-resolve the binary path after install. The installer adds the binary
-  // to a well-known location that the current process PATH may not include.
+      const resolved = resolveInstalledClaudeBinary();
+      if (resolved !== "claude") {
+        emit("provider://cli-install-progress", {
+          stage: "complete",
+          message: "Claude Code CLI installed successfully via npm",
+        });
+        return resolved;
+      }
+
+      // npm install returned success but binary not found
+      throw new Error(
+        "Claude Code package installed but binary not found. " +
+        "Try running: npm install -g @anthropic-ai/claude-code"
+      );
+    } catch (npmError) {
+      console.error("[agent-registry] npm install also failed:", npmError.message);
+      throw new Error(
+        `Failed to install Claude Code CLI.\n` +
+        `Native installer: ${nativeInstallerFailed ? "failed (possibly blocked by execution policy)" : "skipped"}\n` +
+        `npm install: ${npmError.message}\n` +
+        `Please install manually: npm install -g @anthropic-ai/claude-code`
+      );
+    }
+  }
+
   return resolveInstalledClaudeBinary();
 }
 
@@ -193,10 +285,17 @@ function resolveInstalledClaudeBinary() {
   if (process.platform === "win32") {
     const home = os.homedir();
     const appData = process.env.APPDATA ?? "";
+    const nodeDir = path.dirname(process.execPath);
     const candidates = [
+      // Native installer location
       path.join(home, ".claude", "bin", "claude.exe"),
+      // Legacy / alternate location
       ...(appData ? [path.join(appData, "Claude", "claude.exe")] : []),
+      // npm global install via system npm
       ...(appData ? [path.join(appData, "npm", "claude.cmd")] : []),
+      // npm global install via embedded runtime's npm (prefix = node dir on Windows)
+      path.join(nodeDir, "claude.cmd"),
+      path.join(nodeDir, "claude"),
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
@@ -205,9 +304,13 @@ function resolveInstalledClaudeBinary() {
     }
   } else {
     const home = os.homedir();
+    const nodeDir = path.dirname(process.execPath);
+    const prefix = path.dirname(nodeDir);
     const candidates = [
       path.join(home, ".claude", "bin", "claude"),
       path.join(home, ".local", "bin", "claude"),
+      // npm global install via embedded runtime's npm
+      path.join(prefix, "bin", "claude"),
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
