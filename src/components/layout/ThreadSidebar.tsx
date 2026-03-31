@@ -23,7 +23,6 @@ import { skills as skillsService } from "@/services/skills";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
-import { sessionStore } from "@/stores/session.store";
 import { skillsStore } from "@/stores/skills.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
 
@@ -1153,11 +1152,6 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             />
           </svg>
           Sessions
-          <Show when={sessionStore.activeSessions.length > 0}>
-            <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-medium">
-              {sessionStore.activeSessions.length}
-            </span>
-          </Show>
         </button>
 
         <Show when={threadStore.runningCount > 0}>

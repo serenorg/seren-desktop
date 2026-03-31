@@ -16,15 +16,11 @@ import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
-import { sessionStore } from "@/stores/session.store";
 import { skillsStore } from "@/stores/skills.store";
 
 const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
 
-function persistLastActiveThread(
-  id: string,
-  kind: "chat" | "agent" | "session",
-): void {
+function persistLastActiveThread(id: string, kind: "chat" | "agent"): void {
   try {
     localStorage.setItem(LAST_ACTIVE_THREAD_KEY, JSON.stringify({ id, kind }));
   } catch {
@@ -34,7 +30,7 @@ function persistLastActiveThread(
 
 function loadLastActiveThread(): {
   id: string;
-  kind: "chat" | "agent" | "session";
+  kind: "chat" | "agent";
 } | null {
   try {
     const raw = localStorage.getItem(LAST_ACTIVE_THREAD_KEY);
@@ -42,11 +38,9 @@ function loadLastActiveThread(): {
     const parsed = JSON.parse(raw);
     if (
       typeof parsed?.id === "string" &&
-      (parsed?.kind === "chat" ||
-        parsed?.kind === "agent" ||
-        parsed?.kind === "session")
+      (parsed?.kind === "chat" || parsed?.kind === "agent")
     ) {
-      return parsed as { id: string; kind: "chat" | "agent" | "session" };
+      return parsed as { id: string; kind: "chat" | "agent" };
     }
   } catch {
     // Ignore
@@ -63,15 +57,13 @@ export type ThreadStatus = "idle" | "running" | "waiting-input" | "error";
 export interface Thread {
   id: string;
   title: string;
-  kind: "chat" | "agent" | "session";
+  kind: "chat" | "agent";
   agentType?: AgentType;
   status: ThreadStatus;
   projectRoot: string | null;
   timestamp: number;
   /** Whether this thread has an active in-memory agent runtime session. */
   isLive: boolean;
-  /** For session threads, the runtime session ID. */
-  sessionId?: string;
 }
 
 export interface ThreadGroup {
@@ -82,7 +74,7 @@ export interface ThreadGroup {
 
 interface ThreadState {
   activeThreadId: string | null;
-  activeThreadKind: "chat" | "agent" | "session" | null;
+  activeThreadKind: "chat" | "agent" | null;
   /** When true, new threads prefer Seren Chat over any available agent. */
   preferChat: boolean;
 }
@@ -236,26 +228,8 @@ export const threadStore = {
         };
       });
 
-    // Runtime sessions → Thread
-    const sessionThreads: Thread[] = sessionStore.sessions.map((s) => ({
-      id: `session:${s.id}`,
-      title: s.title,
-      kind: "session" as const,
-      status: (s.status === "running"
-        ? "running"
-        : s.status === "waiting_approval"
-          ? "waiting-input"
-          : s.status === "error"
-            ? "error"
-            : "idle") as ThreadStatus,
-      projectRoot: s.project_root,
-      timestamp: s.updated_at,
-      isLive: s.status === "running" || s.status === "waiting_approval",
-      sessionId: s.id,
-    }));
-
     // Merge and sort by recency
-    const all = [...chatThreads, ...agentThreads, ...sessionThreads];
+    const all = [...chatThreads, ...agentThreads];
 
     return all.sort((a, b) => b.timestamp - a.timestamp);
   },
@@ -341,7 +315,7 @@ export const threadStore = {
    * Select a thread by ID. Updates the underlying store (conversation or agent)
    * to match.
    */
-  selectThread(id: string, kind: "chat" | "agent" | "session") {
+  selectThread(id: string, kind: "chat" | "agent") {
     setState({ activeThreadId: id, activeThreadKind: kind });
     persistLastActiveThread(id, kind);
 
@@ -365,15 +339,6 @@ export const threadStore = {
         );
         chatStore.setModel(conversation.selectedModel || AUTO_MODEL_ID);
       }
-    } else if (kind === "session") {
-      // For session threads, activate the runtime session.
-      const realSessionId = thread?.sessionId ?? id.replace("session:", "");
-      sessionStore.setActiveSession(realSessionId);
-      void sessionStore.loadEvents(realSessionId);
-      // Open the sessions panel so the user sees the session detail.
-      window.dispatchEvent(
-        new CustomEvent("seren:open-panel", { detail: "sessions" }),
-      );
     } else {
       if (
         thread?.agentType &&
@@ -577,12 +542,9 @@ export const threadStore = {
   /**
    * Archive a thread.
    */
-  async archiveThread(id: string, kind: "chat" | "agent" | "session") {
+  async archiveThread(id: string, kind: "chat" | "agent") {
     if (kind === "chat") {
       await conversationStore.archiveConversation(id);
-    } else if (kind === "session") {
-      const realSessionId = id.replace("session:", "");
-      await sessionStore.deleteSession(realSessionId);
     } else {
       await archiveAgentConversation(id);
       await agentStore.refreshRecentAgentConversations(200);
@@ -621,7 +583,6 @@ export const threadStore = {
   async refresh() {
     await conversationStore.loadHistory();
     await agentStore.refreshRecentAgentConversations(200);
-    await sessionStore.loadSessions();
 
     // Only restore if no thread is already active (e.g. deep-linked navigation).
     if (state.activeThreadId) return;
@@ -645,7 +606,6 @@ export const threadStore = {
       activeThreadKind: null,
       preferChat: false,
     });
-    sessionStore.clear();
     try {
       localStorage.removeItem(LAST_ACTIVE_THREAD_KEY);
     } catch {
