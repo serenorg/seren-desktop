@@ -8,10 +8,8 @@ import {
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
 import { runtimeHasCapability } from "@/lib/runtime";
-import { runValidationLoop } from "@/services/validation";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
-import { validationStore } from "@/stores/validation.store";
 
 /** Per-session ready promises — resolved when backend emits "ready" status */
 const sessionReadyPromises = new Map<
@@ -1447,6 +1445,10 @@ export const agentStore = {
           `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`,
           error,
         );
+        // Mark as terminated so the global event subscriber drops any
+        // late-arriving events from this dead session. Without this,
+        // stale errors leak into retried sessions that reuse the same ID.
+        terminatedSessionIds.add(spawnKey);
         tempUnsubscribe();
         const message = error instanceof Error ? error.message : String(error);
         setState("error", message);
@@ -1495,11 +1497,13 @@ export const agentStore = {
     setState("error", null);
 
     // Pre-emptively clean up any stale backend session with this conversation id.
-      // If the frontend lost track of a session (e.g. after a crash or auth error),
-      // the backend may still hold it, causing "Session already exists" on re-spawn.
-      try {
-        await providerService.terminateSession(conversationId);
-      } catch {
+    // If the frontend lost track of a session (e.g. after a crash or auth error),
+    // the backend may still hold it, causing "Session already exists" on re-spawn.
+    // Mark as terminated so late-arriving events from the old session are dropped.
+    terminatedSessionIds.add(conversationId);
+    try {
+      await providerService.terminateSession(conversationId);
+    } catch {
         // Ignore — session likely doesn't exist in the backend
       }
 
@@ -2961,40 +2965,6 @@ Summary:`;
                 settingsStore.settings.autoCompactPreserveMessages,
               );
             }
-          }
-        }
-
-        // Auto-validation: trigger the self-testing loop after non-replay completions.
-        if (!isHistoryReplay && validationStore.settings.enabled) {
-          const sess = state.sessions[sessionId];
-          if (sess && !sess.isCompacting) {
-            const conversationId = sess.conversationId;
-            const sessionMessages = [...sess.messages];
-            const sessionCwd = sess.cwd;
-
-            // Fire-and-forget: validation runs asynchronously and updates the
-            // reactive validationStore so the UI picks up changes.
-            void runValidationLoop(
-              sessionId,
-              conversationId,
-              sessionMessages,
-              sessionCwd,
-              async (failureSummary: string) => {
-                // Repair callback: send the failure context back to the agent
-                // so it can attempt a fix.
-                const repairPrompt = [
-                  "The automatic validation of your last change failed.",
-                  "Please review the failures below and fix the issues:\n",
-                  failureSummary,
-                ].join("\n");
-                await this.sendPrompt(
-                  repairPrompt,
-                  undefined,
-                  undefined,
-                  sessionId,
-                );
-              },
-            );
           }
         }
         break;

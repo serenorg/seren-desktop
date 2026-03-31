@@ -10,8 +10,8 @@ import {
   Show,
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
-import { allowsSerenAgent } from "@/services/organization-policy";
 import { authStore } from "@/stores/auth.store";
+import { allowsSerenAgent } from "@/services/organization-policy";
 import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { providerStore } from "@/stores/provider.store";
@@ -23,9 +23,7 @@ import {
   settingsStore,
   toggleMcpServer,
 } from "@/stores/settings.store";
-import { validationStore } from "@/stores/validation.store";
 import { claimDaily, walletState } from "@/stores/wallet.store";
-import type { TaskCategory } from "@/types/validation";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
@@ -34,7 +32,6 @@ import { ToolsetsSettings } from "./ToolsetsSettings";
 type SettingsSection =
   | "chat"
   | "agent"
-  | "validation"
   | "providers"
   | "logins"
   | "toolsets"
@@ -113,7 +110,6 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const sections: { id: SettingsSection; label: string; icon: string }[] = [
     { id: "chat", label: "Window", icon: "🪟" },
     { id: "agent", label: "Agent", icon: "🛡️" },
-    { id: "validation", label: "Self-Test", icon: "🧪" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },
     { id: "toolsets", label: "Toolsets", icon: "📦" },
@@ -1192,212 +1188,6 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   </span>
                 </div>
               </label>
-            </div>
-          </section>
-        </Show>
-
-        <Show when={activeSection() === "validation"}>
-          <section>
-            <h3 class="m-0 mb-2 text-[1.3rem] font-semibold">Self-Test</h3>
-            <p class="m-0 mb-6 text-muted-foreground leading-normal">
-              Configure automatic validation that runs after agent tasks
-              complete. The agent self-tests its work before marking tasks as
-              done.
-            </p>
-
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={validationStore.settings.enabled}
-                  onChange={(e) =>
-                    validationStore.setSetting(
-                      "enabled",
-                      e.currentTarget.checked,
-                    )
-                  }
-                  class="mt-1 w-4 h-4 accent-[var(--color-primary,#6366f1)]"
-                />
-                <div class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">
-                    Enable Self-Testing
-                  </span>
-                  <span class="text-[0.8rem] text-muted-foreground">
-                    Automatically validate agent output after task completion
-                  </span>
-                </div>
-              </label>
-            </div>
-
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
-              <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">
-                  Max Repair Attempts
-                </span>
-                <span class="text-[0.8rem] text-muted-foreground">
-                  How many times the agent can attempt to fix failed validation
-                </span>
-              </label>
-              <select
-                value={validationStore.settings.maxRepairAttempts}
-                onChange={(e) =>
-                  validationStore.setSetting(
-                    "maxRepairAttempts",
-                    Number.parseInt(e.currentTarget.value, 10),
-                  )
-                }
-                class="bg-surface-2 text-foreground border border-border rounded-lg px-3 py-2 text-[0.85rem] min-w-[80px]"
-              >
-                <option value={0}>0 (no repair)</option>
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-                <option value={5}>5</option>
-              </select>
-            </div>
-
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={validationStore.settings.autoRunTests}
-                  onChange={(e) =>
-                    validationStore.setSetting(
-                      "autoRunTests",
-                      e.currentTarget.checked,
-                    )
-                  }
-                  class="mt-1 w-4 h-4 accent-[var(--color-primary,#6366f1)]"
-                />
-                <div class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">
-                    Auto-Run Tests
-                  </span>
-                  <span class="text-[0.8rem] text-muted-foreground">
-                    Automatically run project tests after code changes
-                  </span>
-                </div>
-              </label>
-            </div>
-
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={validationStore.settings.captureScreenshots}
-                  onChange={(e) =>
-                    validationStore.setSetting(
-                      "captureScreenshots",
-                      e.currentTarget.checked,
-                    )
-                  }
-                  class="mt-1 w-4 h-4 accent-[var(--color-primary,#6366f1)]"
-                />
-                <div class="flex flex-col gap-0.5">
-                  <span class="text-[0.95rem] font-medium text-foreground">
-                    Capture Screenshots
-                  </span>
-                  <span class="text-[0.8rem] text-muted-foreground">
-                    Save browser screenshots during validation for review
-                  </span>
-                </div>
-              </label>
-            </div>
-
-            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
-              <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">
-                  Step Timeout
-                </span>
-                <span class="text-[0.8rem] text-muted-foreground">
-                  Maximum time per validation step (seconds)
-                </span>
-              </label>
-              <select
-                value={validationStore.settings.stepTimeoutMs / 1000}
-                onChange={(e) =>
-                  validationStore.setSetting(
-                    "stepTimeoutMs",
-                    Number.parseInt(e.currentTarget.value, 10) * 1000,
-                  )
-                }
-                class="bg-surface-2 text-foreground border border-border rounded-lg px-3 py-2 text-[0.85rem] min-w-[80px]"
-              >
-                <option value={10}>10s</option>
-                <option value={30}>30s</option>
-                <option value={60}>60s</option>
-                <option value={120}>120s</option>
-              </select>
-            </div>
-
-            <div class="flex items-start justify-between gap-4 py-3">
-              <label class="flex flex-col gap-0.5 flex-1">
-                <span class="text-[0.95rem] font-medium text-foreground">
-                  Required Task Categories
-                </span>
-                <span class="text-[0.8rem] text-muted-foreground">
-                  Always validate these task types (leave empty for auto-detect)
-                </span>
-              </label>
-              <div class="flex flex-wrap gap-2 max-w-[300px]">
-                <For
-                  each={
-                    [
-                      {
-                        value: "code_edit" as TaskCategory,
-                        label: "Code Edits",
-                      },
-                      {
-                        value: "browser_automation" as TaskCategory,
-                        label: "Browser",
-                      },
-                      {
-                        value: "file_generation" as TaskCategory,
-                        label: "File Gen",
-                      },
-                      {
-                        value: "terminal_command" as TaskCategory,
-                        label: "Terminal",
-                      },
-                      { value: "deployment" as TaskCategory, label: "Deploy" },
-                    ] as const
-                  }
-                >
-                  {(cat) => {
-                    const isActive = () =>
-                      validationStore.settings.requiredCategories.includes(
-                        cat.value,
-                      );
-                    return (
-                      <button
-                        type="button"
-                        class={`px-2.5 py-1 text-[0.75rem] rounded-md border cursor-pointer transition-colors ${
-                          isActive()
-                            ? "bg-primary/15 border-primary/40 text-primary"
-                            : "bg-surface-2 border-border text-muted-foreground hover:border-border-hover"
-                        }`}
-                        onClick={() => {
-                          const current =
-                            validationStore.settings.requiredCategories;
-                          if (isActive()) {
-                            validationStore.setSetting(
-                              "requiredCategories",
-                              current.filter((c) => c !== cat.value),
-                            );
-                          } else {
-                            validationStore.setSetting("requiredCategories", [
-                              ...current,
-                              cat.value,
-                            ]);
-                          }
-                        }}
-                      >
-                        {cat.label}
-                      </button>
-                    );
-                  }}
-                </For>
-              </div>
             </div>
           </section>
         </Show>
