@@ -20,6 +20,7 @@ function resolveClaudeBinary() {
   if (process.platform === "win32") {
     const home = os.homedir();
     const appData = process.env.APPDATA ?? "";
+    const nodeDir = path.dirname(process.execPath);
     const candidates = [
       // Native installer (install.ps1) places binary here
       path.join(home, ".claude", "bin", "claude.exe"),
@@ -27,6 +28,9 @@ function resolveClaudeBinary() {
       ...(appData ? [path.join(appData, "Claude", "claude.exe")] : []),
       // npm global install creates a .cmd wrapper here
       ...(appData ? [path.join(appData, "npm", "claude.cmd")] : []),
+      // npm global install via embedded runtime's npm (prefix = node dir on Windows)
+      path.join(nodeDir, "claude.cmd"),
+      path.join(nodeDir, "claude"),
     ];
 
     for (const candidate of candidates) {
@@ -52,9 +56,13 @@ function resolveClaudeBinary() {
   }
 
   const home = os.homedir();
+  const nodeDir = path.dirname(process.execPath);
+  const prefix = path.dirname(nodeDir);
   const candidates = [
     path.join(home, ".claude", "bin", "claude"),
     path.join(home, ".local", "bin", "claude"),
+    // npm global install via embedded runtime's npm
+    path.join(prefix, "bin", "claude"),
   ];
 
   for (const candidate of candidates) {
