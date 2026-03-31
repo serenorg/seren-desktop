@@ -20,7 +20,6 @@ import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
 import { CompactedMessage } from "@/components/chat/CompactedMessage";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
-import { ValidationPanel } from "@/components/validation/ValidationPanel";
 import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
 import { collapseBuildOutput } from "@/lib/build-output";
 import {
@@ -55,7 +54,6 @@ import {
   type ToolCallEvent,
 } from "@/services/providers";
 import { skills } from "@/services/skills";
-import { runValidationLoop } from "@/services/validation";
 import {
   type AgentCompactedSummary,
   type AgentMessage,
@@ -64,7 +62,6 @@ import {
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
 import { threadStore } from "@/stores/thread.store";
-import { validationStore } from "@/stores/validation.store";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AgentEffortSelector } from "./AgentEffortSelector";
 import { AgentModelSelector } from "./AgentModelSelector";
@@ -174,7 +171,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     if (!thread) return "";
     return agentStore.getStreamingContentForConversation(thread.id);
   });
-
 
   // Enqueue finalized assistant messages to the render worker.
   // The worker returns HTML via onmessage → setHtmlCache → reactive DOM update.
@@ -1552,31 +1548,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 />
                 <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
               </article>
-            </Show>
-
-            {/* Validation Panel — shows self-test results after agent task completion */}
-            <Show when={threadValidationRun()}>
-              {(run) => (
-                <article
-                  class="px-5 py-4"
-                  data-testid="validation-panel-container"
-                >
-                  <ValidationPanel
-                    run={run()}
-                    onRerun={() => {
-                      const session = threadSession();
-                      if (!session) return;
-                      const msgs = threadMessages();
-                      void runValidationLoop(
-                        session.info.id,
-                        session.conversationId,
-                        [...msgs],
-                        session.cwd,
-                      );
-                    }}
-                  />
-                </article>
-              )}
             </Show>
           </Show>
         </Show>
