@@ -8,9 +8,9 @@ import {
   onRuntimeEvent,
 } from "@/lib/browser-local-runtime";
 import { runtimeHasCapability } from "@/lib/runtime";
+import { runValidationLoop } from "@/services/validation";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
-import { runValidationLoop } from "@/services/validation";
 import { validationStore } from "@/stores/validation.store";
 
 /** Per-session ready promises — resolved when backend emits "ready" status */
@@ -1796,6 +1796,10 @@ Summary:`;
       const cwd = session.cwd;
       const agentType = session.info.agentType;
       const conversationId = session.conversationId;
+      // Preserve the last user prompt so we can retry it after compaction.
+      // Without this, the user's message is lost when the old session is
+      // terminated and the new session starts with lastUserPrompt = undefined.
+      const pendingUserPrompt = session.lastUserPrompt;
       // Terminate the old agent session
       await this.terminateSession(sessionId);
 
@@ -1864,6 +1868,20 @@ Summary:`;
       await this.restoreSessionSettings(session, newSessionId);
 
       await providerService.sendPrompt(newSessionId, seedPrompt);
+
+      // Wait for the seed prompt to finish before retrying the user's message.
+      await waitForSessionIdle(newSessionId);
+
+      // Retry the user's last prompt if one was in-flight when compaction
+      // triggered. This prevents the message from being silently dropped.
+      if (pendingUserPrompt) {
+        console.info(
+          "[AgentStore] Retrying user prompt after auto-compaction:",
+          pendingUserPrompt.slice(0, 60),
+        );
+        setState("sessions", newSessionId, "lastUserPrompt", pendingUserPrompt);
+        await providerService.sendPrompt(newSessionId, pendingUserPrompt);
+      }
     } catch (error) {
       console.error(
         "[AgentStore] Failed to compact agent conversation:",
@@ -2857,7 +2875,12 @@ Summary:`;
                   "Please review the failures below and fix the issues:\n",
                   failureSummary,
                 ].join("\n");
-                await this.sendPrompt(repairPrompt, undefined, undefined, sessionId);
+                await this.sendPrompt(
+                  repairPrompt,
+                  undefined,
+                  undefined,
+                  sessionId,
+                );
               },
             );
           }
