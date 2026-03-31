@@ -254,15 +254,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
   const threadSessionId = createMemo(() => threadSession()?.info.id ?? null);
 
-  // Active validation run for this thread's session.
-  // MUST be declared after threadSession to avoid TDZ — SolidJS may eagerly
-  // evaluate memos during reactive batches triggered by selectThread.
-  const threadValidationRun = createMemo(() => {
-    const session = threadSession();
-    if (!session) return undefined;
-    return validationStore.getActiveRun(session.info.id);
-  });
-
   createEffect(() => {
     const sessionId = threadSessionId();
     if (sessionId && agentStore.activeSessionId !== sessionId) {
