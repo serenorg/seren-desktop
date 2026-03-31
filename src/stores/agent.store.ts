@@ -23,6 +23,20 @@ const sessionReadyPromises = new Map<
  *  when selectThread fires twice before the first spawn registers the session. */
 const spawningConversations = new Set<string>();
 
+/** Session IDs that have been explicitly terminated. The global event subscriber
+ *  drops events for these IDs to prevent stale errors from dead sessions leaking
+ *  into new/live sessions. Cleared when the global subscriber is torn down. */
+const terminatedSessionIds = new Set<string>();
+
+/** Lightweight context for sessions that are mid-spawn (IPC call in flight).
+ *  Populated before providerService.spawnAgent and cleaned up after the session
+ *  is registered in state.sessions. The global event logger consults this map
+ *  so early events show the correct agent type and conversation ID. */
+const spawnContextMap = new Map<
+  string,
+  { agentType: string; conversationId?: string }
+>();
+
 /** Max time to wait for a session to become ready before giving up */
 const SESSION_READY_TIMEOUT_MS = 30_000;
 
@@ -466,6 +480,8 @@ function disposeAgentStoreRuntimeBindings(): void {
   pendingSessionEvents.clear();
   sessionReadyPromises.clear();
   recoveryInFlightMap.clear();
+  terminatedSessionIds.clear();
+  spawnContextMap.clear();
   for (const timer of chunkFlushTimers.values()) {
     clearTimeout(timer);
   }
@@ -896,504 +912,553 @@ export const agentStore = {
       opts?.conversationTitle ??
       (resolvedAgentType === "codex" ? "Codex Agent" : "Claude Agent");
 
-    setState("isLoading", true);
-    setState("error", null);
-
-    console.log("[AgentStore] Spawning session:", {
-      agentType: resolvedAgentType,
-      cwd,
-      localSessionId,
-      resumeAgentSessionId,
-    });
-
-    // Preemptively terminate idle Claude sessions for other conversations
-    // before spawning. Claude CLI cannot reliably initialize a second
-    // instance while another is alive (see isRetryableClaudeInitError).
-    // Without this, the new session times out 3x (60s) before the existing
-    // post-failure idle-reclaim logic kicks in.
-    if (resolvedAgentType === "claude-code" && initRetryAttempt === 0) {
-      const idleSessions = getIdleClaudeSessionIds(localSessionId);
-      for (const idleId of idleSessions) {
-        console.log(
-          "[AgentStore] Reclaiming idle Claude session before spawn:",
-          idleId,
-        );
-        await this.terminateSession(idleId);
-      }
-    }
-
-    console.log("[AgentStore] Checking agent availability...");
-    const agentAvailable =
-      await providerService.checkAgentAvailable(resolvedAgentType);
-    if (!agentAvailable) {
-      const helper =
-        state.availableAgents.find((agent) => agent.type === resolvedAgentType)
-          ?.unavailableReason ??
-        `${resolvedAgentType === "codex" ? "Codex" : "Claude Code"} is not available in this runtime.`;
-      setState("error", helper);
-      setState("isLoading", false);
+    // Prevent concurrent spawns for the same conversation. Internal retries
+    // (initRetryAttempt > 0) are allowed through because they are sequential
+    // continuations of the same spawn attempt, not independent races.
+    const spawnKey = localSessionId ?? `anon-${Date.now()}`;
+    if (initRetryAttempt === 0 && spawningConversations.has(spawnKey)) {
+      console.log(
+        "[AgentStore] spawnSession: spawn already in progress for",
+        spawnKey,
+        "— skipping duplicate",
+      );
       return null;
     }
-
-    // Set up a global listener for session status events BEFORE spawning
-    // This ensures we don't miss the "ready" event due to race conditions
-    let resolveReady: ((sessionId: string) => void) | null = null;
-    let rejectReady: ((error: Error) => void) | null = null;
-    const readyPromise = new Promise<string>((resolve, reject) => {
-      resolveReady = resolve;
-      rejectReady = reject;
-    });
-
-    // Listen to session status events temporarily so ready-state resolution does
-    // not depend on global event routing order.
-    const tempUnsubscribe =
-      await providerService.subscribeToEvent<SessionStatusEvent>(
-        "sessionStatus",
-        (data) => {
-          console.log("[AgentStore] Received session status event:", data);
-          if (state.sessions[data.sessionId]) {
-            this.handleStatusChange(data.sessionId, data.status, data);
-          }
-          if (data.status === "ready" && resolveReady) {
-            resolveReady(data.sessionId);
-          } else if (data.status === "error" && rejectReady) {
-            const sessionError =
-              state.sessions[data.sessionId]?.error ??
-              "Agent session failed during initialization.";
-            rejectReady(new Error(sessionError));
-          } else if (data.status === "terminated" && rejectReady) {
-            // Claude process exited before reaching "ready" — typically an
-            // auth failure or binary-not-found on Windows.
-            const sessionError =
-              state.sessions[data.sessionId]?.error ??
-              "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.";
-            rejectReady(new Error(sessionError));
-          }
-        },
-      );
-
-    // Subscribe once to all agent runtime events before spawning, so early replay events
-    // from load_session are buffered instead of dropped.
-    if (!globalUnsubscribe) {
-      globalUnsubscribe = await providerService.subscribeToAllEvents(
-        (event) => {
-          const eventSessionId = event.data.sessionId;
-          if (!eventSessionId) return;
-          // Skip logging high-frequency messageChunk events to avoid flooding
-          // DevTools. Other event types (sessionStatus, toolCall, etc.) are
-          // still logged for debugging.
-          if (event.type !== "messageChunk") {
-            const session = state.sessions[eventSessionId];
-            console.log(
-              "[AgentRuntime] Event received - type:",
-              event.type,
-              "agent:",
-              session?.info?.agentType ?? "unknown",
-              "sessionId:",
-              eventSessionId,
-              "conversationId:",
-              session?.conversationId,
-            );
-          }
-          if (state.sessions[eventSessionId]) {
-            this.handleSessionEvent(eventSessionId, event);
-            return;
-          }
-
-          const pending = pendingSessionEvents.get(eventSessionId) ?? [];
-          pending.push(event);
-          if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
-            pending.shift();
-          }
-          pendingSessionEvents.set(eventSessionId, pending);
-        },
-      );
+    if (initRetryAttempt === 0) {
+      spawningConversations.add(spawnKey);
     }
 
     try {
-      // Ensure the underlying CLI is installed and up-to-date before spawning
-      const ensureFn =
-        resolvedAgentType === "claude-code"
-          ? providerService.ensureClaudeCli
-          : resolvedAgentType === "codex"
-            ? providerService.ensureCodexCli
-            : null;
+      setState("isLoading", true);
+      setState("error", null);
 
-      if (ensureFn) {
-        console.log("[AgentStore] Ensuring CLI is installed...");
-        let progressUnsub: UnlistenFn = () => {};
+      console.log("[AgentStore] Spawning session:", {
+        agentType: resolvedAgentType,
+        cwd,
+        localSessionId,
+        resumeAgentSessionId,
+      });
 
-        if (!isLocalProviderRuntime()) {
-          setState(
-            "error",
-            "Local provider runtime is not configured for agent installation.",
+      // Preemptively terminate idle Claude sessions for other conversations
+      // before spawning. Claude CLI cannot reliably initialize a second
+      // instance while another is alive (see isRetryableClaudeInitError).
+      // Without this, the new session times out 3x (60s) before the existing
+      // post-failure idle-reclaim logic kicks in.
+      if (resolvedAgentType === "claude-code" && initRetryAttempt === 0) {
+        const idleSessions = getIdleClaudeSessionIds(localSessionId);
+        for (const idleId of idleSessions) {
+          console.log(
+            "[AgentStore] Reclaiming idle Claude session before spawn:",
+            idleId,
           );
-          setState("isLoading", false);
-          return null;
+          await this.terminateSession(idleId);
         }
+      }
 
-        progressUnsub = onRuntimeEvent(
-          "provider://cli-install-progress",
-          (payload) => {
-            const event = payload as { stage?: string; message?: string };
-            setState("installStatus", event.message ?? null);
+      console.log("[AgentStore] Checking agent availability...");
+      const agentAvailable =
+        await providerService.checkAgentAvailable(resolvedAgentType);
+      if (!agentAvailable) {
+        const helper =
+          state.availableAgents.find(
+            (agent) => agent.type === resolvedAgentType,
+          )?.unavailableReason ??
+          `${resolvedAgentType === "codex" ? "Codex" : "Claude Code"} is not available in this runtime.`;
+        setState("error", helper);
+        setState("isLoading", false);
+        return null;
+      }
+
+      // Set up a global listener for session status events BEFORE spawning
+      // This ensures we don't miss the "ready" event due to race conditions
+      let resolveReady: ((sessionId: string) => void) | null = null;
+      let rejectReady: ((error: Error) => void) | null = null;
+      const readyPromise = new Promise<string>((resolve, reject) => {
+        resolveReady = resolve;
+        rejectReady = reject;
+      });
+
+      // Listen to session status events temporarily so ready-state resolution does
+      // not depend on global event routing order.
+      const tempUnsubscribe =
+        await providerService.subscribeToEvent<SessionStatusEvent>(
+          "sessionStatus",
+          (data) => {
+            console.log("[AgentStore] Received session status event:", data);
+            if (state.sessions[data.sessionId]) {
+              this.handleStatusChange(data.sessionId, data.status, data);
+            }
+            if (data.status === "ready" && resolveReady) {
+              resolveReady(data.sessionId);
+            } else if (data.status === "error" && rejectReady) {
+              const sessionError =
+                state.sessions[data.sessionId]?.error ??
+                "Agent session failed during initialization.";
+              rejectReady(new Error(sessionError));
+            } else if (data.status === "terminated" && rejectReady) {
+              // Claude process exited before reaching "ready" — typically an
+              // auth failure or binary-not-found on Windows.
+              const sessionError =
+                state.sessions[data.sessionId]?.error ??
+                "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.";
+              rejectReady(new Error(sessionError));
+            }
           },
         );
 
-        try {
-          await ensureFn();
-        } catch (error) {
-          progressUnsub();
-          tempUnsubscribe();
-          const message =
-            error instanceof Error
-              ? error.message
-              : `Failed to install ${resolvedAgentType === "codex" ? "Codex" : "Claude Code"} CLI`;
-          setState("error", message);
-          setState("isLoading", false);
-          setState("installStatus", null);
-          return null;
-        }
+      // Subscribe once to all agent runtime events before spawning, so early replay events
+      // from load_session are buffered instead of dropped.
+      if (!globalUnsubscribe) {
+        globalUnsubscribe = await providerService.subscribeToAllEvents(
+          (event) => {
+            const eventSessionId = event.data.sessionId;
+            if (!eventSessionId) return;
 
-        progressUnsub();
-        setState("installStatus", null);
-      }
+            // Drop events for sessions that have been explicitly terminated.
+            // Without this, late-arriving errors from dead sessions leak into
+            // new sessions that reuse the same conversation ID.
+            if (terminatedSessionIds.has(eventSessionId)) return;
 
-      // Get Seren API key to enable MCP tools for the agent.
-      // If null, auth may still be initializing — wait briefly and retry
-      // so the agent gets publisher access on cold start.
-      let apiKey = await getSerenApiKey();
-      if (!apiKey) {
-        await new Promise((r) => setTimeout(r, 3000));
-        apiKey = await getSerenApiKey();
-        if (apiKey) {
-          console.info(
-            "[AgentStore] API key became available after waiting for auth",
-          );
-        }
-      }
-      const enabledMcpServers = getEnabledMcpServers();
-
-      // No inactivity timeout — agent sessions wait indefinitely.
-      // The agent may be waiting for tool approval, thinking, or the user
-      // may have stepped away. Killing the session is never the right call.
-      const timeoutSecs = undefined;
-
-      // Codex defaults to "on-failure" (auto-approve safe ops) regardless of
-      // the global agentApprovalPolicy setting, which applies to Claude Code.
-      const approvalPolicy =
-        resolvedAgentType === "codex"
-          ? "on-failure"
-          : settingsStore.settings.agentApprovalPolicy;
-
-      console.log("[AgentStore] Spawning agent process...");
-      const info = await providerService.spawnAgent(
-        resolvedAgentType,
-        cwd,
-        settingsStore.settings.agentSandboxMode,
-        apiKey ?? undefined,
-        approvalPolicy,
-        settingsStore.settings.agentSearchEnabled,
-        settingsStore.settings.agentNetworkEnabled,
-        localSessionId,
-        resumeAgentSessionId,
-        timeoutSecs,
-        enabledMcpServers,
-      );
-      console.log("[AgentStore] Spawn result:", info);
-
-      // Persist an agent conversation record (safe to call repeatedly via INSERT OR IGNORE).
-      try {
-        await createAgentConversation(
-          info.id,
-          conversationTitle,
-          resolvedAgentType,
-          cwd,
-          cwd,
-          resumeAgentSessionId ?? undefined,
-          serializeAgentConversationMetadata({
-            pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
-            pendingBootstrapMessages: opts?.bootstrapPromptContext
-              ? opts?.restoredMessages
-              : undefined,
-          }) ?? undefined,
-        );
-      } catch (error) {
-        console.warn("Failed to persist agent conversation", error);
-      }
-
-      // Create session state
-      const hasRestoredMessages =
-        opts?.restoredMessages && opts.restoredMessages.length > 0;
-      const session: ActiveSession = {
-        info,
-        messages: opts?.restoredMessages ?? [],
-        plan: [],
-        pendingToolCalls: new Map(),
-        streamingContent: "",
-        streamingThinking: "",
-        pendingUserMessage: "",
-        cwd,
-        conversationId: info.id,
-        // When we already have a pending local bootstrap snapshot, skip the
-        // provider's replay to avoid duplicates until that bootstrap state is
-        // cleared and provider history becomes authoritative.
-        skipHistoryReplay: hasRestoredMessages ? true : undefined,
-        restoredMessageCount: hasRestoredMessages
-          ? opts?.restoredMessages?.length
-          : undefined,
-        contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
-        bootstrapPromptContext: opts?.bootstrapPromptContext,
-      };
-
-      setState("sessions", info.id, session);
-
-      // Only take focus if no session is currently active. Background spawns
-      // (e.g. compaction of an inactive thread) must not steal focus from
-      // the user's current thread. The caller (threadStore.selectThread,
-      // resumeAgentConversation, etc.) is responsible for setting focus
-      // after spawn when the user explicitly navigates to the thread.
-      if (!state.activeSessionId) {
-        setState("activeSessionId", info.id);
-      }
-
-      const pendingEvents = pendingSessionEvents.get(info.id);
-      if (pendingEvents?.length) {
-        for (const pendingEvent of pendingEvents) {
-          this.handleSessionEvent(info.id, pendingEvent);
-        }
-        pendingSessionEvents.delete(info.id);
-      }
-
-      // Create a ready promise that sendPrompt can await
-      let readyResolve: () => void;
-      const readyPromiseObj = {
-        promise: new Promise<void>((resolve) => {
-          readyResolve = resolve;
-        }),
-        resolve: () => readyResolve(),
-      };
-      sessionReadyPromises.set(info.id, readyPromiseObj);
-
-      // Buffered resume events can mark the session ready before this gate is
-      // installed. If that already happened, don't leave sendPrompt blocked on
-      // a promise that will never resolve.
-      if (state.sessions[info.id]?.info.status === "ready") {
-        readyPromiseObj.resolve();
-        sessionReadyPromises.delete(info.id);
-      }
-
-      // Wait for ready event with timeout (agent initialization can take a moment)
-      const timeoutPromise = new Promise<string>((_, reject) => {
-        setTimeout(
-          () => reject(new Error("Agent initialization timed out")),
-          30000,
-        );
-      });
-
-      let initFailure: string | null = null;
-      try {
-        const readySessionId = await Promise.race([
-          readyPromise,
-          timeoutPromise,
-        ]);
-        console.log("[AgentStore] Session ready:", readySessionId);
-
-        // Update status to ready
-        if (readySessionId === info.id) {
-          setState(
-            "sessions",
-            info.id,
-            "info",
-            "status",
-            "ready" as SessionStatus,
-          );
-        }
-      } catch (raceError) {
-        const message =
-          raceError instanceof Error ? raceError.message : String(raceError);
-        if (message.toLowerCase().includes("timed out")) {
-          // Check if the session has an error or was terminated — if so, this
-          // is a real failure (e.g. unauthenticated Claude on Windows), not a
-          // benign slow start that we can proceed past.
-          const sessionState = state.sessions[info.id];
-          const sessionDead =
-            !sessionState ||
-            sessionState.error ||
-            sessionState.info.status === "error" ||
-            sessionState.info.status === "terminated";
-
-          if (sessionDead) {
-            console.error(
-              "[AgentStore] Session terminated or errored during init wait:",
-              sessionState?.error ?? sessionState?.info.status,
-            );
-            initFailure =
-              sessionState?.error ??
-              "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.";
-          } else {
-            console.warn(
-              "[AgentStore] Timeout waiting for ready, proceeding anyway",
-            );
-            // Resolve the ready promise so sendPrompt doesn't block forever
-            const entry = sessionReadyPromises.get(info.id);
-            if (entry) {
-              entry.resolve();
-              sessionReadyPromises.delete(info.id);
+            // Skip logging high-frequency messageChunk events to avoid flooding
+            // DevTools. Other event types (sessionStatus, toolCall, etc.) are
+            // still logged for debugging.
+            if (event.type !== "messageChunk") {
+              const session = state.sessions[eventSessionId];
+              const spawnCtx = session
+                ? undefined
+                : spawnContextMap.get(eventSessionId);
+              console.log(
+                "[AgentRuntime] Event received - type:",
+                event.type,
+                "agent:",
+                session?.info?.agentType ?? spawnCtx?.agentType ?? "unknown",
+                "sessionId:",
+                eventSessionId,
+                "conversationId:",
+                session?.conversationId ?? spawnCtx?.conversationId,
+              );
             }
-          }
-        } else {
-          initFailure = message;
-        }
+            if (state.sessions[eventSessionId]) {
+              this.handleSessionEvent(eventSessionId, event);
+              return;
+            }
+
+            const pending = pendingSessionEvents.get(eventSessionId) ?? [];
+            pending.push(event);
+            if (pending.length > PENDING_SESSION_EVENT_LIMIT) {
+              pending.shift();
+            }
+            pendingSessionEvents.set(eventSessionId, pending);
+          },
+        );
       }
 
-      if (initFailure) {
-        if (
-          resolvedAgentType === "claude-code" &&
-          initRetryAttempt < MAX_CLAUDE_INIT_RETRIES &&
-          isRetryableClaudeInitError(initFailure)
-        ) {
-          console.warn(
-            "[AgentStore] Claude init failed, retrying:",
-            initFailure,
+      try {
+        // Ensure the underlying CLI is installed and up-to-date before spawning
+        const ensureFn =
+          resolvedAgentType === "claude-code"
+            ? providerService.ensureClaudeCli
+            : resolvedAgentType === "codex"
+              ? providerService.ensureCodexCli
+              : null;
+
+        if (ensureFn) {
+          console.log("[AgentStore] Ensuring CLI is installed...");
+          let progressUnsub: UnlistenFn = () => {};
+
+          if (!isLocalProviderRuntime()) {
+            setState(
+              "error",
+              "Local provider runtime is not configured for agent installation.",
+            );
+            setState("isLoading", false);
+            return null;
+          }
+
+          progressUnsub = onRuntimeEvent(
+            "provider://cli-install-progress",
+            (payload) => {
+              const event = payload as { stage?: string; message?: string };
+              setState("installStatus", event.message ?? null);
+            },
           );
-          await this.terminateSession(info.id);
-          sessionReadyPromises.delete(info.id);
-          pendingSessionEvents.delete(info.id);
-          setState("isLoading", false);
-          tempUnsubscribe();
-          const delayMs =
-            CLAUDE_INIT_RETRY_DELAY_MS * (initRetryAttempt + 1) +
-            Math.floor(Math.random() * 200);
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          return this.spawnSession(cwd, resolvedAgentType, {
-            ...opts,
-            initRetryAttempt: initRetryAttempt + 1,
+
+          try {
+            await ensureFn();
+          } catch (error) {
+            progressUnsub();
+            tempUnsubscribe();
+            const message =
+              error instanceof Error
+                ? error.message
+                : `Failed to install ${resolvedAgentType === "codex" ? "Codex" : "Claude Code"} CLI`;
+            setState("error", message);
+            setState("isLoading", false);
+            setState("installStatus", null);
+            return null;
+          }
+
+          progressUnsub();
+          setState("installStatus", null);
+        }
+
+        // Get Seren API key to enable MCP tools for the agent.
+        // If null, auth may still be initializing — wait briefly and retry
+        // so the agent gets publisher access on cold start.
+        let apiKey = await getSerenApiKey();
+        if (!apiKey) {
+          await new Promise((r) => setTimeout(r, 3000));
+          apiKey = await getSerenApiKey();
+          if (apiKey) {
+            console.info(
+              "[AgentStore] API key became available after waiting for auth",
+            );
+          }
+        }
+        const enabledMcpServers = getEnabledMcpServers();
+
+        // No inactivity timeout — agent sessions wait indefinitely.
+        // The agent may be waiting for tool approval, thinking, or the user
+        // may have stepped away. Killing the session is never the right call.
+        const timeoutSecs = undefined;
+
+        // Codex defaults to "on-failure" (auto-approve safe ops) regardless of
+        // the global agentApprovalPolicy setting, which applies to Claude Code.
+        const approvalPolicy =
+          resolvedAgentType === "codex"
+            ? "on-failure"
+            : settingsStore.settings.agentApprovalPolicy;
+
+        // Register spawn context so the global event logger can identify
+        // early events that arrive before the session is in state.sessions.
+        if (localSessionId) {
+          spawnContextMap.set(localSessionId, {
+            agentType: resolvedAgentType,
+            conversationId: localSessionId,
           });
         }
-        if (
-          resolvedAgentType === "claude-code" &&
-          !reclaimedIdleClaude &&
-          isRetryableClaudeInitError(initFailure)
-        ) {
-          const idleClaude = getIdleClaudeSessionIds(localSessionId);
-          if (idleClaude.length > 0) {
-            const evictedId = idleClaude[0];
-            console.warn(
-              "[AgentStore] Claude init failed under pressure; reclaiming idle Claude session and retrying:",
-              evictedId,
+
+        console.log("[AgentStore] Spawning agent process...");
+        const info = await providerService.spawnAgent(
+          resolvedAgentType,
+          cwd,
+          settingsStore.settings.agentSandboxMode,
+          apiKey ?? undefined,
+          approvalPolicy,
+          settingsStore.settings.agentSearchEnabled,
+          settingsStore.settings.agentNetworkEnabled,
+          localSessionId,
+          resumeAgentSessionId,
+          timeoutSecs,
+          enabledMcpServers,
+        );
+        console.log("[AgentStore] Spawn result:", info);
+
+        // Persist an agent conversation record (safe to call repeatedly via INSERT OR IGNORE).
+        try {
+          await createAgentConversation(
+            info.id,
+            conversationTitle,
+            resolvedAgentType,
+            cwd,
+            cwd,
+            resumeAgentSessionId ?? undefined,
+            serializeAgentConversationMetadata({
+              pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
+              pendingBootstrapMessages: opts?.bootstrapPromptContext
+                ? opts?.restoredMessages
+                : undefined,
+            }) ?? undefined,
+          );
+        } catch (error) {
+          console.warn("Failed to persist agent conversation", error);
+        }
+
+        // Create session state
+        const hasRestoredMessages =
+          opts?.restoredMessages && opts.restoredMessages.length > 0;
+        const session: ActiveSession = {
+          info,
+          messages: opts?.restoredMessages ?? [],
+          plan: [],
+          pendingToolCalls: new Map(),
+          streamingContent: "",
+          streamingThinking: "",
+          pendingUserMessage: "",
+          cwd,
+          conversationId: info.id,
+          // When we already have a pending local bootstrap snapshot, skip the
+          // provider's replay to avoid duplicates until that bootstrap state is
+          // cleared and provider history becomes authoritative.
+          skipHistoryReplay: hasRestoredMessages ? true : undefined,
+          restoredMessageCount: hasRestoredMessages
+            ? opts?.restoredMessages?.length
+            : undefined,
+          contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
+          bootstrapPromptContext: opts?.bootstrapPromptContext,
+        };
+
+        setState("sessions", info.id, session);
+
+        // Session is now registered — spawn context no longer needed for logging.
+        spawnContextMap.delete(info.id);
+        // This session is alive — ensure it's not in the terminated set
+        // (edge case: reused conversation ID from a prior terminated session).
+        terminatedSessionIds.delete(info.id);
+
+        // Only take focus if no session is currently active. Background spawns
+        // (e.g. compaction of an inactive thread) must not steal focus from
+        // the user's current thread. The caller (threadStore.selectThread,
+        // resumeAgentConversation, etc.) is responsible for setting focus
+        // after spawn when the user explicitly navigates to the thread.
+        if (!state.activeSessionId) {
+          setState("activeSessionId", info.id);
+        }
+
+        const pendingEvents = pendingSessionEvents.get(info.id);
+        if (pendingEvents?.length) {
+          for (const pendingEvent of pendingEvents) {
+            this.handleSessionEvent(info.id, pendingEvent);
+          }
+          pendingSessionEvents.delete(info.id);
+        }
+
+        // Create a ready promise that sendPrompt can await
+        let readyResolve: () => void;
+        const readyPromiseObj = {
+          promise: new Promise<void>((resolve) => {
+            readyResolve = resolve;
+          }),
+          resolve: () => readyResolve(),
+        };
+        sessionReadyPromises.set(info.id, readyPromiseObj);
+
+        // Buffered resume events can mark the session ready before this gate is
+        // installed. If that already happened, don't leave sendPrompt blocked on
+        // a promise that will never resolve.
+        if (state.sessions[info.id]?.info.status === "ready") {
+          readyPromiseObj.resolve();
+          sessionReadyPromises.delete(info.id);
+        }
+
+        // Wait for ready event with timeout (agent initialization can take a moment)
+        const timeoutPromise = new Promise<string>((_, reject) => {
+          setTimeout(
+            () => reject(new Error("Agent initialization timed out")),
+            30000,
+          );
+        });
+
+        let initFailure: string | null = null;
+        try {
+          const readySessionId = await Promise.race([
+            readyPromise,
+            timeoutPromise,
+          ]);
+          console.log("[AgentStore] Session ready:", readySessionId);
+
+          // Update status to ready
+          if (readySessionId === info.id) {
+            setState(
+              "sessions",
+              info.id,
+              "info",
+              "status",
+              "ready" as SessionStatus,
             );
-            await this.terminateSession(evictedId);
+          }
+        } catch (raceError) {
+          const message =
+            raceError instanceof Error ? raceError.message : String(raceError);
+          if (message.toLowerCase().includes("timed out")) {
+            // Check if the session has an error or was terminated — if so, this
+            // is a real failure (e.g. unauthenticated Claude on Windows), not a
+            // benign slow start that we can proceed past.
+            const sessionState = state.sessions[info.id];
+            const sessionDead =
+              !sessionState ||
+              sessionState.error ||
+              sessionState.info.status === "error" ||
+              sessionState.info.status === "terminated";
+
+            if (sessionDead) {
+              console.error(
+                "[AgentStore] Session terminated or errored during init wait:",
+                sessionState?.error ?? sessionState?.info.status,
+              );
+              initFailure =
+                sessionState?.error ??
+                "Agent session terminated before initialization completed. Check that Claude Code is installed and authenticated.";
+            } else {
+              console.warn(
+                "[AgentStore] Timeout waiting for ready, proceeding anyway",
+              );
+              // Resolve the ready promise so sendPrompt doesn't block forever
+              const entry = sessionReadyPromises.get(info.id);
+              if (entry) {
+                entry.resolve();
+                sessionReadyPromises.delete(info.id);
+              }
+            }
+          } else {
+            initFailure = message;
+          }
+        }
+
+        if (initFailure) {
+          if (
+            resolvedAgentType === "claude-code" &&
+            initRetryAttempt < MAX_CLAUDE_INIT_RETRIES &&
+            isRetryableClaudeInitError(initFailure)
+          ) {
+            console.warn(
+              "[AgentStore] Claude init failed, retrying:",
+              initFailure,
+            );
             await this.terminateSession(info.id);
             sessionReadyPromises.delete(info.id);
             pendingSessionEvents.delete(info.id);
             setState("isLoading", false);
             tempUnsubscribe();
-            await new Promise((resolve) => setTimeout(resolve, 300));
+            const delayMs =
+              CLAUDE_INIT_RETRY_DELAY_MS * (initRetryAttempt + 1) +
+              Math.floor(Math.random() * 200);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
             return this.spawnSession(cwd, resolvedAgentType, {
               ...opts,
-              initRetryAttempt: 0,
-              reclaimedIdleClaude: true,
+              initRetryAttempt: initRetryAttempt + 1,
             });
           }
-        }
+          if (
+            resolvedAgentType === "claude-code" &&
+            !reclaimedIdleClaude &&
+            isRetryableClaudeInitError(initFailure)
+          ) {
+            const idleClaude = getIdleClaudeSessionIds(localSessionId);
+            if (idleClaude.length > 0) {
+              const evictedId = idleClaude[0];
+              console.warn(
+                "[AgentStore] Claude init failed under pressure; reclaiming idle Claude session and retrying:",
+                evictedId,
+              );
+              await this.terminateSession(evictedId);
+              await this.terminateSession(info.id);
+              sessionReadyPromises.delete(info.id);
+              pendingSessionEvents.delete(info.id);
+              setState("isLoading", false);
+              tempUnsubscribe();
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              return this.spawnSession(cwd, resolvedAgentType, {
+                ...opts,
+                initRetryAttempt: 0,
+                reclaimedIdleClaude: true,
+              });
+            }
+          }
 
-        setState("error", initFailure);
-        await this.terminateSession(info.id);
-        sessionReadyPromises.delete(info.id);
-        pendingSessionEvents.delete(info.id);
-        setState("isLoading", false);
-        tempUnsubscribe();
-        return null;
-      }
-
-      // Worker can fail fast and remove the session before timeout handling.
-      // Treat that as an initialization failure instead of returning a dead id.
-      if (!state.sessions[info.id]) {
-        const exitedMsg = "Agent session exited during initialization.";
-        if (
-          resolvedAgentType === "claude-code" &&
-          initRetryAttempt < MAX_CLAUDE_INIT_RETRIES
-        ) {
-          console.warn(
-            "[AgentStore] Claude session exited during init, retrying.",
-          );
+          setState("error", initFailure);
+          await this.terminateSession(info.id);
           sessionReadyPromises.delete(info.id);
           pendingSessionEvents.delete(info.id);
           setState("isLoading", false);
           tempUnsubscribe();
-          const delayMs =
-            CLAUDE_INIT_RETRY_DELAY_MS * (initRetryAttempt + 1) +
-            Math.floor(Math.random() * 200);
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          return this.spawnSession(cwd, resolvedAgentType, {
-            ...opts,
-            initRetryAttempt: initRetryAttempt + 1,
-          });
+          return null;
         }
-        if (resolvedAgentType === "claude-code" && !reclaimedIdleClaude) {
-          const idleClaude = getIdleClaudeSessionIds(localSessionId);
-          if (idleClaude.length > 0) {
-            const evictedId = idleClaude[0];
+
+        // Worker can fail fast and remove the session before timeout handling.
+        // Treat that as an initialization failure instead of returning a dead id.
+        if (!state.sessions[info.id]) {
+          const exitedMsg = "Agent session exited during initialization.";
+          if (
+            resolvedAgentType === "claude-code" &&
+            initRetryAttempt < MAX_CLAUDE_INIT_RETRIES
+          ) {
             console.warn(
-              "[AgentStore] Claude init exited early; reclaiming idle Claude session and retrying:",
-              evictedId,
+              "[AgentStore] Claude session exited during init, retrying.",
             );
-            await this.terminateSession(evictedId);
             sessionReadyPromises.delete(info.id);
             pendingSessionEvents.delete(info.id);
             setState("isLoading", false);
             tempUnsubscribe();
-            await new Promise((resolve) => setTimeout(resolve, 300));
+            const delayMs =
+              CLAUDE_INIT_RETRY_DELAY_MS * (initRetryAttempt + 1) +
+              Math.floor(Math.random() * 200);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
             return this.spawnSession(cwd, resolvedAgentType, {
               ...opts,
-              initRetryAttempt: 0,
-              reclaimedIdleClaude: true,
+              initRetryAttempt: initRetryAttempt + 1,
             });
           }
+          if (resolvedAgentType === "claude-code" && !reclaimedIdleClaude) {
+            const idleClaude = getIdleClaudeSessionIds(localSessionId);
+            if (idleClaude.length > 0) {
+              const evictedId = idleClaude[0];
+              console.warn(
+                "[AgentStore] Claude init exited early; reclaiming idle Claude session and retrying:",
+                evictedId,
+              );
+              await this.terminateSession(evictedId);
+              sessionReadyPromises.delete(info.id);
+              pendingSessionEvents.delete(info.id);
+              setState("isLoading", false);
+              tempUnsubscribe();
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              return this.spawnSession(cwd, resolvedAgentType, {
+                ...opts,
+                initRetryAttempt: 0,
+                reclaimedIdleClaude: true,
+              });
+            }
+          }
+
+          setState("error", exitedMsg);
+          sessionReadyPromises.delete(info.id);
+          pendingSessionEvents.delete(info.id);
+          setState("isLoading", false);
+          tempUnsubscribe();
+          return null;
         }
 
-        setState("error", exitedMsg);
-        sessionReadyPromises.delete(info.id);
-        pendingSessionEvents.delete(info.id);
+        // If the worker reported an initialization error, treat spawn as failed.
+        // This is especially important for resume flows where the sidecar can
+        // accept the command but then fail load_session (e.g. missing Claude id).
+        const spawned = state.sessions[info.id];
+        const initError =
+          spawned?.error ??
+          (spawned?.info.status === "error"
+            ? "Agent session failed during initialization."
+            : null);
+        if (initError) {
+          setState("error", initError);
+          await this.terminateSession(info.id);
+          sessionReadyPromises.delete(info.id);
+          pendingSessionEvents.delete(info.id);
+          setState("isLoading", false);
+          tempUnsubscribe();
+          return null;
+        }
+
         setState("isLoading", false);
         tempUnsubscribe();
-        return null;
-      }
 
-      // If the worker reported an initialization error, treat spawn as failed.
-      // This is especially important for resume flows where the sidecar can
-      // accept the command but then fail load_session (e.g. missing Claude id).
-      const spawned = state.sessions[info.id];
-      const initError =
-        spawned?.error ??
-        (spawned?.info.status === "error"
-          ? "Agent session failed during initialization."
-          : null);
-      if (initError) {
-        setState("error", initError);
-        await this.terminateSession(info.id);
-        sessionReadyPromises.delete(info.id);
-        pendingSessionEvents.delete(info.id);
-        setState("isLoading", false);
+        return info.id;
+      } catch (error) {
+        console.error(
+          `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`,
+          error,
+        );
         tempUnsubscribe();
+        const message = error instanceof Error ? error.message : String(error);
+        setState("error", message);
+        setState("isLoading", false);
         return null;
       }
-
-      setState("isLoading", false);
-      tempUnsubscribe();
-
-      return info.id;
-    } catch (error) {
-      console.error(
-        `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`,
-        error,
-      );
-      tempUnsubscribe();
-      const message = error instanceof Error ? error.message : String(error);
-      setState("error", message);
-      setState("isLoading", false);
-      return null;
+    } finally {
+      // Release the spawn guard so future spawns for this conversation can proceed.
+      // Only the outermost call (attempt 0) holds the guard, so only it cleans up.
+      if (initRetryAttempt === 0) {
+        spawningConversations.delete(spawnKey);
+      }
     }
   },
 
@@ -1725,6 +1790,10 @@ export const agentStore = {
     const session = state.sessions[sessionId];
     if (!session) return;
 
+    // Mark as terminated BEFORE the async IPC call so the global event
+    // subscriber immediately starts dropping late-arriving events.
+    terminatedSessionIds.add(sessionId);
+
     try {
       await providerService.terminateSession(sessionId);
     } catch (error) {
@@ -1734,6 +1803,7 @@ export const agentStore = {
     // Clean up ready promise if still pending
     sessionReadyPromises.delete(sessionId);
     pendingSessionEvents.delete(sessionId);
+    spawnContextMap.delete(sessionId);
 
     // Remove from state using produce to properly delete the key
     setState(
@@ -1755,6 +1825,8 @@ export const agentStore = {
       globalUnsubscribe();
       globalUnsubscribe = null;
       pendingSessionEvents.clear();
+      terminatedSessionIds.clear();
+      spawnContextMap.clear();
     }
   },
 
