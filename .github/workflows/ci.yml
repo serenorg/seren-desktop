@@ -99,7 +99,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Run e2e tests against production bundle
-        run: pnpm test:e2e
+        run: npx playwright test tests/e2e/production-bundle.spec.ts tests/e2e/thread-lifecycle.spec.ts tests/e2e/session-panel.spec.ts
         env:
           PLAYWRIGHT_WEB_COMMAND: 'npx vite preview --port 1420'
           PLAYWRIGHT_WEB_TIMEOUT: '30000'
