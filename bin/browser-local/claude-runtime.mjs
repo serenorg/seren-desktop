@@ -1227,10 +1227,18 @@ function handleLine(emit, session, line) {
 function attachProcessListeners(emit, sessions, session, exitPromises) {
   session.output.on("line", (line) => handleLine(emit, session, line));
 
+  // Buffer the last stderr lines so exit diagnostics include the reason.
+  const stderrLines = [];
+  const MAX_STDERR_LINES = 20;
+
   session.process.stderr.on("data", (chunk) => {
     const message = String(chunk).trim();
     if (message.length > 0) {
       console.log(`[browser-local][claude] ${message}`);
+      stderrLines.push(message);
+      if (stderrLines.length > MAX_STDERR_LINES) {
+        stderrLines.shift();
+      }
     }
   });
 
@@ -1239,8 +1247,23 @@ function attachProcessListeners(emit, sessions, session, exitPromises) {
   let resolveExit;
   exitPromises.set(session.id, new Promise((r) => { resolveExit = r; }));
 
-  session.process.on("exit", () => {
+  session.process.on("exit", (code, signal) => {
     const wasTracked = sessions.delete(session.id);
+
+    const stderrTail = stderrLines.join("\n").slice(-500);
+    const exitDetail = signal
+      ? `signal=${signal}`
+      : `code=${code ?? "unknown"}`;
+
+    if (stderrTail) {
+      console.error(
+        `[browser-local][claude] Process exited (${exitDetail}) stderr:\n${stderrTail}`,
+      );
+    } else {
+      console.warn(
+        `[browser-local][claude] Process exited (${exitDetail}) with no stderr`,
+      );
+    }
 
     // Resolve the exit promise AFTER cleanup so waiters know it's safe
     // to reuse this session ID.
@@ -1254,19 +1277,24 @@ function attachProcessListeners(emit, sessions, session, exitPromises) {
       return;
     }
 
+    const diagnosticSuffix = stderrTail
+      ? ` (${exitDetail}): ${stderrTail.split("\n").pop()}`
+      : ` (${exitDetail})`;
+
     rejectPendingControlRequests(
       session,
-      new Error("Claude Code stopped before request completed."),
+      new Error(`Claude Code stopped before request completed${diagnosticSuffix}`),
     );
 
     if (session.currentPrompt) {
+      const promptError = `Claude Code stopped while prompt was active${diagnosticSuffix}`;
       rejectCurrentPrompt(
         session,
-        new Error("Claude Code stopped while prompt was active."),
+        new Error(promptError),
       );
       emit("provider://error", {
         sessionId: session.id,
-        error: "Claude Code stopped while prompt was active.",
+        error: promptError,
       });
     }
 

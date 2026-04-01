@@ -1623,6 +1623,7 @@ export const agentStore = {
           agentType,
           {
             localSessionId: conversationId,
+            resumeAgentSessionId: remoteSessionId,
             conversationTitle: convo.title,
             restoredMessages,
             bootstrapPromptContext: pendingBootstrapPromptContext,
