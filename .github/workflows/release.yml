@@ -1051,7 +1051,7 @@ jobs:
           # List all version directories (v*), sort by semver descending, skip first 5
           VERSIONS=$(aws s3 ls "s3://${R2_BUCKET}/" --endpoint-url="${AWS_ENDPOINT_URL}" \
             | grep 'PRE v' | awk '{print $2}' | sed 's|/$||' \
-            | sort -t. -k1,1rn -k2,2rn -k3,3rn)
+            | sed 's/^v//' | sort -t. -k1,1rn -k2,2rn -k3,3rn | sed 's/^/v/')
 
           KEEP=5
           COUNT=0
