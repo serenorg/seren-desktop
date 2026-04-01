@@ -240,6 +240,9 @@ export interface ActiveSession {
    *  that subsequent chunks of the same skill block — which arrive without the
    *  '# Active Skills' header — are also suppressed. */
   isSkippingSkillContext?: boolean;
+  /** Queued prompts awaiting dispatch when the session returns to ready.
+   *  Lives in the store (not the component) so background threads still drain. */
+  pendingPrompts: string[];
 }
 
 // ============================================================================
@@ -721,6 +724,23 @@ export const agentStore = {
       state.pendingPermissions.some((p) => p.sessionId === sid) ||
       state.pendingDiffProposals.some((p) => p.sessionId === sid)
     );
+  },
+
+  /** Enqueue a prompt for a session. Dispatched automatically on promptComplete. */
+  enqueuePrompt(sessionId: string, prompt: string): void {
+    if (!state.sessions[sessionId]) return;
+    setState("sessions", sessionId, "pendingPrompts", (q) => [...q, prompt]);
+  },
+
+  /** Get the pending prompt queue for a session (reactive). */
+  getPendingPrompts(sessionId: string): string[] {
+    return state.sessions[sessionId]?.pendingPrompts ?? [];
+  },
+
+  /** Clear the prompt queue for a session (e.g. on cancel). */
+  clearPromptQueue(sessionId: string): void {
+    if (!state.sessions[sessionId]) return;
+    setState("sessions", sessionId, "pendingPrompts", []);
   },
 
   /**
@@ -1211,6 +1231,7 @@ export const agentStore = {
             : undefined,
           contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
           bootstrapPromptContext: opts?.bootstrapPromptContext,
+          pendingPrompts: [],
         };
 
         setState("sessions", info.id, session);
@@ -1521,141 +1542,135 @@ export const agentStore = {
     try {
       await providerService.terminateSession(conversationId);
     } catch {
-        // Ignore — session likely doesn't exist in the backend
-      }
+      // Ignore — session likely doesn't exist in the backend
+    }
 
-      let convo: DbAgentConversation | null = null;
-      try {
-        convo = await getAgentConversation(conversationId);
-      } catch (error) {
-        console.error("Failed to read agent conversation:", error);
-      }
-      if (!convo) {
-        setState("error", "Agent conversation not found");
-        return null;
-      }
-      const agentType: AgentType =
-        convo.agent_type === "codex" || convo.agent_type === "claude-code"
-          ? (convo.agent_type as AgentType)
-          : state.selectedAgentType;
-      const convoMetadata = parseAgentConversationMetadata(
-        convo.agent_metadata,
+    let convo: DbAgentConversation | null = null;
+    try {
+      convo = await getAgentConversation(conversationId);
+    } catch (error) {
+      console.error("Failed to read agent conversation:", error);
+    }
+    if (!convo) {
+      setState("error", "Agent conversation not found");
+      return null;
+    }
+    const agentType: AgentType =
+      convo.agent_type === "codex" || convo.agent_type === "claude-code"
+        ? (convo.agent_type as AgentType)
+        : state.selectedAgentType;
+    const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);
+    const pendingBootstrapPromptContext =
+      convoMetadata.pendingBootstrapPromptContext;
+    const restoredMessages = Array.isArray(
+      convoMetadata.pendingBootstrapMessages,
+    )
+      ? convoMetadata.pendingBootstrapMessages
+      : [];
+
+    const remoteSessionId = convo.agent_session_id?.trim();
+    if (!remoteSessionId) {
+      console.warn(
+        "[AgentStore] Conversation has no stored remote session id; creating a fresh session.",
+        conversationId,
       );
-      const pendingBootstrapPromptContext =
-        convoMetadata.pendingBootstrapPromptContext;
-      const restoredMessages = Array.isArray(
-        convoMetadata.pendingBootstrapMessages,
-      )
-        ? convoMetadata.pendingBootstrapMessages
-        : [];
-
-      const remoteSessionId = convo.agent_session_id?.trim();
-      if (!remoteSessionId) {
-        console.warn(
-          "[AgentStore] Conversation has no stored remote session id; creating a fresh session.",
-          conversationId,
-        );
-        const convoCwd =
-          convo.project_root?.trim() || convo.agent_cwd?.trim() || undefined;
-        const freshCwd = convoCwd || cwd;
-        if (!freshCwd) {
-          setState(
-            "error",
-            "Unable to determine project path for this conversation.",
-          );
-          return null;
-        }
-        const freshSessionId = await this.spawnSession(freshCwd, agentType, {
-          localSessionId: conversationId,
-          conversationTitle: convo.title,
-          restoredMessages,
-          bootstrapPromptContext: pendingBootstrapPromptContext,
-        });
-        if (freshSessionId) {
-          clearSpawnFailures(conversationId);
-          void this.refreshRecentAgentConversations(200).catch(() => {});
-        } else {
-          recordSpawnFailure(conversationId);
-        }
-        return freshSessionId;
-      }
-      if (
-        agentType === "claude-code" &&
-        LEGACY_CLAUDE_LOCAL_SESSION_ID_RE.test(remoteSessionId)
-      ) {
-        setState(
-          "error",
-          "This conversation references a legacy local Claude id. Use Browse Claude Sessions and resume the real remote session.",
-        );
-        return null;
-      }
-
       const convoCwd =
         convo.project_root?.trim() || convo.agent_cwd?.trim() || undefined;
-      const resumeCwd = convoCwd || cwd;
-      if (!resumeCwd) {
+      const freshCwd = convoCwd || cwd;
+      if (!freshCwd) {
         setState(
           "error",
           "Unable to determine project path for this conversation.",
         );
         return null;
       }
+      const freshSessionId = await this.spawnSession(freshCwd, agentType, {
+        localSessionId: conversationId,
+        conversationTitle: convo.title,
+        restoredMessages,
+        bootstrapPromptContext: pendingBootstrapPromptContext,
+      });
+      if (freshSessionId) {
+        clearSpawnFailures(conversationId);
+        void this.refreshRecentAgentConversations(200).catch(() => {});
+      } else {
+        recordSpawnFailure(conversationId);
+      }
+      return freshSessionId;
+    }
+    if (
+      agentType === "claude-code" &&
+      LEGACY_CLAUDE_LOCAL_SESSION_ID_RE.test(remoteSessionId)
+    ) {
+      setState(
+        "error",
+        "This conversation references a legacy local Claude id. Use Browse Claude Sessions and resume the real remote session.",
+      );
+      return null;
+    }
 
-      const sessionId = await this.spawnSession(resumeCwd, agentType, {
+    const convoCwd =
+      convo.project_root?.trim() || convo.agent_cwd?.trim() || undefined;
+    const resumeCwd = convoCwd || cwd;
+    if (!resumeCwd) {
+      setState(
+        "error",
+        "Unable to determine project path for this conversation.",
+      );
+      return null;
+    }
+
+    const sessionId = await this.spawnSession(resumeCwd, agentType, {
+      localSessionId: conversationId,
+      resumeAgentSessionId: remoteSessionId,
+      conversationTitle: convo.title,
+      restoredMessages,
+      bootstrapPromptContext: pendingBootstrapPromptContext,
+    });
+
+    // Legacy Claude conversations can reference session IDs that no longer
+    // exist on disk. In that case, fall back to a fresh session for the same
+    // persisted conversation instead of failing hard.
+    if (!sessionId && agentType === "claude-code") {
+      console.warn(
+        "[AgentStore] Claude resume failed, starting a fresh session for conversation",
+        conversationId,
+        state.error,
+      );
+      const fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
         localSessionId: conversationId,
         resumeAgentSessionId: remoteSessionId,
         conversationTitle: convo.title,
         restoredMessages,
         bootstrapPromptContext: pendingBootstrapPromptContext,
       });
-
-      // Legacy Claude conversations can reference session IDs that no longer
-      // exist on disk. In that case, fall back to a fresh session for the same
-      // persisted conversation instead of failing hard.
-      if (!sessionId && agentType === "claude-code") {
-        console.warn(
-          "[AgentStore] Claude resume failed, starting a fresh session for conversation",
-          conversationId,
-          state.error,
+      if (fallbackSessionId) {
+        // Clear error state and remove stale error messages left by the
+        // failed first spawn. Without this, "Claude Code request failed"
+        // banners persist even though the retry session is healthy.
+        setState("error", null);
+        setState("sessions", fallbackSessionId, "error", undefined);
+        setState("sessions", fallbackSessionId, "messages", (msgs) =>
+          msgs.filter((m) => m.type !== "error"),
         );
-        const fallbackSessionId = await this.spawnSession(
-          resumeCwd,
-          agentType,
-          {
-            localSessionId: conversationId,
-            resumeAgentSessionId: remoteSessionId,
-            conversationTitle: convo.title,
-            restoredMessages,
-            bootstrapPromptContext: pendingBootstrapPromptContext,
-          },
-        );
-        if (fallbackSessionId) {
-          // Clear error state and remove stale error messages left by the
-          // failed first spawn. Without this, "Claude Code request failed"
-          // banners persist even though the retry session is healthy.
-          setState("error", null);
-          setState("sessions", fallbackSessionId, "error", undefined);
-          setState("sessions", fallbackSessionId, "messages", (msgs) =>
-            msgs.filter((m) => m.type !== "error"),
-          );
-          clearSpawnFailures(conversationId);
-          void this.refreshRecentAgentConversations(200).catch(() => {});
-        } else {
-          recordSpawnFailure(conversationId);
-        }
-        return fallbackSessionId;
-      }
-
-      if (sessionId) {
-        if (!pendingBootstrapPromptContext) {
-          clearLegacyAgentTranscript(conversationId);
-        }
         clearSpawnFailures(conversationId);
         void this.refreshRecentAgentConversations(200).catch(() => {});
       } else {
         recordSpawnFailure(conversationId);
       }
-      return sessionId;
+      return fallbackSessionId;
+    }
+
+    if (sessionId) {
+      if (!pendingBootstrapPromptContext) {
+        clearLegacyAgentTranscript(conversationId);
+      }
+      clearSpawnFailures(conversationId);
+      void this.refreshRecentAgentConversations(200).catch(() => {});
+    } else {
+      recordSpawnFailure(conversationId);
+    }
+    return sessionId;
   },
   /**
    * Resume a remote agent session from the provider's stored session list.
@@ -2952,6 +2967,29 @@ Summary:`;
           "ready" as SessionStatus,
         );
 
+        // Drain the prompt queue for this session. This runs in the store
+        // regardless of which thread the UI is showing, so background threads
+        // don't stall. Guard against compaction — the session will be
+        // terminated and re-spawned, so sendPrompt would fail.
+        if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
+          const queue = state.sessions[sessionId]?.pendingPrompts ?? [];
+          if (queue.length > 0) {
+            const [nextPrompt, ...remaining] = queue;
+            setState("sessions", sessionId, "pendingPrompts", remaining);
+            console.log(
+              "[AgentStore] Draining queued prompt for session",
+              sessionId,
+              "remaining:",
+              remaining.length,
+            );
+            // Dispatch asynchronously so the promptComplete handler finishes
+            // before the next sendPrompt begins.
+            setTimeout(() => {
+              void this.sendPrompt(nextPrompt, undefined, undefined, sessionId);
+            }, 100);
+          }
+        }
+
         // Auto-compact check: trigger compaction at 85% of context window,
         // or at 200 messages for agents that don't report token usage at all.
         if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
@@ -3907,10 +3945,10 @@ Summary:`;
 };
 
 export type {
-  AgentType,
-  SessionStatus,
-  AgentSessionInfo,
   AgentInfo,
+  AgentSessionInfo,
+  AgentType,
   DiffEvent,
   DiffProposalEvent,
+  SessionStatus,
 };

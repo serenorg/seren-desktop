@@ -82,13 +82,11 @@ interface AgentChatProps {
 // Per-thread input drafts so switching threads doesn't leak text between them.
 const agentDrafts = new Map<string, string>();
 
-// Per-thread message queues so canceling in one thread doesn't lose queued
-// messages in another thread.
-const threadQueues = new Map<string, string[]>();
+// threadQueues removed — prompt queue now lives in agentStore.sessions[id].pendingPrompts
+// so background threads drain automatically on promptComplete.
 
 export const AgentChat: Component<AgentChatProps> = (props) => {
   const [input, setInput] = createSignal("");
-  const [messageQueue, setMessageQueue] = createSignal<string[]>([]);
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const { isDragging } = createDragDrop((files) =>
     setAttachedImages((prev) => [...prev, ...files]),
@@ -134,6 +132,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
 
   // Save/restore per-thread input drafts and message queues when switching
+  // Save/restore per-thread input drafts when switching threads.
+  // Queue persistence is no longer needed — it lives in the store.
   createEffect(() => {
     const currentId = activeAgentThread()?.id ?? null;
     if (currentId !== prevThreadId) {
@@ -144,16 +144,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         } else {
           agentDrafts.delete(prevThreadId);
         }
-        // Persist the outgoing thread's queue
-        const currentQueue = untrack(messageQueue);
-        if (currentQueue.length > 0) {
-          threadQueues.set(prevThreadId, currentQueue);
-        } else {
-          threadQueues.delete(prevThreadId);
-        }
       }
       setInput(currentId ? (agentDrafts.get(currentId) ?? "") : "");
-      setMessageQueue(currentId ? (threadQueues.get(currentId) ?? []) : []);
       prevThreadId = currentId;
     }
   });
@@ -270,6 +262,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   const hasSession = () => threadSession() !== null;
   const isReady = () => threadSession()?.info.status === "ready";
   const isPrompting = () => threadSession()?.info.status === "prompting";
+  const messageQueue = () =>
+    threadSessionId() ? agentStore.getPendingPrompts(threadSessionId()!) : [];
   const promptStartTime = () => threadSession()?.promptStartTime;
   const sessionError = () => threadSession()?.error ?? agentStore.error;
   const lockedAgentType = createMemo<AgentType>(() => {
@@ -626,12 +620,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       }
     }
 
-    // If agent is prompting, queue the message instead
+    // If agent is prompting, queue the message in the store
     if (isPrompting()) {
-      const updated = [...messageQueue(), trimmed];
-      setMessageQueue(updated);
-      const threadId = activeAgentThread()?.id;
-      if (threadId) threadQueues.set(threadId, updated);
+      const sid = threadSessionId();
+      if (sid) {
+        agentStore.enqueuePrompt(sid, trimmed);
+      }
       setInput("");
       console.log("[AgentChat] Message queued:", trimmed);
       return;
@@ -727,112 +721,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   // Guard flag prevents concurrent queue processing
-  let queueDraining = false;
 
-  const processNextQueuedMessage = async () => {
-    if (queueDraining) return;
-
-    // Capture thread identity synchronously before any async gap.
-    const drainThreadId = activeAgentThread()?.id;
-    const drainSessionId = threadSessionId();
-    if (!drainThreadId || !drainSessionId || !isReady()) return;
-
-    // Don't process queued messages while compaction is in progress —
-    // the session will be terminated and re-spawned, so any sendPrompt
-    // call would fail with "Session terminated" and the message would be
-    // lost. The isReady effect will re-trigger once the new session is up.
-    if (threadSession()?.isCompacting) return;
-
-    // Read from the thread-specific Map, NOT the reactive messageQueue()
-    // signal. During a thread switch the isReady effect can fire before the
-    // thread-switch effect clears messageQueue(), making the signal stale.
-    // threadQueues is a plain JS Map keyed by thread ID — it is always
-    // accurate for the target thread and immune to SolidJS batch ordering.
-    const threadQueue = threadQueues.get(drainThreadId);
-    if (!threadQueue || threadQueue.length === 0) return;
-
-    queueDraining = true;
-    const [nextMessage, ...remaining] = threadQueue;
-    // Keep the Map and signal in sync.
-    if (remaining.length > 0) {
-      threadQueues.set(drainThreadId, remaining);
-    } else {
-      threadQueues.delete(drainThreadId);
-    }
-    setMessageQueue(remaining);
-    console.log("[AgentChat] Processing queued message:", nextMessage);
-
-    try {
-      await agentStore.sendPrompt(
-        nextMessage,
-        undefined,
-        undefined,
-        drainSessionId,
-      );
-    } catch (error) {
-      // If the session was terminated (e.g. by compaction), re-queue the
-      // message at the front so it survives the session transition and
-      // gets delivered once the new session is ready.
-      const msg = error instanceof Error ? error.message : String(error);
-      if (
-        msg.includes("Session terminated") ||
-        msg.includes("not found") ||
-        msg.includes("Worker thread dropped")
-      ) {
-        console.warn(
-          "[AgentChat] Re-queuing message after session termination:",
-          nextMessage,
-        );
-        const currentQueue = threadQueues.get(drainThreadId) ?? [];
-        const restored = [nextMessage, ...currentQueue];
-        threadQueues.set(drainThreadId, restored);
-        setMessageQueue(restored);
-      } else {
-        console.error("[AgentChat] Queued message failed:", error);
-      }
-    }
-
-    queueDraining = false;
-    // After the prompt completes, promptComplete has already set status
-    // back to "ready" — only continue draining if still on the same thread.
-    // If the user switched threads during the await, let the isReady effect
-    // for that thread handle its own queue instead of spilling over here.
-    if (activeAgentThread()?.id === drainThreadId) {
-      processNextQueuedMessage();
-    }
-  };
-
-  // Trigger queue drain when agent becomes ready.
-  // Check threadQueues Map (not the reactive signal) to avoid reading stale
-  // messageQueue() values during a thread switch — the root cause of
-  // cross-thread message pollution.
-  // Also guard against compaction: the session briefly reports "ready" during
-  // the compaction flow before being terminated — processing queued messages
-  // in that window causes "Session terminated" errors and message loss.
-  createEffect(
-    on(
-      isReady,
-      (ready) => {
-        const threadId = activeAgentThread()?.id;
-        if (
-          ready &&
-          threadId &&
-          !threadSession()?.isCompacting &&
-          (threadQueues.get(threadId)?.length ?? 0) > 0
-        ) {
-          processNextQueuedMessage();
-        }
-      },
-      { defer: true },
-    ),
-  );
+  // Queue drain is handled by the store's promptComplete handler.
+  // No component-level drain logic needed.
 
   const handleCancel = async () => {
-    // Clear only THIS thread's queued messages
-    setMessageQueue([]);
-    const threadId = activeAgentThread()?.id;
-    if (threadId) threadQueues.delete(threadId);
-    await agentStore.cancelPrompt(threadSessionId() ?? undefined);
+    const sid = threadSessionId();
+    if (sid) agentStore.clearPromptQueue(sid);
+    await agentStore.cancelPrompt(sid ?? undefined);
   };
 
   const [forking, setForking] = createSignal(false);
@@ -1841,7 +1737,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     <button
                       type="button"
                       class="text-destructive hover:underline"
-                      onClick={() => setMessageQueue([])}
+                      onClick={() => {
+                        const sid = threadSessionId();
+                        if (sid) agentStore.clearPromptQueue(sid);
+                      }}
                     >
                       Clear
                     </button>

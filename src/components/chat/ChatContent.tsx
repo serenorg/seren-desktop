@@ -768,14 +768,23 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       settingsStore.get("autoCompactPreserveMessages"),
     );
 
-    // Process message queue if there are queued messages
+    // Process message queue if there are queued messages.
+    // Capture the conversation ID to ensure the drain targets the same
+    // conversation even if the user switched threads during orchestration.
+    const drainConversationId = conversationId;
     const queue = messageQueue();
     if (queue.length > 0) {
       const [nextMessage, ...remainingQueue] = queue;
       setMessageQueue(remainingQueue);
       console.log("[ChatContent] Processing queued message:", nextMessage);
       setTimeout(() => {
-        sendMessageImmediate(nextMessage);
+        if (conversationStore.activeConversationId === drainConversationId) {
+          sendMessageImmediate(nextMessage);
+        } else {
+          console.warn(
+            "[ChatContent] Skipping queued message — conversation changed",
+          );
+        }
       }, 100);
     }
   };
