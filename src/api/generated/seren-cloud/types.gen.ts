@@ -5,6 +5,49 @@ export type ClientOptions = {
 };
 
 /**
+ * A single audit trail entry.
+ */
+export type AuditEntry = {
+    action: string;
+    actor: string;
+    created_at: string;
+    details: unknown;
+    entry_hash: string;
+    id: string;
+    invocation_id?: string | null;
+    organization_id: string;
+    prev_hash: string;
+    publisher_id?: string | null;
+    sequence_number: number;
+};
+
+/**
+ * Generic status payload used by cloud deployment lifecycle endpoints.
+ */
+export type CloudDeploymentActionStatusResponse = {
+    status: string;
+};
+
+/**
+ * Run-status event that can trigger a deployment alert webhook.
+ */
+export type CloudDeploymentAlertEvent = 'awaiting_approval' | 'failed' | 'blocked' | 'timeout' | 'completed' | 'cancelled';
+
+/**
+ * Deployment-level operator alert policy.
+ */
+export type CloudDeploymentAlertPolicy = {
+    /**
+     * Run events that should trigger the webhook.
+     */
+    events?: Array<CloudDeploymentAlertEvent>;
+    /**
+     * Secret key whose value is the destination webhook URL.
+     */
+    webhook_secret_key: string;
+};
+
+/**
  * Cloud deployment compute backend target.
  */
 export type CloudDeploymentComputeBackend = 'aws_container' | 'cloudflare_worker' | 'daytona';
@@ -27,9 +70,41 @@ export type CloudDeploymentEnvironment = {
 };
 
 /**
+ * Computed evaluation gate status for a deployment.
+ */
+export type CloudDeploymentEvalGateStatus = {
+    blocking: boolean;
+    checked_at: string;
+    eval_gate_max_age_seconds: number;
+    eval_gate_set_id: string;
+    fresh_until?: string | null;
+    latest_eval_run_completed_at?: string | null;
+    latest_eval_run_id?: string | null;
+    latest_eval_run_status?: string | null;
+    latest_verdict_passed?: boolean | null;
+    latest_verdict_status?: string | null;
+    message: string;
+    state: string;
+};
+
+/**
  * Cloud deployment execution mode.
  */
-export type CloudDeploymentMode = 'always_on' | 'cron';
+export type CloudDeploymentMode = 'always_on' | 'cron' | 'job';
+
+/**
+ * Deployment-level outbound network restrictions for sandboxed execution backends.
+ */
+export type CloudDeploymentNetworkPolicy = {
+    /**
+     * Explicit IPv4 CIDR ranges allowed for outbound access.
+     */
+    allow_list?: Array<string>;
+    /**
+     * When true, block all outbound network access from the deployment runtime.
+     */
+    block_all?: boolean;
+};
 
 /**
  * Artifact emitted by a cloud run (for example PR links, plans, screenshots).
@@ -67,6 +142,10 @@ export type CloudDeploymentRunEvent = {
     inference_cost_usd: string;
     inference_input_tokens: number;
     inference_output_tokens: number;
+    /**
+     * Canonical JSON payload submitted to trigger the run.
+     */
+    invocation_payload: unknown;
     metadata: unknown;
     organization_id: string;
     /**
@@ -93,6 +172,83 @@ export type CloudDeploymentRunEvent = {
 };
 
 /**
+ * Response envelope for triggering a cloud deployment run.
+ *
+ * This schema intentionally covers both synchronous and asynchronous responses
+ * across compute backends (`always_on`, `cron`, Cloudflare, Daytona).
+ */
+export type CloudDeploymentRunInvocationResponse = {
+    /**
+     * Atomic compute cost units when emitted by the backend.
+     */
+    compute_cost_atomic?: number | null;
+    /**
+     * Backend execution ID for correlating orchestrator/job-level status.
+     */
+    execution_id?: string | null;
+    /**
+     * Execution duration in milliseconds when available.
+     */
+    execution_time_ms?: number | null;
+    /**
+     * Process exit code for runtimes that expose it (for example Daytona).
+     */
+    exit_code?: number | null;
+    /**
+     * K8s Job name for queued cron executions.
+     */
+    job_name?: string | null;
+    /**
+     * Backend-specific result payload.
+     */
+    result?: unknown;
+    /**
+     * Persisted run event ID when the invocation is tracked in the run history table.
+     */
+    run_id?: string | null;
+    /**
+     * Daytona sandbox ID when applicable.
+     */
+    sandbox_id?: string | null;
+    /**
+     * Cloudflare Worker script name when applicable.
+     */
+    script_name?: string | null;
+    /**
+     * Lifecycle status reported by the backend (`queued`, `running`, `completed`, etc.).
+     */
+    status: string;
+};
+
+/**
+ * Request body for triggering a cloud deployment run.
+ *
+ * Additional JSON fields are allowed and forwarded to the runtime.
+ */
+export type CloudDeploymentRunRequest = {
+    /**
+     * Optional approval decisions used when resuming a paused run checkpoint.
+     */
+    approval_decisions?: Array<CloudRunApprovalDecision> | null;
+    /**
+     * Whether to request async execution for always-on orchestrators.
+     */
+    async?: boolean | null;
+    /**
+     * Optional message for orchestrated runtimes.
+     */
+    message?: string | null;
+    /**
+     * Optional checkpoint identifier used to resume an awaiting-approval run.
+     */
+    resume_checkpoint_id?: string | null;
+    /**
+     * Optional client-provided run identifier (used by some orchestrators).
+     */
+    run_id?: string | null;
+};
+
+/**
  * Cloud deployment runtime kind (language/runtime format).
  */
 export type CloudDeploymentRuntimeKind = 'python' | 'javascript' | 'typescript' | 'rust' | 'rust_wasm_adk';
@@ -106,24 +262,392 @@ export type CloudDeploymentStatus = 'pending' | 'building' | 'running' | 'stoppe
  * Summary view for listing deployments (excludes large fields like code_bundle).
  */
 export type CloudDeploymentSummary = {
+    alert_policy?: null | CloudDeploymentAlertPolicy;
     code_bundle_hash: string;
     compute_backend: CloudDeploymentComputeBackend;
     created_at: string;
     cron_schedule?: string | null;
+    cron_timezone?: string | null;
+    dashboard_config?: unknown;
     endpoint_url?: string | null;
     environment_id?: string | null;
     error_message?: string | null;
+    eval_gate_max_age_seconds?: number | null;
+    eval_gate_set_id?: string | null;
+    eval_gate_status?: null | CloudDeploymentEvalGateStatus;
     id: string;
+    managed_agent?: null | ManagedAgentSummary;
     mode: CloudDeploymentMode;
     model_id?: string | null;
     name: string;
+    network_policy?: null | CloudDeploymentNetworkPolicy;
     orchestration_mode: OrchestrationMode;
     organization_id: string;
+    publisher_only?: boolean;
+    requirements: unknown;
     runtime_kind: CloudDeploymentRuntimeKind;
     skill_slug: string;
     status: CloudDeploymentStatus;
     updated_at: string;
     user_id: string;
+    /**
+     * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+     */
+    visibility: string;
+};
+
+/**
+ * Reusable eval baseline captured from a run or created manually later.
+ */
+export type CloudEvalCase = {
+    created_at: string;
+    created_by_user_id: string;
+    deployment_id?: string | null;
+    eval_set_id: string;
+    expected_eval_capture: unknown;
+    expected_output?: string | null;
+    expected_output_sha256?: string | null;
+    expected_replay_events: unknown;
+    id: string;
+    invocation_payload: unknown;
+    metadata: unknown;
+    name: string;
+    organization_id: string;
+    source_kind: string;
+    source_run_id?: string | null;
+    updated_at: string;
+};
+
+/**
+ * Per-case result row captured when running an eval set.
+ */
+export type CloudEvalCaseResult = {
+    actual_eval_capture: unknown;
+    actual_output_sha256?: string | null;
+    actual_replay_events: unknown;
+    actual_run_id?: string | null;
+    actual_status?: string | null;
+    comparison: unknown;
+    completed_at?: string | null;
+    created_at: string;
+    deployment_id?: string | null;
+    eval_case_id: string;
+    eval_run_id: string;
+    eval_set_id: string;
+    expected_eval_capture: unknown;
+    expected_output_sha256?: string | null;
+    expected_replay_events: unknown;
+    expected_status?: string | null;
+    id: string;
+    metadata: unknown;
+    organization_id: string;
+    started_at?: string | null;
+    status: string;
+    status_message?: string | null;
+    updated_at: string;
+};
+
+/**
+ * Durable pass/fail criteria for a seren-cloud eval set.
+ */
+export type CloudEvalCriteria = {
+    max_errored_cases?: number;
+    max_failed_cases?: number;
+    max_missing_actual_eval_capture_cases?: number;
+    max_missing_actual_replay_cases?: number;
+    max_output_mismatches?: number;
+    max_status_mismatches?: number;
+    max_trajectory_mismatches?: number;
+    min_completion_rate?: number;
+    min_field_match_rate?: number;
+    min_score?: number;
+};
+
+/**
+ * Durable execution record for running an eval set against a deployment.
+ */
+export type CloudEvalRun = {
+    completed_at?: string | null;
+    completed_cases: number;
+    created_at: string;
+    created_by_user_id: string;
+    deployment_id?: string | null;
+    errored_cases: number;
+    eval_set_id: string;
+    failed_cases: number;
+    id: string;
+    metadata: unknown;
+    organization_id: string;
+    passed_cases: number;
+    started_at?: string | null;
+    status: string;
+    status_message?: string | null;
+    summary: CloudEvalRunSummary;
+    total_cases: number;
+    updated_at: string;
+    verdict: CloudEvalRunVerdict;
+};
+
+/**
+ * Representative failures attached to an eval run summary.
+ */
+export type CloudEvalRunFailureExample = {
+    actual_run_id?: string | null;
+    case_name?: string | null;
+    eval_case_id: string;
+    notes?: Array<string>;
+    status: string;
+};
+
+/**
+ * Roll-up summary for an eval run.
+ */
+export type CloudEvalRunSummary = {
+    compared_cases: number;
+    completion_rate: number;
+    failure_examples?: Array<CloudEvalRunFailureExample>;
+    field_comparisons: number;
+    field_match_rate: number;
+    field_mismatches: number;
+    first_errored_case_id?: string | null;
+    first_failed_case_id?: string | null;
+    missing_actual_eval_capture_cases: number;
+    missing_actual_replay_cases: number;
+    output_checked_cases: number;
+    output_mismatches: number;
+    pass_rate: number;
+    score: number;
+    status_checked_cases: number;
+    status_mismatches: number;
+    trajectory_checked_cases: number;
+    trajectory_mismatches: number;
+};
+
+/**
+ * Durable pass/fail verdict derived from an eval run and its criteria.
+ */
+export type CloudEvalRunVerdict = {
+    criteria: CloudEvalCriteria;
+    evaluated_at?: string | null;
+    failing_checks?: Array<CloudEvalRunVerdictCheck>;
+    status: string;
+};
+
+/**
+ * Individual threshold failure that contributed to an eval verdict.
+ */
+export type CloudEvalRunVerdictCheck = {
+    actual: unknown;
+    key: string;
+    label: string;
+    message: string;
+    operator: string;
+    target: unknown;
+};
+
+/**
+ * Durable grouping for reusable seren-cloud eval cases.
+ */
+export type CloudEvalSet = {
+    created_at: string;
+    created_by_user_id: string;
+    criteria: CloudEvalCriteria;
+    deployment_id?: string | null;
+    description?: string | null;
+    id: string;
+    metadata: unknown;
+    name: string;
+    organization_id: string;
+    schedule?: null | CloudEvalSetSchedule;
+    updated_at: string;
+};
+
+/**
+ * Scheduler state for automatically executing a seren-cloud eval set.
+ */
+export type CloudEvalSetSchedule = {
+    schedule_cron: string;
+    schedule_last_attempted_at?: string | null;
+    schedule_last_eval_run_id?: string | null;
+    schedule_last_message?: string | null;
+    schedule_last_status?: string | null;
+    schedule_next_run_at: string;
+    schedule_timezone: string;
+};
+
+/**
+ * Request body for enabling or updating scheduled eval execution.
+ */
+export type CloudEvalSetScheduleRequest = {
+    schedule_cron: string;
+    schedule_timezone: string;
+};
+
+/**
+ * Awaiting-approval run entry returned by the approval inbox endpoints.
+ */
+export type CloudPendingApprovalRun = {
+    compute_backend: CloudDeploymentComputeBackend;
+    deployment_id: string;
+    execution_id: string;
+    pending_approvals?: Array<CloudRunPendingApproval>;
+    run_id: string;
+    run_name?: string | null;
+    source: string;
+    started_at: string;
+    status: string;
+    status_message?: string | null;
+    updated_at: string;
+};
+
+/**
+ * Approval decision submitted when resuming an awaiting-approval run.
+ */
+export type CloudRunApprovalDecision = {
+    decision: CloudRunApprovalDecisionValue;
+    id: string;
+};
+
+/**
+ * Normalized approval action accepted by the cloud resume API.
+ */
+export type CloudRunApprovalDecisionValue = 'approve' | 'reject';
+
+/**
+ * Eval records linked to a run, either as the promoted source or as an actual replay target.
+ */
+export type CloudRunEvalsResponse = {
+    actual_eval_case_results?: Array<CloudEvalCaseResult>;
+    run_id: string;
+    source_eval_cases?: Array<CloudEvalCase>;
+};
+
+/**
+ * A single event in the structured output trace.
+ *
+ * Matches the seren-desktop `WorkerEvent` model for consistency.
+ * Stored as a JSON array in `output_events`.
+ */
+export type CloudRunOutputEvent = {
+    text: string;
+    type: 'text';
+} | {
+    duration_ms?: number | null;
+    text: string;
+    type: 'thinking';
+} | {
+    arguments?: string | null;
+    id: string;
+    name: string;
+    status?: string | null;
+    type: 'tool_call';
+} | {
+    content: string;
+    id: string;
+    is_error: boolean;
+    type: 'tool_result';
+} | {
+    id: string;
+    reason: string;
+    tool: string;
+    type: 'tool_audit';
+} | {
+    checkpoint_id?: string | null;
+    details?: unknown;
+    state: string;
+    type: 'workflow';
+} | {
+    message: string;
+    type: 'error';
+};
+
+/**
+ * Envelope carrying structured output event metadata.
+ */
+export type CloudRunOutputEventEnvelope = CloudRunOutputEvent & {
+    content_index?: number | null;
+    event_type?: string | null;
+    item_id?: string | null;
+    kind?: null | CloudRunOutputEventKind;
+    output_index?: number | null;
+    sequence_number?: number | null;
+};
+
+/**
+ * Canonical taxonomy for structured run output events.
+ */
+export type CloudRunOutputEventKind = 'text' | 'thinking' | 'tool_call_started' | 'tool_call_completed' | 'tool_audit' | 'workflow' | 'error' | 'unknown';
+
+/**
+ * Pending approval attached to an `awaiting_approval` run.
+ */
+export type CloudRunPendingApproval = {
+    args?: unknown;
+    function_call_id?: string | null;
+    id: string;
+    reason?: string | null;
+    tool: string;
+};
+
+/**
+ * Current approval state for a run.
+ */
+export type CloudRunPendingApprovalsResponse = {
+    checkpoint_id?: string | null;
+    pending_approvals?: Array<CloudRunPendingApproval>;
+    run_id: string;
+    status: string;
+};
+
+/**
+ * Comparison summary between two run replay captures.
+ */
+export type CloudRunReplayComparison = {
+    baseline_deployment_id: string;
+    baseline_eval_capture_present: boolean;
+    baseline_replay_artifact_present: boolean;
+    baseline_run_id: string;
+    baseline_status: string;
+    candidate_deployment_id: string;
+    candidate_eval_capture_present: boolean;
+    candidate_replay_artifact_present: boolean;
+    candidate_run_id: string;
+    candidate_status: string;
+    field_matches: Array<CloudRunReplayFieldComparison>;
+    first_event_mismatch?: null | CloudRunReplayEventMismatch;
+    notes?: Array<string>;
+    overall_match: boolean;
+};
+
+/**
+ * The first structured replay event that differs between two runs.
+ */
+export type CloudRunReplayEventMismatch = {
+    baseline: unknown;
+    baseline_kind?: string | null;
+    candidate: unknown;
+    candidate_kind?: string | null;
+    index: number;
+};
+
+/**
+ * Field-level replay/eval summary comparison between two runs.
+ */
+export type CloudRunReplayFieldComparison = {
+    baseline: unknown;
+    candidate: unknown;
+    field: string;
+    label: string;
+    matches: boolean;
+};
+
+/**
+ * Response payload for explicitly closing an active run stream session.
+ */
+export type CloudRunStreamCloseResponse = {
+    run_id: string;
+    session_id: string;
+    status: string;
 };
 
 /**
@@ -135,6 +659,186 @@ export type CreateCloudDeploymentEnvironmentRequest = {
     is_default?: boolean | null;
     name: string;
     setup_commands?: Array<string> | null;
+};
+
+/**
+ * Request body for executing an eval set against a deployment.
+ */
+export type CreateCloudEvalRunRequest = {
+    deployment_id?: string | null;
+    metadata?: unknown;
+};
+
+/**
+ * Request body for creating a seren-cloud eval set.
+ */
+export type CreateCloudEvalSetRequest = {
+    criteria?: CloudEvalCriteria;
+    deployment_id?: string | null;
+    description?: string | null;
+    metadata?: unknown;
+    name: string;
+    schedule?: null | CloudEvalSetScheduleRequest;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAuditEntry = {
+    /**
+     * A single audit trail entry.
+     */
+    data: {
+        action: string;
+        actor: string;
+        created_at: string;
+        details: unknown;
+        entry_hash: string;
+        id: string;
+        invocation_id?: string | null;
+        organization_id: string;
+        prev_hash: string;
+        publisher_id?: string | null;
+        sequence_number: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudDeploymentActionStatusResponse = {
+    /**
+     * Generic status payload used by cloud deployment lifecycle endpoints.
+     */
+    data: {
+        status: string;
+    };
+    pagination?: null | PaginationMeta;
 };
 
 /**
@@ -307,6 +1011,10 @@ export type DataResponseCloudDeploymentRunEvent = {
         inference_cost_usd: string;
         inference_input_tokens: number;
         inference_output_tokens: number;
+        /**
+         * Canonical JSON payload submitted to trigger the run.
+         */
+        invocation_payload: unknown;
         metadata: unknown;
         organization_id: string;
         /**
@@ -399,30 +1107,1008 @@ export type DataResponseCloudDeploymentRunEvent = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseCloudDeploymentRunInvocationResponse = {
+    /**
+     * Response envelope for triggering a cloud deployment run.
+     *
+     * This schema intentionally covers both synchronous and asynchronous responses
+     * across compute backends (`always_on`, `cron`, Cloudflare, Daytona).
+     */
+    data: {
+        /**
+         * Atomic compute cost units when emitted by the backend.
+         */
+        compute_cost_atomic?: number | null;
+        /**
+         * Backend execution ID for correlating orchestrator/job-level status.
+         */
+        execution_id?: string | null;
+        /**
+         * Execution duration in milliseconds when available.
+         */
+        execution_time_ms?: number | null;
+        /**
+         * Process exit code for runtimes that expose it (for example Daytona).
+         */
+        exit_code?: number | null;
+        /**
+         * K8s Job name for queued cron executions.
+         */
+        job_name?: string | null;
+        /**
+         * Backend-specific result payload.
+         */
+        result?: unknown;
+        /**
+         * Persisted run event ID when the invocation is tracked in the run history table.
+         */
+        run_id?: string | null;
+        /**
+         * Daytona sandbox ID when applicable.
+         */
+        sandbox_id?: string | null;
+        /**
+         * Cloudflare Worker script name when applicable.
+         */
+        script_name?: string | null;
+        /**
+         * Lifecycle status reported by the backend (`queued`, `running`, `completed`, etc.).
+         */
+        status: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseCloudDeploymentSummary = {
     /**
      * Summary view for listing deployments (excludes large fields like code_bundle).
      */
     data: {
+        alert_policy?: null | CloudDeploymentAlertPolicy;
         code_bundle_hash: string;
         compute_backend: CloudDeploymentComputeBackend;
         created_at: string;
         cron_schedule?: string | null;
+        cron_timezone?: string | null;
+        dashboard_config?: unknown;
         endpoint_url?: string | null;
         environment_id?: string | null;
         error_message?: string | null;
+        eval_gate_max_age_seconds?: number | null;
+        eval_gate_set_id?: string | null;
+        eval_gate_status?: null | CloudDeploymentEvalGateStatus;
         id: string;
+        managed_agent?: null | ManagedAgentSummary;
         mode: CloudDeploymentMode;
         model_id?: string | null;
         name: string;
+        network_policy?: null | CloudDeploymentNetworkPolicy;
         orchestration_mode: OrchestrationMode;
         organization_id: string;
+        publisher_only?: boolean;
+        requirements: unknown;
         runtime_kind: CloudDeploymentRuntimeKind;
         skill_slug: string;
         status: CloudDeploymentStatus;
         updated_at: string;
         user_id: string;
+        /**
+         * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+         */
+        visibility: string;
     };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudEvalCase = {
+    /**
+     * Reusable eval baseline captured from a run or created manually later.
+     */
+    data: {
+        created_at: string;
+        created_by_user_id: string;
+        deployment_id?: string | null;
+        eval_set_id: string;
+        expected_eval_capture: unknown;
+        expected_output?: string | null;
+        expected_output_sha256?: string | null;
+        expected_replay_events: unknown;
+        id: string;
+        invocation_payload: unknown;
+        metadata: unknown;
+        name: string;
+        organization_id: string;
+        source_kind: string;
+        source_run_id?: string | null;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudEvalCaseResult = {
+    /**
+     * Per-case result row captured when running an eval set.
+     */
+    data: {
+        actual_eval_capture: unknown;
+        actual_output_sha256?: string | null;
+        actual_replay_events: unknown;
+        actual_run_id?: string | null;
+        actual_status?: string | null;
+        comparison: unknown;
+        completed_at?: string | null;
+        created_at: string;
+        deployment_id?: string | null;
+        eval_case_id: string;
+        eval_run_id: string;
+        eval_set_id: string;
+        expected_eval_capture: unknown;
+        expected_output_sha256?: string | null;
+        expected_replay_events: unknown;
+        expected_status?: string | null;
+        id: string;
+        metadata: unknown;
+        organization_id: string;
+        started_at?: string | null;
+        status: string;
+        status_message?: string | null;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudEvalRun = {
+    /**
+     * Durable execution record for running an eval set against a deployment.
+     */
+    data: {
+        completed_at?: string | null;
+        completed_cases: number;
+        created_at: string;
+        created_by_user_id: string;
+        deployment_id?: string | null;
+        errored_cases: number;
+        eval_set_id: string;
+        failed_cases: number;
+        id: string;
+        metadata: unknown;
+        organization_id: string;
+        passed_cases: number;
+        started_at?: string | null;
+        status: string;
+        status_message?: string | null;
+        summary: CloudEvalRunSummary;
+        total_cases: number;
+        updated_at: string;
+        verdict: CloudEvalRunVerdict;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudEvalSet = {
+    /**
+     * Durable grouping for reusable seren-cloud eval cases.
+     */
+    data: {
+        created_at: string;
+        created_by_user_id: string;
+        criteria: CloudEvalCriteria;
+        deployment_id?: string | null;
+        description?: string | null;
+        id: string;
+        metadata: unknown;
+        name: string;
+        organization_id: string;
+        schedule?: null | CloudEvalSetSchedule;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudRunEvalsResponse = {
+    /**
+     * Eval records linked to a run, either as the promoted source or as an actual replay target.
+     */
+    data: {
+        actual_eval_case_results?: Array<CloudEvalCaseResult>;
+        run_id: string;
+        source_eval_cases?: Array<CloudEvalCase>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudRunPendingApprovalsResponse = {
+    /**
+     * Current approval state for a run.
+     */
+    data: {
+        checkpoint_id?: string | null;
+        pending_approvals?: Array<CloudRunPendingApproval>;
+        run_id: string;
+        status: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudRunReplayComparison = {
+    /**
+     * Comparison summary between two run replay captures.
+     */
+    data: {
+        baseline_deployment_id: string;
+        baseline_eval_capture_present: boolean;
+        baseline_replay_artifact_present: boolean;
+        baseline_run_id: string;
+        baseline_status: string;
+        candidate_deployment_id: string;
+        candidate_eval_capture_present: boolean;
+        candidate_replay_artifact_present: boolean;
+        candidate_run_id: string;
+        candidate_status: string;
+        field_matches: Array<CloudRunReplayFieldComparison>;
+        first_event_mismatch?: null | CloudRunReplayEventMismatch;
+        notes?: Array<string>;
+        overall_match: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseCloudRunStreamCloseResponse = {
+    /**
+     * Response payload for explicitly closing an active run stream session.
+     */
+    data: {
+        run_id: string;
+        session_id: string;
+        status: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseDeploymentSpendSummary = {
+    /**
+     * Aggregated spend summary for a single cloud deployment.
+     */
+    data: {
+        compute_cost_usd: string;
+        first_event_at?: string | null;
+        inference_cost_usd: string;
+        last_event_at?: string | null;
+        run_count: number;
+        total_cost_usd: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecAuditEntry = {
+    data: Array<{
+        action: string;
+        actor: string;
+        created_at: string;
+        details: unknown;
+        entry_hash: string;
+        id: string;
+        invocation_id?: string | null;
+        organization_id: string;
+        prev_hash: string;
+        publisher_id?: string | null;
+        sequence_number: number;
+    }>;
     pagination?: null | PaginationMeta;
 };
 
@@ -672,6 +2358,10 @@ export type DataResponseVecCloudDeploymentRunEvent = {
         inference_cost_usd: string;
         inference_input_tokens: number;
         inference_output_tokens: number;
+        /**
+         * Canonical JSON payload submitted to trigger the run.
+         */
+        invocation_payload: unknown;
         metadata: unknown;
         organization_id: string;
         /**
@@ -766,25 +2456,632 @@ export type DataResponseVecCloudDeploymentRunEvent = {
  */
 export type DataResponseVecCloudDeploymentSummary = {
     data: Array<{
+        alert_policy?: null | CloudDeploymentAlertPolicy;
         code_bundle_hash: string;
         compute_backend: CloudDeploymentComputeBackend;
         created_at: string;
         cron_schedule?: string | null;
+        cron_timezone?: string | null;
+        dashboard_config?: unknown;
         endpoint_url?: string | null;
         environment_id?: string | null;
         error_message?: string | null;
+        eval_gate_max_age_seconds?: number | null;
+        eval_gate_set_id?: string | null;
+        eval_gate_status?: null | CloudDeploymentEvalGateStatus;
         id: string;
+        managed_agent?: null | ManagedAgentSummary;
         mode: CloudDeploymentMode;
         model_id?: string | null;
         name: string;
+        network_policy?: null | CloudDeploymentNetworkPolicy;
         orchestration_mode: OrchestrationMode;
         organization_id: string;
+        publisher_only?: boolean;
+        requirements: unknown;
         runtime_kind: CloudDeploymentRuntimeKind;
         skill_slug: string;
         status: CloudDeploymentStatus;
         updated_at: string;
         user_id: string;
+        /**
+         * Visibility mode: "open" (default) or "opaque" (hides internals from non-owners).
+         */
+        visibility: string;
     }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecCloudEvalCase = {
+    data: Array<{
+        created_at: string;
+        created_by_user_id: string;
+        deployment_id?: string | null;
+        eval_set_id: string;
+        expected_eval_capture: unknown;
+        expected_output?: string | null;
+        expected_output_sha256?: string | null;
+        expected_replay_events: unknown;
+        id: string;
+        invocation_payload: unknown;
+        metadata: unknown;
+        name: string;
+        organization_id: string;
+        source_kind: string;
+        source_run_id?: string | null;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecCloudEvalCaseResult = {
+    data: Array<{
+        actual_eval_capture: unknown;
+        actual_output_sha256?: string | null;
+        actual_replay_events: unknown;
+        actual_run_id?: string | null;
+        actual_status?: string | null;
+        comparison: unknown;
+        completed_at?: string | null;
+        created_at: string;
+        deployment_id?: string | null;
+        eval_case_id: string;
+        eval_run_id: string;
+        eval_set_id: string;
+        expected_eval_capture: unknown;
+        expected_output_sha256?: string | null;
+        expected_replay_events: unknown;
+        expected_status?: string | null;
+        id: string;
+        metadata: unknown;
+        organization_id: string;
+        started_at?: string | null;
+        status: string;
+        status_message?: string | null;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecCloudEvalRun = {
+    data: Array<{
+        completed_at?: string | null;
+        completed_cases: number;
+        created_at: string;
+        created_by_user_id: string;
+        deployment_id?: string | null;
+        errored_cases: number;
+        eval_set_id: string;
+        failed_cases: number;
+        id: string;
+        metadata: unknown;
+        organization_id: string;
+        passed_cases: number;
+        started_at?: string | null;
+        status: string;
+        status_message?: string | null;
+        summary: CloudEvalRunSummary;
+        total_cases: number;
+        updated_at: string;
+        verdict: CloudEvalRunVerdict;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecCloudEvalSet = {
+    data: Array<{
+        created_at: string;
+        created_by_user_id: string;
+        criteria: CloudEvalCriteria;
+        deployment_id?: string | null;
+        description?: string | null;
+        id: string;
+        metadata: unknown;
+        name: string;
+        organization_id: string;
+        schedule?: null | CloudEvalSetSchedule;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecCloudPendingApprovalRun = {
+    data: Array<{
+        compute_backend: CloudDeploymentComputeBackend;
+        deployment_id: string;
+        execution_id: string;
+        pending_approvals?: Array<CloudRunPendingApproval>;
+        run_id: string;
+        run_name?: string | null;
+        source: string;
+        started_at: string;
+        status: string;
+        status_message?: string | null;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecCloudRunOutputEventEnvelope = {
+    /**
+     * Envelope carrying structured output event metadata.
+     */
+    data: Array<CloudRunOutputEvent & {
+        content_index?: number | null;
+        event_type?: string | null;
+        item_id?: string | null;
+        kind?: null | CloudRunOutputEventKind;
+        output_index?: number | null;
+        sequence_number?: number | null;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVerificationResult = {
+    /**
+     * Result of verifying the audit chain integrity.
+     */
+    data: {
+        entries_checked: number;
+        error?: string | null;
+        first_invalid_sequence?: number | null;
+        verified: boolean;
+    };
     pagination?: null | PaginationMeta;
 };
 
@@ -792,17 +3089,52 @@ export type DataResponseVecCloudDeploymentSummary = {
  * JSON body for the deploy endpoint (base64-encoded code bundle).
  */
 export type DeployRequest = {
+    alert_policy?: null | CloudDeploymentAlertPolicy;
     /**
      * Base64-encoded tar.gz of the scripts/ directory.
      */
     code_bundle_base64: string;
+    /**
+     * Optional backend override. Omit or set "auto" for AWS-first bundle-based routing.
+     */
     compute_backend?: string | null;
     /**
      * JSON config object (will be encrypted at rest).
      */
     config?: unknown;
+    /**
+     * Cumulative context token budget; oldest tool results truncated when exceeded.
+     */
+    context_budget_tokens?: number | null;
     cron_schedule?: string | null;
+    cron_timezone?: string | null;
+    /**
+     * UI rendering hints for custom dashboards.
+     */
+    dashboard_config?: unknown;
     environment_id?: string | null;
+    eval_gate_max_age_seconds?: number | null;
+    eval_gate_set_id?: string | null;
+    /**
+     * Fallback model IDs to try on transient errors (429, 503, timeout).
+     */
+    fallback_models?: Array<string> | null;
+    /**
+     * Max LLM loop iterations (overrides SEREN_MAX_ITERATIONS env var in orchestrator).
+     */
+    max_iterations?: number | null;
+    /**
+     * Max wall-clock seconds per run (overrides SEREN_MAX_TIMEOUT env var in orchestrator).
+     */
+    max_timeout_seconds?: number | null;
+    /**
+     * Max total tool calls allowed in a single run before the runtime stops.
+     */
+    max_tool_calls_per_run?: number | null;
+    /**
+     * Max characters per tool output (overrides SEREN_MAX_TOOL_OUTPUT env var).
+     */
+    max_tool_output_chars?: number | null;
     mode: string;
     /**
      * Additional model parameters (temperature, max_tokens, etc.).
@@ -812,17 +3144,30 @@ export type DeployRequest = {
      * Model identifier (e.g. "anthropic/claude-sonnet-4-20250514").
      */
     model_id?: string | null;
-    name: string;
+    name?: string | null;
+    network_policy?: null | CloudDeploymentNetworkPolicy;
     /**
      * Orchestration mode: "script" (default) or "llm".
      */
     orchestration_mode?: string | null;
+    /**
+     * Restrict the runtime to built-in Seren publisher tools only.
+     */
+    publisher_only?: boolean;
+    /**
+     * Declared requirements (env vars, secrets, config keys) validated at deploy time.
+     */
+    requirements?: Array<RequirementSpec> | null;
     requirements_txt?: string | null;
+    /**
+     * Optional runtime override. Omit or set "auto" to infer from the uploaded bundle.
+     */
     runtime_kind?: string | null;
     /**
      * JSON secrets object (key-value pairs, will be encrypted at rest).
      */
     secrets?: unknown;
+    side_effect_policy?: null | SideEffectPolicy;
     skill_slug: string;
     /**
      * System prompt for LLM orchestration (required when orchestration_mode = "llm").
@@ -832,7 +3177,46 @@ export type DeployRequest = {
      * Tool definitions for the LLM to call.
      */
     tool_definitions?: unknown;
+    /**
+     * Visibility mode: "open" (default, internals visible) or "opaque" (internals hidden).
+     */
+    visibility?: string | null;
 };
+
+/**
+ * Aggregated spend summary for a single cloud deployment.
+ */
+export type DeploymentSpendSummary = {
+    compute_cost_usd: string;
+    first_event_at?: string | null;
+    inference_cost_usd: string;
+    last_event_at?: string | null;
+    run_count: number;
+    total_cost_usd: string;
+};
+
+export type ManagedAgentApprovalPolicy = 'read_only' | 'allow_mutations';
+
+export type ManagedAgentModelPolicy = 'fast' | 'balanced' | 'deep';
+
+export type ManagedAgentSummary = {
+    allowed_publisher_operations: Array<string>;
+    allowed_remote_agent_origins?: Array<string>;
+    approval_policy: ManagedAgentApprovalPolicy;
+    build_target: string;
+    model_policy: ManagedAgentModelPolicy;
+    publisher: string;
+    resolved_tools: Array<string>;
+    routing_reason: string;
+    runtime_adapter: string;
+    target_framework: string;
+    template: ManagedAgentTemplate;
+    tool_presets: Array<ManagedAgentToolPreset>;
+};
+
+export type ManagedAgentTemplate = 'research_monitor' | 'workflow_agent';
+
+export type ManagedAgentToolPreset = 'live_data' | 'publisher_actions' | 'database';
 
 /**
  * Cloud deployment orchestration mode.
@@ -869,6 +3253,37 @@ export type PaginationMeta = {
 };
 
 /**
+ * Request body for promoting a run into a reusable eval case.
+ */
+export type PromoteRunToCloudEvalCaseRequest = {
+    metadata?: unknown;
+    name?: string | null;
+};
+
+/**
+ * Where a deployment requirement should be satisfied from.
+ */
+export type RequirementSource = 'env' | 'secret' | 'config';
+
+/**
+ * A declared requirement for a cloud deployment (validated at deploy time).
+ */
+export type RequirementSpec = {
+    description?: string | null;
+    key: string;
+    source: RequirementSource;
+};
+
+/**
+ * Deployment-level safety controls for mutating built-in publisher calls.
+ */
+export type SideEffectPolicy = {
+    max_mutating_calls_per_run?: number | null;
+    min_seconds_between_mutating_calls?: number | null;
+    require_idempotency_key?: boolean;
+};
+
+/**
  * Request body for updating a reusable execution environment.
  */
 export type UpdateCloudDeploymentEnvironmentRequest = {
@@ -883,9 +3298,120 @@ export type UpdateCloudDeploymentEnvironmentRequest = {
  * Request body for updating config/secrets without redeploying.
  */
 export type UpdateCloudDeploymentRequest = {
+    alert_policy?: null | CloudDeploymentAlertPolicy;
+    clear_alert_policy?: boolean;
+    clear_eval_gate?: boolean;
+    clear_network_policy?: boolean;
     config?: unknown;
+    eval_gate_max_age_seconds?: number | null;
+    eval_gate_set_id?: string | null;
+    network_policy?: null | CloudDeploymentNetworkPolicy;
     secrets?: unknown;
 };
+
+/**
+ * Request body for replacing a seren-cloud eval set.
+ */
+export type UpdateCloudEvalSetRequest = {
+    criteria?: CloudEvalCriteria;
+    deployment_id?: string | null;
+    description?: string | null;
+    metadata?: unknown;
+    name: string;
+    schedule?: null | CloudEvalSetScheduleRequest;
+};
+
+/**
+ * Result of verifying the audit chain integrity.
+ */
+export type VerificationResult = {
+    entries_checked: number;
+    error?: string | null;
+    first_invalid_sequence?: number | null;
+    verified: boolean;
+};
+
+export type SerenCloudListAuditEntriesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Max audit entries to return (default: 50, max: 200)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+        /**
+         * Filter by exact audit action
+         */
+        action?: string;
+        /**
+         * Case-insensitive search across action, actor, and details
+         */
+        q?: string;
+    };
+    url: '/audit';
+};
+
+export type SerenCloudListAuditEntriesResponses = {
+    /**
+     * Audit entries listed
+     */
+    200: DataResponseVecAuditEntry;
+};
+
+export type SerenCloudListAuditEntriesResponse = SerenCloudListAuditEntriesResponses[keyof SerenCloudListAuditEntriesResponses];
+
+export type SerenCloudVerifyAuditData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Max audit entries to verify in sequence order (default: 10000, max: 100000)
+         */
+        limit?: number;
+    };
+    url: '/audit/verify';
+};
+
+export type SerenCloudVerifyAuditResponses = {
+    /**
+     * Audit verification result
+     */
+    200: DataResponseVerificationResult;
+};
+
+export type SerenCloudVerifyAuditResponse = SerenCloudVerifyAuditResponses[keyof SerenCloudVerifyAuditResponses];
+
+export type SerenCloudGetAuditEntryData = {
+    body?: never;
+    path: {
+        /**
+         * Audit entry ID
+         */
+        entry_id: string;
+    };
+    query?: never;
+    url: '/audit/{entry_id}';
+};
+
+export type SerenCloudGetAuditEntryErrors = {
+    /**
+     * Audit entry not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetAuditEntryResponses = {
+    /**
+     * Audit entry details
+     */
+    200: DataResponseAuditEntry;
+};
+
+export type SerenCloudGetAuditEntryResponse = SerenCloudGetAuditEntryResponses[keyof SerenCloudGetAuditEntryResponses];
 
 export type SerenCloudDeployData = {
     body: DeployRequest;
@@ -1016,8 +3542,55 @@ export type SerenCloudUpdateConfigResponses = {
     /**
      * Config updated
      */
-    200: unknown;
+    200: DataResponseCloudDeploymentActionStatusResponse;
 };
+
+export type SerenCloudUpdateConfigResponse = SerenCloudUpdateConfigResponses[keyof SerenCloudUpdateConfigResponses];
+
+export type SerenCloudDeploymentAuditData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Max audit entries to return (default: 50, max: 200)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+        /**
+         * Filter by exact audit action
+         */
+        action?: string;
+        /**
+         * Case-insensitive search across action, actor, and details
+         */
+        q?: string;
+    };
+    url: '/deployments/{id}/audit';
+};
+
+export type SerenCloudDeploymentAuditErrors = {
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeploymentAuditResponses = {
+    /**
+     * Deployment audit entries listed
+     */
+    200: DataResponseVecAuditEntry;
+};
+
+export type SerenCloudDeploymentAuditResponse = SerenCloudDeploymentAuditResponses[keyof SerenCloudDeploymentAuditResponses];
 
 export type SerenCloudLogsData = {
     body?: never;
@@ -1045,6 +3618,67 @@ export type SerenCloudLogsResponses = {
     200: unknown;
 };
 
+export type SerenCloudDeploymentPendingApprovalsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Max runs to return (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Pagination offset (default: 0)
+         */
+        offset?: number;
+        /**
+         * Filter by compute backend (aws_container, cloudflare_worker, daytona)
+         */
+        compute_backend?: string;
+        /**
+         * Filter by run source (api, cli, scheduler, ui, system, unknown)
+         */
+        source?: string;
+        /**
+         * Filter runs by artifact existence
+         */
+        has_artifacts?: boolean;
+        /**
+         * Filter runs started at/after RFC3339 timestamp
+         */
+        started_after?: string;
+        /**
+         * Filter runs started at/before RFC3339 timestamp
+         */
+        started_before?: string;
+        /**
+         * Case-insensitive search across execution_id, status, source, run_name, output, metadata
+         */
+        q?: string;
+    };
+    url: '/deployments/{id}/pending_approvals';
+};
+
+export type SerenCloudDeploymentPendingApprovalsErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeploymentPendingApprovalsResponses = {
+    /**
+     * Awaiting-approval runs listed
+     */
+    200: DataResponseVecCloudPendingApprovalRun;
+};
+
+export type SerenCloudDeploymentPendingApprovalsResponse = SerenCloudDeploymentPendingApprovalsResponses[keyof SerenCloudDeploymentPendingApprovalsResponses];
+
 export type SerenCloudDeploymentRunsData = {
     body?: never;
     path: {
@@ -1063,7 +3697,7 @@ export type SerenCloudDeploymentRunsData = {
          */
         offset?: number;
         /**
-         * Repeat or comma-separate statuses: queued, running, completed, failed, cancelled, timeout, blocked, error
+         * Repeat or comma-separate statuses: queued, running, awaiting_approval, completed, failed, cancelled, timeout, blocked, error
          */
         status?: string;
         /**
@@ -1111,7 +3745,7 @@ export type SerenCloudDeploymentRunsResponses = {
 export type SerenCloudDeploymentRunsResponse = SerenCloudDeploymentRunsResponses[keyof SerenCloudDeploymentRunsResponses];
 
 export type SerenCloudRunData = {
-    body?: unknown;
+    body?: null | CloudDeploymentRunRequest;
     path: {
         /**
          * Deployment ID
@@ -1124,6 +3758,10 @@ export type SerenCloudRunData = {
 
 export type SerenCloudRunErrors = {
     /**
+     * Insufficient SerenBucks balance
+     */
+    402: unknown;
+    /**
      * Not found
      */
     404: unknown;
@@ -1133,12 +3771,14 @@ export type SerenCloudRunResponses = {
     /**
      * Run completed (always_on deployments)
      */
-    200: unknown;
+    200: DataResponseCloudDeploymentRunInvocationResponse;
     /**
      * Run triggered
      */
-    202: unknown;
+    202: DataResponseCloudDeploymentRunInvocationResponse;
 };
+
+export type SerenCloudRunResponse = SerenCloudRunResponses[keyof SerenCloudRunResponses];
 
 export type SerenCloudDeploymentRunData = {
     body?: never;
@@ -1245,6 +3885,161 @@ export type SerenCloudDeploymentRunCancelResponses = {
 
 export type SerenCloudDeploymentRunCancelResponse = SerenCloudDeploymentRunCancelResponses[keyof SerenCloudDeploymentRunCancelResponses];
 
+export type SerenCloudDeploymentRunEvalsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/runs/{run_id}/evals';
+};
+
+export type SerenCloudDeploymentRunEvalsErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeploymentRunEvalsResponses = {
+    /**
+     * Eval records linked to the run
+     */
+    200: DataResponseCloudRunEvalsResponse;
+};
+
+export type SerenCloudDeploymentRunEvalsResponse = SerenCloudDeploymentRunEvalsResponses[keyof SerenCloudDeploymentRunEvalsResponses];
+
+export type SerenCloudDeploymentRunEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Max events to return (default: 100, max: 500)
+         */
+        limit?: number;
+        /**
+         * Pagination offset (default: 0)
+         */
+        offset?: number;
+        /**
+         * Filter by event kind (text, thinking, tool_call_started, tool_call_completed, tool_audit, workflow, error, unknown)
+         */
+        kind?: string;
+        /**
+         * Filter by tool/output item ID
+         */
+        item_id?: string;
+        /**
+         * Case-insensitive search across event type, kind, item ID, and payload
+         */
+        q?: string;
+    };
+    url: '/deployments/{id}/runs/{run_id}/events';
+};
+
+export type SerenCloudDeploymentRunEventsErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeploymentRunEventsResponses = {
+    /**
+     * Run output events listed
+     */
+    200: DataResponseVecCloudRunOutputEventEnvelope;
+};
+
+export type SerenCloudDeploymentRunEventsResponse = SerenCloudDeploymentRunEventsResponses[keyof SerenCloudDeploymentRunEventsResponses];
+
+export type SerenCloudDeploymentRunPendingApprovalsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/runs/{run_id}/pending_approvals';
+};
+
+export type SerenCloudDeploymentRunPendingApprovalsErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeploymentRunPendingApprovalsResponses = {
+    /**
+     * Current pending approvals for the run
+     */
+    200: DataResponseCloudRunPendingApprovalsResponse;
+};
+
+export type SerenCloudDeploymentRunPendingApprovalsResponse = SerenCloudDeploymentRunPendingApprovalsResponses[keyof SerenCloudDeploymentRunPendingApprovalsResponses];
+
+export type SerenCloudDeploymentRunStreamCloseData = {
+    body?: never;
+    headers: {
+        /**
+         * Active stream session ID to close
+         */
+        'x-seren-stream-session-id': string;
+    };
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/runs/{run_id}/stream';
+};
+
+export type SerenCloudDeploymentRunStreamCloseErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeploymentRunStreamCloseResponses = {
+    /**
+     * Stream session closed
+     */
+    200: DataResponseCloudRunStreamCloseResponse;
+};
+
+export type SerenCloudDeploymentRunStreamCloseResponse = SerenCloudDeploymentRunStreamCloseResponses[keyof SerenCloudDeploymentRunStreamCloseResponses];
+
 export type SerenCloudDeploymentRunStreamData = {
     body?: never;
     path: {
@@ -1275,6 +4070,34 @@ export type SerenCloudDeploymentRunStreamResponses = {
     200: unknown;
 };
 
+export type SerenCloudGetDeploymentSpendData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/spend';
+};
+
+export type SerenCloudGetDeploymentSpendErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetDeploymentSpendResponses = {
+    /**
+     * Aggregated spend summary
+     */
+    200: DataResponseDeploymentSpendSummary;
+};
+
+export type SerenCloudGetDeploymentSpendResponse = SerenCloudGetDeploymentSpendResponses[keyof SerenCloudGetDeploymentSpendResponses];
+
 export type SerenCloudStartData = {
     body?: never;
     path: {
@@ -1292,14 +4115,20 @@ export type SerenCloudStartErrors = {
      * Bad request (not always_on)
      */
     400: unknown;
+    /**
+     * Insufficient SerenBucks balance
+     */
+    402: unknown;
 };
 
 export type SerenCloudStartResponses = {
     /**
      * Deployment started
      */
-    200: unknown;
+    200: DataResponseCloudDeploymentActionStatusResponse;
 };
+
+export type SerenCloudStartResponse = SerenCloudStartResponses[keyof SerenCloudStartResponses];
 
 export type SerenCloudStopData = {
     body?: never;
@@ -1324,8 +4153,10 @@ export type SerenCloudStopResponses = {
     /**
      * Deployment stopped
      */
-    200: unknown;
+    200: DataResponseCloudDeploymentActionStatusResponse;
 };
+
+export type SerenCloudStopResponse = SerenCloudStopResponses[keyof SerenCloudStopResponses];
 
 export type SerenCloudListEnvironmentsData = {
     body?: never;
@@ -1450,6 +4281,461 @@ export type SerenCloudUpdateEnvironmentResponses = {
 
 export type SerenCloudUpdateEnvironmentResponse = SerenCloudUpdateEnvironmentResponses[keyof SerenCloudUpdateEnvironmentResponses];
 
+export type SerenCloudEvalSetsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Optional deployment scope
+         */
+        deployment_id?: string;
+        /**
+         * Max eval sets to return (default: 50, max: 200)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+    };
+    url: '/eval-sets';
+};
+
+export type SerenCloudEvalSetsResponses = {
+    /**
+     * Eval sets listed
+     */
+    200: DataResponseVecCloudEvalSet;
+};
+
+export type SerenCloudEvalSetsResponse = SerenCloudEvalSetsResponses[keyof SerenCloudEvalSetsResponses];
+
+export type SerenCloudCreateEvalSetData = {
+    body: CreateCloudEvalSetRequest;
+    path?: never;
+    query?: never;
+    url: '/eval-sets';
+};
+
+export type SerenCloudCreateEvalSetErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudCreateEvalSetResponses = {
+    /**
+     * Eval set created
+     */
+    201: DataResponseCloudEvalSet;
+};
+
+export type SerenCloudCreateEvalSetResponse = SerenCloudCreateEvalSetResponses[keyof SerenCloudCreateEvalSetResponses];
+
+export type SerenCloudGetEvalSetData = {
+    body?: never;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/eval-sets/{id}';
+};
+
+export type SerenCloudGetEvalSetErrors = {
+    /**
+     * Eval set not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetEvalSetResponses = {
+    /**
+     * Eval set details
+     */
+    200: DataResponseCloudEvalSet;
+};
+
+export type SerenCloudGetEvalSetResponse = SerenCloudGetEvalSetResponses[keyof SerenCloudGetEvalSetResponses];
+
+export type SerenCloudUpdateEvalSetData = {
+    body: UpdateCloudEvalSetRequest;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/eval-sets/{id}';
+};
+
+export type SerenCloudUpdateEvalSetErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Eval set or deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudUpdateEvalSetResponses = {
+    /**
+     * Eval set updated
+     */
+    200: DataResponseCloudEvalSet;
+};
+
+export type SerenCloudUpdateEvalSetResponse = SerenCloudUpdateEvalSetResponses[keyof SerenCloudUpdateEvalSetResponses];
+
+export type SerenCloudEvalCasesData = {
+    body?: never;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Max eval cases to return (default: 50, max: 200)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+    };
+    url: '/eval-sets/{id}/cases';
+};
+
+export type SerenCloudEvalCasesErrors = {
+    /**
+     * Eval set not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudEvalCasesResponses = {
+    /**
+     * Eval cases listed
+     */
+    200: DataResponseVecCloudEvalCase;
+};
+
+export type SerenCloudEvalCasesResponse = SerenCloudEvalCasesResponses[keyof SerenCloudEvalCasesResponses];
+
+export type SerenCloudPromoteRunToEvalCaseData = {
+    body: PromoteRunToCloudEvalCaseRequest;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+        /**
+         * Source run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/eval-sets/{id}/cases/from-run/{run_id}';
+};
+
+export type SerenCloudPromoteRunToEvalCaseErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Eval set or run not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudPromoteRunToEvalCaseResponses = {
+    /**
+     * Eval case created
+     */
+    201: DataResponseCloudEvalCase;
+};
+
+export type SerenCloudPromoteRunToEvalCaseResponse = SerenCloudPromoteRunToEvalCaseResponses[keyof SerenCloudPromoteRunToEvalCaseResponses];
+
+export type SerenCloudGetEvalCaseData = {
+    body?: never;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+        /**
+         * Eval case ID
+         */
+        case_id: string;
+    };
+    query?: never;
+    url: '/eval-sets/{id}/cases/{case_id}';
+};
+
+export type SerenCloudGetEvalCaseErrors = {
+    /**
+     * Eval case not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetEvalCaseResponses = {
+    /**
+     * Eval case details
+     */
+    200: DataResponseCloudEvalCase;
+};
+
+export type SerenCloudGetEvalCaseResponse = SerenCloudGetEvalCaseResponses[keyof SerenCloudGetEvalCaseResponses];
+
+export type SerenCloudEvalRunsData = {
+    body?: never;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Max eval runs to return (default: 50, max: 200)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+    };
+    url: '/eval-sets/{id}/runs';
+};
+
+export type SerenCloudEvalRunsErrors = {
+    /**
+     * Eval set not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudEvalRunsResponses = {
+    /**
+     * Eval runs listed
+     */
+    200: DataResponseVecCloudEvalRun;
+};
+
+export type SerenCloudEvalRunsResponse = SerenCloudEvalRunsResponses[keyof SerenCloudEvalRunsResponses];
+
+export type SerenCloudRunEvalSetData = {
+    body: CreateCloudEvalRunRequest;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/eval-sets/{id}/runs';
+};
+
+export type SerenCloudRunEvalSetErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Eval set or deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudRunEvalSetResponses = {
+    /**
+     * Eval run accepted
+     */
+    202: DataResponseCloudEvalRun;
+};
+
+export type SerenCloudRunEvalSetResponse = SerenCloudRunEvalSetResponses[keyof SerenCloudRunEvalSetResponses];
+
+export type SerenCloudGetEvalRunData = {
+    body?: never;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+        /**
+         * Eval run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/eval-sets/{id}/runs/{run_id}';
+};
+
+export type SerenCloudGetEvalRunErrors = {
+    /**
+     * Eval run not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetEvalRunResponses = {
+    /**
+     * Eval run details
+     */
+    200: DataResponseCloudEvalRun;
+};
+
+export type SerenCloudGetEvalRunResponse = SerenCloudGetEvalRunResponses[keyof SerenCloudGetEvalRunResponses];
+
+export type SerenCloudEvalRunResultsData = {
+    body?: never;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+        /**
+         * Eval run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Max case results to return (default: 50, max: 200)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+    };
+    url: '/eval-sets/{id}/runs/{run_id}/results';
+};
+
+export type SerenCloudEvalRunResultsErrors = {
+    /**
+     * Eval run not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudEvalRunResultsResponses = {
+    /**
+     * Eval case results listed
+     */
+    200: DataResponseVecCloudEvalCaseResult;
+};
+
+export type SerenCloudEvalRunResultsResponse = SerenCloudEvalRunResultsResponses[keyof SerenCloudEvalRunResultsResponses];
+
+export type SerenCloudGetEvalCaseResultData = {
+    body?: never;
+    path: {
+        /**
+         * Eval set ID
+         */
+        id: string;
+        /**
+         * Eval run ID
+         */
+        run_id: string;
+        /**
+         * Eval case ID
+         */
+        case_id: string;
+    };
+    query?: never;
+    url: '/eval-sets/{id}/runs/{run_id}/results/{case_id}';
+};
+
+export type SerenCloudGetEvalCaseResultErrors = {
+    /**
+     * Eval case result not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudGetEvalCaseResultResponses = {
+    /**
+     * Eval case result details
+     */
+    200: DataResponseCloudEvalCaseResult;
+};
+
+export type SerenCloudGetEvalCaseResultResponse = SerenCloudGetEvalCaseResultResponses[keyof SerenCloudGetEvalCaseResultResponses];
+
+export type SerenCloudPendingApprovalsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Max runs to return (default: 50, max: 100)
+         */
+        limit?: number;
+        /**
+         * Pagination offset (default: 0)
+         */
+        offset?: number;
+        /**
+         * Filter by compute backend (aws_container, cloudflare_worker, daytona)
+         */
+        compute_backend?: string;
+        /**
+         * Filter by run source (api, cli, scheduler, ui, system, unknown)
+         */
+        source?: string;
+        /**
+         * Filter runs by artifact existence
+         */
+        has_artifacts?: boolean;
+        /**
+         * Filter runs started at/after RFC3339 timestamp
+         */
+        started_after?: string;
+        /**
+         * Filter runs started at/before RFC3339 timestamp
+         */
+        started_before?: string;
+        /**
+         * Case-insensitive search across execution_id, status, source, run_name, output, metadata
+         */
+        q?: string;
+    };
+    url: '/pending_approvals';
+};
+
+export type SerenCloudPendingApprovalsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+};
+
+export type SerenCloudPendingApprovalsResponses = {
+    /**
+     * Awaiting-approval runs listed
+     */
+    200: DataResponseVecCloudPendingApprovalRun;
+};
+
+export type SerenCloudPendingApprovalsResponse = SerenCloudPendingApprovalsResponses[keyof SerenCloudPendingApprovalsResponses];
+
 export type SerenCloudRunsData = {
     body?: never;
     path?: never;
@@ -1463,7 +4749,7 @@ export type SerenCloudRunsData = {
          */
         offset?: number;
         /**
-         * Repeat or comma-separate statuses: queued, running, completed, failed, cancelled, timeout, blocked, error
+         * Repeat or comma-separate statuses: queued, running, awaiting_approval, completed, failed, cancelled, timeout, blocked, error
          */
         status?: string;
         /**
@@ -1575,6 +4861,51 @@ export type SerenCloudRunArtifactsResponses = {
 
 export type SerenCloudRunArtifactsResponse = SerenCloudRunArtifactsResponses[keyof SerenCloudRunArtifactsResponses];
 
+export type SerenCloudRunAuditData = {
+    body?: never;
+    path: {
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Max audit entries to return (default: 50, max: 200)
+         */
+        limit?: number;
+        /**
+         * Pagination offset
+         */
+        offset?: number;
+        /**
+         * Filter by exact audit action
+         */
+        action?: string;
+        /**
+         * Case-insensitive search across action, actor, and details
+         */
+        q?: string;
+    };
+    url: '/runs/{run_id}/audit';
+};
+
+export type SerenCloudRunAuditErrors = {
+    /**
+     * Run event not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudRunAuditResponses = {
+    /**
+     * Run audit entries listed
+     */
+    200: DataResponseVecAuditEntry;
+};
+
+export type SerenCloudRunAuditResponse = SerenCloudRunAuditResponses[keyof SerenCloudRunAuditResponses];
+
 export type SerenCloudRunCancelData = {
     body?: never;
     path: {
@@ -1602,6 +4933,177 @@ export type SerenCloudRunCancelResponses = {
 };
 
 export type SerenCloudRunCancelResponse = SerenCloudRunCancelResponses[keyof SerenCloudRunCancelResponses];
+
+export type SerenCloudRunCompareData = {
+    body?: never;
+    path: {
+        /**
+         * Baseline run event ID
+         */
+        run_id: string;
+        /**
+         * Candidate run event ID
+         */
+        compare_run_id: string;
+    };
+    query?: never;
+    url: '/runs/{run_id}/compare/{compare_run_id}';
+};
+
+export type SerenCloudRunCompareErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudRunCompareResponses = {
+    /**
+     * Replay comparison summary
+     */
+    200: DataResponseCloudRunReplayComparison;
+};
+
+export type SerenCloudRunCompareResponse = SerenCloudRunCompareResponses[keyof SerenCloudRunCompareResponses];
+
+export type SerenCloudRunEvalsData = {
+    body?: never;
+    path: {
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/runs/{run_id}/evals';
+};
+
+export type SerenCloudRunEvalsErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudRunEvalsResponses = {
+    /**
+     * Eval records linked to the run
+     */
+    200: DataResponseCloudRunEvalsResponse;
+};
+
+export type SerenCloudRunEvalsResponse = SerenCloudRunEvalsResponses[keyof SerenCloudRunEvalsResponses];
+
+export type SerenCloudRunEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Max events to return (default: 100, max: 500)
+         */
+        limit?: number;
+        /**
+         * Pagination offset (default: 0)
+         */
+        offset?: number;
+        /**
+         * Filter by event kind (text, thinking, tool_call_started, tool_call_completed, tool_audit, workflow, error, unknown)
+         */
+        kind?: string;
+        /**
+         * Filter by tool/output item ID
+         */
+        item_id?: string;
+        /**
+         * Case-insensitive search across event type, kind, item ID, and payload
+         */
+        q?: string;
+    };
+    url: '/runs/{run_id}/events';
+};
+
+export type SerenCloudRunEventsErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudRunEventsResponses = {
+    /**
+     * Run output events listed
+     */
+    200: DataResponseVecCloudRunOutputEventEnvelope;
+};
+
+export type SerenCloudRunEventsResponse = SerenCloudRunEventsResponses[keyof SerenCloudRunEventsResponses];
+
+export type SerenCloudRunPendingApprovalsData = {
+    body?: never;
+    path: {
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/runs/{run_id}/pending_approvals';
+};
+
+export type SerenCloudRunPendingApprovalsErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudRunPendingApprovalsResponses = {
+    /**
+     * Current pending approvals for the run
+     */
+    200: DataResponseCloudRunPendingApprovalsResponse;
+};
+
+export type SerenCloudRunPendingApprovalsResponse = SerenCloudRunPendingApprovalsResponses[keyof SerenCloudRunPendingApprovalsResponses];
+
+export type SerenCloudRunStreamCloseData = {
+    body?: never;
+    headers: {
+        /**
+         * Active stream session ID to close
+         */
+        'x-seren-stream-session-id': string;
+    };
+    path: {
+        /**
+         * Run event ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/runs/{run_id}/stream';
+};
+
+export type SerenCloudRunStreamCloseErrors = {
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudRunStreamCloseResponses = {
+    /**
+     * Stream session closed
+     */
+    200: DataResponseCloudRunStreamCloseResponse;
+};
+
+export type SerenCloudRunStreamCloseResponse = SerenCloudRunStreamCloseResponses[keyof SerenCloudRunStreamCloseResponses];
 
 export type SerenCloudRunStreamData = {
     body?: never;

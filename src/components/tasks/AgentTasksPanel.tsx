@@ -20,6 +20,7 @@ import {
   followTask,
   getEventsForTask,
   loadTasks,
+  resumeTask,
   runAgent,
   stopFollowing,
 } from "@/stores/agent-tasks.store";
@@ -111,6 +112,11 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
     if (orgId()) {
       cancelTask(orgId(), taskId);
     }
+  };
+
+  const handleResumeTask = async (taskId: string, input: unknown) => {
+    if (!orgId()) return;
+    await resumeTask(orgId(), taskId, input);
   };
 
   const activeTasks = () =>
@@ -335,6 +341,7 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
                 events={getEventsForTask(task.id)}
                 onSelect={handleSelectTask}
                 onCancel={handleCancelTask}
+                onResume={handleResumeTask}
               />
             )}
           </For>
@@ -355,6 +362,7 @@ export const AgentTasksPanel: Component<AgentTasksPanelProps> = (props) => {
                 events={getEventsForTask(task.id)}
                 onSelect={handleSelectTask}
                 onCancel={handleCancelTask}
+                onResume={handleResumeTask}
               />
             )}
           </For>

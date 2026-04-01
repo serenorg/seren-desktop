@@ -159,9 +159,12 @@ export type ConnectionString = {
  */
 export type ConsumptionPeriodData = {
     active_time_seconds?: number;
+    cloud_compute_cost_usd?: number;
+    cloud_compute_time_seconds?: number;
     compute_time_seconds?: number;
     data_transfer_bytes?: number;
     period_id: string;
+    serendb_compute_time_seconds?: number;
     synthetic_storage_size_bytes?: number;
     written_data_bytes?: number;
 };
@@ -171,8 +174,11 @@ export type ConsumptionPeriodData = {
  */
 export type ConsumptionSummary = {
     active_time_seconds?: number;
+    cloud_compute_cost_usd?: number;
+    cloud_compute_time_seconds?: number;
     compute_time_seconds?: number;
     data_transfer_bytes?: number;
+    serendb_compute_time_seconds?: number;
     synthetic_storage_size_bytes?: number;
     written_data_bytes?: number;
 };
@@ -3555,9 +3561,10 @@ export type QueryRequest = {
      */
     query: string;
     /**
-     * Execute query in a read-only transaction (defaults to true).
+     * Execute query in a read-only transaction. When omitted, obvious read-only queries
+     * run read-only and all other statements run read-write.
      */
-    read_only?: boolean;
+    read_only?: boolean | null;
 };
 
 /**

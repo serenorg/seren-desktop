@@ -9,6 +9,7 @@ import {
   getAgentTask,
   isTerminalStatus,
   listAgentTasks,
+  resumeAgentTask,
   runAgentCloud,
   streamTask,
 } from "@/services/agent-tasks";
@@ -183,6 +184,24 @@ async function cancelTask(orgId: string, taskId: string): Promise<void> {
 }
 
 /**
+ * Resume a task that is waiting for additional user input.
+ */
+async function resumeTask(
+  orgId: string,
+  taskId: string,
+  input: unknown,
+): Promise<void> {
+  try {
+    const task = await resumeAgentTask(orgId, taskId, { input });
+    updateTaskInList(taskId, task);
+    followTask(orgId, taskId);
+  } catch (err) {
+    setState("error", err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+}
+
+/**
  * Update a task in the list by ID.
  */
 function updateTaskInList(taskId: string, updates: Partial<AgentTask>): void {
@@ -224,6 +243,7 @@ export {
   stopFollowing,
   refreshTask,
   cancelTask,
+  resumeTask,
   getActiveTask,
   getEventsForTask,
   resetAgentTasksState,

@@ -19,6 +19,12 @@ interface AgentTaskItemProps {
   events: StreamEvent[];
   onSelect: (taskId: string) => void;
   onCancel: (taskId: string) => void;
+  onResume: (taskId: string, input: unknown) => Promise<void>;
+}
+
+interface InputRequestPayload {
+  text?: string;
+  data?: unknown;
 }
 
 function formatCost(atomic: number): string {
@@ -54,6 +60,7 @@ function eventLabel(eventType: string): string {
   const map: Record<string, string> = {
     "task.created": "Created",
     "task.submitted": "Submitted",
+    "task.input_submitted": "Input Sent",
     "task.working": "Working",
     "task.completed": "Completed",
     "task.failed": "Failed",
@@ -68,15 +75,40 @@ function eventLabel(eventType: string): string {
 function eventSummary(data: Record<string, unknown>): string {
   if (typeof data.message === "string") return data.message;
   if (typeof data.text === "string") return data.text;
+  if (typeof data.error === "string") return data.error;
+  if (
+    data.input_request &&
+    typeof data.input_request === "object" &&
+    data.input_request !== null &&
+    typeof (data.input_request as { text?: unknown }).text === "string"
+  ) {
+    return (data.input_request as { text: string }).text;
+  }
   if (data.status) return `Status → ${data.status}`;
   return JSON.stringify(data).slice(0, 120);
 }
 
+function getInputRequest(task: AgentTask): InputRequestPayload | null {
+  if (task.status !== "input_required") return null;
+  const output = task.output;
+  if (!output || typeof output !== "object" || Array.isArray(output)) return null;
+
+  const request = output as Record<string, unknown>;
+  return {
+    text: typeof request.text === "string" ? request.text : undefined,
+    data: request.data,
+  };
+}
+
 export const AgentTaskItem: Component<AgentTaskItemProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false);
+  const [resumeInput, setResumeInput] = createSignal("");
+  const [resumeError, setResumeError] = createSignal<string | null>(null);
+  const [isResuming, setIsResuming] = createSignal(false);
   let logRef: HTMLDivElement | undefined;
 
   const isTerminal = () => isTerminalStatus(props.task.status);
+  const inputRequest = () => getInputRequest(props.task);
 
   // Auto-scroll event log when new events arrive
   createEffect(() => {
@@ -87,6 +119,39 @@ export const AgentTaskItem: Component<AgentTaskItemProps> = (props) => {
       });
     }
   });
+
+  createEffect(() => {
+    if (props.task.status !== "input_required") {
+      setResumeError(null);
+    }
+  });
+
+  const handleResume = async (e: Event) => {
+    e.stopPropagation();
+    const raw = resumeInput().trim();
+    if (!raw) {
+      setResumeError("Response is required.");
+      return;
+    }
+
+    setIsResuming(true);
+    setResumeError(null);
+    try {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = { text: raw };
+      }
+
+      await props.onResume(props.task.id, parsed);
+      setResumeInput("");
+    } catch (error) {
+      setResumeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsResuming(false);
+    }
+  };
 
   return (
     <div
@@ -235,8 +300,54 @@ export const AgentTaskItem: Component<AgentTaskItemProps> = (props) => {
             </div>
           </Show>
 
+          <Show when={inputRequest()}>
+            {(request) => (
+              <div class="mt-2">
+                <div class="text-[11px] text-amber-300 mb-1 font-medium uppercase tracking-wider">
+                  Input Required
+                </div>
+                <Show when={request().text}>
+                  <div class="mb-2 text-[12px] text-foreground/80 bg-amber-950/20 border border-amber-400/20 rounded p-2 leading-relaxed">
+                    {request().text}
+                  </div>
+                </Show>
+                <Show when={request().data !== undefined}>
+                  <pre class="text-[12px] text-foreground/70 bg-surface-0 border border-border/50 rounded p-2 overflow-x-auto max-h-[160px] overflow-y-auto font-mono leading-relaxed">
+                    {JSON.stringify(request().data, null, 2)}
+                  </pre>
+                </Show>
+                <div class="mt-2 flex flex-col gap-2">
+                  <textarea
+                    value={resumeInput()}
+                    onClick={(e) => e.stopPropagation()}
+                    onInput={(e) => setResumeInput(e.currentTarget.value)}
+                    placeholder="Reply as plain text or JSON"
+                    rows={3}
+                    class="w-full px-2.5 py-2 bg-surface-0 border border-border rounded text-[12px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors resize-none font-mono leading-relaxed"
+                    disabled={isResuming()}
+                  />
+                  <div class="flex items-center justify-between gap-2">
+                    <Show when={resumeError()}>
+                      <div class="text-[11px] text-red-400 break-all">
+                        {resumeError()}
+                      </div>
+                    </Show>
+                    <button
+                      type="button"
+                      class="ml-auto px-2.5 py-1 bg-primary text-background text-[11px] font-semibold rounded hover:bg-primary/85 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={handleResume}
+                      disabled={isResuming() || !resumeInput().trim()}
+                    >
+                      {isResuming() ? "Resuming..." : "Resume Task"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Show>
+
           {/* Output */}
-          <Show when={props.task.output}>
+          <Show when={props.task.output && props.task.status !== "input_required"}>
             <div class="mt-2">
               <div class="text-[11px] text-muted-foreground mb-1 font-medium uppercase tracking-wider">
                 Output

@@ -4,6 +4,17 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type AcceptOrganizationInviteRequest = {
+    token: string;
+};
+
+export type AcceptOrganizationInviteResult = {
+    affiliate_referral_code?: string | null;
+    organization_id: string;
+    organization_name: string;
+    role: string;
+};
+
 export type AddPaymentMethodRequest = {
     set_as_default: boolean;
     stripe_payment_method_id: string;
@@ -46,16 +57,6 @@ export type AgentInfo = {
      * Agent type (always "agent")
      */
     user_type: string;
-};
-
-/**
- * DataResponse wrapper for agent registration (for OpenAPI schema)
- */
-export type AgentRegisterDataResponse = {
-    /**
-     * The actual response data
-     */
-    data: AgentRegisterResponse;
 };
 
 /**
@@ -305,13 +306,6 @@ export type BillingJobHealth = {
 };
 
 /**
- * Wrapped bonus claim response for OpenAPI
- */
-export type BonusClaimDataResponse = {
-    data: BonusClaimResponse;
-};
-
-/**
  * Response for claiming bonuses
  */
 export type BonusClaimResponse = {
@@ -351,9 +345,12 @@ export type ConnectionsResponse = {
  */
 export type ConsumptionPeriodData = {
     active_time_seconds?: number;
+    cloud_compute_cost_usd?: number;
+    cloud_compute_time_seconds?: number;
     compute_time_seconds?: number;
     data_transfer_bytes?: number;
     period_id: string;
+    serendb_compute_time_seconds?: number;
     synthetic_storage_size_bytes?: number;
     written_data_bytes?: number;
 };
@@ -363,8 +360,11 @@ export type ConsumptionPeriodData = {
  */
 export type ConsumptionSummary = {
     active_time_seconds?: number;
+    cloud_compute_cost_usd?: number;
+    cloud_compute_time_seconds?: number;
     compute_time_seconds?: number;
     data_transfer_bytes?: number;
+    serendb_compute_time_seconds?: number;
     synthetic_storage_size_bytes?: number;
     written_data_bytes?: number;
 };
@@ -442,6 +442,18 @@ export type CreateOAuthProviderRequest = {
     token_endpoint_auth_method?: TokenEndpointAuthMethod;
     token_url: string;
     userinfo_url?: string | null;
+};
+
+export type CreateOrganizationCustomSkillRequest = {
+    description?: string | null;
+    display_name: string;
+    initial_revision: CreateOrganizationCustomSkillRevisionRequest;
+    slug: string;
+};
+
+export type CreateOrganizationCustomSkillRevisionRequest = {
+    files: Array<OrganizationCustomSkillFileInput>;
+    publish?: boolean;
 };
 
 /**
@@ -764,6 +776,10 @@ export type CreateTemplateRequest = {
      */
     price: string;
     /**
+     * Publisher-defined user-configurable settings schema
+     */
+    settingsSchema?: Array<TemplateSetting> | null;
+    /**
      * URL-friendly slug (unique identifier)
      */
     slug: string;
@@ -813,20 +829,6 @@ export type CreateWebhookRequest = {
 export type CurrencyCode = string;
 
 /**
- * Wrapped daily claim response for OpenAPI
- */
-export type DailyClaimDataResponse = {
-    data: DailyClaimResponse;
-};
-
-/**
- * Wrapped daily eligibility response for OpenAPI
- */
-export type DailyClaimEligibilityDataResponse = {
-    data: DailyClaimEligibilityResponse;
-};
-
-/**
  * Response for daily claim eligibility check
  */
 export type DailyClaimEligibilityResponse = {
@@ -855,6 +857,175 @@ export type DailyClaimResponse = {
     balance_usd: string;
     claims_remaining_this_month: number;
     success: boolean;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAcceptOrganizationInviteResult = {
+    data: {
+        affiliate_referral_code?: string | null;
+        organization_id: string;
+        organization_name: string;
+        role: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseAgentRegisterResponse = {
+    /**
+     * Response from agent registration endpoint
+     */
+    data: {
+        /**
+         * The newly created agent account
+         */
+        agent: AgentInfo;
+        /**
+         * Welcome message
+         */
+        message: string;
+        /**
+         * Setup instructions for getting started
+         */
+        setup: SetupInstructions;
+        /**
+         * Links to skill files and documentation
+         */
+        skill_files: SkillFiles;
+        /**
+         * Whether registration was successful
+         */
+        success: boolean;
+    };
+    pagination?: null | PaginationMeta;
 };
 
 /**
@@ -1363,6 +1534,84 @@ export type DataResponseBillingHealth = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseBonusClaimResponse = {
+    /**
+     * Response for claiming bonuses
+     */
+    data: {
+        amount_atomic: number;
+        amount_usd: string;
+        bonus_type: string;
+        success: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseCreateTemplateResponse = {
     /**
      * Response after creating a template
@@ -1445,6 +1694,267 @@ export type DataResponseCreateTemplateResponse = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseDailyClaimEligibilityResponse = {
+    /**
+     * Response for daily claim eligibility check
+     */
+    data: {
+        can_claim: boolean;
+        /**
+         * Formatted USD amount that will be granted on a successful daily claim.
+         * Optional to avoid breaking older clients.
+         */
+        claim_amount_usd?: string | null;
+        claims_remaining_this_month: number;
+        reason?: string | null;
+        /**
+         * Seconds until the daily claim resets (midnight UTC).
+         * Only present when can_claim is false due to already claiming today.
+         */
+        resets_in_seconds?: number | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseDailyClaimResponse = {
+    /**
+     * Response for claiming daily credits
+     */
+    data: {
+        amount_atomic: number;
+        amount_usd: string;
+        balance_atomic: number;
+        balance_usd: string;
+        claims_remaining_this_month: number;
+        success: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseDepositResponse = {
+    /**
+     * Response for wallet deposit initiation
+     */
+    data: {
+        /**
+         * Base deposit amount in atomic units
+         */
+        amount_atomic: number;
+        amount_usd: string;
+        /**
+         * Tier bonus in atomic units (if applicable)
+         */
+        bonus_atomic: number;
+        bonus_usd: string;
+        /**
+         * URL to the Stripe hosted checkout page - open this in a browser to complete payment
+         */
+        checkout_url: string;
+        deposit_id: string;
+        /**
+         * Total to be credited in atomic units
+         */
+        total_atomic: number;
+        total_usd: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseEndpointBillingEvents = {
     /**
      * Combined debug response for an endpoint's billing events
@@ -1454,6 +1964,157 @@ export type DataResponseEndpointBillingEvents = {
         endpoint_id: string;
         organization_id: string;
         usage_events: Array<UsageEventDebugRecord>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseEvalMatrixResponse = {
+    data: {
+        generated_at: string;
+        matrix: {
+            [key: string]: {
+                [key: string]: EvalMatrixEntry;
+            };
+        };
+        total_signals: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseEvalSignalResponse = {
+    data: {
+        accepted: number;
+        rejected: number;
     };
     pagination?: null | PaginationMeta;
 };
@@ -2186,6 +2847,97 @@ export type DataResponseLogoUploadResponse = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseOAuthProviderResponse = {
+    /**
+     * Response type for OAuth provider (excludes sensitive fields like client_secret)
+     */
+    data: {
+        authorization_url: string;
+        client_id: string;
+        created_at: string;
+        description?: string | null;
+        id: string;
+        is_active: boolean;
+        logo_url?: string | null;
+        name: string;
+        organization_id?: string | null;
+        pkce_required: boolean;
+        revocation_url?: string | null;
+        scopes: Array<string>;
+        slug: string;
+        token_endpoint_auth_method: string;
+        token_url: string;
+        updated_at: string;
+        userinfo_url?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseOrganizationConsumption = {
     /**
      * OrganizationConsumption wraps organization-wide consumption
@@ -2196,6 +2948,258 @@ export type DataResponseOrganizationConsumption = {
         organization_id: string;
         periods: Array<ConsumptionPeriodData>;
         to: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationCustomSkill = {
+    data: {
+        created_at: string;
+        created_by_user_id?: string | null;
+        description?: string | null;
+        display_name: string;
+        id: string;
+        latest_revision?: null | OrganizationCustomSkillRevisionSummary;
+        latest_revision_id?: string | null;
+        organization_id: string;
+        published_revision?: null | OrganizationCustomSkillRevisionSummary;
+        published_revision_id?: string | null;
+        slug: string;
+        status: OrganizationCustomSkillStatus;
+        updated_at: string;
+        updated_by_user_id?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationCustomSkillFileContent = {
+    data: {
+        content_base64: string;
+        content_type: string;
+        is_text: boolean;
+        relative_path: string;
+        revision_id: string;
+        sha256: string;
+        size_bytes: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationCustomSkillRevision = {
+    data: {
+        bundle_artifact_key?: string | null;
+        bundle_sha256: string;
+        bundle_size_bytes: number;
+        created_at: string;
+        created_by_user_id?: string | null;
+        description?: string | null;
+        files: Array<OrganizationCustomSkillFileMetadata>;
+        frontmatter: unknown;
+        id: string;
+        manifest: unknown;
+        organization_custom_skill_id: string;
+        organization_id: string;
+        published_at?: string | null;
+        revision_number: number;
+        skill_md: string;
+        skill_md_sha256: string;
+        status: OrganizationCustomSkillRevisionStatus;
+        title?: string | null;
     };
     pagination?: null | PaginationMeta;
 };
@@ -2355,6 +3359,96 @@ export type DataResponseOrganizationPlanWithDetails = {
     data: {
         organization_plan: OrganizationPlan;
         plan: Plan;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationPrivateChatPolicy = {
+    data: {
+        allow_claude_agent?: boolean;
+        allow_cloud_agent_launch?: boolean;
+        allow_codex_agent?: boolean;
+        allow_seren_agent?: boolean;
+        allow_seren_private_agent?: boolean;
+        deployment_id?: string | null;
+        deployment_name?: string | null;
+        disable_external_model_providers?: boolean;
+        disable_local_agents?: boolean;
+        disable_seren_models?: boolean;
+        fallback_models?: Array<string> | null;
+        force_private_model?: boolean;
+        hide_model_picker?: boolean;
+        mode: OrganizationPrivateChatMode;
+        model_id?: string | null;
+        organization_id: string;
+        private_output_policy?: ManagedAgentPrivateOutputPolicy;
+        session_database?: null | ManagedAgentSessionDatabase;
+        updated_at: string;
     };
     pagination?: null | PaginationMeta;
 };
@@ -3628,6 +4722,10 @@ export type DataResponsePublisherResponse = {
         token_response_field?: string | null;
         total_queries: number;
         /**
+         * Lifetime total revenue across all assets, in atomic units
+         */
+        total_revenue_atomic: number;
+        /**
          * Policy for handling requests to paths not in the endpoints catalog
          */
         undocumented_endpoint_policy: UndocumentedEndpointPolicy;
@@ -3735,8 +4833,10 @@ export type DataResponseQuotaUsage = {
     data: {
         compute_hours_usage_percent?: number | null;
         current_branches: number;
+        current_cloud_compute_hours: number;
         current_compute_hours: number;
         current_projects: number;
+        current_serendb_compute_hours: number;
         current_storage_gb: number;
         is_over_compute_quota: boolean;
         is_over_projects_quota: boolean;
@@ -3894,6 +4994,292 @@ export type DataResponseRbacRole = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseRecoveryResponse = {
+    /**
+     * Response for recovery setup
+     */
+    data: {
+        /**
+         * Whether recovery is now set up
+         */
+        has_recovery: boolean;
+        /**
+         * Whether a recovery email is set
+         */
+        has_recovery_email: boolean;
+        /**
+         * Message about recovery status
+         */
+        message: string;
+        /**
+         * Recovery code (only shown once, save it securely!)
+         * This is a 24-character code that can be used to recover your account.
+         */
+        recovery_code?: string | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseReferralInfoResponse = {
+    /**
+     * Response for referral info
+     */
+    data: {
+        pending_earnings_atomic: number;
+        pending_earnings_usd: string;
+        referral_code: string;
+        referral_url: string;
+        total_earnings_atomic: number;
+        total_earnings_usd: string;
+        total_referrals: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseRevenueMetrics = {
+    /**
+     * Revenue metrics with period-over-period comparison.
+     */
+    data: {
+        /**
+         * Number of active agents in the period
+         */
+        active_agents: number;
+        /**
+         * Agent count change from previous period (percentage)
+         */
+        agents_change_pct: number;
+        /**
+         * Average query cost (atomic units)
+         */
+        avg_query_cost_atomic: number;
+        /**
+         * Period end date (ISO 8601)
+         */
+        period_end: string;
+        /**
+         * Period start date (ISO 8601)
+         */
+        period_start: string;
+        /**
+         * Query count change from previous period (percentage)
+         */
+        queries_change_pct: number;
+        /**
+         * Revenue change from previous period (percentage, e.g., 15 = +15%)
+         */
+        revenue_change_pct: number;
+        /**
+         * Total queries executed in the period
+         */
+        total_queries: number;
+        /**
+         * Total revenue as decimal string
+         */
+        total_revenue: string;
+        /**
+         * Total revenue in the period (atomic units)
+         */
+        total_revenue_atomic: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseSessionsRevoked = {
     data: {
         message: string;
@@ -3981,6 +5367,111 @@ export type DataResponseSuggestResponse = {
          * Matched publishers sorted by relevance
          */
         publishers: Array<PublisherSuggestion>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseTransactionSummaryResponse = {
+    /**
+     * Summary statistics for transactions in a date range
+     */
+    data: {
+        /**
+         * Wallet balance at the end of the selected period
+         */
+        ending_balance_atomic: number;
+        ending_balance_usd: string;
+        /**
+         * Net change (credits - debits, can be negative)
+         */
+        net_change_atomic: number;
+        net_change_usd: string;
+        period_end?: string | null;
+        period_start?: string | null;
+        /**
+         * Wallet balance immediately before the period start
+         */
+        starting_balance_atomic: number;
+        starting_balance_usd: string;
+        /**
+         * Total credits received in the period (positive)
+         */
+        total_credits_atomic: number;
+        total_credits_usd: string;
+        /**
+         * Total debits spent in the period (positive number representing absolute spend)
+         */
+        total_debits_atomic: number;
+        total_debits_usd: string;
+        /**
+         * Total number of transactions in the period
+         */
+        transaction_count: number;
     };
     pagination?: null | PaginationMeta;
 };
@@ -4730,6 +6221,94 @@ export type DataResponseVecFederatedResourceWithPublisherResponse = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseVecOAuthProviderResponse = {
+    data: Array<{
+        authorization_url: string;
+        client_id: string;
+        created_at: string;
+        description?: string | null;
+        id: string;
+        is_active: boolean;
+        logo_url?: string | null;
+        name: string;
+        organization_id?: string | null;
+        pkce_required: boolean;
+        revocation_url?: string | null;
+        scopes: Array<string>;
+        slug: string;
+        token_endpoint_auth_method: string;
+        token_url: string;
+        updated_at: string;
+        userinfo_url?: string | null;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseVecOrganization = {
     data: Array<{
         created_at: string;
@@ -4744,6 +6323,176 @@ export type DataResponseVecOrganization = {
          */
         stripe_customer_id?: string | null;
         updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecOrganizationCustomSkill = {
+    data: Array<{
+        created_at: string;
+        created_by_user_id?: string | null;
+        description?: string | null;
+        display_name: string;
+        id: string;
+        latest_revision?: null | OrganizationCustomSkillRevisionSummary;
+        latest_revision_id?: string | null;
+        organization_id: string;
+        published_revision?: null | OrganizationCustomSkillRevisionSummary;
+        published_revision_id?: string | null;
+        slug: string;
+        status: OrganizationCustomSkillStatus;
+        updated_at: string;
+        updated_by_user_id?: string | null;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecOrganizationCustomSkillRevisionSummary = {
+    data: Array<{
+        bundle_artifact_key?: string | null;
+        bundle_sha256: string;
+        bundle_size_bytes: number;
+        created_at: string;
+        created_by_user_id?: string | null;
+        description?: string | null;
+        file_count: number;
+        id: string;
+        organization_custom_skill_id: string;
+        organization_id: string;
+        published_at?: string | null;
+        revision_number: number;
+        status: OrganizationCustomSkillRevisionStatus;
+        title?: string | null;
     }>;
     pagination?: null | PaginationMeta;
 };
@@ -4971,6 +6720,85 @@ export type DataResponseVecOrganizationMemberWithUser = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseVecOrganizationVpcEndpoint = {
+    data: Array<{
+        created_at: string;
+        endpoint_id: string;
+        id: string;
+        label?: string | null;
+        organization_id: string;
+        region: string;
+        state: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseVecPaymentMethod = {
     data: Array<{
         bank_last4?: string | null;
@@ -4981,6 +6809,83 @@ export type DataResponseVecPaymentMethod = {
         id: string;
         is_default: boolean;
         type_: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecPermission = {
+    data: Array<{
+        action: string;
+        created_at: string;
+        description?: string | null;
+        id: string;
+        name: string;
+        resource_type: string;
     }>;
     pagination?: null | PaginationMeta;
 };
@@ -5457,6 +7362,10 @@ export type DataResponseVecPublisherResponse = {
         token_response_field?: string | null;
         total_queries: number;
         /**
+         * Lifetime total revenue across all assets, in atomic units
+         */
+        total_revenue_atomic: number;
+        /**
          * Policy for handling requests to paths not in the endpoints catalog
          */
         undocumented_endpoint_policy: UndocumentedEndpointPolicy;
@@ -5634,6 +7543,344 @@ export type DataResponseVecRbacRole = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseVecRevenueByDay = {
+    data: Array<{
+        /**
+         * Date (YYYY-MM-DD)
+         */
+        date: string;
+        /**
+         * Number of queries on this day
+         */
+        query_count: number;
+        /**
+         * Revenue as decimal string
+         */
+        revenue: string;
+        /**
+         * Revenue on this day (atomic units)
+         */
+        revenue_atomic: number;
+        /**
+         * Number of unique agents on this day
+         */
+        unique_agents: number;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecSession = {
+    data: Array<{
+        created_at: string;
+        expires_at: string;
+        id: string;
+        ip_address?: string | null;
+        is_current: boolean;
+        last_active_at: string;
+        user_agent?: string | null;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecString = {
+    data: Array<string>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecTopAgent = {
+    data: Array<{
+        /**
+         * Agent wallet address
+         */
+        agent_wallet: string;
+        /**
+         * Current balance (atomic units)
+         */
+        balance_atomic: number;
+        /**
+         * Last activity timestamp (ISO 8601)
+         */
+        last_active?: string | null;
+        /**
+         * Number of queries executed
+         */
+        query_count: number;
+        /**
+         * Rank (1 = highest spender)
+         */
+        rank: number;
+        /**
+         * Total amount spent as decimal string
+         */
+        total_spent: string;
+        /**
+         * Total amount spent (atomic units)
+         */
+        total_spent_atomic: number;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseVecUsageSummary = {
     data: Array<{
         compute_cost_usd: string;
@@ -5657,6 +7904,91 @@ export type DataResponseVecUsageSummary = {
         storage_cost_usd: string;
         storage_gb_avg: number;
         total_cost_usd: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecWebhookDelivery = {
+    data: Array<{
+        attempt_number: number;
+        created_at: string;
+        delivered_at?: string | null;
+        error_message?: string | null;
+        event_id: string;
+        event_type: string;
+        id: string;
+        next_retry_at?: string | null;
+        payload: {
+            [key: string]: unknown;
+        };
+        response_body?: string | null;
+        response_status?: number | null;
+        webhook_id: string;
     }>;
     pagination?: null | PaginationMeta;
 };
@@ -5878,6 +8210,289 @@ export type DataResponseVerificationSent = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseWalletBalanceResponse = {
+    /**
+     * Wallet balance response (funded + promotional)
+     */
+    data: {
+        /**
+         * Total wallet balance in atomic units
+         */
+        balance_atomic: number;
+        balance_usd: string;
+        /**
+         * Breakdown by source
+         */
+        by_source: Array<WalletSourceBalance>;
+        /**
+         * Total funded balance (fiat purchases + tier bonuses)
+         */
+        funded_balance_atomic: number;
+        funded_balance_usd: string;
+        /**
+         * Whether recovery is set up for this account
+         */
+        has_recovery: boolean;
+        /**
+         * Total promotional balance (bonuses, daily claims, referrals, admin grants)
+         */
+        promotional_balance_atomic: number;
+        promotional_balance_usd: string;
+        /**
+         * Warning if funds exist but no recovery is set up
+         */
+        recovery_warning?: string | null;
+        /**
+         * Total lifetime SerenBucks purchases in cents (for plan upgrade tracking)
+         */
+        total_purchases_cents: number;
+        total_purchases_usd: string;
+        wallet_address: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWalletRecoverResponse = {
+    /**
+     * Response from wallet recovery endpoint.
+     */
+    data: {
+        /**
+         * The recovered agent account (with a new API key)
+         */
+        agent: AgentInfo;
+        /**
+         * Message about recovery result
+         */
+        message: string;
+        /**
+         * New recovery code (the old one has been rotated). Save this securely!
+         */
+        new_recovery_code: string;
+        /**
+         * Setup instructions for getting started
+         */
+        setup: SetupInstructions;
+        /**
+         * Links to skill files and documentation
+         */
+        skill_files: SkillFiles;
+        /**
+         * Whether recovery was successful
+         */
+        success: boolean;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseWalletTransactionHistoryResponse = {
+    /**
+     * Response for transaction history
+     */
+    data: {
+        limit: number;
+        offset: number;
+        total: number;
+        transactions: Array<WalletTransactionResponse>;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseWebhookCreated = {
     /**
      * Webhook created response (includes secret on creation only)
@@ -5976,6 +8591,76 @@ export type DataResponseWebhookInfo = {
 };
 
 /**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseBool = {
+    data: boolean;
+    pagination?: null | PaginationMeta;
+};
+
+/**
  * Request body for database queries
  */
 export type DatabaseQueryRequest = {
@@ -6041,13 +8726,6 @@ export type DatabaseWithContext = {
 };
 
 export type DelegationType = 'in_loop' | 'full_handoff';
-
-/**
- * Wrapped deposit response for OpenAPI
- */
-export type DepositDataResponse = {
-    data: DepositResponse;
-};
 
 /**
  * Request to deposit funds via Stripe
@@ -6584,11 +9262,47 @@ export type LogoUploadResponse = {
     message: string;
 };
 
+export type ManagedAgentPrivateOutputPolicy = 'control_plane' | 'private_session_database';
+
+export type ManagedAgentSessionDatabase = {
+    /**
+     * Optional Seren organization database name when `provider` is `seren_organization_database`.
+     */
+    database_name?: string | null;
+    /**
+     * Session database engine family. The runtime still consumes a standard connection URL.
+     */
+    engine: ManagedAgentSessionDatabaseEngine;
+    /**
+     * Session database provider. Defaults to `direct_url`.
+     */
+    provider?: ManagedAgentSessionDatabaseProvider;
+    /**
+     * Secret key whose value is the connection URL for the session database.
+     */
+    url_secret_key?: string | null;
+};
+
+export type ManagedAgentSessionDatabaseEngine = 'postgres' | 'aurora_postgres';
+
+export type ManagedAgentSessionDatabaseProvider = 'direct_url' | 'seren_organization_database';
+
 /**
- * DataResponse wrapper for OpenAPI schema
+ * Information about an MCP tool
  */
-export type OAuthProviderDataResponse = {
-    data: OAuthProviderResponse;
+export type McpToolInfo = {
+    /**
+     * Tool description
+     */
+    description?: string | null;
+    /**
+     * JSON Schema for tool input parameters
+     */
+    input_schema?: unknown;
+    /**
+     * Tool name
+     */
+    name: string;
 };
 
 /**
@@ -6612,13 +9326,6 @@ export type OAuthProviderResponse = {
     token_url: string;
     updated_at: string;
     userinfo_url?: string | null;
-};
-
-/**
- * DataResponse wrapper for list of providers
- */
-export type OAuthProvidersDataResponse = {
-    data: Array<OAuthProviderResponse>;
 };
 
 /**
@@ -6728,6 +9435,92 @@ export type OrganizationConsumption = {
     to: string;
 };
 
+export type OrganizationCustomSkill = {
+    created_at: string;
+    created_by_user_id?: string | null;
+    description?: string | null;
+    display_name: string;
+    id: string;
+    latest_revision?: null | OrganizationCustomSkillRevisionSummary;
+    latest_revision_id?: string | null;
+    organization_id: string;
+    published_revision?: null | OrganizationCustomSkillRevisionSummary;
+    published_revision_id?: string | null;
+    slug: string;
+    status: OrganizationCustomSkillStatus;
+    updated_at: string;
+    updated_by_user_id?: string | null;
+};
+
+export type OrganizationCustomSkillFileContent = {
+    content_base64: string;
+    content_type: string;
+    is_text: boolean;
+    relative_path: string;
+    revision_id: string;
+    sha256: string;
+    size_bytes: number;
+};
+
+export type OrganizationCustomSkillFileInput = {
+    content_base64: string;
+    content_type?: string | null;
+    relative_path: string;
+};
+
+export type OrganizationCustomSkillFileMetadata = {
+    content_type: string;
+    created_at: string;
+    id: string;
+    is_text: boolean;
+    relative_path: string;
+    revision_id: string;
+    sha256: string;
+    size_bytes: number;
+};
+
+export type OrganizationCustomSkillRevision = {
+    bundle_artifact_key?: string | null;
+    bundle_sha256: string;
+    bundle_size_bytes: number;
+    created_at: string;
+    created_by_user_id?: string | null;
+    description?: string | null;
+    files: Array<OrganizationCustomSkillFileMetadata>;
+    frontmatter: unknown;
+    id: string;
+    manifest: unknown;
+    organization_custom_skill_id: string;
+    organization_id: string;
+    published_at?: string | null;
+    revision_number: number;
+    skill_md: string;
+    skill_md_sha256: string;
+    status: OrganizationCustomSkillRevisionStatus;
+    title?: string | null;
+};
+
+export type OrganizationCustomSkillRevisionStatus = 'draft' | 'published' | 'superseded' | 'archived';
+
+export type OrganizationCustomSkillRevisionSummary = {
+    bundle_artifact_key?: string | null;
+    bundle_sha256: string;
+    bundle_size_bytes: number;
+    created_at: string;
+    created_by_user_id?: string | null;
+    description?: string | null;
+    file_count: number;
+    id: string;
+    organization_custom_skill_id: string;
+    organization_id: string;
+    published_at?: string | null;
+    revision_number: number;
+    status: OrganizationCustomSkillRevisionStatus;
+    title?: string | null;
+};
+
+export type OrganizationCustomSkillStatus = 'active' | 'archived';
+
 /**
  * Response type for organization invites (token is not exposed over the API).
  */
@@ -6781,6 +9574,30 @@ export type OrganizationPlan = {
 export type OrganizationPlanWithDetails = {
     organization_plan: OrganizationPlan;
     plan: Plan;
+};
+
+export type OrganizationPrivateChatMode = 'standard' | 'private_org_agent';
+
+export type OrganizationPrivateChatPolicy = {
+    allow_claude_agent?: boolean;
+    allow_cloud_agent_launch?: boolean;
+    allow_codex_agent?: boolean;
+    allow_seren_agent?: boolean;
+    allow_seren_private_agent?: boolean;
+    deployment_id?: string | null;
+    deployment_name?: string | null;
+    disable_external_model_providers?: boolean;
+    disable_local_agents?: boolean;
+    disable_seren_models?: boolean;
+    fallback_models?: Array<string> | null;
+    force_private_model?: boolean;
+    hide_model_picker?: boolean;
+    mode: OrganizationPrivateChatMode;
+    model_id?: string | null;
+    organization_id: string;
+    private_output_policy?: ManagedAgentPrivateOutputPolicy;
+    session_database?: null | ManagedAgentSessionDatabase;
+    updated_at: string;
 };
 
 export type OrganizationVpcEndpoint = {
@@ -6929,6 +9746,10 @@ export type PaginatedResponseVecPublisherResponse = {
          */
         token_response_field?: string | null;
         total_queries: number;
+        /**
+         * Lifetime total revenue across all assets, in atomic units
+         */
+        total_revenue_atomic: number;
         /**
          * Policy for handling requests to paths not in the endpoints catalog
          */
@@ -7533,6 +10354,10 @@ export type PublisherResponse = {
     token_response_field?: string | null;
     total_queries: number;
     /**
+     * Lifetime total revenue across all assets, in atomic units
+     */
+    total_revenue_atomic: number;
+    /**
      * Policy for handling requests to paths not in the endpoints catalog
      */
     undocumented_endpoint_policy: UndocumentedEndpointPolicy;
@@ -7587,6 +10412,10 @@ export type PublisherSuggestion = {
      * Why this publisher was suggested
      */
     match_reason: string;
+    /**
+     * Cached MCP tool schemas for MCP publishers
+     */
+    mcp_tools?: Array<McpToolInfo> | null;
     name: string;
     pricing?: null | PricingSummary;
     /**
@@ -7651,8 +10480,10 @@ export type QueryParamDefinition = {
 export type QuotaUsage = {
     compute_hours_usage_percent?: number | null;
     current_branches: number;
+    current_cloud_compute_hours: number;
     current_compute_hours: number;
     current_projects: number;
+    current_serendb_compute_hours: number;
     current_storage_gb: number;
     is_over_compute_quota: boolean;
     is_over_projects_quota: boolean;
@@ -7676,13 +10507,6 @@ export type RbacRole = {
 };
 
 /**
- * Wrapped recovery response for OpenAPI
- */
-export type RecoveryDataResponse = {
-    data: RecoveryResponse;
-};
-
-/**
  * Response for recovery setup
  */
 export type RecoveryResponse = {
@@ -7703,13 +10527,6 @@ export type RecoveryResponse = {
      * This is a 24-character code that can be used to recover your account.
      */
     recovery_code?: string | null;
-};
-
-/**
- * Wrapped referral info response for OpenAPI
- */
-export type ReferralInfoDataResponse = {
-    data: ReferralInfoResponse;
 };
 
 /**
@@ -7941,6 +10758,10 @@ export type StripePaymentIntentId = string;
  */
 export type StripePaymentMethodId = string;
 
+export type SubmitTaskInputRequest = {
+    input: unknown;
+};
+
 /**
  * Response for suggest endpoint
  * Returns publisher and agent recommendations based on task/query matching
@@ -8018,6 +10839,44 @@ export type TemplateAnalytics = {
 export type TemplateLanguage = 'python' | 'typescript' | 'javascript';
 
 /**
+ * A publisher-defined user-configurable setting on a template.
+ */
+export type TemplateSetting = {
+    /**
+     * Default value (must match setting_type)
+     */
+    default?: unknown;
+    /**
+     * Machine-readable key (e.g., "output_format")
+     */
+    key: string;
+    /**
+     * Human-readable label (e.g., "Output Format")
+     */
+    label: string;
+    /**
+     * Whether the setting must be provided at invocation time
+     */
+    required: boolean;
+    /**
+     * Type of the setting
+     */
+    settingType: TemplateSettingType;
+};
+
+/**
+ * Types of user-configurable template settings.
+ */
+export type TemplateSettingType = 'text' | 'toggle' | {
+    /**
+     * Selection from a fixed set of options
+     */
+    select: {
+        options: Array<string>;
+    };
+};
+
+/**
  * Sorting options for template catalog
  */
 export type TemplateSortBy = 'popularity' | 'price_asc' | 'price_desc' | 'newest' | 'oldest';
@@ -8061,13 +10920,6 @@ export type TopAgent = {
      * Total amount spent (atomic units)
      */
     total_spent_atomic: number;
-};
-
-/**
- * Wrapped transaction summary response for OpenAPI
- */
-export type TransactionSummaryDataResponse = {
-    data: TransactionSummaryResponse;
 };
 
 /**
@@ -8163,6 +11015,41 @@ export type UpdateOAuthProviderRequest = {
      * If omitted, leave unchanged. If null, clear.
      */
     userinfo_url?: string | null;
+};
+
+export type UpdateOrganizationCustomSkillRequest = {
+    /**
+     * If omitted, leave unchanged. If null, clear.
+     */
+    description?: string | null;
+    display_name?: string | null;
+    status?: null | OrganizationCustomSkillStatus;
+};
+
+export type UpdateOrganizationPrivateChatPolicyRequest = {
+    allow_claude_agent?: boolean;
+    allow_cloud_agent_launch?: boolean;
+    allow_codex_agent?: boolean;
+    allow_seren_agent?: boolean;
+    allow_seren_private_agent?: boolean;
+    clear_session_database?: boolean;
+    deployment_id?: string | null;
+    disable_external_model_providers?: boolean;
+    disable_local_agents?: boolean;
+    disable_seren_models?: boolean;
+    fallback_models?: Array<string> | null;
+    force_private_model?: boolean;
+    hide_model_picker?: boolean;
+    mode: OrganizationPrivateChatMode;
+    model_id?: string | null;
+    private_output_policy?: null | ManagedAgentPrivateOutputPolicy;
+    session_database?: null | ManagedAgentSessionDatabase;
+    /**
+     * Optional new secret value for the private DB URL referenced by `session_database.url_secret_key`.
+     *
+     * This is write-only and is not returned by the API.
+     */
+    session_database_secret_value?: string | null;
 };
 
 /**
@@ -8570,6 +11457,7 @@ export type UsageSummary = {
  * Combined user view for API responses
  */
 export type UserInfo = {
+    affiliate_referral_code?: string | null;
     avatar_url?: string | null;
     created_at: string;
     email: Email;
@@ -8645,13 +11533,6 @@ export type VerifyEmailRequest = {
  */
 export type WalletAddress = string;
 
-/**
- * Wrapped wallet balance response for OpenAPI
- */
-export type WalletBalanceDataResponse = {
-    data: WalletBalanceResponse;
-};
-
 export type WalletBalanceKind = 'funded' | 'promotional';
 
 /**
@@ -8691,13 +11572,6 @@ export type WalletBalanceResponse = {
     total_purchases_cents: number;
     total_purchases_usd: string;
     wallet_address: string;
-};
-
-/**
- * Wrapped wallet recover response for OpenAPI
- */
-export type WalletRecoverDataResponse = {
-    data: WalletRecoverResponse;
 };
 
 /**
@@ -8759,13 +11633,6 @@ export type WalletSourceBalance = {
 export type WalletTransactionDirection = 'credit' | 'debit';
 
 /**
- * Wrapped transaction history response for OpenAPI
- */
-export type WalletTransactionHistoryDataResponse = {
-    data: WalletTransactionHistoryResponse;
-};
-
-/**
  * Response for transaction history
  */
 export type WalletTransactionHistoryResponse = {
@@ -8779,6 +11646,10 @@ export type WalletTransactionHistoryResponse = {
  * Response for a single transaction
  */
 export type WalletTransactionResponse = {
+    /**
+     * Optional alert string when the transaction appears anomalously expensive.
+     */
+    alert?: string | null;
     amount_atomic: number;
     amount_usd: string;
     /**
@@ -8871,6 +11742,37 @@ export type WebhookInfo = {
     url: string;
 };
 
+export type AcceptOrganizationInviteData = {
+    body: AcceptOrganizationInviteRequest;
+    path?: never;
+    query?: never;
+    url: '/auth/accept-invite';
+};
+
+export type AcceptOrganizationInviteErrors = {
+    /**
+     * Invalid or expired invite
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Invite not found
+     */
+    404: unknown;
+};
+
+export type AcceptOrganizationInviteResponses = {
+    /**
+     * Organization invite accepted
+     */
+    200: DataResponseAcceptOrganizationInviteResult;
+};
+
+export type AcceptOrganizationInviteResponse = AcceptOrganizationInviteResponses[keyof AcceptOrganizationInviteResponses];
+
 export type AgentUpdateData = {
     body: AgentUpdateRequest;
     path?: never;
@@ -8918,7 +11820,7 @@ export type AgentRegisterResponses = {
     /**
      * Agent registered successfully
      */
-    201: AgentRegisterDataResponse;
+    201: DataResponseAgentRegisterResponse;
 };
 
 export type AgentRegisterResponse2 = AgentRegisterResponses[keyof AgentRegisterResponses];
@@ -9620,7 +12522,7 @@ export type GetMatrixResponses = {
     /**
      * Eval matrix
      */
-    200: EvalMatrixResponse;
+    200: DataResponseEvalMatrixResponse;
 };
 
 export type GetMatrixResponse = GetMatrixResponses[keyof GetMatrixResponses];
@@ -9647,7 +12549,7 @@ export type PostSignalsResponses = {
     /**
      * Signals accepted
      */
-    201: EvalSignalResponse;
+    201: DataResponseEvalSignalResponse;
 };
 
 export type PostSignalsResponse = PostSignalsResponses[keyof PostSignalsResponses];
@@ -10019,16 +12921,20 @@ export type InitiateOauthByIdData = {
          */
         provider_id: string;
     };
-    query?: {
+    query: {
         /**
          * Where to redirect after OAuth completes
          */
-        redirect_uri?: string;
+        redirect_uri: string;
     };
     url: '/oauth/providers/{provider_id}/authorize';
 };
 
 export type InitiateOauthByIdErrors = {
+    /**
+     * Invalid or missing redirect URI
+     */
+    400: unknown;
     /**
      * Provider not found
      */
@@ -10075,16 +12981,20 @@ export type InitiateOauthData = {
          */
         provider: string;
     };
-    query?: {
+    query: {
         /**
          * Where to redirect after OAuth completes
          */
-        redirect_uri?: string;
+        redirect_uri: string;
     };
     url: '/oauth/{provider}/authorize';
 };
 
 export type InitiateOauthErrors = {
+    /**
+     * Invalid or missing redirect URI
+     */
+    400: unknown;
     /**
      * Provider not found
      */
@@ -10360,6 +13270,46 @@ export type ListTaskEventsResponses = {
 };
 
 export type ListTaskEventsResponse = ListTaskEventsResponses[keyof ListTaskEventsResponses];
+
+export type SubmitTaskInputData = {
+    body: SubmitTaskInputRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Task ID
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/agents/tasks/{task_id}/resume';
+};
+
+export type SubmitTaskInputErrors = {
+    /**
+     * Task is not awaiting input or cannot be resumed
+     */
+    400: unknown;
+    /**
+     * Not authorized
+     */
+    403: unknown;
+    /**
+     * Task not found
+     */
+    404: unknown;
+};
+
+export type SubmitTaskInputResponses = {
+    /**
+     * Task input accepted
+     */
+    202: DataResponseAgentTask;
+};
+
+export type SubmitTaskInputResponse = SubmitTaskInputResponses[keyof SubmitTaskInputResponses];
 
 export type StreamTaskData = {
     body?: never;
@@ -10680,6 +13630,283 @@ export type GetOrganizationConsumptionResponses = {
 
 export type GetOrganizationConsumptionResponse = GetOrganizationConsumptionResponses[keyof GetOrganizationConsumptionResponses];
 
+export type ListCustomSkillsData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+    };
+    query?: {
+        q?: string | null;
+        include_archived?: boolean;
+    };
+    url: '/organizations/{organization_id}/custom-skills';
+};
+
+export type ListCustomSkillsResponses = {
+    /**
+     * Custom skills retrieved
+     */
+    200: DataResponseVecOrganizationCustomSkill;
+};
+
+export type ListCustomSkillsResponse = ListCustomSkillsResponses[keyof ListCustomSkillsResponses];
+
+export type CreateCustomSkillData = {
+    body: CreateOrganizationCustomSkillRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/custom-skills';
+};
+
+export type CreateCustomSkillResponses = {
+    /**
+     * Custom skill created
+     */
+    200: DataResponseOrganizationCustomSkill;
+};
+
+export type CreateCustomSkillResponse = CreateCustomSkillResponses[keyof CreateCustomSkillResponses];
+
+export type GetCustomSkillData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Custom skill ID
+         */
+        skill_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}';
+};
+
+export type GetCustomSkillErrors = {
+    /**
+     * Custom skill not found
+     */
+    404: unknown;
+};
+
+export type GetCustomSkillResponses = {
+    /**
+     * Custom skill retrieved
+     */
+    200: DataResponseOrganizationCustomSkill;
+};
+
+export type GetCustomSkillResponse = GetCustomSkillResponses[keyof GetCustomSkillResponses];
+
+export type UpdateCustomSkillData = {
+    body: UpdateOrganizationCustomSkillRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Custom skill ID
+         */
+        skill_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}';
+};
+
+export type UpdateCustomSkillErrors = {
+    /**
+     * Custom skill not found
+     */
+    404: unknown;
+};
+
+export type UpdateCustomSkillResponses = {
+    /**
+     * Custom skill updated
+     */
+    200: DataResponseOrganizationCustomSkill;
+};
+
+export type UpdateCustomSkillResponse = UpdateCustomSkillResponses[keyof UpdateCustomSkillResponses];
+
+export type ListCustomSkillRevisionsData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Custom skill ID
+         */
+        skill_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions';
+};
+
+export type ListCustomSkillRevisionsResponses = {
+    /**
+     * Custom skill revisions retrieved
+     */
+    200: DataResponseVecOrganizationCustomSkillRevisionSummary;
+};
+
+export type ListCustomSkillRevisionsResponse = ListCustomSkillRevisionsResponses[keyof ListCustomSkillRevisionsResponses];
+
+export type CreateCustomSkillRevisionData = {
+    body: CreateOrganizationCustomSkillRevisionRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Custom skill ID
+         */
+        skill_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions';
+};
+
+export type CreateCustomSkillRevisionResponses = {
+    /**
+     * Custom skill revision created
+     */
+    200: DataResponseOrganizationCustomSkillRevision;
+};
+
+export type CreateCustomSkillRevisionResponse = CreateCustomSkillRevisionResponses[keyof CreateCustomSkillRevisionResponses];
+
+export type GetCustomSkillRevisionData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Custom skill ID
+         */
+        skill_id: string;
+        /**
+         * Revision ID
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}';
+};
+
+export type GetCustomSkillRevisionResponses = {
+    /**
+     * Custom skill revision retrieved
+     */
+    200: DataResponseOrganizationCustomSkillRevision;
+};
+
+export type GetCustomSkillRevisionResponse = GetCustomSkillRevisionResponses[keyof GetCustomSkillRevisionResponses];
+
+export type DownloadCustomSkillRevisionBundleData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Custom skill ID
+         */
+        skill_id: string;
+        /**
+         * Revision ID
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/bundle';
+};
+
+export type DownloadCustomSkillRevisionBundleResponses = {
+    /**
+     * Revision bundle download
+     */
+    200: Blob | File;
+};
+
+export type DownloadCustomSkillRevisionBundleResponse = DownloadCustomSkillRevisionBundleResponses[keyof DownloadCustomSkillRevisionBundleResponses];
+
+export type GetCustomSkillRevisionFileData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Custom skill ID
+         */
+        skill_id: string;
+        /**
+         * Revision ID
+         */
+        revision_id: string;
+    };
+    query: {
+        path: string;
+    };
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/file';
+};
+
+export type GetCustomSkillRevisionFileResponses = {
+    /**
+     * Revision file retrieved
+     */
+    200: DataResponseOrganizationCustomSkillFileContent;
+};
+
+export type GetCustomSkillRevisionFileResponse = GetCustomSkillRevisionFileResponses[keyof GetCustomSkillRevisionFileResponses];
+
+export type PublishCustomSkillRevisionData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * Custom skill ID
+         */
+        skill_id: string;
+        /**
+         * Revision ID
+         */
+        revision_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/custom-skills/{skill_id}/revisions/{revision_id}/publish';
+};
+
+export type PublishCustomSkillRevisionResponses = {
+    /**
+     * Revision published
+     */
+    200: DataResponseOrganizationCustomSkill;
+};
+
+export type PublishCustomSkillRevisionResponse = PublishCustomSkillRevisionResponses[keyof PublishCustomSkillRevisionResponses];
+
 export type ListInvitesData = {
     body?: never;
     path: {
@@ -10853,7 +14080,7 @@ export type ListOrgOauthProvidersResponses = {
     /**
      * List of OAuth providers
      */
-    200: OAuthProvidersDataResponse;
+    200: DataResponseVecOAuthProviderResponse;
 };
 
 export type ListOrgOauthProvidersResponse = ListOrgOauthProvidersResponses[keyof ListOrgOauthProvidersResponses];
@@ -10897,7 +14124,7 @@ export type CreateOrgOauthProviderResponses = {
     /**
      * OAuth provider created
      */
-    201: OAuthProviderDataResponse;
+    201: DataResponseOAuthProviderResponse;
 };
 
 export type CreateOrgOauthProviderResponse = CreateOrgOauthProviderResponses[keyof CreateOrgOauthProviderResponses];
@@ -10985,7 +14212,7 @@ export type GetOrgOauthProviderResponses = {
     /**
      * OAuth provider details
      */
-    200: OAuthProviderDataResponse;
+    200: DataResponseOAuthProviderResponse;
 };
 
 export type GetOrgOauthProviderResponse = GetOrgOauthProviderResponses[keyof GetOrgOauthProviderResponses];
@@ -11037,7 +14264,7 @@ export type UpdateOrgOauthProviderResponses = {
     /**
      * OAuth provider updated
      */
-    200: OAuthProviderDataResponse;
+    200: DataResponseOAuthProviderResponse;
 };
 
 export type UpdateOrgOauthProviderResponse = UpdateOrgOauthProviderResponses[keyof UpdateOrgOauthProviderResponses];
@@ -11073,7 +14300,7 @@ export type CheckPermissionResponses = {
     /**
      * Permission check result
      */
-    200: boolean;
+    200: DataResponseBool;
 };
 
 export type CheckPermissionResponse = CheckPermissionResponses[keyof CheckPermissionResponses];
@@ -11105,7 +14332,7 @@ export type GetMyPermissionsResponses = {
     /**
      * User's permissions
      */
-    200: Array<string>;
+    200: DataResponseVecString;
 };
 
 export type GetMyPermissionsResponse = GetMyPermissionsResponses[keyof GetMyPermissionsResponses];
@@ -11177,6 +14404,74 @@ export type ChangeOrganizationPlanResponses = {
 };
 
 export type ChangeOrganizationPlanResponse = ChangeOrganizationPlanResponses[keyof ChangeOrganizationPlanResponses];
+
+export type GetPrivateChatPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default' for authenticated user's default organization
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/private-chat-policy';
+};
+
+export type GetPrivateChatPolicyErrors = {
+    /**
+     * User is not a member of the organization
+     */
+    403: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type GetPrivateChatPolicyResponses = {
+    /**
+     * Organization private chat policy
+     */
+    200: DataResponseOrganizationPrivateChatPolicy;
+};
+
+export type GetPrivateChatPolicyResponse = GetPrivateChatPolicyResponses[keyof GetPrivateChatPolicyResponses];
+
+export type UpdatePrivateChatPolicyData = {
+    body: UpdateOrganizationPrivateChatPolicyRequest;
+    path: {
+        /**
+         * Organization ID or 'default' for authenticated user's default organization
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/private-chat-policy';
+};
+
+export type UpdatePrivateChatPolicyErrors = {
+    /**
+     * Invalid request
+     */
+    400: unknown;
+    /**
+     * User is not allowed to update the organization
+     */
+    403: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type UpdatePrivateChatPolicyResponses = {
+    /**
+     * Updated organization private chat policy
+     */
+    200: DataResponseOrganizationPrivateChatPolicy;
+};
+
+export type UpdatePrivateChatPolicyResponse = UpdatePrivateChatPolicyResponses[keyof UpdatePrivateChatPolicyResponses];
 
 export type ListOrgPublishersData = {
     body?: never;
@@ -11408,7 +14703,7 @@ export type GetRevenueMetricsResponses = {
     /**
      * Revenue metrics
      */
-    200: RevenueMetrics;
+    200: DataResponseRevenueMetrics;
 };
 
 export type GetRevenueMetricsResponse = GetRevenueMetricsResponses[keyof GetRevenueMetricsResponses];
@@ -11449,7 +14744,7 @@ export type GetRevenueByDayResponses = {
     /**
      * Daily revenue breakdown
      */
-    200: Array<RevenueByDay>;
+    200: DataResponseVecRevenueByDay;
 };
 
 export type GetRevenueByDayResponse = GetRevenueByDayResponses[keyof GetRevenueByDayResponses];
@@ -11490,7 +14785,7 @@ export type GetTopAgentsResponses = {
     /**
      * Top agents by spending
      */
-    200: Array<TopAgent>;
+    200: DataResponseVecTopAgent;
 };
 
 export type GetTopAgentsResponse = GetTopAgentsResponses[keyof GetTopAgentsResponses];
@@ -12020,7 +15315,7 @@ export type ListOrgVpcEndpointsResponses = {
     /**
      * List of VPC endpoints
      */
-    200: Array<OrganizationVpcEndpoint>;
+    200: DataResponseVecOrganizationVpcEndpoint;
 };
 
 export type ListOrgVpcEndpointsResponse = ListOrgVpcEndpointsResponses[keyof ListOrgVpcEndpointsResponses];
@@ -12156,7 +15451,7 @@ export type ListOrgVpcEndpointsByRegionResponses = {
     /**
      * List of VPC endpoints
      */
-    200: Array<OrganizationVpcEndpoint>;
+    200: DataResponseVecOrganizationVpcEndpoint;
 };
 
 export type ListOrgVpcEndpointsByRegionResponse = ListOrgVpcEndpointsByRegionResponses[keyof ListOrgVpcEndpointsByRegionResponses];
@@ -12268,7 +15563,7 @@ export type ListOrgVpcEndpointsAliasResponses = {
     /**
      * List of VPC endpoints
      */
-    200: Array<OrganizationVpcEndpoint>;
+    200: DataResponseVecOrganizationVpcEndpoint;
 };
 
 export type ListOrgVpcEndpointsAliasResponse = ListOrgVpcEndpointsAliasResponses[keyof ListOrgVpcEndpointsAliasResponses];
@@ -12500,7 +15795,7 @@ export type ListWebhookDeliveriesResponses = {
     /**
      * Deliveries retrieved successfully
      */
-    200: Array<WebhookDelivery>;
+    200: DataResponseVecWebhookDelivery;
 };
 
 export type ListWebhookDeliveriesResponse = ListWebhookDeliveriesResponses[keyof ListWebhookDeliveriesResponses];
@@ -12586,7 +15881,7 @@ export type ListPermissionsResponses = {
     /**
      * Permissions retrieved successfully
      */
-    200: Array<Permission>;
+    200: DataResponseVecPermission;
 };
 
 export type ListPermissionsResponse = ListPermissionsResponses[keyof ListPermissionsResponses];
@@ -12970,7 +16265,7 @@ export type ListSessionsResponses = {
     /**
      * Sessions retrieved successfully
      */
-    200: Array<Session>;
+    200: DataResponseVecSession;
 };
 
 export type ListSessionsResponse = ListSessionsResponses[keyof ListSessionsResponses];
@@ -13251,7 +16546,7 @@ export type GetWalletBalanceResponses = {
     /**
      * Wallet balance retrieved
      */
-    200: WalletBalanceDataResponse;
+    200: DataResponseWalletBalanceResponse;
 };
 
 export type GetWalletBalanceResponse = GetWalletBalanceResponses[keyof GetWalletBalanceResponses];
@@ -13282,7 +16577,7 @@ export type ClaimPaymentMethodBonusResponses = {
     /**
      * Payment method bonus claimed
      */
-    200: BonusClaimDataResponse;
+    200: DataResponseBonusClaimResponse;
 };
 
 export type ClaimPaymentMethodBonusResponse = ClaimPaymentMethodBonusResponses[keyof ClaimPaymentMethodBonusResponses];
@@ -13313,7 +16608,7 @@ export type ClaimSignupBonusResponses = {
     /**
      * Signup bonus claimed
      */
-    200: BonusClaimDataResponse;
+    200: DataResponseBonusClaimResponse;
 };
 
 export type ClaimSignupBonusResponse = ClaimSignupBonusResponses[keyof ClaimSignupBonusResponses];
@@ -13344,7 +16639,7 @@ export type ClaimDailyResponses = {
     /**
      * Daily credits claimed
      */
-    200: DailyClaimDataResponse;
+    200: DataResponseDailyClaimResponse;
 };
 
 export type ClaimDailyResponse = ClaimDailyResponses[keyof ClaimDailyResponses];
@@ -13367,7 +16662,7 @@ export type CheckDailyEligibilityResponses = {
     /**
      * Eligibility checked
      */
-    200: DailyClaimEligibilityDataResponse;
+    200: DataResponseDailyClaimEligibilityResponse;
 };
 
 export type CheckDailyEligibilityResponse = CheckDailyEligibilityResponses[keyof CheckDailyEligibilityResponses];
@@ -13398,7 +16693,7 @@ export type CreateDepositResponses = {
     /**
      * Deposit initiated
      */
-    200: DepositDataResponse;
+    200: DataResponseDepositResponse;
 };
 
 export type CreateDepositResponse = CreateDepositResponses[keyof CreateDepositResponses];
@@ -13502,7 +16797,7 @@ export type WalletRecoverResponses = {
     /**
      * Account recovered successfully
      */
-    200: WalletRecoverDataResponse;
+    200: DataResponseWalletRecoverResponse;
 };
 
 export type WalletRecoverResponse2 = WalletRecoverResponses[keyof WalletRecoverResponses];
@@ -13525,7 +16820,7 @@ export type SetRecoveryResponses = {
     /**
      * Recovery set up
      */
-    200: RecoveryDataResponse;
+    200: DataResponseRecoveryResponse;
 };
 
 export type SetRecoveryResponse = SetRecoveryResponses[keyof SetRecoveryResponses];
@@ -13548,7 +16843,7 @@ export type GetReferralInfoResponses = {
     /**
      * Referral info retrieved
      */
-    200: ReferralInfoDataResponse;
+    200: DataResponseReferralInfoResponse;
 };
 
 export type GetReferralInfoResponse = GetReferralInfoResponses[keyof GetReferralInfoResponses];
@@ -13623,7 +16918,7 @@ export type GetTransactionsResponses = {
     /**
      * Transaction history retrieved
      */
-    200: WalletTransactionHistoryDataResponse;
+    200: DataResponseWalletTransactionHistoryResponse;
 };
 
 export type GetTransactionsResponse = GetTransactionsResponses[keyof GetTransactionsResponses];
@@ -13685,7 +16980,7 @@ export type GetTransactionSummaryResponses = {
     /**
      * Transaction summary retrieved
      */
-    200: TransactionSummaryDataResponse;
+    200: DataResponseTransactionSummaryResponse;
 };
 
 export type GetTransactionSummaryResponse = GetTransactionSummaryResponses[keyof GetTransactionSummaryResponses];
@@ -13708,7 +17003,7 @@ export type ListEventTypesResponses = {
     /**
      * Event types retrieved successfully
      */
-    200: Array<string>;
+    200: DataResponseVecString;
 };
 
 export type ListEventTypesResponse = ListEventTypesResponses[keyof ListEventTypesResponses];

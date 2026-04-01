@@ -63,6 +63,10 @@ export interface AgentTaskEvent {
   created_at: string;
 }
 
+export interface ResumeAgentTaskRequest {
+  input: unknown;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function authHeaders(
@@ -165,6 +169,21 @@ export async function cancelAgentTask(
 ): Promise<AgentTask> {
   const { data } = await apiPost<AgentTask>(
     `/organizations/${orgId}/agents/tasks/${taskId}/cancel`,
+  );
+  return data;
+}
+
+/**
+ * Resume an input-required agent task with additional user input.
+ */
+export async function resumeAgentTask(
+  orgId: string,
+  taskId: string,
+  body: ResumeAgentTaskRequest,
+): Promise<AgentTask> {
+  const { data } = await apiPost<AgentTask>(
+    `/organizations/${orgId}/agents/tasks/${taskId}/resume`,
+    body,
   );
   return data;
 }

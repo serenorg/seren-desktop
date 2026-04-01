@@ -2209,6 +2209,68 @@
         }
       }
     },
+    "/organizations/{organization_id}/agents/tasks/{task_id}/resume": {
+      "post": {
+        "tags": [
+          "Agent Tasks"
+        ],
+        "summary": "POST /organizations/{organization_id}/agents/tasks/{task_id}/resume",
+        "operationId": "submit_task_input",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "description": "Organization ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "description": "Task ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitTaskInputRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Task input accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_AgentTask"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Task is not awaiting input or cannot be resumed"
+          },
+          "403": {
+            "description": "Not authorized"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
     "/organizations/{organization_id}/agents/tasks/{task_id}/stream": {
       "get": {
         "tags": [
@@ -21711,6 +21773,15 @@
         "type": "string",
         "description": "A Stripe Payment Method ID (pm_xxx).",
         "example": "pm_1234567890abcdef"
+      },
+      "SubmitTaskInputRequest": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {}
+        }
       },
       "SuggestResponse": {
         "type": "object",
