@@ -1,0 +1,74 @@
+# ABOUTME: Manual workflow to prune old releases from Cloudflare R2.
+# ABOUTME: Keeps the N most recent versioned directories, deletes the rest.
+
+name: Prune R2 Releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Number of recent releases to keep"
+        required: true
+        default: "5"
+      dry_run:
+        description: "Dry run (list what would be pruned without deleting)"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup AWS CLI for R2
+        run: pip install awscli
+
+      - name: Prune old releases
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          KEEP=${{ github.event.inputs.keep }}
+          DRY_RUN=${{ github.event.inputs.dry_run }}
+
+          echo "=== R2 Bucket Contents ==="
+          aws s3 ls "s3://${R2_BUCKET}/" --endpoint-url="${AWS_ENDPOINT_URL}"
+
+          # List version directories, sort by semver descending
+          VERSIONS=$(aws s3 ls "s3://${R2_BUCKET}/" --endpoint-url="${AWS_ENDPOINT_URL}" \
+            | grep 'PRE v' | awk '{print $2}' | sed 's|/$||' \
+            | sort -t. -k1,1rn -k2,2rn -k3,3rn)
+
+          TOTAL=$(echo "$VERSIONS" | wc -l | tr -d ' ')
+          echo ""
+          echo "=== Found $TOTAL versioned releases, keeping $KEEP ==="
+          echo ""
+
+          COUNT=0
+          PRUNED=0
+          for ver in $VERSIONS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -le $KEEP ]; then
+              echo "  KEEP: $ver"
+            else
+              PRUNED=$((PRUNED + 1))
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "  WOULD PRUNE: $ver"
+              else
+                echo "  PRUNING: $ver"
+                aws s3 rm "s3://${R2_BUCKET}/${ver}/" --recursive --endpoint-url="${AWS_ENDPOINT_URL}"
+              fi
+            fi
+          done
+
+          echo ""
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "=== DRY RUN: Would prune $PRUNED releases ==="
+          else
+            echo "=== Pruned $PRUNED releases, $KEEP kept ==="
+          fi
