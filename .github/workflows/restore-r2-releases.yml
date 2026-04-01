@@ -1,0 +1,89 @@
+# ABOUTME: One-off workflow to restore release artifacts from GitHub Releases to R2.
+# ABOUTME: Run after accidental R2 pruning to re-upload missing version directories.
+
+name: Restore R2 Releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: "Comma-separated versions to restore (e.g. v3.1.3,v3.1.2)"
+        required: true
+        default: "v3.1.3,v3.1.2,v3.1.1,v3.1.0,v3.0.2"
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup AWS CLI for R2
+        run: pip install awscli
+
+      - name: Download from GitHub and upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IFS=',' read -ra VERSIONS <<< "${{ github.event.inputs.versions }}"
+          for TAG in "${VERSIONS[@]}"; do
+            TAG=$(echo "$TAG" | tr -d ' ')
+            echo "=== Restoring $TAG ==="
+            mkdir -p "/tmp/$TAG"
+            gh release download "$TAG" --repo "${{ github.repository }}" --dir "/tmp/$TAG"
+            for file in "/tmp/$TAG"/*; do
+              filename=$(basename "$file")
+              echo "  Uploading: ${TAG}/${filename}"
+              aws s3 cp "$file" "s3://${R2_BUCKET}/${TAG}/${filename}" \
+                --endpoint-url="${AWS_ENDPOINT_URL}"
+            done
+            echo ""
+          done
+
+      - name: Regenerate latest.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_URL: "https://pub-714fe894394345a0a8a102fbac2b208f.r2.dev"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST=$(gh release list --repo "${{ github.repository }}" --limit 5 --json tagName,isDraft --jq '[.[] | select(.isDraft == false)][0].tagName')
+          echo "Latest release: $LATEST"
+
+          cat > /tmp/build-latest.js << 'SCRIPT'
+          const fs = require('fs');
+          const tag = process.env.LATEST_TAG;
+          const base = process.env.R2_PUBLIC_URL;
+          const ver = tag.replace('v', '');
+          const platforms = {};
+          const mappings = [
+            ['darwin-aarch64', `SerenDesktop_aarch64.app.tar.gz`],
+            ['darwin-x86_64', `SerenDesktop_x64.app.tar.gz`],
+            ['windows-x86_64', `SerenDesktop_${ver}_x64-setup.nsis.zip`],
+            ['linux-x86_64', `SerenDesktop_${ver}_amd64.AppImage.tar.gz`],
+            ['linux-aarch64', `SerenDesktop_${ver}_aarch64.AppImage.tar.gz`],
+          ];
+          for (const [platform, bundle] of mappings) {
+            let sig = '';
+            try { sig = fs.readFileSync(`/tmp/${tag}/${bundle}.sig`, 'utf8').trim(); } catch {}
+            platforms[platform] = { signature: sig, url: `${base}/${tag}/${bundle}` };
+          }
+          const manifest = {
+            version: ver,
+            notes: `Release ${tag}`,
+            pub_date: new Date().toISOString(),
+            platforms,
+          };
+          fs.writeFileSync('/tmp/latest.json', JSON.stringify(manifest, null, 2));
+          console.log(JSON.stringify(manifest, null, 2));
+          SCRIPT
+
+          LATEST_TAG="$LATEST" node /tmp/build-latest.js
+
+          aws s3 cp /tmp/latest.json "s3://${R2_BUCKET}/latest.json" \
+            --endpoint-url="${AWS_ENDPOINT_URL}" \
+            --content-type "application/json"
+          echo "Uploaded latest.json"
