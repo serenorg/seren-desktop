@@ -26,7 +26,8 @@ import { catalog, type Publisher } from "./catalog";
 const SKILLS_REPO_OWNER = "serenorg";
 const SKILLS_REPO_NAME = "seren-skills";
 const SKILLS_REPO_BRANCH = "main";
-const SKILLS_INDEX_URL = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/git/trees/${SKILLS_REPO_BRANCH}?recursive=1`;
+const SKILLS_R2_INDEX_URL = "https://pub-714fe894394345a0a8a102fbac2b208f.r2.dev/skills/index.json";
+const SKILLS_GITHUB_INDEX_URL = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/git/trees/${SKILLS_REPO_BRANCH}?recursive=1`;
 const SKILLS_RAW_URL = `https://raw.githubusercontent.com/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/${SKILLS_REPO_BRANCH}`;
 const INDEX_CACHE_KEY = "seren:skills_index";
 const PUBLISHER_SKILLS_CACHE_KEY = "seren:publisher_skills";
@@ -180,13 +181,35 @@ let cachedRepoTree: GitHubTreeNode[] | null = null;
 /**
  * Fetch all available skills from GitHub repository tree.
  */
-async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
-  const response = await appFetch(SKILLS_INDEX_URL, {
+async function fetchSkillsFromR2Index(): Promise<Skill[]> {
+  const response = await appFetch(SKILLS_R2_INDEX_URL);
+  if (!response.ok) {
+    throw new Error(`R2 skills index: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as {
+    version: string;
+    updatedAt: string;
+    skills: SkillIndexEntry[];
+    tree?: string[];
+  };
+
+  // Populate cachedRepoTree from the tree listing so install/update flows
+  // can discover sibling files without hitting the GitHub API.
+  if (payload.tree) {
+    cachedRepoTree = payload.tree.map((path) => ({ path, type: "blob" }));
+  }
+
+  return payload.skills.map(indexEntryToSkill);
+}
+
+async function fetchSkillsFromGitHubIndex(): Promise<Skill[]> {
+  const response = await appFetch(SKILLS_GITHUB_INDEX_URL, {
     headers: githubApiHeaders(),
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch skills index: ${response.status}`);
+    throw new Error(`GitHub skills index: ${response.status}`);
   }
 
   const payload = (await response.json()) as GitHubTreeResponse;
@@ -210,6 +233,18 @@ async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
     .map((result) => (result.status === "fulfilled" ? result.value : null))
     .filter((skill): skill is Skill => skill !== null)
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
+  // Primary: R2 (unlimited, zero egress fees, single request)
+  try {
+    return await fetchSkillsFromR2Index();
+  } catch (r2Error) {
+    log.warn("[Skills] R2 index unavailable, falling back to GitHub:", r2Error);
+  }
+
+  // Fallback: GitHub API (rate-limited to 60 req/hr + 69 individual fetches)
+  return fetchSkillsFromGitHubIndex();
 }
 
 /**
@@ -464,7 +499,7 @@ export function isPublisherManagedSkill(
 async function fetchFreshRepoTree(
   _sourceUrl: string,
 ): Promise<GitHubTreeNode[]> {
-  const cacheBustedTreeUrl = `${SKILLS_INDEX_URL}&t=${Date.now()}`;
+  const cacheBustedTreeUrl = `${SKILLS_GITHUB_INDEX_URL}&t=${Date.now()}`;
   const response = await appFetch(cacheBustedTreeUrl, {
     headers: githubApiHeaders(),
   });
@@ -663,7 +698,7 @@ export const skills = {
         }
       }
 
-      log.info("[Skills] Fetching skills index from", SKILLS_INDEX_URL);
+      log.info("[Skills] Fetching skills index from", SKILLS_R2_INDEX_URL);
       const skills = await fetchSkillsFromRepoIndex();
 
       // Cache the result
