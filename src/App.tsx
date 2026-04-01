@@ -109,11 +109,11 @@ function App() {
   });
 
   // Periodically refresh available skills so newly published skills appear without restart.
-  // Base interval: 60 min + up to 5 min jitter to avoid thundering herd across instances.
-  const SKILLS_REFRESH_BASE = 60 * 60 * 1000;
+  // Base interval: 5 min + up to 30s jitter. R2 serves the index with zero rate limits.
+  const SKILLS_REFRESH_BASE = 5 * 60 * 1000;
   const skillsRefreshTimer = setInterval(
     () => void skillsStore.refresh(),
-    SKILLS_REFRESH_BASE + Math.random() * 5 * 60 * 1000,
+    SKILLS_REFRESH_BASE + Math.random() * 30 * 1000,
   );
 
   onCleanup(() => {
