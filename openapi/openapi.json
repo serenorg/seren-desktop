@@ -71,7 +71,7 @@
           "agent"
         ],
         "summary": "POST /auth/agent\nRegister a new AI agent account.",
-        "description": "This endpoint allows AI agents to self-register and receive an API key immediately.\nUnlike the standard signup flow, agent registration:\n- Does NOT require email verification\n- Automatically creates a personal organization\n- Returns an API key named \"agent\" for immediate use\n\n**Important:** Save the `api_key` immediately - it is only shown once!",
+        "description": "This endpoint allows AI agents to self-register using the user's real email\naddress and receive an API key immediately. Registration:\n- Requires a user-controlled email address up front\n- Automatically creates a personal organization\n- Returns an API key named \"agent\" for immediate use\n- Sends an email verification link immediately after signup\n\n**Important:** Save the `api_key` immediately - it is only shown once!",
         "operationId": "agent_register",
         "requestBody": {
           "content": {
@@ -4035,13 +4035,13 @@
         }
       }
     },
-    "/organizations/{organization_id}/private-chat-policy": {
+    "/organizations/{organization_id}/private-models-policy": {
       "get": {
         "tags": [
           "Organizations"
         ],
-        "summary": "GET /organizations/{organization_id}/private-chat-policy",
-        "operationId": "get_private_chat_policy",
+        "summary": "GET /organizations/{organization_id}/private-models-policy",
+        "operationId": "get_private_models_policy",
         "parameters": [
           {
             "name": "organization_id",
@@ -4056,11 +4056,11 @@
         ],
         "responses": {
           "200": {
-            "description": "Organization private chat policy",
+            "description": "Organization private models policy",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_OrganizationPrivateChatPolicy"
+                  "$ref": "#/components/schemas/DataResponse_OrganizationPrivateModelsPolicy"
                 }
               }
             }
@@ -4082,8 +4082,8 @@
         "tags": [
           "Organizations"
         ],
-        "summary": "PUT /organizations/{organization_id}/private-chat-policy",
-        "operationId": "update_private_chat_policy",
+        "summary": "PUT /organizations/{organization_id}/private-models-policy",
+        "operationId": "update_private_models_policy",
         "parameters": [
           {
             "name": "organization_id",
@@ -4100,7 +4100,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateOrganizationPrivateChatPolicyRequest"
+                "$ref": "#/components/schemas/UpdateOrganizationPrivateModelsPolicyRequest"
               }
             }
           },
@@ -4108,11 +4108,11 @@
         },
         "responses": {
           "200": {
-            "description": "Updated organization private chat policy",
+            "description": "Updated organization private models policy",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_OrganizationPrivateChatPolicy"
+                  "$ref": "#/components/schemas/DataResponse_OrganizationPrivateModelsPolicy"
                 }
               }
             }
@@ -7081,9 +7081,6 @@
           "401": {
             "description": "Unauthorized"
           },
-          "403": {
-            "description": "Recovery setup required"
-          },
           "409": {
             "description": "Bonus already claimed"
           }
@@ -7115,9 +7112,6 @@
           },
           "401": {
             "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Recovery setup required"
           },
           "409": {
             "description": "Bonus already claimed"
@@ -7153,9 +7147,6 @@
           },
           "401": {
             "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Recovery setup required"
           }
         },
         "security": [
@@ -7229,7 +7220,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Recovery setup required"
+            "description": "Verified email required"
           }
         },
         "security": [
@@ -7800,6 +7791,8 @@
         "required": [
           "id",
           "name",
+          "email",
+          "email_verified",
           "api_key",
           "organization_id",
           "status",
@@ -7815,6 +7808,14 @@
             "type": "string",
             "format": "date-time",
             "description": "When the account was created"
+          },
+          "email": {
+            "type": "string",
+            "description": "The verified-user email attached at signup"
+          },
+          "email_verified": {
+            "type": "boolean",
+            "description": "Whether the email has been verified yet"
           },
           "id": {
             "type": "string",
@@ -7842,8 +7843,15 @@
       },
       "AgentRegisterRequest": {
         "type": "object",
-        "description": "Request to register a new AI agent account.\nAll fields are optional - an empty body is valid.",
+        "description": "Request to register a new AI agent account.",
+        "required": [
+          "email"
+        ],
         "properties": {
+          "email": {
+            "type": "string",
+            "description": "Real user-controlled email address for ownership verification."
+          },
           "name": {
             "type": [
               "string",
@@ -7859,6 +7867,9 @@
         "required": [
           "success",
           "message",
+          "verification_sent",
+          "verification_required",
+          "next_step",
           "agent",
           "setup",
           "skill_files"
@@ -7872,6 +7883,10 @@
             "type": "string",
             "description": "Welcome message"
           },
+          "next_step": {
+            "type": "string",
+            "description": "Clear next-step guidance for the caller"
+          },
           "setup": {
             "$ref": "#/components/schemas/SetupInstructions",
             "description": "Setup instructions for getting started"
@@ -7883,6 +7898,14 @@
           "success": {
             "type": "boolean",
             "description": "Whether registration was successful"
+          },
+          "verification_required": {
+            "type": "boolean",
+            "description": "Whether the agent must verify the submitted email before ownership is confirmed"
+          },
+          "verification_sent": {
+            "type": "boolean",
+            "description": "Whether a verification email was sent"
           }
         }
       },
@@ -9790,6 +9813,9 @@
             "required": [
               "success",
               "message",
+              "verification_sent",
+              "verification_required",
+              "next_step",
               "agent",
               "setup",
               "skill_files"
@@ -9803,6 +9829,10 @@
                 "type": "string",
                 "description": "Welcome message"
               },
+              "next_step": {
+                "type": "string",
+                "description": "Clear next-step guidance for the caller"
+              },
               "setup": {
                 "$ref": "#/components/schemas/SetupInstructions",
                 "description": "Setup instructions for getting started"
@@ -9814,6 +9844,14 @@
               "success": {
                 "type": "boolean",
                 "description": "Whether registration was successful"
+              },
+              "verification_required": {
+                "type": "boolean",
+                "description": "Whether the agent must verify the submitted email before ownership is confirmed"
+              },
+              "verification_sent": {
+                "type": "boolean",
+                "description": "Whether a verification email was sent"
               }
             }
           },
@@ -11694,7 +11732,7 @@
           }
         }
       },
-      "DataResponse_OrganizationPrivateChatPolicy": {
+      "DataResponse_OrganizationPrivateModelsPolicy": {
         "type": "object",
         "description": "Generic API response wrapper with optional pagination\n\nThis wrapper provides a consistent structure for all API responses,\nmaking it easier for clients to handle responses uniformly. It supports\nboth single resources and collections, with optional pagination metadata.\n\n# Response Structure\n\n```json\n{\n  \"data\": T,\n  \"pagination\": { ... } // optional\n}\n```\n\n# Examples\n\n## Single Resource\n\n```rust\nuse seren_core::http::DataResponse;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\n    id: String,\n    name: String,\n}\n\nlet project = Project {\n    id: \"123\".to_string(),\n    name: \"My Project\".to_string(),\n};\n\nlet response = DataResponse::new(project);\n// Serializes to: {\"data\": {\"id\": \"123\", \"name\": \"My Project\"}}\n```\n\n## Collection with Pagination\n\n```rust\nuse seren_core::http::DataResponse;\nuse seren_core::pagination::PaginationMeta;\nuse serde::Serialize;\n\n#[derive(Serialize)]\nstruct Project {\n    id: String,\n    name: String,\n}\n\nlet projects: Vec<Project> = Vec::new();\nlet pagination = PaginationMeta {\n    total: 0,\n    count: 0,\n    limit: 20,\n    offset: 0,\n    has_more: false,\n};\n\nlet response = DataResponse::with_pagination(projects, pagination);\n// Serializes to: {\"data\": [...], \"pagination\": {\"total\": 0, \"count\": 0, \"limit\": 20, \"offset\": 0, \"has_more\": false}}\n```",
         "required": [
@@ -11758,17 +11796,35 @@
               "force_private_model": {
                 "type": "boolean"
               },
+              "global_ordered_model_ids": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              },
               "hide_model_picker": {
                 "type": "boolean"
               },
               "mode": {
-                "$ref": "#/components/schemas/OrganizationPrivateChatMode"
+                "$ref": "#/components/schemas/OrganizationPrivateModelsMode"
               },
               "model_id": {
                 "type": [
                   "string",
                   "null"
                 ]
+              },
+              "ordered_model_ids": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
               },
               "organization_id": {
                 "type": "string",
@@ -11790,6 +11846,9 @@
               "updated_at": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "use_global_model_routing_defaults": {
+                "type": "boolean"
               }
             }
           },
@@ -18985,14 +19044,14 @@
           }
         }
       },
-      "OrganizationPrivateChatMode": {
+      "OrganizationPrivateModelsMode": {
         "type": "string",
         "enum": [
           "standard",
           "private_org_agent"
         ]
       },
-      "OrganizationPrivateChatPolicy": {
+      "OrganizationPrivateModelsPolicy": {
         "type": "object",
         "required": [
           "organization_id",
@@ -19049,17 +19108,35 @@
           "force_private_model": {
             "type": "boolean"
           },
+          "global_ordered_model_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
           "hide_model_picker": {
             "type": "boolean"
           },
           "mode": {
-            "$ref": "#/components/schemas/OrganizationPrivateChatMode"
+            "$ref": "#/components/schemas/OrganizationPrivateModelsMode"
           },
           "model_id": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "ordered_model_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
           },
           "organization_id": {
             "type": "string",
@@ -19081,6 +19158,9 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "use_global_model_routing_defaults": {
+            "type": "boolean"
           }
         }
       },
@@ -22343,7 +22423,7 @@
           }
         }
       },
-      "UpdateOrganizationPrivateChatPolicyRequest": {
+      "UpdateOrganizationPrivateModelsPolicyRequest": {
         "type": "object",
         "required": [
           "mode"
@@ -22399,13 +22479,22 @@
             "type": "boolean"
           },
           "mode": {
-            "$ref": "#/components/schemas/OrganizationPrivateChatMode"
+            "$ref": "#/components/schemas/OrganizationPrivateModelsMode"
           },
           "model_id": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "ordered_model_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
           },
           "private_output_policy": {
             "oneOf": [
@@ -22433,6 +22522,12 @@
               "null"
             ],
             "description": "Optional new secret value for the private DB URL referenced by `session_database.url_secret_key`.\n\nThis is write-only and is not returned by the API."
+          },
+          "use_global_model_routing_defaults": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         }
       },

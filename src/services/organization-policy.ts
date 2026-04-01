@@ -3,7 +3,7 @@ import { appFetch } from "@/lib/fetch";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
-export type OrganizationPrivateChatMode = "standard" | "private_org_agent";
+export type OrganizationPrivateModelsMode = "standard" | "private_org_agent";
 export type ManagedAgentSessionDatabaseEngine = "postgres" | "aurora_postgres";
 export type ManagedAgentSessionDatabaseProvider =
   | "direct_url"
@@ -19,9 +19,9 @@ export interface ManagedAgentSessionDatabase {
   database_name?: string | null;
 }
 
-export interface OrganizationPrivateChatPolicy {
+export interface OrganizationPrivateModelsPolicy {
   organization_id: string;
-  mode: OrganizationPrivateChatMode;
+  mode: OrganizationPrivateModelsMode;
   deployment_id: string | null;
   deployment_name?: string | null;
   allow_seren_agent?: boolean;
@@ -31,6 +31,9 @@ export interface OrganizationPrivateChatPolicy {
   allow_cloud_agent_launch?: boolean;
   model_id?: string | null;
   fallback_models?: string[] | null;
+  ordered_model_ids?: string[] | null;
+  global_ordered_model_ids?: string[] | null;
+  use_global_model_routing_defaults?: boolean;
   force_private_model: boolean;
   disable_seren_models: boolean;
   disable_local_agents: boolean;
@@ -41,32 +44,35 @@ export interface OrganizationPrivateChatPolicy {
   updated_at: string;
 }
 
+export type OrganizationPrivateChatMode = OrganizationPrivateModelsMode;
+export type OrganizationPrivateChatPolicy = OrganizationPrivateModelsPolicy;
+
 export function allowsSerenAgent(
-  policy: OrganizationPrivateChatPolicy | null | undefined,
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
   return policy?.allow_seren_agent ?? true;
 }
 
 export function allowsSerenPrivateAgent(
-  policy: OrganizationPrivateChatPolicy | null | undefined,
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
-  return (policy?.allow_seren_private_agent ?? true) && !!policy?.deployment_id;
+  return policy?.allow_seren_private_agent ?? true;
 }
 
 export function allowsClaudeAgent(
-  policy: OrganizationPrivateChatPolicy | null | undefined,
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
   return policy?.allow_claude_agent ?? true;
 }
 
 export function allowsCodexAgent(
-  policy: OrganizationPrivateChatPolicy | null | undefined,
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
   return policy?.allow_codex_agent ?? true;
 }
 
 export function allowsCloudAgentLaunch(
-  policy: OrganizationPrivateChatPolicy | null | undefined,
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
   return policy?.allow_cloud_agent_launch ?? false;
 }
@@ -85,8 +91,8 @@ async function authHeaders(url: string): Promise<HeadersInit> {
   return headers;
 }
 
-export async function getDefaultOrganizationPrivateChatPolicy(): Promise<OrganizationPrivateChatPolicy> {
-  const url = `${apiBase}/organizations/default/private-chat-policy`;
+export async function getDefaultOrganizationPrivateModelsPolicy(): Promise<OrganizationPrivateModelsPolicy> {
+  const url = `${apiBase}/organizations/default/private-models-policy`;
   const response = await appFetch(url, {
     headers: await authHeaders(url),
   });
@@ -94,10 +100,13 @@ export async function getDefaultOrganizationPrivateChatPolicy(): Promise<Organiz
   if (!response.ok) {
     const message = await response.text().catch(() => "");
     throw new Error(
-      `Failed to load organization private chat policy (${response.status}): ${message}`,
+      `Failed to load organization private models policy (${response.status}): ${message}`,
     );
   }
 
   const json = await response.json();
-  return json.data as OrganizationPrivateChatPolicy;
+  return json.data as OrganizationPrivateModelsPolicy;
 }
+
+export const getDefaultOrganizationPrivateChatPolicy =
+  getDefaultOrganizationPrivateModelsPolicy;

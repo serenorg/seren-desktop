@@ -3739,6 +3739,7 @@ export type UpdateDatabaseRequest = {
 export type UpdateEndpointRequest = {
     autoscaling_max?: number | null;
     autoscaling_min?: number | null;
+    compute_unit?: string | null;
     pooler_enabled?: boolean | null;
     pooler_mode?: null | PoolerMode;
     suspend_timeout_seconds?: number | null;

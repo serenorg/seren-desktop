@@ -8761,6 +8761,12 @@
             ],
             "format": "int32"
           },
+          "compute_unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "pooler_enabled": {
             "type": [
               "boolean",

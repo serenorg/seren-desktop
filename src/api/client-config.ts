@@ -51,12 +51,16 @@ const customFetch: typeof globalThis.fetch = async (input, init) => {
 export const createClientConfig = <T extends ClientOptions>(
   override?: Config<T>,
 ): Config<T> => {
+  const resolvedBaseUrl =
+    typeof override?.baseUrl === "string" && override.baseUrl.length > 0
+      ? new URL(override.baseUrl, apiBase).toString()
+      : apiBase;
+
   return {
     ...override,
-    // Sub-spec clients pass relative baseUrls (e.g. '/publishers/seren-db')
-    // from their spec's servers[].url. Override because the Gateway routes
-    // all SDK paths from the API root.
-    baseUrl: apiBase,
+    // Sub-spec clients pass relative baseUrls (e.g. '/publishers/seren-db').
+    // Resolve them against the configured API root instead of dropping them.
+    baseUrl: resolvedBaseUrl,
     fetch: customFetch,
   } as Config<T>;
 };

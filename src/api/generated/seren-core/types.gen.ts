@@ -38,6 +38,14 @@ export type AgentInfo = {
      */
     created_at: string;
     /**
+     * The verified-user email attached at signup
+     */
+    email: string;
+    /**
+     * Whether the email has been verified yet
+     */
+    email_verified: boolean;
+    /**
      * The agent's unique ID
      */
     id: string;
@@ -61,9 +69,12 @@ export type AgentInfo = {
 
 /**
  * Request to register a new AI agent account.
- * All fields are optional - an empty body is valid.
  */
 export type AgentRegisterRequest = {
+    /**
+     * Real user-controlled email address for ownership verification.
+     */
+    email: string;
     /**
      * Optional custom display name for the agent.
      * If not provided, a unique celestial-themed name will be generated (e.g., "radiant-sirius").
@@ -84,6 +95,10 @@ export type AgentRegisterResponse = {
      */
     message: string;
     /**
+     * Clear next-step guidance for the caller
+     */
+    next_step: string;
+    /**
      * Setup instructions for getting started
      */
     setup: SetupInstructions;
@@ -95,6 +110,14 @@ export type AgentRegisterResponse = {
      * Whether registration was successful
      */
     success: boolean;
+    /**
+     * Whether the agent must verify the submitted email before ownership is confirmed
+     */
+    verification_required: boolean;
+    /**
+     * Whether a verification email was sent
+     */
+    verification_sent: boolean;
 };
 
 /**
@@ -1013,6 +1036,10 @@ export type DataResponseAgentRegisterResponse = {
          */
         message: string;
         /**
+         * Clear next-step guidance for the caller
+         */
+        next_step: string;
+        /**
          * Setup instructions for getting started
          */
         setup: SetupInstructions;
@@ -1024,6 +1051,14 @@ export type DataResponseAgentRegisterResponse = {
          * Whether registration was successful
          */
         success: boolean;
+        /**
+         * Whether the agent must verify the submitted email before ownership is confirmed
+         */
+        verification_required: boolean;
+        /**
+         * Whether a verification email was sent
+         */
+        verification_sent: boolean;
     };
     pagination?: null | PaginationMeta;
 };
@@ -3428,7 +3463,7 @@ export type DataResponseOrganizationPlanWithDetails = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
-export type DataResponseOrganizationPrivateChatPolicy = {
+export type DataResponseOrganizationPrivateModelsPolicy = {
     data: {
         allow_claude_agent?: boolean;
         allow_cloud_agent_launch?: boolean;
@@ -3442,13 +3477,16 @@ export type DataResponseOrganizationPrivateChatPolicy = {
         disable_seren_models?: boolean;
         fallback_models?: Array<string> | null;
         force_private_model?: boolean;
+        global_ordered_model_ids?: Array<string> | null;
         hide_model_picker?: boolean;
-        mode: OrganizationPrivateChatMode;
+        mode: OrganizationPrivateModelsMode;
         model_id?: string | null;
+        ordered_model_ids?: Array<string> | null;
         organization_id: string;
         private_output_policy?: ManagedAgentPrivateOutputPolicy;
         session_database?: null | ManagedAgentSessionDatabase;
         updated_at: string;
+        use_global_model_routing_defaults?: boolean;
     };
     pagination?: null | PaginationMeta;
 };
@@ -9576,9 +9614,9 @@ export type OrganizationPlanWithDetails = {
     plan: Plan;
 };
 
-export type OrganizationPrivateChatMode = 'standard' | 'private_org_agent';
+export type OrganizationPrivateModelsMode = 'standard' | 'private_org_agent';
 
-export type OrganizationPrivateChatPolicy = {
+export type OrganizationPrivateModelsPolicy = {
     allow_claude_agent?: boolean;
     allow_cloud_agent_launch?: boolean;
     allow_codex_agent?: boolean;
@@ -9591,13 +9629,16 @@ export type OrganizationPrivateChatPolicy = {
     disable_seren_models?: boolean;
     fallback_models?: Array<string> | null;
     force_private_model?: boolean;
+    global_ordered_model_ids?: Array<string> | null;
     hide_model_picker?: boolean;
-    mode: OrganizationPrivateChatMode;
+    mode: OrganizationPrivateModelsMode;
     model_id?: string | null;
+    ordered_model_ids?: Array<string> | null;
     organization_id: string;
     private_output_policy?: ManagedAgentPrivateOutputPolicy;
     session_database?: null | ManagedAgentSessionDatabase;
     updated_at: string;
+    use_global_model_routing_defaults?: boolean;
 };
 
 export type OrganizationVpcEndpoint = {
@@ -11026,7 +11067,7 @@ export type UpdateOrganizationCustomSkillRequest = {
     status?: null | OrganizationCustomSkillStatus;
 };
 
-export type UpdateOrganizationPrivateChatPolicyRequest = {
+export type UpdateOrganizationPrivateModelsPolicyRequest = {
     allow_claude_agent?: boolean;
     allow_cloud_agent_launch?: boolean;
     allow_codex_agent?: boolean;
@@ -11040,8 +11081,9 @@ export type UpdateOrganizationPrivateChatPolicyRequest = {
     fallback_models?: Array<string> | null;
     force_private_model?: boolean;
     hide_model_picker?: boolean;
-    mode: OrganizationPrivateChatMode;
+    mode: OrganizationPrivateModelsMode;
     model_id?: string | null;
+    ordered_model_ids?: Array<string> | null;
     private_output_policy?: null | ManagedAgentPrivateOutputPolicy;
     session_database?: null | ManagedAgentSessionDatabase;
     /**
@@ -11050,6 +11092,7 @@ export type UpdateOrganizationPrivateChatPolicyRequest = {
      * This is write-only and is not returned by the API.
      */
     session_database_secret_value?: string | null;
+    use_global_model_routing_defaults?: boolean | null;
 };
 
 /**
@@ -14405,7 +14448,7 @@ export type ChangeOrganizationPlanResponses = {
 
 export type ChangeOrganizationPlanResponse = ChangeOrganizationPlanResponses[keyof ChangeOrganizationPlanResponses];
 
-export type GetPrivateChatPolicyData = {
+export type GetPrivateModelsPolicyData = {
     body?: never;
     path: {
         /**
@@ -14414,10 +14457,10 @@ export type GetPrivateChatPolicyData = {
         organization_id: string;
     };
     query?: never;
-    url: '/organizations/{organization_id}/private-chat-policy';
+    url: '/organizations/{organization_id}/private-models-policy';
 };
 
-export type GetPrivateChatPolicyErrors = {
+export type GetPrivateModelsPolicyErrors = {
     /**
      * User is not a member of the organization
      */
@@ -14428,17 +14471,17 @@ export type GetPrivateChatPolicyErrors = {
     500: unknown;
 };
 
-export type GetPrivateChatPolicyResponses = {
+export type GetPrivateModelsPolicyResponses = {
     /**
-     * Organization private chat policy
+     * Organization private models policy
      */
-    200: DataResponseOrganizationPrivateChatPolicy;
+    200: DataResponseOrganizationPrivateModelsPolicy;
 };
 
-export type GetPrivateChatPolicyResponse = GetPrivateChatPolicyResponses[keyof GetPrivateChatPolicyResponses];
+export type GetPrivateModelsPolicyResponse = GetPrivateModelsPolicyResponses[keyof GetPrivateModelsPolicyResponses];
 
-export type UpdatePrivateChatPolicyData = {
-    body: UpdateOrganizationPrivateChatPolicyRequest;
+export type UpdatePrivateModelsPolicyData = {
+    body: UpdateOrganizationPrivateModelsPolicyRequest;
     path: {
         /**
          * Organization ID or 'default' for authenticated user's default organization
@@ -14446,10 +14489,10 @@ export type UpdatePrivateChatPolicyData = {
         organization_id: string;
     };
     query?: never;
-    url: '/organizations/{organization_id}/private-chat-policy';
+    url: '/organizations/{organization_id}/private-models-policy';
 };
 
-export type UpdatePrivateChatPolicyErrors = {
+export type UpdatePrivateModelsPolicyErrors = {
     /**
      * Invalid request
      */
@@ -14464,14 +14507,14 @@ export type UpdatePrivateChatPolicyErrors = {
     500: unknown;
 };
 
-export type UpdatePrivateChatPolicyResponses = {
+export type UpdatePrivateModelsPolicyResponses = {
     /**
-     * Updated organization private chat policy
+     * Updated organization private models policy
      */
-    200: DataResponseOrganizationPrivateChatPolicy;
+    200: DataResponseOrganizationPrivateModelsPolicy;
 };
 
-export type UpdatePrivateChatPolicyResponse = UpdatePrivateChatPolicyResponses[keyof UpdatePrivateChatPolicyResponses];
+export type UpdatePrivateModelsPolicyResponse = UpdatePrivateModelsPolicyResponses[keyof UpdatePrivateModelsPolicyResponses];
 
 export type ListOrgPublishersData = {
     body?: never;
@@ -16564,10 +16607,6 @@ export type ClaimPaymentMethodBonusErrors = {
      */
     401: unknown;
     /**
-     * Recovery setup required
-     */
-    403: unknown;
-    /**
      * Bonus already claimed
      */
     409: unknown;
@@ -16594,10 +16633,6 @@ export type ClaimSignupBonusErrors = {
      * Unauthorized
      */
     401: unknown;
-    /**
-     * Recovery setup required
-     */
-    403: unknown;
     /**
      * Bonus already claimed
      */
@@ -16629,10 +16664,6 @@ export type ClaimDailyErrors = {
      * Unauthorized
      */
     401: unknown;
-    /**
-     * Recovery setup required
-     */
-    403: unknown;
 };
 
 export type ClaimDailyResponses = {
@@ -16684,7 +16715,7 @@ export type CreateDepositErrors = {
      */
     401: unknown;
     /**
-     * Recovery setup required
+     * Verified email required
      */
     403: unknown;
 };
