@@ -1040,3 +1040,27 @@ jobs:
             fi
             echo "Uploaded installer: ${TAG}/${filename} and latest/${filename}"
           done
+
+      - name: Prune old releases from R2 (keep last 5)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          # List all version directories (v*), sort by semver descending, skip first 5
+          VERSIONS=$(aws s3 ls "s3://${R2_BUCKET}/" --endpoint-url="${AWS_ENDPOINT_URL}" \
+            | grep 'PRE v' | awk '{print $2}' | sed 's|/$||' \
+            | sort -t. -k1,1rn -k2,2rn -k3,3rn)
+
+          KEEP=5
+          COUNT=0
+          for ver in $VERSIONS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -le $KEEP ]; then
+              echo "Keeping: $ver"
+            else
+              echo "Pruning: $ver"
+              aws s3 rm "s3://${R2_BUCKET}/${ver}/" --recursive --endpoint-url="${AWS_ENDPOINT_URL}"
+            fi
+          done
