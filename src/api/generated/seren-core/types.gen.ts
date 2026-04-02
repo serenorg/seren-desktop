@@ -3486,7 +3486,6 @@ export type DataResponseOrganizationPrivateModelsPolicy = {
         private_output_policy?: ManagedAgentPrivateOutputPolicy;
         session_database?: null | ManagedAgentSessionDatabase;
         updated_at: string;
-        use_global_model_routing_defaults?: boolean;
     };
     pagination?: null | PaginationMeta;
 };
@@ -9638,7 +9637,6 @@ export type OrganizationPrivateModelsPolicy = {
     private_output_policy?: ManagedAgentPrivateOutputPolicy;
     session_database?: null | ManagedAgentSessionDatabase;
     updated_at: string;
-    use_global_model_routing_defaults?: boolean;
 };
 
 export type OrganizationVpcEndpoint = {
@@ -11092,7 +11090,6 @@ export type UpdateOrganizationPrivateModelsPolicyRequest = {
      * This is write-only and is not returned by the API.
      */
     session_database_secret_value?: string | null;
-    use_global_model_routing_defaults?: boolean | null;
 };
 
 /**

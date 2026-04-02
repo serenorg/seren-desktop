@@ -11846,9 +11846,6 @@
               "updated_at": {
                 "type": "string",
                 "format": "date-time"
-              },
-              "use_global_model_routing_defaults": {
-                "type": "boolean"
               }
             }
           },
@@ -19158,9 +19155,6 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "use_global_model_routing_defaults": {
-            "type": "boolean"
           }
         }
       },
@@ -22522,12 +22516,6 @@
               "null"
             ],
             "description": "Optional new secret value for the private DB URL referenced by `session_database.url_secret_key`.\n\nThis is write-only and is not returned by the API."
-          },
-          "use_global_model_routing_defaults": {
-            "type": [
-              "boolean",
-              "null"
-            ]
           }
         }
       },

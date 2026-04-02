@@ -33,7 +33,6 @@ export interface OrganizationPrivateModelsPolicy {
   fallback_models?: string[] | null;
   ordered_model_ids?: string[] | null;
   global_ordered_model_ids?: string[] | null;
-  use_global_model_routing_defaults?: boolean;
   force_private_model: boolean;
   disable_seren_models: boolean;
   disable_local_agents: boolean;
