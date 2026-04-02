@@ -7,13 +7,35 @@
   Pop $0
   Pop $1
   ; Brief pause for child processes to exit
-  Sleep 1000
-  ; Kill orphaned node.exe from the embedded runtime. The /T flag above misses
-  ; node.exe processes that were detached or orphaned by a provider-runtime crash.
-  ; Target only Seren's embedded node — not the user's own Node.js processes.
-  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "Get-Process node -EA 0 | ? { $_.Path -and $_.Path -match ''SerenDesktop'' } | Stop-Process -Force -EA 0"'
+  Sleep 1500
+
+  ; Kill ALL node.exe whose executable path lives under the SerenDesktop
+  ; install directory. Uses Get-CimInstance (WMI) which returns the full
+  ; ExecutablePath — more reliable than Get-Process which can miss
+  ; processes running under different security contexts.
+  ; This catches: embedded node.exe, claude CLI node.exe spawned from
+  ; the embedded runtime, and any other node child still holding a lock.
+  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "\
+    Get-CimInstance Win32_Process -Filter \"Name=''node.exe''\" -EA 0 | \
+      Where-Object { $_.ExecutablePath -and $_.ExecutablePath -match ''SerenDesktop'' } | \
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA 0 }"'
   Pop $0
   Pop $1
-  ; Allow OS to release file handles after process termination
-  Sleep 2000
+
+  ; Also kill node.exe that were spawned BY the embedded runtime but live
+  ; outside SerenDesktop (e.g. globally-installed claude at ~/.local/bin).
+  ; Match by parent: any node.exe whose parent command line contains SerenDesktop.
+  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "\
+    Get-CimInstance Win32_Process -Filter \"Name=''node.exe''\" -EA 0 | \
+      Where-Object { \
+        $ppid = $_.ParentProcessId; \
+        $parent = Get-CimInstance Win32_Process -Filter \"ProcessId=$ppid\" -EA 0; \
+        $parent -and $parent.ExecutablePath -and $parent.ExecutablePath -match ''SerenDesktop'' \
+      } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA 0 }"'
+  Pop $0
+  Pop $1
+
+  ; Allow OS to release file handles after process termination.
+  ; 3 seconds — Windows can take longer than Linux to release locks.
+  Sleep 3000
 !macroend

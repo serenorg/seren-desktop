@@ -177,6 +177,18 @@ impl ProviderRuntimeState {
                     unsafe {
                         libc::kill(pid as i32, libc::SIGKILL);
                     }
+                    #[cfg(windows)]
+                    {
+                        // Use taskkill /T to kill the entire process tree.
+                        // kill_on_drop only terminates the immediate child, leaving
+                        // grandchild node.exe processes (claude CLI) orphaned and
+                        // holding file locks that block the next NSIS install.
+                        use std::os::windows::process::CommandExt;
+                        let _ = std::process::Command::new("taskkill")
+                            .args(["/F", "/T", "/PID", &pid.to_string()])
+                            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                            .status();
+                    }
                 }
             }
             *guard = None;
