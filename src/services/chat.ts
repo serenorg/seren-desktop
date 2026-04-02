@@ -19,7 +19,10 @@ import type {
   ToolResult,
 } from "@/lib/providers/types";
 import { executeTools, getAllTools } from "@/lib/tools";
-import { getGatewayTools } from "@/services/mcp-gateway";
+import {
+  getCallablePublisherSlugs,
+  getGatewayTools,
+} from "@/services/mcp-gateway";
 import { storeAssistantResponse } from "@/services/memory";
 import { authStore } from "@/stores/auth.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -347,29 +350,39 @@ export async function* streamMessageWithTools(
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
 
-  // Build Seren MCP publishers context dynamically based on active toolset
-  // This ensures the LLM only knows about publishers that are actually available
+  // Build Seren MCP publishers context dynamically based on active toolset.
+  // Uses the canonical publisher inventory (all callable publishers) as the
+  // source of truth, not just publishers that expose first-class MCP tools.
+  // This prevents false "not available" responses for publishers like Gmail
+  // that are callable via call_publisher but don't appear in gateway tools.
   const buildPublishersContext = (): string => {
-    const allGatewayTools = getGatewayTools();
+    // Canonical source: all publishers from list_agent_publishers
+    const allPublisherSlugs = getCallablePublisherSlugs();
+
+    // Also include publishers derived from gateway tools (belt and suspenders)
+    const toolPublishers = [
+      ...new Set(getGatewayTools().map((t) => t.publisher)),
+    ];
+
+    // Merge both sources, deduplicate
+    const allSlugs = [...new Set([...allPublisherSlugs, ...toolPublishers])];
+
+    // Filter by active toolset if one is selected
     const activePublishers = getActiveToolsetPublishers();
-
-    // Filter tools by active toolset (same logic as definitions.ts)
-    const availableTools = activePublishers
-      ? allGatewayTools.filter((t) => activePublishers.includes(t.publisher))
-      : allGatewayTools;
-
-    // Get unique publisher slugs from available tools
-    const publishers = [...new Set(availableTools.map((t) => t.publisher))];
+    const publishers = activePublishers
+      ? allSlugs.filter((slug) => activePublishers.includes(slug))
+      : allSlugs;
 
     if (publishers.length === 0) {
-      return ""; // No publishers available, don't add context
+      return "";
     }
 
-    const publisherList = publishers.join(", ");
+    const publisherList = publishers.sort().join(", ");
     return (
       "\n\nIMPORTANT - Available Seren MCP Publishers:\n" +
       "This application connects to Seren MCP publishers - third-party data services. " +
       `You have access to the following publishers: ${publisherList}. ` +
+      "These publishers are callable via the call_publisher tool. " +
       "ONLY use tools from these publishers. Do NOT suggest or attempt to use publishers that are not in this list. " +
       "When users mention publisher names, interpret them in the Seren MCP context unless they explicitly ask about the technology/framework itself."
     );

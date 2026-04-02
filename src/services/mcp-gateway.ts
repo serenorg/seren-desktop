@@ -75,6 +75,11 @@ let lastFetchedAt: number | null = null;
 let loadingPromise: Promise<void> | null = null;
 let isConnected = false;
 
+// All publisher slugs from the last list_agent_publishers call.
+// This is the canonical source of callable publishers — includes publishers
+// that are reachable via call_publisher but don't expose first-class MCP tools.
+let cachedPublisherSlugs: string[] = [];
+
 // Track first-class MCP tools from the gateway's list_tools() response.
 // These tools can be called directly via MCP protocol, bypassing call_publisher.
 // Key: "publisher:toolName", Value: original MCP tool name (e.g., "mcp__mcp-time__get_current_time").
@@ -159,6 +164,10 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
   }
 
   if (publisherSlugs.length === 0) return [];
+
+  // Cache the full publisher list — this is the canonical source of callable
+  // publishers, regardless of whether they expose first-class MCP tools.
+  cachedPublisherSlugs = publisherSlugs;
 
   // For each MCP publisher, query its tools
   const allTools: GatewayTool[] = [];
@@ -342,6 +351,15 @@ export async function initializeGateway(): Promise<void> {
  */
 export function getGatewayTools(): GatewayTool[] {
   return cachedTools;
+}
+
+/**
+ * Get all callable publisher slugs from the last discovery.
+ * This is the canonical source of publisher availability — includes publishers
+ * reachable via call_publisher even if they expose no first-class MCP tools.
+ */
+export function getCallablePublisherSlugs(): string[] {
+  return cachedPublisherSlugs;
 }
 
 /**
