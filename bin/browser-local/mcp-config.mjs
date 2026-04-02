@@ -89,7 +89,7 @@ function encodeTomlValue(value) {
   return '""';
 }
 
-function buildClaudeMcpConfig(servers) {
+function buildClaudeMcpConfig(servers, childEnv) {
   if (servers.length === 0) {
     return null;
   }
@@ -97,10 +97,20 @@ function buildClaudeMcpConfig(servers) {
   const mcpServers = {};
   for (const server of servers) {
     if (server.type === "http") {
+      // Resolve env var placeholders in headers to actual values.
+      // Claude CLI may not expand ${VAR} in MCP config headers on all
+      // platforms. Use the real value from childEnv to guarantee it works.
+      const resolvedHeaders = {};
+      for (const [key, value] of Object.entries(server.headers ?? {})) {
+        resolvedHeaders[key] =
+          typeof value === "string"
+            ? value.replace(/\$\{(\w+)\}/g, (_, varName) => childEnv[varName] ?? process.env[varName] ?? "")
+            : value;
+      }
       mcpServers[server.name] = {
         type: "http",
         url: server.url,
-        headers: server.headers ?? {},
+        headers: resolvedHeaders,
       };
       continue;
     }
@@ -151,12 +161,14 @@ export function buildProviderMcpConfig({ apiKey, mcpServers } = {}) {
       .filter(Boolean)),
   ].filter(Boolean));
 
+  const childEnv =
+    trimToNull(apiKey) == null
+      ? {}
+      : { [SEREN_MCP_API_KEY_ENV]: trimToNull(apiKey) };
+
   return {
-    childEnv:
-      trimToNull(apiKey) == null
-        ? {}
-        : { [SEREN_MCP_API_KEY_ENV]: trimToNull(apiKey) },
-    claudeMcpConfigJson: buildClaudeMcpConfig(normalizedServers),
+    childEnv,
+    claudeMcpConfigJson: buildClaudeMcpConfig(normalizedServers, childEnv),
     codexMcpConfigOverride: buildCodexMcpOverride(normalizedServers),
   };
 }
