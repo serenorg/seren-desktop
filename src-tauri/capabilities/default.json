@@ -30,7 +30,8 @@
         { "url": "https://generativelanguage.googleapis.com/**" },
         { "url": "https://oauth2.googleapis.com/**" },
         { "url": "https://api.github.com/**" },
-        { "url": "https://raw.githubusercontent.com/**" }
+        { "url": "https://raw.githubusercontent.com/**" },
+        { "url": "https://pub-714fe894394345a0a8a102fbac2b208f.r2.dev/**" }
       ]
     }
   ]
