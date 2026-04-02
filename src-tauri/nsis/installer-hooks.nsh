@@ -9,29 +9,16 @@
   ; Brief pause for child processes to exit
   Sleep 1500
 
-  ; Kill ALL node.exe whose executable path lives under the SerenDesktop
-  ; install directory. Uses Get-CimInstance (WMI) which returns the full
-  ; ExecutablePath — more reliable than Get-Process which can miss
-  ; processes running under different security contexts.
-  ; This catches: embedded node.exe, claude CLI node.exe spawned from
-  ; the embedded runtime, and any other node child still holding a lock.
-  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "\
-    Get-CimInstance Win32_Process -Filter \"Name=''node.exe''\" -EA 0 | \
-      Where-Object { $_.ExecutablePath -and $_.ExecutablePath -match ''SerenDesktop'' } | \
-      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA 0 }"'
-  Pop $0
-  Pop $1
-
-  ; Also kill node.exe that were spawned BY the embedded runtime but live
-  ; outside SerenDesktop (e.g. globally-installed claude at ~/.local/bin).
-  ; Match by parent: any node.exe whose parent command line contains SerenDesktop.
-  nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "\
-    Get-CimInstance Win32_Process -Filter \"Name=''node.exe''\" -EA 0 | \
-      Where-Object { \
-        $ppid = $_.ParentProcessId; \
-        $parent = Get-CimInstance Win32_Process -Filter \"ProcessId=$ppid\" -EA 0; \
-        $parent -and $parent.ExecutablePath -and $parent.ExecutablePath -match ''SerenDesktop'' \
-      } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA 0 }"'
+  ; Kill ALL node.exe processes. This is the nuclear option but the only
+  ; reliable approach through NSIS:
+  ;
+  ; - PowerShell $_ variables get eaten by NSIS's own $ interpolation
+  ; - wmic + cmd /c for /f has nested quoting issues inside nsExec
+  ; - The user is actively installing — killing node.exe is expected
+  ;
+  ; This catches: embedded provider-runtime, playwright MCP server,
+  ; claude CLI, and any other orphaned node.exe holding file locks.
+  nsExec::ExecToStack 'taskkill /F /IM "node.exe" /T'
   Pop $0
   Pop $1
 
