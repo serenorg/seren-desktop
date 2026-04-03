@@ -72,7 +72,7 @@ describe("MCP Gateway Caching", () => {
     // First init - should connect
     await initializeGateway();
     expect(connectMock).toHaveBeenCalledTimes(1);
-    expect(getGatewayTools()).toHaveLength(3);
+    expect(getGatewayTools()).toHaveLength(1);
     expect(isGatewayInitialized()).toBe(true);
 
     // Second init within TTL - should use cache
@@ -109,14 +109,14 @@ describe("MCP Gateway Caching", () => {
     } = await import("@/services/mcp-gateway");
 
     await initializeGateway();
-    expect(getGatewayTools()).toHaveLength(3);
+    expect(getGatewayTools()).toHaveLength(1);
 
     await resetGateway();
     expect(getGatewayTools()).toHaveLength(0);
     expect(isGatewayInitialized()).toBe(false);
   });
 
-  it("should include built-in tools under seren-mcp publisher (#1210, #1417)", async () => {
+  it("should exclude built-in tools from gateway pipeline (#1210, #1422)", async () => {
     const { initializeGateway, getGatewayTools } = await import(
       "@/services/mcp-gateway"
     );
@@ -124,18 +124,16 @@ describe("MCP Gateway Caching", () => {
     await initializeGateway();
     const tools = getGatewayTools();
 
-    // All 3 tools survive: prefixed publisher tool + 2 built-in under seren-mcp
-    expect(tools).toHaveLength(3);
+    // Only the mcp__test__test-tool should be in gateway tools.
+    // Built-in tools (list_mcp_tools, call_publisher) are now first-class
+    // SEREN_TOOLS handled by definitions.ts, not the gateway pipeline.
+    expect(tools).toHaveLength(1);
+    expect(tools[0].publisher).toBe("test");
+    expect(tools[0].tool.name).toBe("test-tool");
 
-    const prefixedTool = tools.find((t) => t.publisher === "test");
-    expect(prefixedTool).toBeDefined();
-    expect(prefixedTool!.tool.name).toBe("test-tool");
-
+    // No seren-mcp tools in gateway pipeline
     const serenTools = tools.filter((t) => t.publisher === "seren-mcp");
-    expect(serenTools).toHaveLength(2);
-    expect(serenTools.map((t) => t.tool.name).sort()).toEqual(
-      ["call_publisher", "list_mcp_tools"],
-    );
+    expect(serenTools).toHaveLength(0);
   });
 
   it("should discover publisher tools regardless of publisher_type (#1217)", async () => {

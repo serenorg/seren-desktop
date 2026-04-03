@@ -6,7 +6,11 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mcpClient } from "@/lib/mcp/client";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
 import { type PaymentRequirements, parsePaymentRequirements } from "@/lib/x402";
-import { callGatewayTool, type PaymentProxyInfo } from "@/services/mcp-gateway";
+import {
+  callGatewayTool,
+  callSerenTool,
+  type PaymentProxyInfo,
+} from "@/services/mcp-gateway";
 import { x402Service } from "@/services/x402";
 import { getApprovalRequirement, requiresApproval } from "./approval-config";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
@@ -260,6 +264,21 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
       string,
       unknown
     >;
+
+    // Check if this is a built-in Seren tool (seren__toolName)
+    if (name.startsWith("seren__")) {
+      const serenToolName = name.slice("seren__".length);
+      const response = await callSerenTool(serenToolName, args);
+      const content =
+        typeof response.result === "string"
+          ? response.result
+          : JSON.stringify(response.result);
+      return {
+        tool_call_id: toolCall.id,
+        content,
+        is_error: response.is_error,
+      };
+    }
 
     // Check if this is a Seren Gateway tool call (gateway__publisher__toolName)
     const gatewayInfo = parseGatewayToolName(name);
