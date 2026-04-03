@@ -287,7 +287,9 @@ function resolveInstalledClaudeBinary() {
     const appData = process.env.APPDATA ?? "";
     const nodeDir = path.dirname(process.execPath);
     const candidates = [
-      // Native installer location
+      // Native installer location (install.ps1 puts it here)
+      path.join(home, ".local", "bin", "claude.exe"),
+      // Older native installer location
       path.join(home, ".claude", "bin", "claude.exe"),
       // Legacy / alternate location
       ...(appData ? [path.join(appData, "Claude", "claude.exe")] : []),
