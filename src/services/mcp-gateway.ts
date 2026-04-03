@@ -113,11 +113,24 @@ function parsePublisherFromToolName(toolName: string): {
  * Convert MCP tool to GatewayTool format.
  * Stores the bare tool name (without mcp__publisher__ prefix) so that
  * callGatewayTool() can dispatch through call_publisher correctly.
- * Returns null for built-in gateway tools (no publisher prefix).
+ * Built-in gateway tools (no mcp__ prefix) are included under "seren-mcp".
  */
 function convertToGatewayTool(tool: McpTool): GatewayTool | null {
   const parsed = parsePublisherFromToolName(tool.name);
-  if (!parsed) return null;
+  if (!parsed) {
+    // Built-in gateway tool (e.g. call_publisher, run_sql, list_projects).
+    // These don't have the mcp__publisher__ prefix but are core SerenDB
+    // capabilities that must be available to the model.
+    return {
+      publisher: "seren-mcp",
+      publisherName: "Seren",
+      tool: {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema as McpToolInfo["inputSchema"],
+      },
+    };
+  }
   return {
     publisher: parsed.publisher,
     publisherName: parsed.publisher,
