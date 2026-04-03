@@ -50,18 +50,6 @@ impl Default for OrchestratorState {
 
 const PRIVATE_CHAT_DEPLOYMENT_MISSING_MESSAGE: &str = "Your organization requires private chat, but no private chat deployment is configured. Please contact your organization admin.";
 
-fn private_chat_configuration_error(capabilities: &UserCapabilities) -> Option<&'static str> {
-    if capabilities.force_private_chat
-        && capabilities
-            .configured_private_chat_deployment_id()
-            .is_none()
-    {
-        return Some(PRIVATE_CHAT_DEPLOYMENT_MISSING_MESSAGE);
-    }
-
-    None
-}
-
 // =============================================================================
 // Model Fallback Chain
 // =============================================================================
@@ -106,29 +94,6 @@ pub async fn orchestrate(
         "[Orchestrator] Starting orchestration for conversation {}",
         conversation_id
     );
-
-    if let Some(message) = private_chat_configuration_error(&capabilities) {
-        log::error!(
-            "[Orchestrator] force_private_chat is enabled but no private deployment is configured"
-        );
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<WorkerEvent>(4);
-        let app_clone = app.clone();
-        let _ = event_tx
-            .send(WorkerEvent::Error {
-                message: message.to_string(),
-            })
-            .await;
-        drop(event_tx);
-        while let Some(event) = event_rx.recv().await {
-            let orch_event = OrchestratorEvent {
-                conversation_id: conversation_id.clone(),
-                worker_event: event,
-                subtask_id: None,
-            };
-            let _ = app_clone.emit("orchestrator://event", &orch_event);
-        }
-        return Ok(());
-    }
 
     // 0. RLM check: if input exceeds context window threshold, process recursively.
     //    Use the user-selected model (or a sensible default) for the limit check.
@@ -1247,49 +1212,6 @@ mod tests {
         let content = "---\ntitle: Just Frontmatter\n---\n";
         let result = strip_frontmatter(content);
         assert!(result.trim().is_empty());
-    }
-
-    #[test]
-    fn private_chat_configuration_error_requires_deployment_when_forced() {
-        let capabilities = UserCapabilities {
-            has_local_agent: false,
-            agent_type: None,
-            active_agent_session_id: None,
-            selected_model: None,
-            force_private_chat: true,
-            private_chat_deployment_id: None,
-            available_models: vec![],
-            available_tools: vec![],
-            tool_definitions: vec![],
-            installed_skills: vec![],
-            model_rankings: vec![],
-            reasoning_effort: None,
-        };
-
-        assert_eq!(
-            private_chat_configuration_error(&capabilities),
-            Some(PRIVATE_CHAT_DEPLOYMENT_MISSING_MESSAGE)
-        );
-    }
-
-    #[test]
-    fn private_chat_configuration_error_ignores_configured_deployment() {
-        let capabilities = UserCapabilities {
-            has_local_agent: false,
-            agent_type: None,
-            active_agent_session_id: None,
-            selected_model: None,
-            force_private_chat: true,
-            private_chat_deployment_id: Some("deployment_123".to_string()),
-            available_models: vec![],
-            available_tools: vec![],
-            tool_definitions: vec![],
-            installed_skills: vec![],
-            model_rankings: vec![],
-            reasoning_effort: None,
-        };
-
-        assert_eq!(private_chat_configuration_error(&capabilities), None);
     }
 
     // =========================================================================

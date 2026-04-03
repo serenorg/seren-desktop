@@ -91,11 +91,7 @@ fn select_worker_type(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
 ) -> WorkerType {
-    if capabilities.force_private_chat
-        && capabilities
-            .configured_private_chat_deployment_id()
-            .is_some()
-    {
+    if capabilities.force_private_chat {
         return WorkerType::ChatModel;
     }
 
@@ -232,11 +228,7 @@ fn extract_publisher_slug(
 /// 2. Thompson sampling rankings (satisfaction-driven, computed by service layer)
 /// 3. Hardcoded preference lists (cold start fallback)
 fn select_model(classification: &TaskClassification, capabilities: &UserCapabilities) -> String {
-    if capabilities.force_private_chat
-        && capabilities
-            .configured_private_chat_deployment_id()
-            .is_some()
-    {
+    if capabilities.force_private_chat {
         return capabilities
             .selected_model
             .as_ref()
@@ -656,7 +648,20 @@ mod tests {
         capabilities.private_chat_deployment_id = Some("   ".to_string());
         let decision = route(&classification, &capabilities, "test query");
         assert_eq!(decision.worker_type, WorkerType::ChatModel);
-        assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
+        assert_eq!(decision.publisher_slug, Some(PRIVATE_MODELS_PUBLISHER_SLUG.to_string()));
+        assert_eq!(decision.model_id, "organization/private-model");
+    }
+
+    #[test]
+    fn forced_private_chat_overrides_local_agent_routing() {
+        let classification = make_classification("code_generation", true, true);
+        let mut capabilities =
+            make_capabilities(true, &["anthropic/claude-opus-4-6"], &["firecrawl"]);
+        capabilities.force_private_chat = true;
+        let decision = route(&classification, &capabilities, "test query");
+        assert_eq!(decision.worker_type, WorkerType::ChatModel);
+        assert_eq!(decision.publisher_slug, Some(PRIVATE_MODELS_PUBLISHER_SLUG.to_string()));
+        assert_eq!(decision.model_id, "organization/private-model");
     }
 
     #[test]
