@@ -3,7 +3,7 @@
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -633,7 +633,17 @@ function buildClaudeArgs({
   ];
 
   if (mcpConfigJson) {
-    args.push("--mcp-config", mcpConfigJson, "--strict-mcp-config");
+    if (process.platform === "win32") {
+      // Windows spawns claude via cmd.exe (shell: true) which strips double
+      // quotes from arguments, mangling inline JSON. Write to a temp file
+      // and pass the path instead.
+      const tempPath = path.join(os.tmpdir(), `seren-mcp-${sessionId}.json`);
+      writeFileSync(tempPath, mcpConfigJson, "utf-8");
+      args.push("--mcp-config", tempPath, "--strict-mcp-config");
+      args._mcpTempFile = tempPath;
+    } else {
+      args.push("--mcp-config", mcpConfigJson, "--strict-mcp-config");
+    }
   }
 
   if (resumeSessionId) {
@@ -1392,15 +1402,16 @@ export function createClaudeRuntime({ emit }) {
     const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
     const claudeBin = resolveClaudeBinary();
     const extendedPath = buildExtendedPath();
+    const claudeArgs = buildClaudeArgs({
+      sessionId: remoteSessionId,
+      resumeSessionId: resumeAgentSessionId ?? null,
+      forkSession: false,
+      preferredModel: null,
+      mcpConfigJson: mcpConfig.claudeMcpConfigJson,
+    });
     const processHandle = spawn(
       claudeBin,
-      buildClaudeArgs({
-        sessionId: remoteSessionId,
-        resumeSessionId: resumeAgentSessionId ?? null,
-        forkSession: false,
-        preferredModel: null,
-        mcpConfigJson: mcpConfig.claudeMcpConfigJson,
-      }),
+      claudeArgs,
       {
         cwd,
         env: {
@@ -1412,6 +1423,14 @@ export function createClaudeRuntime({ emit }) {
         shell: process.platform === "win32",
       },
     );
+
+    // Clean up MCP config temp file when the process exits
+    if (claudeArgs._mcpTempFile) {
+      const tempFile = claudeArgs._mcpTempFile;
+      processHandle.on("exit", () => {
+        try { unlinkSync(tempFile); } catch {}
+      });
+    }
 
     // Catch spawn errors (e.g. ENOENT) to prevent crashing the provider runtime.
     processHandle.on("error", (spawnError) => {
@@ -1733,15 +1752,16 @@ export function createClaudeRuntime({ emit }) {
     const forkedAgentSessionId = randomUUID();
     const tempLocalSessionId = randomUUID();
     const claudeBin = resolveClaudeBinary();
+    const forkArgs = buildClaudeArgs({
+      sessionId: forkedAgentSessionId,
+      resumeSessionId: sourceAgentSessionId,
+      forkSession: true,
+      preferredModel: session.currentModelId,
+      mcpConfigJson: session.mcpConfigJson,
+    });
     const processHandle = spawn(
       claudeBin,
-      buildClaudeArgs({
-        sessionId: forkedAgentSessionId,
-        resumeSessionId: sourceAgentSessionId,
-        forkSession: true,
-        preferredModel: session.currentModelId,
-        mcpConfigJson: session.mcpConfigJson,
-      }),
+      forkArgs,
       {
         cwd: session.cwd,
         env: {
@@ -1753,6 +1773,14 @@ export function createClaudeRuntime({ emit }) {
         shell: process.platform === "win32",
       },
     );
+
+    // Clean up MCP config temp file when the process exits
+    if (forkArgs._mcpTempFile) {
+      const tempFile = forkArgs._mcpTempFile;
+      processHandle.on("exit", () => {
+        try { unlinkSync(tempFile); } catch {}
+      });
+    }
 
     // Catch spawn errors to prevent crashing the provider runtime.
     processHandle.on("error", (spawnError) => {
