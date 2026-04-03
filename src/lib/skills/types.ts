@@ -18,6 +18,8 @@ export type SkillSource =
  */
 export interface SkillMetadata {
   name: string;
+  /** Human-readable display name from frontmatter. */
+  displayName?: string;
   description: string;
   slug?: string;
   version?: string;
@@ -38,8 +40,10 @@ export interface Skill {
   id: string;
   /** URL-friendly slug (e.g., "commit-message") */
   slug: string;
-  /** Display name */
+  /** Slug-based name (used for lookups) */
   name: string;
+  /** Human-readable display name from frontmatter */
+  displayName?: string;
   /** Short description */
   description: string;
   /** Where this skill comes from */
@@ -134,6 +138,8 @@ export interface InstalledSkill extends Skill {
 export interface SkillIndexEntry {
   slug: string;
   name: string;
+  /** Human-readable display name from SKILL.md frontmatter. */
+  displayName?: string;
   description: string;
   source: SkillSource;
   sourceUrl: string;

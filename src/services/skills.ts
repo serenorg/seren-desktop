@@ -100,6 +100,7 @@ function indexEntryToSkill(entry: SkillIndexEntry): Skill {
     id: `${entry.source}:${entry.slug}`,
     slug: entry.slug,
     name: entry.name,
+    displayName: entry.displayName,
     description: entry.description,
     source: entry.source,
     sourceUrl: entry.sourceUrl,
@@ -116,6 +117,7 @@ function skillToIndexEntry(skill: Skill): SkillIndexEntry {
   return {
     slug: skill.slug,
     name: skill.name,
+    displayName: skill.displayName,
     description: skill.description,
     source: skill.source,
     sourceUrl: skill.sourceUrl ?? "",
@@ -163,6 +165,7 @@ async function fetchSkillFromRepo(path: string): Promise<Skill | null> {
     id: `serenorg:${slug}`,
     slug,
     name: resolveSkillDisplayName(parsed, slug),
+    displayName: parsed.metadata.displayName,
     description: parsed.metadata.description || "Install this skill to add it.",
     source: "serenorg" as SkillSource,
     sourceUrl,

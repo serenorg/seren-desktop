@@ -155,6 +155,9 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
         case "slug":
           metadata.slug = cleanValue;
           break;
+        case "display-name":
+          metadata.displayName = cleanValue;
+          break;
         case "description":
           metadata.description = cleanValue;
           break;
