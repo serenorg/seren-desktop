@@ -1637,13 +1637,30 @@ export const agentStore = {
         conversationId,
         state.error,
       );
-      const fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
+      // Try resuming the remote session (preserves history). If the session
+      // file is corrupted, this will also fail — fall through to fresh.
+      let fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
         localSessionId: conversationId,
         resumeAgentSessionId: remoteSessionId,
         conversationTitle: convo.title,
         restoredMessages,
         bootstrapPromptContext: pendingBootstrapPromptContext,
       });
+
+      // If resume-based fallback also failed, the session file is likely
+      // corrupted (Claude CLI exits code=1 with no stderr). Start a
+      // completely fresh session without --resume so the thread is usable.
+      if (!fallbackSessionId) {
+        console.warn(
+          "[AgentStore] Resume fallback also failed — spawning without --resume for",
+          conversationId,
+        );
+        fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
+          localSessionId: conversationId,
+          conversationTitle: convo.title,
+        });
+      }
+
       if (fallbackSessionId) {
         // Clear error state and remove stale error messages left by the
         // failed first spawn. Without this, "Claude Code request failed"
