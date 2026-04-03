@@ -45,13 +45,14 @@ const PINNED_TOOL_NAMES: &[&str] = &[
     // Core Seren publisher and database tools — without these, skills that
     // use SerenDB (run_sql, create_project, etc.) or publishers (call_publisher)
     // silently fail because BM25 drops them for non-technical prompts.
-    "gateway__call_publisher",
-    "gateway__run_sql",
-    "gateway__run_sql_transaction",
-    "gateway__list_projects",
-    "gateway__create_project",
-    "gateway__list_databases",
-    "gateway__create_database",
+    // Tool names use the format gateway__{publisher}__{toolName}.
+    "gateway__seren-mcp__call_publisher",
+    "gateway__seren-mcp__run_sql",
+    "gateway__seren-mcp__run_sql_transaction",
+    "gateway__seren-mcp__list_projects",
+    "gateway__seren-mcp__create_project",
+    "gateway__seren-mcp__list_databases",
+    "gateway__seren-mcp__create_database",
 ];
 
 /// Model-aware tool cap: returns (max_tools, token_budget) for the given model.
@@ -770,14 +771,14 @@ mod tests {
             "Execute a shell command on the user machine",
         ));
 
-        // Add pinned gateway tools so they appear in the output
-        tools.push(make_tool("gateway__call_publisher", "Call a Seren publisher"));
-        tools.push(make_tool("gateway__run_sql", "Execute SQL on SerenDB"));
-        tools.push(make_tool("gateway__run_sql_transaction", "Execute SQL transaction on SerenDB"));
-        tools.push(make_tool("gateway__list_projects", "List Seren projects"));
-        tools.push(make_tool("gateway__create_project", "Create a Seren project"));
-        tools.push(make_tool("gateway__list_databases", "List Seren databases"));
-        tools.push(make_tool("gateway__create_database", "Create a Seren database"));
+        // Add pinned gateway tools (must match gateway__{publisher}__{tool} format)
+        tools.push(make_tool("gateway__seren-mcp__call_publisher", "Call a Seren publisher"));
+        tools.push(make_tool("gateway__seren-mcp__run_sql", "Execute SQL on SerenDB"));
+        tools.push(make_tool("gateway__seren-mcp__run_sql_transaction", "Execute SQL transaction on SerenDB"));
+        tools.push(make_tool("gateway__seren-mcp__list_projects", "List Seren projects"));
+        tools.push(make_tool("gateway__seren-mcp__create_project", "Create a Seren project"));
+        tools.push(make_tool("gateway__seren-mcp__list_databases", "List Seren databases"));
+        tools.push(make_tool("gateway__seren-mcp__create_database", "Create a Seren database"));
 
         // Fill with gateway tools so total exceeds budget
         for i in 0..62 {
