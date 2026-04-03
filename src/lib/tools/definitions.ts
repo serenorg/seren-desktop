@@ -7,7 +7,11 @@ import type {
   ToolDefinition,
   ToolParameterSchema,
 } from "@/lib/providers/types";
-import { type GatewayTool, getGatewayTools } from "@/services/mcp-gateway";
+import {
+  type GatewayTool,
+  getBuiltinToolSchemas,
+  getGatewayTools,
+} from "@/services/mcp-gateway";
 import { getActiveToolsetPublishers } from "@/stores/settings.store";
 
 /**
@@ -356,8 +360,28 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
   const tools: ToolDefinition[] = [...FILE_TOOLS];
   const seenNames = new Set<string>(FILE_TOOLS.map((t) => t.function.name));
 
+  // Add built-in Seren tools (run_sql, list_projects, etc.) — always included,
+  // like file tools. These bypass BM25 and publisher dispatch entirely.
+  for (const schema of getBuiltinToolSchemas()) {
+    const name = `seren__${schema.name}`;
+    if (seenNames.has(name)) continue;
+    tools.push({
+      type: "function",
+      function: {
+        name,
+        description: schema.description || `Seren built-in: ${schema.name}`,
+        parameters: {
+          type: "object",
+          properties: schema.inputSchema?.properties ?? {},
+          required: schema.inputSchema?.required,
+        },
+      },
+    });
+    seenNames.add(name);
+  }
+
   // Add tools from connected local MCP servers (user-added) - high priority
-  // IMPORTANT: Exclude "seren-gateway" server as those tools are handled by getGatewayTools()
+  // IMPORTANT: Exclude "seren-gateway" server as those tools are handled separately
   const mcpTools = mcpClient.getAllTools();
   for (const { serverName, tool } of mcpTools) {
     // Skip seren-gateway tools - they're added via getGatewayTools() below

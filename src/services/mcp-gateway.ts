@@ -113,24 +113,12 @@ function parsePublisherFromToolName(toolName: string): {
  * Convert MCP tool to GatewayTool format.
  * Stores the bare tool name (without mcp__publisher__ prefix) so that
  * callGatewayTool() can dispatch through call_publisher correctly.
- * Built-in gateway tools (no mcp__ prefix) are included under "seren-mcp".
+ * Returns null for built-in gateway tools — those are handled separately
+ * as first-class SEREN_TOOLS in definitions.ts.
  */
 function convertToGatewayTool(tool: McpTool): GatewayTool | null {
   const parsed = parsePublisherFromToolName(tool.name);
-  if (!parsed) {
-    // Built-in gateway tool (e.g. call_publisher, run_sql, list_projects).
-    // These don't have the mcp__publisher__ prefix but are core SerenDB
-    // capabilities that must be available to the model.
-    return {
-      publisher: "seren-mcp",
-      publisherName: "Seren",
-      tool: {
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema as McpToolInfo["inputSchema"],
-      },
-    };
-  }
+  if (!parsed) return null;
   return {
     publisher: parsed.publisher,
     publisherName: parsed.publisher,
@@ -314,12 +302,9 @@ export async function initializeGateway(): Promise<void> {
             `${parsed.publisher}:${parsed.originalName}`,
             tool.name,
           );
-        } else {
-          // Built-in gateway tools (no mcp__ prefix) — index under seren-mcp
-          // so callGatewayTool("seren-mcp", "list_projects", {}) dispatches
-          // directly via MCP protocol instead of through call_publisher.
-          nativeMcpTools.set(`seren-mcp:${tool.name}`, tool.name);
         }
+        // Built-in tools (no mcp__ prefix) are handled by SEREN_TOOLS
+        // in definitions.ts with their own execution path.
       }
 
       // Convert publisher MCP tools to GatewayTool format (skip built-in tools)
@@ -364,11 +349,52 @@ export async function initializeGateway(): Promise<void> {
 }
 
 /**
- * Get all cached gateway tools.
+ * Get all cached gateway tools (publisher tools only, not built-in).
  * Returns empty array if not initialized.
  */
 export function getGatewayTools(): GatewayTool[] {
   return cachedTools;
+}
+
+/**
+ * Get tool schemas for built-in gateway tools (run_sql, list_projects, etc.).
+ * These are first-class Seren tools, not publisher tools.
+ */
+export function getBuiltinToolSchemas(): McpToolInfo[] {
+  const connection = mcpClient.getConnection(SEREN_MCP_SERVER_NAME);
+  if (!connection) return [];
+  return connection.tools
+    .filter((t) => !parsePublisherFromToolName(t.name))
+    .map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: (t.inputSchema ?? { type: "object", properties: {} }) as McpToolInfo["inputSchema"],
+    }));
+}
+
+/**
+ * Call a built-in Seren gateway tool directly via MCP protocol.
+ * No publisher dispatch — these are first-class tools on the gateway.
+ */
+export async function callSerenTool(
+  toolName: string,
+  args: Record<string, unknown>,
+) {
+  if (!isConnected) {
+    throw new McpGatewayError("MCP Gateway not connected", 503, MCP_GATEWAY_URL);
+  }
+  const startTime = Date.now();
+  const result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {
+    name: toolName,
+    arguments: args,
+  });
+  const executionTime = Date.now() - startTime;
+  return {
+    result: result.content,
+    is_error: result.isError ?? false,
+    execution_time_ms: executionTime,
+    response_bytes: JSON.stringify(result).length,
+  };
 }
 
 /**
