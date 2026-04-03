@@ -91,7 +91,9 @@ import {
   type AgentConversation as DbAgentConversation,
   getAgentConversation,
   getAgentConversations,
+  getMessages,
   getSerenApiKey,
+  saveMessage,
   setAgentConversationMetadata as setAgentConversationMetadataDb,
   setAgentConversationModelId as setAgentConversationModelIdDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
@@ -355,15 +357,64 @@ function serializeAgentConversationMetadata(
 }
 
 /**
- * Provider-owned agent transcripts are not stored in Seren SQLite.
- * We keep only in-memory session messages plus narrow bootstrap metadata for
- * exact local forks that have not materialized provider history yet.
+ * Persist an agent message to SQLite so history survives session restarts.
+ * Only user and assistant messages are stored — tool calls, diffs, and
+ * internal events are transient and replayed by the provider.
  */
 function persistAgentMessage(
-  _conversationId: string,
-  _msg: AgentMessage,
+  conversationId: string,
+  msg: AgentMessage,
 ): void {
-  // Intentionally no-op.
+  if (msg.type !== "user" && msg.type !== "assistant") return;
+  saveMessage(
+    msg.id,
+    conversationId,
+    msg.type === "user" ? "user" : "assistant",
+    msg.content,
+    null,
+    msg.timestamp,
+    null,
+  ).catch((error) =>
+    console.warn("[AgentStore] Failed to persist agent message:", error),
+  );
+}
+
+/**
+ * Load persisted agent messages from SQLite and build a conversation summary
+ * for bootstrapping a fresh session. Returns { messages, context } where
+ * messages are AgentMessage[] for the UI and context is a string for the agent.
+ */
+async function loadPersistedAgentHistory(
+  conversationId: string,
+): Promise<{ messages: AgentMessage[]; context: string }> {
+  try {
+    const stored = await getMessages(conversationId, 200);
+    if (!stored || stored.length === 0) {
+      return { messages: [], context: "" };
+    }
+
+    const messages: AgentMessage[] = stored.map((m) => ({
+      id: m.id,
+      type: m.role === "user" ? ("user" as const) : ("assistant" as const),
+      content: m.content,
+      timestamp: m.timestamp,
+    }));
+
+    // Build a concise conversation summary for the agent's context
+    const lines = stored.map(
+      (m) =>
+        `[${m.role}]: ${m.content.length > 500 ? `${m.content.slice(0, 500)}…` : m.content}`,
+    );
+    const context =
+      "Here is the conversation history from your previous session. " +
+      "Continue from where you left off.\n\n" +
+      lines.join("\n\n");
+
+    return { messages, context };
+  } catch (error) {
+    console.warn("[AgentStore] Failed to load persisted agent history:", error);
+    return { messages: [], context: "" };
+  }
 }
 
 function clearLegacyAgentTranscript(conversationId: string): void {
@@ -1649,15 +1700,21 @@ export const agentStore = {
 
       // If resume-based fallback also failed, the session file is likely
       // corrupted (Claude CLI exits code=1 with no stderr). Start a
-      // completely fresh session without --resume so the thread is usable.
+      // completely fresh session without --resume. Load persisted messages
+      // from SQLite so the user sees their history and the agent gets context.
       if (!fallbackSessionId) {
         console.warn(
           "[AgentStore] Resume fallback also failed — spawning without --resume for",
           conversationId,
         );
+        const persisted = await loadPersistedAgentHistory(conversationId);
         fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
           localSessionId: conversationId,
           conversationTitle: convo.title,
+          restoredMessages:
+            persisted.messages.length > 0 ? persisted.messages : undefined,
+          bootstrapPromptContext:
+            persisted.context || undefined,
         });
       }
 
