@@ -314,6 +314,11 @@ export async function initializeGateway(): Promise<void> {
             `${parsed.publisher}:${parsed.originalName}`,
             tool.name,
           );
+        } else {
+          // Built-in gateway tools (no mcp__ prefix) — index under seren-mcp
+          // so callGatewayTool("seren-mcp", "list_projects", {}) dispatches
+          // directly via MCP protocol instead of through call_publisher.
+          nativeMcpTools.set(`seren-mcp:${tool.name}`, tool.name);
         }
       }
 
