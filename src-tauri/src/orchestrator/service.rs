@@ -834,6 +834,7 @@ async fn execute_multi_task(
         );
 
         let mut handles = Vec::new();
+        let mut active_workers: Vec<Arc<dyn Worker>> = Vec::new();
 
         for subtask in layer {
             // Compute rankings for this subtask's task_type
@@ -899,8 +900,9 @@ async fn execute_multi_task(
             app.emit("orchestrator://transition", &transition)
                 .map_err(|e| format!("Failed to emit transition: {}", e))?;
 
-            // Spawn worker
+            // Spawn worker — keep Arc clone for cancellation
             let worker = create_worker(&routing, app, capabilities)?;
+            active_workers.push(Arc::clone(&worker));
             let subtask_prompt = subtask.prompt.clone();
             let subtask_id = subtask.id.clone();
             let worker_routing = routing.clone();
@@ -947,34 +949,53 @@ async fn execute_multi_task(
         let mut layer_fatal_error: Option<String> = None;
         let cancel_check = cancel_watch_rx.clone();
         for handle in handles {
-            // If already cancelled, abort this handle immediately
+            // If already cancelled, signal workers to stop and abort handles
             if *cancel_check.borrow() {
+                for w in &active_workers {
+                    let _ = w.cancel().await;
+                }
                 handle.abort();
                 continue;
             }
-            match handle.await {
-                Ok(Ok(Ok(()))) => {
-                    layer_had_success = true;
-                }
-                Ok(Ok(Err(e))) => {
-                    log::error!("[Orchestrator] Worker error in layer {}: {}", layer_idx, e);
-                    // Check for fatal errors that should abort the entire plan
-                    if e.contains("402 Payment Required")
-                        || e.contains("Insufficient prepaid balance")
-                    {
-                        layer_fatal_error = Some(e);
+            let mut cancel_for_handle = cancel_check.clone();
+            let cancelled_during_await = tokio::select! {
+                result = handle => {
+                    match result {
+                        Ok(Ok(Ok(()))) => {
+                            layer_had_success = true;
+                        }
+                        Ok(Ok(Err(e))) => {
+                            log::error!("[Orchestrator] Worker error in layer {}: {}", layer_idx, e);
+                            // Check for fatal errors that should abort the entire plan
+                            if e.contains("402 Payment Required")
+                                || e.contains("Insufficient prepaid balance")
+                            {
+                                layer_fatal_error = Some(e);
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            log::error!(
+                                "[Orchestrator] Worker panicked in layer {}: {}",
+                                layer_idx,
+                                e
+                            );
+                        }
+                        Err(e) => {
+                            log::error!("[Orchestrator] Join error in layer {}: {}", layer_idx, e);
+                        }
                     }
+                    false
                 }
-                Ok(Err(e)) => {
-                    log::error!(
-                        "[Orchestrator] Worker panicked in layer {}: {}",
-                        layer_idx,
-                        e
-                    );
+                _ = cancel_for_handle.wait_for(|v| *v) => {
+                    log::info!("[Orchestrator] Cancel arrived during layer {} handle await", layer_idx);
+                    true
                 }
-                Err(e) => {
-                    log::error!("[Orchestrator] Join error in layer {}: {}", layer_idx, e);
+            };
+            if cancelled_during_await {
+                for w in &active_workers {
+                    let _ = w.cancel().await;
                 }
+                break;
             }
         }
 
