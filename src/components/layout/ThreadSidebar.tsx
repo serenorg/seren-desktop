@@ -734,7 +734,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                         <div class="flex items-center gap-2 px-2.5 py-2 mb-1 rounded-md hover:bg-surface-2 transition-colors">
                           <div class="flex-1 min-w-0">
                             <div class="text-[13px] font-medium text-foreground truncate">
-                              {skill.name}
+                              {skill.displayName ?? skill.name}
                             </div>
                             <Show when={skill.description}>
                               <div class="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
