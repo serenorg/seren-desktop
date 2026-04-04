@@ -79,6 +79,7 @@ async function waitForSessionIdle(
 }
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
+import { buildChatRequest, sendProviderMessage } from "@/lib/providers";
 import {
   isPromptTooLongError,
   isRateLimitError,
@@ -100,7 +101,6 @@ import {
   setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
 import { refreshAccessToken } from "@/services/auth";
-import { sendMessage } from "@/services/chat";
 import type {
   AgentEvent,
   AgentInfo,
@@ -361,10 +361,7 @@ function serializeAgentConversationMetadata(
  * Only user and assistant messages are stored — tool calls, diffs, and
  * internal events are transient and replayed by the provider.
  */
-function persistAgentMessage(
-  conversationId: string,
-  msg: AgentMessage,
-): void {
+function persistAgentMessage(conversationId: string, msg: AgentMessage): void {
   if (msg.type !== "user" && msg.type !== "assistant") return;
   saveMessage(
     msg.id,
@@ -1713,8 +1710,7 @@ export const agentStore = {
           conversationTitle: convo.title,
           restoredMessages:
             persisted.messages.length > 0 ? persisted.messages : undefined,
-          bootstrapPromptContext:
-            persisted.context || undefined,
+          bootstrapPromptContext: persisted.context || undefined,
         });
       }
 
@@ -2001,17 +1997,23 @@ ${toCompact.map((m) => `${m.type.toUpperCase()}: ${m.content}`).join("\n\n")}
 
 Summary:`;
 
+      // Always route the summary through the public Seren provider.
+      // sendMessage() uses providerStore.activeProvider which may be
+      // stale from a previous chat thread (e.g. seren-private). The
+      // compaction summary is an internal operation — it must not
+      // depend on UI provider state.
       const summaryModel = "anthropic/claude-sonnet-4";
+      const summaryRequest = buildChatRequest(summaryPrompt, summaryModel);
       let summary: string;
       try {
-        summary = await sendMessage(summaryPrompt, summaryModel);
+        summary = await sendProviderMessage("seren", summaryRequest);
       } catch (firstErr) {
         // If auth expired, attempt a token refresh and retry once
         const msg = firstErr instanceof Error ? firstErr.message : "";
         if (msg.includes("Not authenticated") || msg.includes("401")) {
           const refreshed = await refreshAccessToken();
           if (!refreshed) throw firstErr;
-          summary = await sendMessage(summaryPrompt, summaryModel);
+          summary = await sendProviderMessage("seren", summaryRequest);
         } else {
           throw firstErr;
         }
