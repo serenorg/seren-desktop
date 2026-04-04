@@ -146,6 +146,10 @@ export async function orchestrate(
   prompt: string,
   images?: Attachment[],
 ): Promise<void> {
+  // Show loading indicator immediately so the user sees feedback right
+  // after hitting Enter — before history, memory, and skill context load.
+  conversationStore.setLoading(true);
+
   // Save params for retry support
   lastOrchestrationParams = { conversationId, prompt, images };
 
@@ -188,7 +192,6 @@ export async function orchestrate(
   // 3. Prepare streaming state (message added on completion)
   activeMessageId = crypto.randomUUID();
   streamStartTime = Date.now();
-  conversationStore.setLoading(true);
 
   // 4. Listen for events
   let unlistenTransition: UnlistenFn | null = null;
