@@ -1003,6 +1003,7 @@ export const skills = {
             id: `local:${slug}`,
             slug,
             name: resolveSkillDisplayName(parsed, slug),
+            displayName: parsed.metadata.displayName,
             description: parsed.metadata.description || "",
             source: "local" as SkillSource,
             tags: [],
@@ -1188,6 +1189,7 @@ export const skills = {
       syncState,
       // Override with parsed metadata in case it differs
       name: resolveSkillDisplayName(parsed, skill.slug),
+      displayName: parsed.metadata.displayName,
       description: parsed.metadata.description || skill.description,
       tags: skill.tags,
       author: skill.author,
@@ -1434,6 +1436,7 @@ export const skills = {
     const refreshed: InstalledSkill = {
       ...skill,
       name: resolveSkillDisplayName(parsed, skill.slug),
+      displayName: parsed.metadata.displayName,
       description: parsed.metadata.description || skill.description,
       contentHash: hash,
       upstreamSource: syncState.upstreamSource,
