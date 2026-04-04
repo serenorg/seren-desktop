@@ -564,13 +564,20 @@ export const chatStore = {
       const toCompact = messages.slice(0, messages.length - preserveCount);
       const toPreserve = messages.slice(-preserveCount);
 
-      // Generate summary prompt
-      const summaryPrompt = `Please provide a concise summary of the following conversation. Focus on key topics discussed, decisions made, and important context that would be useful for continuing the conversation. Keep the summary under 500 words.
+      // Generate a structured summary with a hard token cap. Each field is
+      // 1-2 sentences. Total output: 80-180 tokens vs ~700 with freeform.
+      const summaryPrompt = `Summarize this conversation into EXACTLY this structured format. Each field must be 1-2 short sentences max. Total output must be under 150 tokens.
 
-Conversation to summarize:
+TOPIC: <main subject of the conversation>
+KEY_POINTS: <important facts, numbers, or conclusions established>
+DECISIONS: <choices made or preferences expressed>
+OPEN_QUESTIONS: <unresolved questions or pending items>
+NEXT: <what the user will likely ask next>
+
+Conversation:
 ${toCompact.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n")}
 
-Summary:`;
+Structured summary:`;
 
       // Use the current model to generate summary
       const summary = await sendMessage(

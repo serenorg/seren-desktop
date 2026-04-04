@@ -1988,14 +1988,22 @@ export const agentStore = {
       const toCompact = messages.slice(0, messages.length - preserveCount);
       const toPreserve = messages.slice(-preserveCount);
 
-      // Generate summary via Gateway API (not via the agent — its context is
-      // what's overloaded). Uses the default Seren Chat model.
-      const summaryPrompt = `Please provide a concise summary of the following AI coding agent conversation. Focus on: what tasks were requested, what files were modified, key decisions made, and current state of the work. Keep the summary under 500 words.
+      // Generate a structured summary via Gateway API (not via the agent —
+      // its context is what's overloaded). Uses a hard-capped schema to keep
+      // the summary under 200 tokens, down from ~700 with freeform "500 words".
+      // This reduces prompt tokens on every subsequent call by ~70%.
+      const summaryPrompt = `Summarize this AI agent conversation into EXACTLY this structured format. Each field must be 1-2 short sentences max. Total output must be under 150 tokens.
 
-Conversation to summarize:
+GOAL: <what the user is trying to accomplish>
+FILES: <files created or modified, comma-separated paths only>
+DECISIONS: <key technical decisions made>
+STATE: <what is done vs in progress>
+NEXT: <what the user will likely ask next>
+
+Conversation:
 ${toCompact.map((m) => `${m.type.toUpperCase()}: ${m.content}`).join("\n\n")}
 
-Summary:`;
+Structured summary:`;
 
       // Always route the summary through the public Seren provider.
       // sendMessage() uses providerStore.activeProvider which may be
@@ -2091,8 +2099,8 @@ Summary:`;
         .join("\n\n");
 
       const seedPrompt = preservedContext
-        ? `Here is a summary of our prior conversation:\n\n${summary}\n\nHere are the most recent messages:\n\n${preservedContext}\n\nThis context was restored after automatic compaction. Briefly confirm you have this context (1-2 sentences summarizing where we left off), then wait for the user's next message. Do not read files, edit code, or use any tools until the user sends a new message.`
-        : `Here is a summary of our prior conversation:\n\n${summary}\n\nThis context was restored after automatic compaction. Briefly confirm you have this context (1-2 sentences summarizing where we left off), then wait for the user's next message. Do not read files, edit code, or use any tools until the user sends a new message.`;
+        ? `Context restored after automatic compaction.\n\nPrior work summary:\n${summary}\n\nRecent messages:\n${preservedContext}\n\nConfirm you have this context in one sentence, then wait for the user's next message. Do not use any tools.`
+        : `Context restored after automatic compaction.\n\nPrior work summary:\n${summary}\n\nConfirm you have this context in one sentence, then wait for the user's next message. Do not use any tools.`;
 
       // Wait for the new session to be ready, then restore settings and seed
       await waitForSessionReady(newSessionId);
