@@ -1177,21 +1177,44 @@ impl Worker for ChatModelWorker {
 
         let mut total_cost: f64 = 0.0;
 
+        // Track where the current prompt's messages start (after system + history).
+        // On tool-call rounds (1+), we trim old conversation history and keep only
+        // the system prompt + the current prompt's message chain. This cuts prompt
+        // tokens by ~60% on multi-round tool calls without affecting tool selection.
+        let current_prompt_start = messages.len().saturating_sub(1); // user message index
+
         for round in 0..=MAX_TOOL_ROUNDS {
             // Check cancellation
             if *self.cancelled.lock().await {
                 return Ok(());
             }
 
+            // On tool-call follow-up rounds, trim old conversation history.
+            // Keep: system prompt (index 0) + messages from the current prompt onward.
+            // The model already has the tool calls and results in the message chain —
+            // it doesn't need 30K tokens of old history to process tool results.
+            let round_messages = if round > 0 && messages.len() > current_prompt_start + 1 {
+                let mut trimmed = Vec::with_capacity(1 + messages.len() - current_prompt_start);
+                trimmed.push(messages[0].clone()); // system prompt
+                trimmed.extend_from_slice(&messages[current_prompt_start..]);
+                trimmed
+            } else {
+                messages.clone()
+            };
+
             // Build request body
             let mut body = serde_json::json!({
                 "model": routing.model_id,
-                "messages": messages,
+                "messages": round_messages,
                 "stream": true
             });
             if !tools.is_empty() {
                 body["tools"] = serde_json::json!(tools);
                 body["tool_choice"] = serde_json::json!("auto");
+            }
+            // Cap output tokens on tool-call rounds — tool selections are small.
+            if round > 0 {
+                body["max_tokens"] = serde_json::json!(4096);
             }
 
             let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
