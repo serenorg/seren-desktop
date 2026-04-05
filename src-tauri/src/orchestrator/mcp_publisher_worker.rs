@@ -374,6 +374,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: publisher_slug.map(String::from),
             reasoning_effort: None,
+            project_root: None,
         }
     }
 

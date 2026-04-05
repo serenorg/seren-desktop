@@ -6,7 +6,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use futures::StreamExt;
 use log;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -39,6 +39,66 @@ const REQUEST_TIMEOUT_SECS: u64 = 600;
 /// This does NOT affect the user-facing display — full results are still emitted
 /// via `WorkerEvent::ToolResult`.
 const MAX_TOOL_RESULT_CONTEXT_BYTES: usize = 30_000;
+
+// =============================================================================
+// Live Repo Context
+// =============================================================================
+
+/// Gather lightweight git/project context for a directory.
+/// Returns a short string for system prompt injection, or empty if not a git repo.
+fn gather_repo_context(project_root: &str) -> String {
+    let root = std::path::Path::new(project_root);
+    if !root.join(".git").exists() {
+        return String::new();
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+
+    // Current branch
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(root)
+        .output()
+    {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() {
+            parts.push(format!("Branch: {}", branch));
+        }
+    }
+
+    // Dirty file count
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(root)
+        .output()
+    {
+        let status = String::from_utf8_lossy(&output.stdout);
+        let dirty_count = status.lines().filter(|l| !l.is_empty()).count();
+        if dirty_count > 0 {
+            parts.push(format!("Uncommitted changes: {} files", dirty_count));
+        } else {
+            parts.push("Working tree: clean".to_string());
+        }
+    }
+
+    // Recent commits (last 5)
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["log", "--oneline", "-5"])
+        .current_dir(root)
+        .output()
+    {
+        let log = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !log.is_empty() {
+            parts.push(format!("Recent commits:\n{}", log));
+        }
+    }
+
+    if parts.is_empty() {
+        return String::new();
+    }
+
+    format!("Project: {}\n{}", project_root, parts.join("\n"))
+}
 
 // =============================================================================
 // Types for SSE Parsing and Tool Execution
@@ -257,10 +317,11 @@ impl ChatModelWorker {
         skill_content: &str,
         tools: &[serde_json::Value],
         images: &[ImageAttachment],
+        project_root: Option<&str>,
     ) -> serde_json::Value {
         let mut messages: Vec<serde_json::Value> = Vec::new();
 
-        // System prompt: base + tool inventory + skill content.
+        // System prompt: base + repo context + tool inventory + skill content.
         // The tool inventory ensures the model knows about ALL connected services,
         // not just the skills matched by the classifier.
         let tool_inventory = Self::build_tool_inventory(tools);
@@ -272,6 +333,13 @@ impl ChatModelWorker {
              or look for keys like SEREN_API_KEY. Just call the tools directly."
                 .to_string(),
         ];
+        // Inject live repo context (git branch, status, recent commits)
+        if let Some(root) = project_root {
+            let repo_context = gather_repo_context(root);
+            if !repo_context.is_empty() {
+                system_parts.push(repo_context);
+            }
+        }
         if !tool_inventory.is_empty() {
             system_parts.push(tool_inventory);
         }
@@ -931,6 +999,18 @@ impl ChatModelWorker {
         )
     }
 
+    /// Check if a tool is a file-read operation (for deduplication).
+    fn is_file_read_tool(name: &str) -> bool {
+        name == "read_file"
+    }
+
+    /// Extract the file path from a tool's arguments JSON.
+    fn extract_file_path(arguments: &str) -> Option<String> {
+        serde_json::from_str::<serde_json::Value>(arguments)
+            .ok()
+            .and_then(|v| v.get("path").and_then(|p| p.as_str()).map(String::from))
+    }
+
     /// Execute a local tool by name with the given arguments.
     /// Returns (result_content, is_error).
     async fn execute_tool(name: &str, arguments: &str) -> (String, bool) {
@@ -1159,7 +1239,7 @@ impl Worker for ChatModelWorker {
         );
         let tools = &budgeted_tools;
 
-        // Build initial request body (includes system prompt, history, user message, images)
+        // Build initial request body (includes system prompt, repo context, history, user message, images)
         let initial_body = self.build_request_body(
             prompt,
             conversation_context,
@@ -1167,6 +1247,7 @@ impl Worker for ChatModelWorker {
             skill_content,
             tools,
             images,
+            routing.project_root.as_deref(),
         );
 
         // Extract messages for the tool execution loop
@@ -1174,6 +1255,10 @@ impl Worker for ChatModelWorker {
             .as_array()
             .cloned()
             .unwrap_or_default();
+
+        // Track file paths already read in this execution to avoid re-inlining
+        // the same content. On duplicate reads, return a short reference instead.
+        let mut read_file_paths: HashSet<String> = HashSet::new();
 
         let mut total_cost: f64 = 0.0;
 
@@ -1396,9 +1481,31 @@ impl Worker for ChatModelWorker {
                             })
                             .await;
 
+                        // Deduplicate file reads: if the same path was already
+                        // read in this execution, return a short reference instead
+                        // of re-inlining the full content.
+                        let deduped_content = if Self::is_file_read_tool(&tc.name) {
+                            if let Some(path) = Self::extract_file_path(&tc.arguments) {
+                                if read_file_paths.contains(&path) {
+                                    log::info!(
+                                        "[ChatModelWorker] Dedup: file already read: {}",
+                                        path
+                                    );
+                                    format!("[File already in context: {}]", path)
+                                } else {
+                                    read_file_paths.insert(path);
+                                    result_content.clone()
+                                }
+                            } else {
+                                result_content.clone()
+                            }
+                        } else {
+                            result_content.clone()
+                        };
+
                         // Truncate tool result for LLM context to prevent
                         // unbounded payload growth that causes upstream 408s.
-                        let context_content = Self::truncate_for_context(&result_content, &tc.name);
+                        let context_content = Self::truncate_for_context(&deduped_content, &tc.name);
 
                         // Add tool result message for the next API call
                         messages.push(serde_json::json!({
@@ -1454,6 +1561,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            project_root: None,
         };
 
         let body = worker.build_request_body(
@@ -1463,6 +1571,7 @@ mod tests {
             "",
             &[],
             &[],
+            None,
         );
 
         assert_eq!(body["model"], "anthropic/claude-sonnet-4");
@@ -1486,6 +1595,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            project_root: None,
         };
 
         let body = worker.build_request_body(
@@ -1495,6 +1605,7 @@ mod tests {
             "# Active Skills\n\n## Skill: Prose",
             &[],
             &[],
+            None,
         );
 
         let system_msg = body["messages"][0]["content"].as_str().unwrap();
@@ -1513,6 +1624,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            project_root: None,
         };
 
         let tools = vec![serde_json::json!({
@@ -1524,7 +1636,7 @@ mod tests {
             }
         })];
 
-        let body = worker.build_request_body("Search for news", &[], &routing, "", &tools, &[]);
+        let body = worker.build_request_body("Search for news", &[], &routing, "", &tools, &[], None);
 
         assert!(body.get("tools").is_some());
         assert_eq!(body["tool_choice"], "auto");
@@ -1699,6 +1811,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            project_root: None,
         };
 
         let images = vec![ImageAttachment {
@@ -1708,7 +1821,7 @@ mod tests {
         }];
 
         let body =
-            worker.build_request_body("What is in this image?", &[], &routing, "", &[], &images);
+            worker.build_request_body("What is in this image?", &[], &routing, "", &[], &images, None);
 
         let messages = body["messages"].as_array().unwrap();
         let user_msg = &messages[messages.len() - 1];
@@ -2016,6 +2129,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            project_root: None,
         };
         let tools = vec![
             make_tool("gateway__gmail__get_messages"),
@@ -2023,7 +2137,7 @@ mod tests {
             make_tool("read_file"),
         ];
 
-        let body = worker.build_request_body("Hello", &[], &routing, "", &tools, &[]);
+        let body = worker.build_request_body("Hello", &[], &routing, "", &tools, &[], None);
         let system_msg = body["messages"][0]["content"].as_str().unwrap();
 
         assert!(system_msg.contains("gmail"), "system prompt must list gmail publisher");
@@ -2048,11 +2162,12 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            project_root: None,
         };
         let tools = vec![make_tool("gateway__gmail__send_message")];
         let skill_content = "# Active Skills\n\n## Skill: Google Docs\n\nCreate documents.";
 
-        let body = worker.build_request_body("Hello", &[], &routing, skill_content, &tools, &[]);
+        let body = worker.build_request_body("Hello", &[], &routing, skill_content, &tools, &[], None);
         let system_msg = body["messages"][0]["content"].as_str().unwrap();
 
         // Both sections present
@@ -2072,9 +2187,10 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            project_root: None,
         };
 
-        let body = worker.build_request_body("Hi", &[], &routing, "", &[], &[]);
+        let body = worker.build_request_body("Hi", &[], &routing, "", &[], &[], None);
         let system_msg = body["messages"][0]["content"].as_str().unwrap();
 
         assert!(

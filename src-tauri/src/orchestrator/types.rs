@@ -105,6 +105,9 @@ pub struct RoutingDecision {
     /// Reasoning effort level forwarded from the frontend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Project root for live repo context injection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -164,6 +167,10 @@ pub struct UserCapabilities {
     /// Values: "minimal", "low", "medium", "high", "xhigh". None = provider default.
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    /// Project root directory path. Used to gather live repo context (git status,
+    /// branch, directory structure) for injection into the system prompt.
+    #[serde(default)]
+    pub project_root: Option<String>,
 }
 
 impl UserCapabilities {
@@ -367,6 +374,7 @@ mod tests {
             }],
             publisher_slug: None,
             reasoning_effort: None,
+            project_root: None,
         };
 
         let json = serde_json::to_string(&decision).unwrap();
@@ -468,6 +476,7 @@ mod tests {
             installed_skills: vec![],
             model_rankings: vec![],
             reasoning_effort: None,
+            project_root: None,
         };
 
         assert_eq!(
@@ -491,8 +500,65 @@ mod tests {
             installed_skills: vec![],
             model_rankings: vec![],
             reasoning_effort: None,
+            project_root: None,
         };
 
         assert_eq!(caps.configured_private_chat_deployment_id(), None);
     }
+}
+
+// =============================================================================
+// Bounded Subagent Types
+// =============================================================================
+
+/// Constraints for a bounded subagent spawned from a parent session.
+/// Restricts tool access, file scope, and execution limits.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubagentConstraints {
+    /// Tool names the subagent is allowed to use. Empty = all tools.
+    #[serde(default)]
+    pub tool_allowlist: Vec<String>,
+    /// Tool names the subagent is NOT allowed to use.
+    #[serde(default)]
+    pub tool_blocklist: Vec<String>,
+    /// If true, subagent cannot use write/delete/execute tools.
+    #[serde(default)]
+    pub read_only: bool,
+    /// Maximum number of tool execution rounds before forced completion.
+    #[serde(default)]
+    pub max_rounds: Option<usize>,
+    /// Maximum output tokens per round.
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
+    /// Restrict file access to paths under these directories.
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
+}
+
+/// Request to spawn a bounded subagent from a parent session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubagentRequest {
+    /// Parent conversation ID that spawned this subagent.
+    pub parent_conversation_id: String,
+    /// Task description for the subagent.
+    pub prompt: String,
+    /// Context from the parent session (truncated summary, not full history).
+    pub parent_context: String,
+    /// Constraints applied to the subagent.
+    pub constraints: SubagentConstraints,
+    /// Model to use (inherits from parent if not specified).
+    pub model_id: Option<String>,
+}
+
+/// Result returned by a bounded subagent to its parent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubagentResult {
+    /// Whether the subagent completed successfully.
+    pub success: bool,
+    /// The subagent's final output.
+    pub content: String,
+    /// Number of tool rounds executed.
+    pub rounds_used: usize,
+    /// Files read or modified by the subagent.
+    pub files_touched: Vec<String>,
 }

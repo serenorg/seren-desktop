@@ -730,5 +730,6 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
       path: s.path,
     })),
     reasoning_effort: chatStore.reasoningEffort ?? null,
+    project_root: fileTreeState.rootPath ?? null,
   };
 }
