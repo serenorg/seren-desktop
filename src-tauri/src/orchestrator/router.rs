@@ -917,7 +917,7 @@ mod tests {
         let classification = make_classification("general_chat", false, false);
         let capabilities = make_capabilities(false, &[], &[]);
         let decision = route(&classification, &capabilities, "test query");
-        assert_eq!(decision.model_id, "anthropic/claude-sonnet-4");
+        assert_eq!(decision.model_id, "arcee-ai/trinity-large-thinking");
     }
 
     #[test]
