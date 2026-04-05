@@ -106,11 +106,6 @@ const DEFAULT_MODELS: ProviderModel[] = [
     contextWindow: 1000000,
   },
   {
-    id: "anthropic/claude-opus-4.5",
-    name: "Claude Opus 4.5",
-    contextWindow: 200000,
-  },
-  {
     id: "anthropic/claude-sonnet-4",
     name: "Claude Sonnet 4",
     contextWindow: 200000,
@@ -121,34 +116,17 @@ const DEFAULT_MODELS: ProviderModel[] = [
     contextWindow: 200000,
   },
   // OpenAI
-  { id: "openai/gpt-5", name: "GPT-5", contextWindow: 128000 },
-  { id: "openai/gpt-4o", name: "GPT-4o", contextWindow: 128000 },
-  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", contextWindow: 128000 },
+  { id: "openai/gpt-5.4", name: "GPT-5.4", contextWindow: 128000 },
   // Google Gemini
   {
     id: "google/gemini-3.1-pro-preview",
     name: "Gemini 3.1 Pro",
     contextWindow: 1048576,
   },
+  // Arcee AI
   {
-    id: "google/gemini-3-flash-preview",
-    name: "Gemini 3 Flash",
-    contextWindow: 1048576,
-  },
-  {
-    id: "google/gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
-    contextWindow: 1000000,
-  },
-  {
-    id: "google/gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    contextWindow: 1000000,
-  },
-  // Zhipu AI
-  {
-    id: "thudm/glm-4",
-    name: "GLM-4",
+    id: "arcee-ai/trinity-large-thinking",
+    name: "Trinity Large Thinking",
     contextWindow: 128000,
   },
 ];

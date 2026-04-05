@@ -145,8 +145,8 @@ const AGENT_TO_SEREN_MODEL: Array<[pattern: string, serenId: string]> = [
 
 /** Default Seren model per agent type when no match is found. */
 const DEFAULT_SEREN_MODELS: Record<AgentType, string> = {
-  "claude-code": "anthropic/claude-sonnet-4",
-  codex: "openai/gpt-4o",
+  "claude-code": "arcee-ai/trinity-large-thinking",
+  codex: "arcee-ai/trinity-large-thinking",
 };
 
 /**
@@ -165,7 +165,7 @@ export function mapAgentModelToChat(
       }
     }
   }
-  return DEFAULT_SEREN_MODELS[agentType] ?? "anthropic/claude-sonnet-4";
+  return DEFAULT_SEREN_MODELS[agentType] ?? "arcee-ai/trinity-large-thinking";
 }
 
 /**
