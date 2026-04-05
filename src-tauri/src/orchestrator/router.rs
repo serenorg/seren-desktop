@@ -83,6 +83,7 @@ pub fn route(
         selected_skills,
         publisher_slug,
         reasoning_effort: capabilities.reasoning_effort.clone(),
+        project_root: capabilities.project_root.clone(),
     }
 }
 
@@ -555,6 +556,7 @@ mod tests {
             installed_skills: vec![],
             model_rankings: vec![],
             reasoning_effort: None,
+            project_root: None,
         }
     }
 
@@ -584,6 +586,7 @@ mod tests {
             installed_skills: skills,
             model_rankings: vec![],
             reasoning_effort: None,
+            project_root: None,
         }
     }
 
