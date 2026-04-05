@@ -278,7 +278,7 @@ fn select_model(classification: &TaskClassification, capabilities: &UserCapabili
         .available_models
         .first()
         .cloned()
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4".to_string())
+        .unwrap_or_else(|| "arcee-ai/trinity-large-thinking".to_string())
 }
 
 /// Resolve skill slugs from the classification to full SkillRef objects.

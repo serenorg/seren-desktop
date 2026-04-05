@@ -17,7 +17,7 @@ import {
 import type { UnifiedMessage } from "@/types/conversation";
 import { deserializeMetadata, serializeMetadata } from "@/types/conversation";
 
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4";
+const DEFAULT_MODEL = "arcee-ai/trinity-large-thinking";
 const MAX_MESSAGES_PER_CONVERSATION = 1000;
 
 export interface Conversation {

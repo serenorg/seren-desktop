@@ -55,7 +55,7 @@ describe("conversationStore", () => {
       expect(convo.id).toBe("test-uuid-1");
       expect(convo.title).toBe("Test");
       expect(convo.isArchived).toBe(false);
-      expect(convo.selectedModel).toBe("anthropic/claude-sonnet-4");
+      expect(convo.selectedModel).toBe("arcee-ai/trinity-large-thinking");
     });
 
     it("sets new conversation as active", async () => {
@@ -79,7 +79,7 @@ describe("conversationStore", () => {
       expect(createConversation).toHaveBeenCalledWith(
         convo.id,
         "With Project",
-        "anthropic/claude-sonnet-4",
+        "arcee-ai/trinity-large-thinking",
         undefined,
         "/Users/dev/my-project",
       );

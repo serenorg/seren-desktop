@@ -142,7 +142,7 @@ export interface ToolsetSettings {
  */
 const DEFAULT_SETTINGS: Settings = {
   // Chat
-  chatDefaultModel: "anthropic/claude-sonnet-4",
+  chatDefaultModel: "arcee-ai/trinity-large-thinking",
   chatMaxHistoryMessages: 50,
   chatEnterToSend: true,
   chatShowThinking: false,
@@ -160,7 +160,7 @@ const DEFAULT_SETTINGS: Settings = {
   completionEnabled: true,
   completionDelay: 300,
   completionMaxSuggestionLines: 6,
-  completionModelId: "anthropic/claude-sonnet-4",
+  completionModelId: "arcee-ai/trinity-large-thinking",
   completionDisabledLanguages: ["markdown", "plaintext"],
   // Wallet
   showBalance: true,

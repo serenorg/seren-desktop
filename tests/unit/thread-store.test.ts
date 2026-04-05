@@ -82,7 +82,7 @@ vi.mock("@/stores/conversation.store", () => ({
         id: `chat-${mockConversations.conversations.length + 1}`,
         title,
         createdAt: Date.now(),
-        selectedModel: "anthropic/claude-sonnet-4",
+        selectedModel: "arcee-ai/trinity-large-thinking",
         selectedProvider: null,
         projectRoot: _projectRoot ?? null,
         isArchived: false,
