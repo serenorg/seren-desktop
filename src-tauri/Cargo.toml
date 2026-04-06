@@ -49,7 +49,7 @@ jiff = { version = "0.2", features = ["serde"] }
 thiserror = "2"
 alloy = { version = "1", default-features = false, features = ["signers", "signer-local", "sol-types"] }
 hex = "0.4"
-hmac = "0.12"
+hmac = "0.13"
 rand = "0.10"
 rand_distr = "0.6"
 sha2 = "0.10"
