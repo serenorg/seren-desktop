@@ -194,7 +194,7 @@ fn summarize_gateway_error(status: reqwest::StatusCode, body_text: &str) -> Stri
     format!(
         "Gateway returned HTTP {}: {}",
         status,
-        &trimmed[..trimmed.len().min(200)]
+        &trimmed[..trimmed.floor_char_boundary(200)]
     )
 }
 
@@ -489,7 +489,7 @@ impl ChatModelWorker {
             Err(_) => {
                 log::debug!(
                     "[ChatModelWorker] Non-JSON SSE data: {}",
-                    &data[..data.len().min(200)]
+                    &data[..data.floor_char_boundary(200)]
                 );
                 return result;
             }
@@ -497,7 +497,7 @@ impl ChatModelWorker {
 
         log::debug!(
             "[ChatModelWorker] SSE chunk: {}",
-            &data[..data.len().min(300)]
+            &data[..data.floor_char_boundary(300)]
         );
 
         // Extract cost from Gateway wrapper (present at top level)
@@ -609,7 +609,7 @@ impl ChatModelWorker {
         {
             log::debug!(
                 "[ChatModelWorker] No events extracted from SSE data: {}",
-                &data[..data.len().min(300)]
+                &data[..data.floor_char_boundary(300)]
             );
         }
 
@@ -754,7 +754,7 @@ impl ChatModelWorker {
                     "[ChatModelWorker] Chunk #{} ({} bytes): {}",
                     chunk_count,
                     chunk.len(),
-                    &text[..text.len().min(500)]
+                    &text[..text.floor_char_boundary(500)]
                 );
             }
 
@@ -781,13 +781,13 @@ impl ChatModelWorker {
                     // Fallback: raw JSON line without SSE data: prefix (NDJSON)
                     log::debug!(
                         "[ChatModelWorker] Raw JSON line (no data: prefix): {}",
-                        &line[..line.len().min(200)]
+                        &line[..line.floor_char_boundary(200)]
                     );
                     line.clone()
                 } else {
                     log::debug!(
                         "[ChatModelWorker] Skipping unrecognized SSE line: {}",
-                        &line[..line.len().min(200)]
+                        &line[..line.floor_char_boundary(200)]
                     );
                     continue;
                 };
@@ -1138,7 +1138,7 @@ impl ChatModelWorker {
             "[ChatModelWorker] Frontend tool execution starting: {} (id: {}, args: {})",
             name,
             tool_call_id,
-            &arguments[..arguments.len().min(200)]
+            &arguments[..arguments.floor_char_boundary(200)]
         );
 
         let bridge = app.state::<ToolResultBridge>();
@@ -1230,7 +1230,7 @@ impl Worker for ChatModelWorker {
         );
         log::debug!(
             "[ChatModelWorker] Prompt preview: {}",
-            &prompt[..prompt.len().min(50)]
+            &prompt[..prompt.floor_char_boundary(50)]
         );
 
         let url = format!(

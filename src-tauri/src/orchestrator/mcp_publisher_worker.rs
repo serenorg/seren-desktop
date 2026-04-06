@@ -348,7 +348,7 @@ impl Worker for McpPublisherWorker {
             return Err(format!(
                 "Publisher returned HTTP {}: {}",
                 status,
-                &body_text[..body_text.len().min(200)]
+                &body_text[..body_text.floor_char_boundary(200)]
             ));
         }
 
