@@ -101,6 +101,7 @@ import {
   setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
 import { refreshAccessToken } from "@/services/auth";
+import { getCallablePublisherSlugs } from "@/services/mcp-gateway";
 import type {
   AgentEvent,
   AgentInfo,
@@ -1812,6 +1813,27 @@ export const agentStore = {
         "[AgentStore] Failed to load skills for agent prompt:",
         error,
       );
+    }
+
+    // Inject publisher inventory so the agent knows which services are
+    // available via call_publisher / list_agent_publishers. Without this,
+    // the agent checks MCP resources (empty) and concludes services like
+    // GitHub are unavailable.
+    const publisherSlugs = getCallablePublisherSlugs();
+    if (publisherSlugs.length > 0) {
+      const publisherList = publisherSlugs.sort().join(", ");
+      mergedContext = [
+        {
+          type: "text",
+          text:
+            "Available Seren MCP Publishers (callable via your seren-mcp tools): " +
+            publisherList +
+            ". Use list_agent_publishers to discover tools for a specific publisher, " +
+            "then call_publisher to invoke them. Do NOT say a service is unavailable " +
+            "without first checking this list.",
+        },
+        ...mergedContext,
+      ];
     }
 
     return mergedContext.length > 0 ? mergedContext : undefined;
