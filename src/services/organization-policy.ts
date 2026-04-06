@@ -40,6 +40,8 @@ export interface OrganizationPrivateModelsPolicy {
   hide_model_picker: boolean;
   session_database: ManagedAgentSessionDatabase | null;
   private_output_policy: ManagedAgentPrivateOutputPolicy;
+  otp_required_for_private_models?: boolean;
+  otp_verification_ttl?: "30m" | "8h" | "12h";
   updated_at: string;
 }
 
@@ -109,3 +111,17 @@ export async function getDefaultOrganizationPrivateModelsPolicy(): Promise<Organ
 
 export const getDefaultOrganizationPrivateChatPolicy =
   getDefaultOrganizationPrivateModelsPolicy;
+
+/**
+ * Check if a private-model action requires OTP step-up.
+ * Returns "enroll" | "challenge" | null (allowed).
+ */
+export function requiresOtpStepUp(
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
+  isPrivateModel: boolean,
+  otpGate: () => "enroll" | "challenge" | null,
+): "enroll" | "challenge" | null {
+  if (!isPrivateModel) return null;
+  if (!policy?.otp_required_for_private_models) return null;
+  return otpGate();
+}
