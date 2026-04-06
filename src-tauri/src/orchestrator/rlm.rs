@@ -308,7 +308,7 @@ fn split_at_budget(text: &str, budget: usize) -> Vec<String> {
 
     // Try to find the best split point within [budget/2 .. budget]
     let window_start = budget / 2;
-    let search_region = &text[..budget.min(text.len())];
+    let search_region = &text[..text.floor_char_boundary(budget)];
 
     // Priority 1: heading boundary (line starting with #, or "N. ", "N) ")
     if let Some(pos) = find_heading_boundary(search_region, window_start) {
