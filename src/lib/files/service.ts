@@ -200,12 +200,27 @@ function entriesToNodes(entries: FileEntry[]): FileNode[] {
 /**
  * Open a file in a tab.
  */
-export async function openFileInTab(path: string): Promise<void> {
-  console.log("[openFileInTab] Opening file:", path);
+export async function openFileInTab(rawPath: string): Promise<void> {
+  // Strip line/column anchors (#L79, #L10-L20) from the path before reading.
+  // Agent-generated links include these for navigation but the OS can't open
+  // a file with '#' in the name.
+  const anchorMatch = rawPath.match(/^(.+?)#L(\d+)(?:-L?\d+)?$/);
+  const path = anchorMatch ? anchorMatch[1] : rawPath;
+  const line = anchorMatch ? Number.parseInt(anchorMatch[2], 10) : undefined;
+
+  console.log(
+    "[openFileInTab] Opening file:",
+    path,
+    line ? `line ${line}` : "",
+  );
   const content = await readFile(path);
   console.log("[openFileInTab] Read content length:", content.length);
   const tabId = openTab(path, content);
-  console.log("[openFileInTab] Opened tab:", tabId);
+  console.log(
+    "[openFileInTab] Opened tab:",
+    tabId,
+    line ? `→ line ${line}` : "",
+  );
 }
 
 /**
