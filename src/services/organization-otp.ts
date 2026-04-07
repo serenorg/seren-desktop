@@ -224,11 +224,34 @@ function createOrganizationOtpService() {
     let helperText: string | null = null;
 
     if (denial.reason === "unenrolled") {
-      challenge = await beginEnrollment();
-      qrCodeDataUrl = await toDataURL(challenge.otpauth_uri, {
-        margin: 1,
-        width: 220,
-      });
+      try {
+        challenge = await beginEnrollment();
+        qrCodeDataUrl = await toDataURL(challenge.otpauth_uri, {
+          margin: 1,
+          width: 220,
+        });
+      } catch (error) {
+        phase = "locked";
+        helperText =
+          error instanceof Error
+            ? error.message
+            : "Failed to begin OTP enrollment.";
+
+        return new Promise((resolve) => {
+          setPendingRequest({
+            denial,
+            challenge: null,
+            qrCodeDataUrl: null,
+            phase,
+            helperText,
+            resolve: (approved) => {
+              setPendingRequest(null);
+              setErrorMessage(null);
+              resolve(approved);
+            },
+          });
+        });
+      }
       phase = "enroll";
       helperText = `Scan the QR code or enter the key below, then enter a 6-digit code to enroll for ${scopeLabel(denial.scope)}.`;
     } else if (denial.reason === "expired") {
