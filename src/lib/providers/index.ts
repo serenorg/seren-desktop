@@ -5,7 +5,6 @@ import { getOAuthCredentials } from "@/lib/tauri-bridge";
 import { needsRefresh, refreshOAuthToken } from "@/services/oauth";
 import { providerStore } from "@/stores/provider.store";
 import { anthropicProvider } from "./anthropic";
-import { geminiProvider } from "./gemini";
 import { openaiProvider } from "./openai";
 import { serenProvider } from "./seren";
 import { serenPrivateProvider } from "./seren-private";
@@ -29,7 +28,6 @@ const providers: Record<ProviderId, ProviderAdapter> = {
   "seren-private": serenPrivateProvider,
   anthropic: anthropicProvider,
   openai: openaiProvider,
-  gemini: geminiProvider,
 };
 
 /**
@@ -261,7 +259,6 @@ export function getProviderDisplayName(providerId: ProviderId): string {
     "seren-private": "Seren Private Models",
     anthropic: "Anthropic",
     openai: "OpenAI",
-    gemini: "Google Gemini",
   };
   return names[providerId] || providerId;
 }
@@ -275,7 +272,6 @@ export function getProviderIcon(providerId: ProviderId): string {
     "seren-private": "P",
     anthropic: "A",
     openai: "O",
-    gemini: "G",
   };
   return icons[providerId] || "?";
 }

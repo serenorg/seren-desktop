@@ -1,4 +1,4 @@
-// ABOUTME: CLI installer commands for auto-installing Claude Code and Codex CLIs
+// ABOUTME: CLI installer commands for auto-installing Claude Code, Codex, and Gemini CLIs
 // ABOUTME: Detects missing CLIs and downloads/installs them automatically
 
 use std::process::Command;
@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter};
 pub enum CliTool {
     Claude,
     Codex,
+    Gemini,
 }
 
 /// Check if a CLI tool is installed and in PATH
@@ -17,6 +18,7 @@ pub async fn check_cli_installed(tool: CliTool) -> Result<bool, String> {
     let bin_name = match tool {
         CliTool::Claude => "claude",
         CliTool::Codex => "codex",
+        CliTool::Gemini => "gemini",
     };
 
     // Try to run --version command
@@ -48,6 +50,7 @@ pub async fn install_cli_tool(app: AppHandle, tool: CliTool) -> Result<bool, Str
     let install_script = match tool {
         CliTool::Claude => get_claude_install_script(),
         CliTool::Codex => get_codex_install_script(),
+        CliTool::Gemini => get_gemini_install_script(),
     };
 
     log::info!(
@@ -129,6 +132,19 @@ fn get_codex_install_script() -> String {
         "irm https://codex.example.com/install.ps1 | iex".to_string()
     } else {
         "curl -fsSL https://codex.example.com/install.sh | bash".to_string()
+    }
+}
+
+/// Get Gemini CLI installation script for current platform.
+/// Installs `@google/gemini-cli` globally via npm. The provider runtime
+/// also has its own install path via `ensureGlobalNpmPackage` in
+/// agent-registry.mjs — this Tauri command exists for the legacy
+/// cliInstallerStore code path used by Settings panels.
+fn get_gemini_install_script() -> String {
+    if cfg!(target_os = "windows") {
+        "npm install -g @google/gemini-cli".to_string()
+    } else {
+        "npm install -g @google/gemini-cli".to_string()
     }
 }
 

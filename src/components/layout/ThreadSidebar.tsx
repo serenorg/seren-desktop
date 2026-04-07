@@ -16,6 +16,7 @@ import type { InstalledSkill, Skill } from "@/lib/skills";
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
+  allowsGeminiAgent,
   allowsSerenPublicModels,
   allowsSerenPrivateAgent,
 } from "@/services/organization-policy";
@@ -470,6 +471,35 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               >
                 <span class="text-[14px]">{"\u26A1"}</span>
                 <span class="font-medium">Codex Agent</span>
+              </button>
+            </Show>
+
+            {/* Gemini Agent */}
+            <Show
+              when={
+                allowsGeminiAgent(authStore.privateChatPolicy) &&
+                agentStore.availableAgents.some(
+                  (a) => a.type === "gemini" && a.available,
+                )
+              }
+            >
+              <button
+                type="button"
+                class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                onClick={async () => {
+                  setShowLauncher(false);
+                  const cwd = fileTreeState.rootPath;
+                  if (!cwd) return;
+                  setSpawning(true);
+                  try {
+                    await threadStore.createAgentThread("gemini", cwd);
+                  } finally {
+                    setSpawning(false);
+                  }
+                }}
+              >
+                <span class="text-[14px]">{"\u2726"}</span>
+                <span class="font-medium">Gemini Agent</span>
               </button>
             </Show>
           </div>

@@ -1,9 +1,9 @@
-// ABOUTME: CLI installer store for managing auto-installation of Claude Code, Codex, and other CLIs
+// ABOUTME: CLI installer store for managing auto-installation of Claude Code, Codex, Gemini, and other CLIs
 // ABOUTME: Handles detection, downloading, and installation with progress tracking
 
 import { createStore } from "solid-js/store";
 
-export type CliTool = "claude" | "codex";
+export type CliTool = "claude" | "codex" | "gemini";
 
 export type InstallStatus =
   | "idle"
@@ -38,6 +38,13 @@ const initialState: CliInstallerState = {
     },
     codex: {
       tool: "codex",
+      status: "idle",
+      progressPercent: 0,
+      downloadedBytes: 0,
+      totalBytes: 0,
+    },
+    gemini: {
+      tool: "gemini",
       status: "idle",
       progressPercent: 0,
       downloadedBytes: 0,

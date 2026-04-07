@@ -12,6 +12,7 @@ import {
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
+  allowsGeminiAgent,
   allowsSerenPublicModels,
   allowsSerenPrivateAgent,
 } from "@/services/organization-policy";
@@ -66,7 +67,9 @@ export const ThreadTabBar: Component = () => {
     });
   };
 
-  const handleNewAgent = async (agentType: "claude-code" | "codex") => {
+  const handleNewAgent = async (
+    agentType: "claude-code" | "codex" | "gemini",
+  ) => {
     setShowNewMenu(false);
     const cwd = fileTreeState.rootPath;
     if (!cwd) return;
@@ -75,7 +78,9 @@ export const ThreadTabBar: Component = () => {
 
   const threadIcon = (thread: Thread) => {
     if (thread.kind === "chat") return "💬";
-    return thread.agentType === "codex" ? "⚡" : "🤖";
+    if (thread.agentType === "codex") return "⚡";
+    if (thread.agentType === "gemini") return "✦";
+    return "🤖";
   };
 
   return (
@@ -228,6 +233,22 @@ export const ThreadTabBar: Component = () => {
               >
                 <span class="text-[13px] w-[18px] text-center">⚡</span>
                 Codex Agent
+              </button>
+            </Show>
+            <Show when={allowsGeminiAgent(authStore.privateChatPolicy)}>
+              <button
+                type="button"
+                class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={() => handleNewAgent("gemini")}
+                disabled={!fileTreeState.rootPath}
+                title={
+                  !fileTreeState.rootPath
+                    ? "Open a folder first to use agents"
+                    : undefined
+                }
+              >
+                <span class="text-[13px] w-[18px] text-center">✦</span>
+                Gemini Agent
               </button>
             </Show>
           </div>

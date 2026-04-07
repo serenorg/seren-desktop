@@ -121,7 +121,7 @@ function mapSessionStatusToThread(status: SessionStatus): ThreadStatus {
  * Auto-detect the best available agent.
  * If preferChat is set, always returns chat.
  * Otherwise respects `agentStore.selectedAgentType` as the user's preference,
- * then falls back to availability order: claude-code > codex > chat.
+ * then falls back to availability order: claude-code > codex > gemini > chat.
  */
 function getBestAgent():
   | { kind: "agent"; agentType: AgentType }
@@ -144,6 +144,9 @@ function getBestAgent():
 
   const codex = agents.find((a) => a.type === "codex" && a.available);
   if (codex) return { kind: "agent", agentType: "codex" };
+
+  const gemini = agents.find((a) => a.type === "gemini" && a.available);
+  if (gemini) return { kind: "agent", agentType: "gemini" };
 
   return { kind: "chat" };
 }

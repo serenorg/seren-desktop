@@ -392,6 +392,42 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         launchLoginCommand("claude");
       },
     },
+    gemini: {
+      type: "gemini",
+      name: "Gemini",
+      description: "Google Gemini via gemini-cli (Agent Client Protocol)",
+      command: "gemini",
+      async getAvailability() {
+        const installed = await isCommandAvailable("gemini");
+        return {
+          type: "gemini",
+          name: "Gemini",
+          description: "Google Gemini via gemini-cli (Agent Client Protocol)",
+          command: "gemini",
+          available: true,
+          ...(installed
+            ? {}
+            : {
+                unavailableReason:
+                  "Gemini CLI is not installed yet. Seren can install it automatically on first launch.",
+              }),
+        };
+      },
+      async canSpawn() {
+        return true;
+      },
+      async ensureCli() {
+        return ensureGlobalNpmPackage({
+          emit,
+          command: "gemini",
+          packageName: "@google/gemini-cli",
+          label: "Gemini",
+        });
+      },
+      launchLogin() {
+        launchLoginCommand("gemini");
+      },
+    },
   };
 
   function getDefinition(agentType) {

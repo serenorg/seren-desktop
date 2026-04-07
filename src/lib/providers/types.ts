@@ -1,5 +1,5 @@
 // ABOUTME: Type definitions for LLM provider configuration and API communication.
-// ABOUTME: Supports Seren Gateway and direct provider integrations (Anthropic, OpenAI, Gemini).
+// ABOUTME: Supports Seren Gateway and direct provider integrations (Anthropic, OpenAI).
 
 /**
  * Supported LLM provider identifiers.
@@ -8,8 +8,7 @@ export type ProviderId =
   | "seren"
   | "seren-private"
   | "anthropic"
-  | "openai"
-  | "gemini";
+  | "openai";
 
 /**
  * Authentication method for a provider.
@@ -331,41 +330,19 @@ export const PROVIDER_CONFIGS: Record<ProviderId, ProviderConfig> = {
     baseUrl: "https://api.openai.com",
     docsUrl: "https://platform.openai.com/docs",
   },
-  gemini: {
-    id: "gemini",
-    name: "Google Gemini",
-    description: "Access Gemini models via Google sign-in or API key",
-    authMethod: "api_key_or_oauth",
-    apiKeyPlaceholder: "AIza...",
-    baseUrl: "https://generativelanguage.googleapis.com",
-    docsUrl: "https://ai.google.dev/docs",
-    oauth: {
-      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      tokenUrl: "https://oauth2.googleapis.com/token",
-      scopes: [
-        "https://www.googleapis.com/auth/generative-language.retriever",
-        "https://www.googleapis.com/auth/cloud-platform",
-      ],
-      clientId:
-        "394120216619-p8h1i4ple18omhcp76h4va64v5ao4jv8.apps.googleusercontent.com",
-      usePkce: true,
-    },
-  },
 };
 
 /**
  * List of provider IDs that can be configured by users (excludes Seren).
  */
-export const CONFIGURABLE_PROVIDERS: ProviderId[] = [
-  "anthropic",
-  "openai",
-  "gemini",
-];
+export const CONFIGURABLE_PROVIDERS: ProviderId[] = ["anthropic", "openai"];
 
 /**
  * List of provider IDs that support OAuth.
+ * Currently empty — Gemini OAuth was removed in favor of the Gemini Agent
+ * (gemini-cli via ACP), which handles its own auth.
  */
-export const OAUTH_PROVIDERS: ProviderId[] = ["gemini"];
+export const OAUTH_PROVIDERS: ProviderId[] = [];
 
 /**
  * Get provider configuration by ID.
