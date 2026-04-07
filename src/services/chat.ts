@@ -22,6 +22,9 @@ import { executeTools, getAllTools } from "@/lib/tools";
 import {
   getCallablePublisherSlugs,
   getGatewayTools,
+  isGatewayInitInFlight,
+  isGatewayInitialized,
+  waitForGatewayReady,
 } from "@/services/mcp-gateway";
 import { storeAssistantResponse } from "@/services/memory";
 import { authStore } from "@/stores/auth.store";
@@ -70,6 +73,29 @@ export interface Message {
 export const CHAT_MAX_RETRIES = 3;
 const INITIAL_DELAY = 1000;
 const TRANSIENT_STATUS_CODES = ["408", "429", "500", "502", "503", "504"];
+
+/**
+ * Maximum time to wait for the MCP gateway to finish initializing before
+ * assembling the first system prompt. Short enough that the user does not
+ * perceive a hang, long enough for a warm login to complete.
+ */
+export const GATEWAY_READY_TIMEOUT_MS = 5000;
+
+/**
+ * Tone and behavior rules injected into every chat system prompt.
+ *
+ * Kept here as a single source of truth for the JS direct-provider path.
+ * The Rust orchestrator path (src-tauri/src/orchestrator/chat_model_worker.rs)
+ * carries a matching copy — update both when changing this block.
+ */
+export const TONE_INSTRUCTIONS =
+  "\n\nTone and behavior:\n" +
+  "- Be concise. Lead with the answer, not preamble.\n" +
+  '- Never open with "Great question," "Excellent," "Perfect," or "You\'re absolutely right."\n' +
+  "- Do not use emojis unless the user uses them first.\n" +
+  "- Push back honestly on bad ideas. The user wants candor, not validation.\n" +
+  "- Never claim a tool or capability is unavailable without first checking your actual tool list. " +
+  "If the tool list is empty or still loading, say so — do not assert the capability does not exist.";
 
 /**
  * Check if an error is transient and should be retried.
@@ -350,6 +376,15 @@ export async function* streamMessageWithTools(
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
 
+  // Wait for the MCP gateway to finish initializing before reading the
+  // publisher cache. Without this, the first message after login races the
+  // background initializeGateway() call and lands while the cache is empty,
+  // producing a system prompt that falsely claims no Seren tools are
+  // available. waitForGatewayReady is a no-op once the cache is hot.
+  if (authStore.isAuthenticated && !isGatewayInitialized()) {
+    await waitForGatewayReady(GATEWAY_READY_TIMEOUT_MS);
+  }
+
   // Build Seren MCP publishers context dynamically based on active toolset.
   // Uses the canonical publisher inventory (all callable publishers) as the
   // source of truth, not just publishers that expose first-class MCP tools.
@@ -374,6 +409,20 @@ export async function* streamMessageWithTools(
       : allSlugs;
 
     if (publishers.length === 0) {
+      // Honest fallback: distinguish "still loading / unreachable" from
+      // "user has actually disabled all publishers". The former must NOT
+      // make the model deny access — it should tell the user to retry.
+      if (
+        authStore.isAuthenticated &&
+        (isGatewayInitInFlight() || !isGatewayInitialized())
+      ) {
+        return (
+          "\n\nIMPORTANT — Seren MCP Gateway Status:\n" +
+          "The Seren MCP gateway is still initializing or temporarily unreachable. " +
+          "Do NOT claim that Seren publishers or tools are unavailable. " +
+          "Tell the user the tools are still loading and to retry their request in a moment."
+        );
+      }
       return "";
     }
 
@@ -426,6 +475,10 @@ export async function* streamMessageWithTools(
     "Key Seren concepts: SerenBucks (billing credits), Publishers (third-party data services), " +
     "Skills (installable prompt-based capabilities from the seren-skills repo), " +
     "Gateway API (AI model access), MCP servers (tool integration), and Seren Desktop (this application).";
+
+  // Tone and behavior instructions — must match Rust orchestrator copy at
+  // src-tauri/src/orchestrator/chat_model_worker.rs TONE_INSTRUCTIONS.
+  systemContent += TONE_INSTRUCTIONS;
 
   // Add user-provided context if available
   if (context) {
