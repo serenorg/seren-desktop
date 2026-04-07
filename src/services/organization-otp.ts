@@ -50,7 +50,7 @@ export interface OrganizationOtpDenialResponse {
   reason: OrganizationOtpDenialReason;
 }
 
-type PendingPhase = "enroll" | "verify";
+type PendingPhase = "enroll" | "verify" | "locked";
 
 interface PendingOtpRequest {
   denial: OrganizationOtpDenialResponse;
@@ -235,6 +235,9 @@ function createOrganizationOtpService() {
       helperText = `Enter a fresh 6-digit code to continue to ${scopeLabel(denial.scope)}.`;
     } else if (denial.reason === "policy_required") {
       helperText = `This organization requires OTP before ${scopeLabel(denial.scope)}.`;
+    } else if (denial.reason === "locked") {
+      phase = "locked";
+      helperText = denial.message;
     } else {
       helperText = denial.message;
     }
@@ -278,11 +281,10 @@ function createOrganizationOtpService() {
         setPendingRequest({
           ...pending,
           phase: "verify",
+          challenge: null,
+          qrCodeDataUrl: null,
           helperText: `Enrollment complete. Enter a fresh 6-digit code to continue to ${scopeLabel(pending.denial.scope)}.`,
         });
-        setErrorMessage(
-          "Enrollment complete. Enter a new code from your authenticator app.",
-        );
         return;
       }
 

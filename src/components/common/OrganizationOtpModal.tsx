@@ -27,12 +27,14 @@ export const OrganizationOtpModal: Component = () => {
     }
   };
 
+  const isLocked = () => pending()?.phase === "locked";
+
   const title = () => {
     const request = pending();
     if (!request) return "Organization OTP";
-    return request.phase === "enroll"
-      ? "Set Up Organization OTP"
-      : "Verify Organization OTP";
+    if (request.phase === "enroll") return "Set Up Organization OTP";
+    if (request.phase === "locked") return "OTP Temporarily Locked";
+    return "Verify Organization OTP";
   };
 
   return (
@@ -134,7 +136,7 @@ export const OrganizationOtpModal: Component = () => {
                 }}
                 class="w-full rounded-xl border border-border bg-background/60 px-4 py-3 text-[1rem] tracking-[0.3em] text-foreground outline-none transition-all focus:border-accent focus:ring-2 focus:ring-accent/20"
                 placeholder="123456"
-                disabled={isProcessing()}
+                disabled={isProcessing() || isLocked()}
               />
             </div>
 
@@ -151,20 +153,22 @@ export const OrganizationOtpModal: Component = () => {
                 onClick={() => organizationOtpService.cancel()}
                 disabled={isProcessing()}
               >
-                Cancel
+                {isLocked() ? "Close" : "Cancel"}
               </button>
-              <button
-                type="button"
-                class="px-4 py-2.5 rounded-lg border-none bg-accent text-primary-foreground cursor-pointer transition-all hover:bg-primary/85 disabled:opacity-50"
-                onClick={() => void handleSubmit()}
-                disabled={isProcessing()}
-              >
-                {isProcessing()
-                  ? "Working..."
-                  : request().phase === "enroll"
-                    ? "Confirm setup"
-                    : "Verify"}
-              </button>
+              <Show when={!isLocked()}>
+                <button
+                  type="button"
+                  class="px-4 py-2.5 rounded-lg border-none bg-accent text-primary-foreground cursor-pointer transition-all hover:bg-primary/85 disabled:opacity-50"
+                  onClick={() => void handleSubmit()}
+                  disabled={isProcessing()}
+                >
+                  {isProcessing()
+                    ? "Working..."
+                    : request().phase === "enroll"
+                      ? "Confirm setup"
+                      : "Verify"}
+                </button>
+              </Show>
             </div>
           </div>
         </div>
