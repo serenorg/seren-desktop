@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import readline from "node:readline";
 import { createBrowserLocalAgentRegistry } from "./agent-registry.mjs";
 import { createClaudeRuntime } from "./claude-runtime.mjs";
+import { createGeminiRuntime } from "./gemini-runtime.mjs";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
 
 function isAuthError(message) {
@@ -881,6 +882,7 @@ export function createProviderHandlers({ emit }) {
   const sessions = new Map();
   const agentRegistry = createBrowserLocalAgentRegistry({ emit });
   const claudeRuntime = createClaudeRuntime({ emit });
+  const geminiRuntime = createGeminiRuntime({ emit });
 
   async function withTemporaryCodexSession(cwd, callback) {
     const processHandle = spawnCodexProcess(cwd);
@@ -934,6 +936,10 @@ export function createProviderHandlers({ emit }) {
 
     if (agentType === "claude-code") {
       return claudeRuntime.spawnSession(params);
+    }
+
+    if (agentType === "gemini") {
+      return geminiRuntime.spawnSession(params);
     }
 
     if (agentType !== "codex") {
@@ -1089,6 +1095,9 @@ export function createProviderHandlers({ emit }) {
   async function sendPrompt({ sessionId, prompt, context }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (geminiRuntime.hasSession(sessionId)) {
+        return geminiRuntime.sendPrompt({ sessionId, prompt, context });
+      }
       return claudeRuntime.sendPrompt({ sessionId, prompt, context });
     }
     if (session.currentPrompt) {
@@ -1158,6 +1167,9 @@ export function createProviderHandlers({ emit }) {
   async function cancelPrompt({ sessionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (geminiRuntime.hasSession(sessionId)) {
+        return geminiRuntime.cancelPrompt({ sessionId });
+      }
       return claudeRuntime.cancelPrompt({ sessionId });
     }
     if (session.activeTurnId) {
@@ -1191,6 +1203,9 @@ export function createProviderHandlers({ emit }) {
   async function terminateSession({ sessionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (geminiRuntime.hasSession(sessionId)) {
+        return geminiRuntime.terminateSession({ sessionId });
+      }
       return claudeRuntime.terminateSession({ sessionId });
     }
 
@@ -1221,12 +1236,16 @@ export function createProviderHandlers({ emit }) {
         timeoutSecs: session.timeoutSecs,
       })),
       ...(await claudeRuntime.listSessions()),
+      ...(await geminiRuntime.listSessions()),
     ];
   }
 
   async function setPermissionMode({ sessionId, mode }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (geminiRuntime.hasSession(sessionId)) {
+        return geminiRuntime.setPermissionMode({ sessionId, mode });
+      }
       return claudeRuntime.setPermissionMode({ sessionId, mode });
     }
 
@@ -1237,6 +1256,9 @@ export function createProviderHandlers({ emit }) {
   async function respondToPermission({ sessionId, requestId, optionId }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (geminiRuntime.hasSession(sessionId)) {
+        return geminiRuntime.respondToPermission({ sessionId, requestId, optionId });
+      }
       return claudeRuntime.respondToPermission({ sessionId, requestId, optionId });
     }
 
@@ -1278,6 +1300,13 @@ export function createProviderHandlers({ emit }) {
   async function listRemoteSessions({ agentType, cwd, cursor }) {
     if (agentType === "claude-code") {
       return claudeRuntime.listRemoteSessions({ cwd, cursor });
+    }
+
+    if (agentType === "gemini") {
+      // gemini-cli supports `--list-sessions` and `--resume <index>` but the
+      // ACP `session/load` flow is not yet wired through the desktop. Return
+      // an empty list so the UI doesn't fail; users always get a fresh thread.
+      return { sessions: [], nextCursor: null };
     }
 
     return withTemporaryCodexSession(cwd, async (session) => {
@@ -1345,6 +1374,11 @@ export function createProviderHandlers({ emit }) {
   async function setSessionModel({ sessionId, modelId }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (geminiRuntime.hasSession(sessionId)) {
+        // Gemini's model is fixed per session — silently no-op so the UI
+        // doesn't error when the user clicks the model selector.
+        return null;
+      }
       return claudeRuntime.setModel({ sessionId, modelId });
     }
 
@@ -1377,6 +1411,10 @@ export function createProviderHandlers({ emit }) {
   async function updateSessionConfigOption({ sessionId, configId, valueId }) {
     const session = sessions.get(sessionId);
     if (!session) {
+      if (geminiRuntime.hasSession(sessionId)) {
+        // Gemini exposes no config options today — silently no-op.
+        return null;
+      }
       return claudeRuntime.setConfigOption({ sessionId, configId, valueId });
     }
     if (configId !== "reasoning_effort") {

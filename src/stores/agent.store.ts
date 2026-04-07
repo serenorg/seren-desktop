@@ -260,6 +260,8 @@ function agentDisplayName(agentType?: string): string {
       return "Codex";
     case "claude-code":
       return "Claude Code";
+    case "gemini":
+      return "Gemini";
     default:
       return agentType ?? "Agent";
   }
@@ -977,7 +979,11 @@ export const agentStore = {
     const reclaimedIdleClaude = opts?.reclaimedIdleClaude ?? false;
     const conversationTitle =
       opts?.conversationTitle ??
-      (resolvedAgentType === "codex" ? "Codex Agent" : "Claude Agent");
+      (resolvedAgentType === "codex"
+        ? "Codex Agent"
+        : resolvedAgentType === "gemini"
+          ? "Gemini Agent"
+          : "Claude Agent");
 
     // Prevent concurrent spawns for the same conversation. Internal retries
     // (initRetryAttempt > 0) are allowed through because they are sequential
@@ -1030,7 +1036,7 @@ export const agentStore = {
           state.availableAgents.find(
             (agent) => agent.type === resolvedAgentType,
           )?.unavailableReason ??
-          `${resolvedAgentType === "codex" ? "Codex" : "Claude Code"} is not available in this runtime.`;
+          `${agentDisplayName(resolvedAgentType)} is not available in this runtime.`;
         setState("error", helper);
         setState("isLoading", false);
         return null;
@@ -1134,7 +1140,9 @@ export const agentStore = {
             ? providerService.ensureClaudeCli
             : resolvedAgentType === "codex"
               ? providerService.ensureCodexCli
-              : null;
+              : resolvedAgentType === "gemini"
+                ? providerService.ensureGeminiCli
+                : null;
 
         if (ensureFn) {
           console.log("[AgentStore] Ensuring CLI is installed...");
@@ -1165,7 +1173,7 @@ export const agentStore = {
             const message =
               error instanceof Error
                 ? error.message
-                : `Failed to install ${resolvedAgentType === "codex" ? "Codex" : "Claude Code"} CLI`;
+                : `Failed to install ${agentDisplayName(resolvedAgentType)} CLI`;
             setState("error", message);
             setState("isLoading", false);
             setState("installStatus", null);
@@ -1278,7 +1286,12 @@ export const agentStore = {
           restoredMessageCount: hasRestoredMessages
             ? opts?.restoredMessages?.length
             : undefined,
-          contextWindowSize: resolvedAgentType === "codex" ? 400_000 : 200_000,
+          contextWindowSize:
+            resolvedAgentType === "codex"
+              ? 400_000
+              : resolvedAgentType === "gemini"
+                ? 1_000_000
+                : 200_000,
           bootstrapPromptContext: opts?.bootstrapPromptContext,
           pendingPrompts: [],
         };
@@ -1605,7 +1618,9 @@ export const agentStore = {
       return null;
     }
     const agentType: AgentType =
-      convo.agent_type === "codex" || convo.agent_type === "claude-code"
+      convo.agent_type === "codex" ||
+      convo.agent_type === "claude-code" ||
+      convo.agent_type === "gemini"
         ? (convo.agent_type as AgentType)
         : state.selectedAgentType;
     const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);
@@ -1767,7 +1782,7 @@ export const agentStore = {
 
     const title =
       remoteSession.title?.trim() ||
-      `${resolvedAgentType === "codex" ? "Codex" : "Claude"} Session ${remoteSession.sessionId.slice(0, 8)}`;
+      `${agentDisplayName(resolvedAgentType)} Session ${remoteSession.sessionId.slice(0, 8)}`;
     const sessionId = await this.spawnSession(cwd, resolvedAgentType, {
       localSessionId: existing?.id,
       resumeAgentSessionId: remoteSession.sessionId,

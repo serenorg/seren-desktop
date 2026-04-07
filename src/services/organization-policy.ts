@@ -28,6 +28,7 @@ export interface OrganizationPrivateModelsPolicy {
   allow_seren_private_agent?: boolean;
   allow_claude_agent?: boolean;
   allow_codex_agent?: boolean;
+  allow_gemini_agent?: boolean;
   allow_cloud_agent_launch?: boolean;
   model_id?: string | null;
   fallback_models?: string[] | null;
@@ -81,6 +82,12 @@ export function allowsCodexAgent(
   policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
   return policy?.allow_codex_agent ?? true;
+}
+
+export function allowsGeminiAgent(
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
+): boolean {
+  return policy?.allow_gemini_agent ?? true;
 }
 
 export function allowsCloudAgentLaunch(

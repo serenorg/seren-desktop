@@ -271,9 +271,7 @@ export const ProviderSettings: Component = () => {
                   class={`flex items-center justify-center gap-2.5 px-5 py-3 border rounded-lg text-sm font-medium cursor-pointer transition-all duration-150 hover:not-disabled:-translate-y-px active:not-disabled:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed ${
                     providerId === "openai"
                       ? "bg-[#10a37f] border-[#10a37f] text-white hover:not-disabled:bg-[#0d8a6a] hover:not-disabled:border-[#0d8a6a]"
-                      : providerId === "gemini"
-                        ? "bg-gradient-to-br from-[#4285f4] via-[#34a853] to-[#fbbc05] border-transparent text-white hover:not-disabled:from-[#3b78e7] hover:not-disabled:via-[#2d9649] hover:not-disabled:to-[#e5ab04]"
-                        : "bg-surface-1/50 border-border-strong text-foreground"
+                      : "bg-surface-1/50 border-border-strong text-foreground"
                   }`}
                   onClick={() => handleOAuthSignIn(providerId)}
                   disabled={isInProgress() || !config.oauth?.clientId}

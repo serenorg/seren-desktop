@@ -147,6 +147,7 @@ const AGENT_TO_SEREN_MODEL: Array<[pattern: string, serenId: string]> = [
 const DEFAULT_SEREN_MODELS: Record<AgentType, string> = {
   "claude-code": "arcee-ai/trinity-large-thinking",
   codex: "arcee-ai/trinity-large-thinking",
+  gemini: "google/gemini-2.5-pro",
 };
 
 /**

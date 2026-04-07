@@ -505,7 +505,7 @@ export async function getConfiguredProviders(): Promise<string[]> {
 
 /**
  * Store OAuth credentials for a provider securely.
- * @param provider - Provider ID (e.g., "openai", "gemini")
+ * @param provider - Provider ID (e.g., "openai")
  * @param credentials - JSON string of OAuthCredentials
  */
 export async function storeOAuthCredentials(

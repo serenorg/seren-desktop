@@ -13,7 +13,7 @@ import { runtimeHasCapability } from "@/lib/runtime";
 // Types
 // ============================================================================
 
-export type AgentType = "claude-code" | "codex";
+export type AgentType = "claude-code" | "codex" | "gemini";
 export type UnlistenFn = () => void;
 
 export function supportsConversationFork(_agentType: AgentType): boolean {
@@ -449,6 +449,17 @@ export async function ensureClaudeCli(): Promise<string> {
 export async function ensureCodexCli(): Promise<string> {
   return invokeProvider<string>("provider_ensure_agent_cli", {
     agentType: "codex",
+  });
+}
+
+/**
+ * Ensure Gemini CLI (`@google/gemini-cli`) is installed.
+ * Installs or upgrades via npm if needed.
+ * Returns the bin directory path containing the gemini binary.
+ */
+export async function ensureGeminiCli(): Promise<string> {
+  return invokeProvider<string>("provider_ensure_agent_cli", {
+    agentType: "gemini",
   });
 }
 

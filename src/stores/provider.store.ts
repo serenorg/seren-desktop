@@ -149,19 +149,6 @@ const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
     { id: "o1", name: "o1", contextWindow: 200000 },
     { id: "o1-mini", name: "o1 Mini", contextWindow: 128000 },
   ],
-  gemini: [
-    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 1000000 },
-    {
-      id: "gemini-2.5-flash",
-      name: "Gemini 2.5 Flash",
-      contextWindow: 1000000,
-    },
-    {
-      id: "gemini-2.0-flash",
-      name: "Gemini 2.0 Flash",
-      contextWindow: 1000000,
-    },
-  ],
 };
 
 const DEFAULT_STATE: ProviderState = {
