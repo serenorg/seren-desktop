@@ -279,7 +279,7 @@ export const SkillsSelector: Component = () => {
 
                     <div class="flex flex-col gap-0.5 min-w-0 flex-1">
                       <span class="text-foreground font-medium truncate">
-                        {skill.name}
+                        {skill.displayName ?? skill.name}
                       </span>
                       <Show when={skill.description}>
                         <span class="text-[11px] text-muted-foreground line-clamp-1">
