@@ -159,6 +159,23 @@ enum StreamOutcome {
         accumulated_thinking: String,
         accumulated_cost: f64,
     },
+    /// Stream terminated with an upstream error (HTTP 4xx/5xx wrapped by the
+    /// gateway). The error event has already been forwarded to the UI; this
+    /// variant lets the orchestrator distinguish failure from empty completion
+    /// so it does not lie about the conversation being completed successfully.
+    Failed {
+        error: String,
+        cost: f64,
+        retryable: bool,
+    },
+}
+
+/// Decide whether a gateway HTTP status indicates a transient failure that
+/// the orchestrator could safely retry. Treats all 5xx as retryable plus the
+/// canonical retryable 4xx codes (408 Request Timeout, 429 Too Many Requests).
+/// Permanent client errors (400, 401, 403, 404, 422, etc.) are not retryable.
+fn gateway_status_is_retryable(status: u64) -> bool {
+    matches!(status, 408 | 429) || (500..600).contains(&status)
 }
 
 /// Extract unique publisher names from tool calls in recent conversation messages.
@@ -882,20 +899,22 @@ impl ChatModelWorker {
                         } else {
                             format!("HTTP {}: {} — {}", status, error_msg, raw_detail)
                         };
+                        let retryable = gateway_status_is_retryable(status);
                         log::error!(
-                            "[ChatModelWorker] Non-streaming wrapper error: {}",
+                            "[ChatModelWorker] Non-streaming wrapper error: {} (retryable={})",
                             full_error,
+                            retryable,
                         );
                         event_tx
                             .send(WorkerEvent::Error {
-                                message: full_error,
+                                message: full_error.clone(),
                             })
                             .await
                             .map_err(|e| format!("Failed to send error event: {}", e))?;
-                        return Ok(StreamOutcome::Complete {
-                            final_content: String::new(),
-                            thinking: None,
+                        return Ok(StreamOutcome::Failed {
+                            error: full_error,
                             cost: accumulated_cost,
+                            retryable,
                         });
                     }
                 }
@@ -1538,6 +1557,51 @@ impl Worker for ChatModelWorker {
                         messages.len()
                     );
                 }
+                StreamOutcome::Failed {
+                    error,
+                    cost,
+                    retryable,
+                } => {
+                    total_cost += cost;
+                    let total = if total_cost > 0.0 {
+                        Some(total_cost)
+                    } else {
+                        None
+                    };
+                    log::error!(
+                        "[ChatModelWorker] StreamOutcome::Failed received — round={}, error={}, retryable={}, cost={:?}",
+                        round,
+                        error,
+                        retryable,
+                        total
+                    );
+                    // The error event was already forwarded by stream_response,
+                    // so the destructive UI is already showing. Send a final
+                    // Complete event with empty content to clear the loading
+                    // spinner — but mark this conversation as failed in logs so
+                    // metrics and downstream consumers don't count it as a
+                    // successful completion.
+                    if let Err(e) = event_tx
+                        .send(WorkerEvent::Complete {
+                            final_content: String::new(),
+                            thinking: None,
+                            cost: total,
+                            rlm_steps: None,
+                        })
+                        .await
+                    {
+                        log::debug!(
+                            "[ChatModelWorker] Channel closed, cannot send Complete after Failed: {}",
+                            e
+                        );
+                        return Ok(());
+                    }
+                    log::info!(
+                        "[ChatModelWorker] Execution failed, breaking from tool loop (retryable={})",
+                        retryable
+                    );
+                    break;
+                }
             }
         }
 
@@ -2080,6 +2144,34 @@ mod tests {
             StreamOutcome::Complete { .. } => {}
             _ => panic!("Expected Complete outcome when no pending tool calls"),
         }
+    }
+
+    #[test]
+    fn gateway_status_retryable_classification() {
+        // 5xx — all retryable (transient upstream/server failure)
+        assert!(gateway_status_is_retryable(500));
+        assert!(gateway_status_is_retryable(502));
+        assert!(gateway_status_is_retryable(503));
+        assert!(gateway_status_is_retryable(504));
+
+        // Retryable 4xx — only 408 Request Timeout and 429 Too Many Requests
+        assert!(gateway_status_is_retryable(408));
+        assert!(gateway_status_is_retryable(429));
+
+        // Permanent client errors — never retryable.
+        // 400 specifically guards against the regression where the gateway
+        // mislabels upstream timeouts as 400 (serenorg/seren-core#125): even
+        // though that case _should_ be retryable, the desktop must trust the
+        // status code it sees and not auto-retry on a real client error.
+        assert!(!gateway_status_is_retryable(400));
+        assert!(!gateway_status_is_retryable(401));
+        assert!(!gateway_status_is_retryable(403));
+        assert!(!gateway_status_is_retryable(404));
+        assert!(!gateway_status_is_retryable(422));
+
+        // 2xx and 3xx are not error states and should not be classified as retryable.
+        assert!(!gateway_status_is_retryable(200));
+        assert!(!gateway_status_is_retryable(301));
     }
 
     #[tokio::test]
