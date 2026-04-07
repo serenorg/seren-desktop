@@ -414,6 +414,47 @@ export function isGatewayInitialized(): boolean {
 }
 
 /**
+ * True when an initializeGateway() call is in flight (started but not resolved).
+ * Used by callers that need to distinguish "still loading" from "never started".
+ */
+export function isGatewayInitInFlight(): boolean {
+  return loadingPromise !== null;
+}
+
+/**
+ * Wait for the gateway to become ready, with a bounded timeout.
+ *
+ * Resolves `true` once the gateway reports initialized (publishers and tools
+ * cached). Resolves `false` on timeout or if initialization throws — callers
+ * should degrade gracefully rather than falsely claim tools are unavailable.
+ *
+ * Safe to call before, during, or after initializeGateway() — it piggy-backs
+ * on the shared loadingPromise so concurrent callers do not trigger redundant
+ * MCP connections.
+ */
+export async function waitForGatewayReady(timeoutMs: number): Promise<boolean> {
+  if (isGatewayInitialized()) return true;
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<false>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve(false), timeoutMs);
+  });
+
+  try {
+    const initPromise = initializeGateway()
+      .then(() => isGatewayInitialized())
+      .catch((error) => {
+        console.warn("[MCP Gateway] waitForGatewayReady init failed:", error);
+        return false;
+      });
+
+    return await Promise.race([initPromise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+  }
+}
+
+/**
  * Reset gateway state (for logout).
  * Disconnects from MCP server. API key is cleared separately in auth flow.
  */

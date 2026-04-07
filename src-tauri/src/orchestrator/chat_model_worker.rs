@@ -40,6 +40,19 @@ const REQUEST_TIMEOUT_SECS: u64 = 600;
 /// via `WorkerEvent::ToolResult`.
 const MAX_TOOL_RESULT_CONTEXT_BYTES: usize = 30_000;
 
+/// Tone and behavior rules injected into every chat system prompt.
+///
+/// Kept here as a single source of truth for the Rust orchestrator path.
+/// The JS direct-provider path (src/services/chat.ts TONE_INSTRUCTIONS)
+/// carries a matching copy — update both when changing this block.
+pub(crate) const TONE_INSTRUCTIONS: &str = "Tone and behavior:\n\
+    - Be concise. Lead with the answer, not preamble.\n\
+    - Never open with \"Great question,\" \"Excellent,\" \"Perfect,\" or \"You're absolutely right.\"\n\
+    - Do not use emojis unless the user uses them first.\n\
+    - Push back honestly on bad ideas. The user wants candor, not validation.\n\
+    - Never claim a tool or capability is unavailable without first checking your actual tool list. \
+    If the tool list is empty or still loading, say so — do not assert the capability does not exist.";
+
 // =============================================================================
 // Live Repo Context
 // =============================================================================
@@ -346,6 +359,10 @@ impl ChatModelWorker {
         if !skill_content.is_empty() {
             system_parts.push(skill_content.to_string());
         }
+        // Tone and behavior rules — must match JS path TONE_INSTRUCTIONS in
+        // src/services/chat.ts. Appended last so the model reads them after
+        // the tool inventory it is allowed to use.
+        system_parts.push(TONE_INSTRUCTIONS.to_string());
         let system_content = system_parts.join("\n\n");
 
         messages.push(serde_json::json!({
@@ -1582,6 +1599,48 @@ mod tests {
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[1]["content"], "previous message");
         assert_eq!(messages[2]["content"], "Hello world");
+    }
+
+    #[test]
+    fn injects_tone_instructions_into_system_prompt() {
+        // Critical: every chat system prompt must carry the tone block so the
+        // model is bound by the same anti-sycophancy / verify-before-denying
+        // rules regardless of skills, tools, or repo context. Regression
+        // guard for serenorg/seren-desktop#1464.
+        let worker = ChatModelWorker::new();
+        let routing = RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "anthropic/claude-sonnet-4".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "General chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+            reasoning_effort: None,
+            project_root: None,
+        };
+
+        let body =
+            worker.build_request_body("hi", &[], &routing, "", &[], &[], None);
+        let system_msg = body["messages"][0]["content"].as_str().unwrap();
+
+        assert!(
+            system_msg.contains("Tone and behavior:"),
+            "system prompt must contain the tone header"
+        );
+        assert!(
+            system_msg.contains("Be concise. Lead with the answer"),
+            "tone block must enforce concise/lead-with-answer rule"
+        );
+        assert!(
+            system_msg.contains("Never open with"),
+            "tone block must forbid sycophantic openers"
+        );
+        assert!(
+            system_msg.contains(
+                "Never claim a tool or capability is unavailable without first checking"
+            ),
+            "tone block must require verification before denying capabilities"
+        );
     }
 
     #[test]
