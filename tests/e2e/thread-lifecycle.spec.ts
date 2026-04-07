@@ -3,26 +3,6 @@
 
 import { test, expect } from "@playwright/test";
 
-// Errors expected in browser-only mode (no Tauri IPC backend)
-const EXPECTED_ERROR_PATTERNS = [
-  "refresh token",
-  "No access token",
-  "Session expired",
-  "401",
-  "publishers",
-  "Tauri runtime",
-  "Conversation operations",
-  "Message operations",
-  "Failed to persist",
-  "Unable to load",
-  "Failed to save",
-  "__TAURI",
-];
-
-function isExpectedError(msg: string): boolean {
-  return EXPECTED_ERROR_PATTERNS.some((p) => msg.includes(p));
-}
-
 test.describe("Thread Lifecycle", () => {
   test.beforeEach(async ({ page }) => {
     const errors: string[] = [];

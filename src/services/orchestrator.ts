@@ -98,6 +98,9 @@ interface UserCapabilities {
   tool_definitions: ToolDefinition[];
   installed_skills: SkillRef[];
   reasoning_effort: string | null;
+  /** Active project root, threaded through to RoutingDecision.project_root
+   * so the Rust ChatModelWorker can inject live git/repo context. */
+  project_root: string | null;
 }
 
 interface SkillRef {

@@ -215,7 +215,7 @@ describe("conversationStore", () => {
       const convo = await conversationStore.createConversation();
 
       const msg = makeMessage({
-        workerType: "acp_agent",
+        workerType: "local_agent",
         modelId: "claude-opus-4-6",
         taskType: "research",
       });
@@ -229,7 +229,7 @@ describe("conversationStore", () => {
         msg.content,
         "claude-opus-4-6",
         msg.timestamp,
-        expect.stringContaining('"worker_type":"acp_agent"'),
+        expect.stringContaining('"worker_type":"local_agent"'),
       );
     });
 

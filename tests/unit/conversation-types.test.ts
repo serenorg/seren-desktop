@@ -196,7 +196,7 @@ describe("type exhaustiveness", () => {
   it("all WorkerType values are valid", () => {
     const workers: WorkerType[] = [
       "chat_model",
-      "acp_agent",
+      "local_agent",
       "mcp_publisher",
       "orchestrator",
     ];
@@ -310,13 +310,13 @@ describe("deserializeMetadata", () => {
 
   it("round-trips routing metadata", () => {
     const msg = makeMessage({
-      workerType: "acp_agent",
+      workerType: "local_agent",
       modelId: "gemini-2.5-flash",
       taskType: "research",
     });
     const json = serializeMetadata(msg);
     const restored = deserializeMetadata(json);
-    expect(restored.workerType).toBe("acp_agent");
+    expect(restored.workerType).toBe("local_agent");
     expect(restored.modelId).toBe("gemini-2.5-flash");
     expect(restored.taskType).toBe("research");
   });

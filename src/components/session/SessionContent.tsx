@@ -11,7 +11,7 @@ export const SessionContent: Component = () => {
   const sessionId = () => {
     const thread = threadStore.activeThread;
     if (!thread) return null;
-    return thread.sessionId ?? thread.id.replace("session:", "");
+    return thread.id.replace("session:", "");
   };
 
   createEffect(() => {

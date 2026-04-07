@@ -14,9 +14,14 @@ async function send(request: ChatRequest): Promise<string> {
   const { data, error } = await postChatCompletions({
     body: {
       model: request.model,
-      messages: request.messages as Array<Record<string, unknown>>,
+      // ChatMessage and Record<string, unknown> have no overlapping index
+      // signature, so the cast must go through `unknown`. The runtime shape
+      // is correct — `postChatCompletions` only reads role/content/tool_calls.
+      messages: request.messages as unknown as Array<Record<string, unknown>>,
       stream: false,
-      tools: request.tools as Array<Record<string, unknown>> | undefined,
+      tools: request.tools as unknown as
+        | Array<Record<string, unknown>>
+        | undefined,
     },
     throwOnError: false,
   });

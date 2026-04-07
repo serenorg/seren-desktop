@@ -260,7 +260,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
 
   const hasSession = () => threadSession() !== null;
-  const isReady = () => threadSession()?.info.status === "ready";
   const isPrompting = () => threadSession()?.info.status === "prompting";
   const messageQueue = () =>
     threadSessionId() ? agentStore.getPendingPrompts(threadSessionId()!) : [];

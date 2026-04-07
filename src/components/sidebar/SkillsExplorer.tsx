@@ -971,7 +971,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             >
                               Edit in Editor
                             </button>
-                            <Show when={isUpstreamManaged(skill)}>
+                            <Show when={isUpstreamManagedSkill(skill)}>
                               <button
                                 type="button"
                                 class="w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none text-[12px] text-foreground cursor-pointer transition-colors hover:bg-surface-3 text-left"
@@ -1017,7 +1017,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                             </div>
                           </Show>
 
-                          <Show when={isUpstreamManaged(skill)}>
+                          <Show when={isUpstreamManagedSkill(skill)}>
                             <div class="mb-2 p-2.5 bg-surface-1 border border-border rounded-md text-[11px] text-muted-foreground">
                               <div class="flex items-center justify-between gap-2">
                                 <span class="font-medium text-foreground">
@@ -1151,12 +1151,12 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                                 </div>
                               </Show>
                               <Show
-                                when={getAffectedLiveThreads(skill).length > 0}
+                                when={getAffectedLiveThreadIds(skill).length > 0}
                               >
                                 <div class="mt-2 text-warning">
-                                  {getAffectedLiveThreads(skill).length} live
+                                  {getAffectedLiveThreadIds(skill).length} live
                                   agent thread
-                                  {getAffectedLiveThreads(skill).length === 1
+                                  {getAffectedLiveThreadIds(skill).length === 1
                                     ? ""
                                     : "s"}{" "}
                                   currently reference this skill.
