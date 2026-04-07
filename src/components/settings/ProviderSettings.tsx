@@ -27,13 +27,13 @@ import {
   handleOAuthCallback,
   startOAuthFlow,
 } from "@/services/oauth";
-import { allowsSerenAgent } from "@/services/organization-policy";
+import { allowsSerenPublicModels } from "@/services/organization-policy";
 import { authStore } from "@/stores/auth.store";
 import { providerStore } from "@/stores/provider.store";
 
 export const ProviderSettings: Component = () => {
   if (
-    !allowsSerenAgent(authStore.privateChatPolicy) ||
+    !allowsSerenPublicModels(authStore.privateChatPolicy) ||
     (authStore.privateChatPolicy?.disable_external_model_providers &&
       authStore.privateChatPolicy?.disable_seren_models)
   ) {

@@ -11793,9 +11793,6 @@
                   "type": "string"
                 }
               },
-              "force_private_model": {
-                "type": "boolean"
-              },
               "global_ordered_model_ids": {
                 "type": [
                   "array",
@@ -19102,9 +19099,6 @@
               "type": "string"
             }
           },
-          "force_private_model": {
-            "type": "boolean"
-          },
           "global_ordered_model_ids": {
             "type": [
               "array",
@@ -22465,9 +22459,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "force_private_model": {
-            "type": "boolean"
           },
           "hide_model_picker": {
             "type": "boolean"

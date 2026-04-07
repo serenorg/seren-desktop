@@ -11,7 +11,7 @@ import {
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
 import { authStore } from "@/stores/auth.store";
-import { allowsSerenAgent } from "@/services/organization-policy";
+import { allowsSerenPublicModels } from "@/services/organization-policy";
 import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { providerStore } from "@/stores/provider.store";
@@ -124,8 +124,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     sections.filter((section) => {
       if (
         section.id === "providers" &&
-        (authStore.privateChatPolicy?.force_private_model ||
-          authStore.privateChatPolicy?.disable_external_model_providers ||
+        (authStore.privateChatPolicy?.disable_external_model_providers ||
           authStore.privateChatPolicy?.disable_seren_models)
       ) {
         return false;
@@ -212,14 +211,14 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   Default Model
                 </span>
                 <span class="text-[0.8rem] text-muted-foreground">
-                  {!allowsSerenAgent(authStore.privateChatPolicy)
-                    ? "Unavailable because standard Seren Agent is disabled by policy"
+                  {!allowsSerenPublicModels(authStore.privateChatPolicy)
+                    ? "Unavailable because public Seren chat is disabled by policy"
                     : "AI model for chat conversations"}
                 </span>
               </label>
               <Show
                 when={
-                  allowsSerenAgent(authStore.privateChatPolicy) &&
+                  allowsSerenPublicModels(authStore.privateChatPolicy) &&
                   !authStore.privateChatPolicy?.hide_model_picker
                 }
                 fallback={

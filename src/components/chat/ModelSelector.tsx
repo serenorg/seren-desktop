@@ -20,6 +20,7 @@ import {
 } from "@/lib/providers";
 import { type Model, modelsService } from "@/services/models";
 import { privateModelsService } from "@/services/private-models";
+import { allowsSerenPublicModels } from "@/services/organization-policy";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -311,7 +312,7 @@ export const ModelSelector: Component = () => {
                       providerId !== "seren-private" &&
                       !(
                         providerId === "seren" &&
-                        authStore.privateChatPolicy?.disable_seren_models
+                        !allowsSerenPublicModels(authStore.privateChatPolicy)
                       ) &&
                       !(
                         providerId !== "seren" &&

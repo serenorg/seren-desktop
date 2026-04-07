@@ -47,7 +47,7 @@ import {
   retryOrchestration,
 } from "@/services/orchestrator";
 import {
-  allowsSerenAgent,
+  allowsSerenPublicModels,
   allowsSerenPrivateAgent,
 } from "@/services/organization-policy";
 import type { ToolCallEvent } from "@/services/providers";
@@ -688,10 +688,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
     if (
       providerStore.activeProvider === "seren" &&
-      !allowsSerenAgent(authStore.privateChatPolicy)
+      !allowsSerenPublicModels(authStore.privateChatPolicy)
     ) {
       conversationStore.setError(
-        "Your organization has disabled the standard Seren Agent launcher.",
+        "Your organization requires private model routing for Seren chat.",
       );
       return;
     }

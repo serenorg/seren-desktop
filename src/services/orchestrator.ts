@@ -10,6 +10,7 @@ import { storeAssistantResponse } from "@/services/memory";
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
+  allowsSerenPublicModels,
   allowsSerenPrivateAgent,
 } from "@/services/organization-policy";
 import { agentStore } from "@/stores/agent.store";
@@ -681,9 +682,11 @@ function serializeHistory(
  */
 function buildCapabilities(threadId: string | null): UserCapabilities {
   const privateChatPolicy = authStore.privateChatPolicy;
+  const publicSerenAllowed = allowsSerenPublicModels(privateChatPolicy);
   const forcePrivateChat =
-    providerStore.activeProvider === "seren-private" &&
-    allowsSerenPrivateAgent(privateChatPolicy);
+    allowsSerenPrivateAgent(privateChatPolicy) &&
+    (providerStore.activeProvider === "seren-private" ||
+      (providerStore.activeProvider === "seren" && !publicSerenAllowed));
   const enabledSkills = skillsStore.getThreadSkills(
     fileTreeState.rootPath,
     threadId,

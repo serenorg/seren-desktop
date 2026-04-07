@@ -3476,7 +3476,6 @@ export type DataResponseOrganizationPrivateModelsPolicy = {
         disable_local_agents?: boolean;
         disable_seren_models?: boolean;
         fallback_models?: Array<string> | null;
-        force_private_model?: boolean;
         global_ordered_model_ids?: Array<string> | null;
         hide_model_picker?: boolean;
         mode: OrganizationPrivateModelsMode;
@@ -9627,7 +9626,6 @@ export type OrganizationPrivateModelsPolicy = {
     disable_local_agents?: boolean;
     disable_seren_models?: boolean;
     fallback_models?: Array<string> | null;
-    force_private_model?: boolean;
     global_ordered_model_ids?: Array<string> | null;
     hide_model_picker?: boolean;
     mode: OrganizationPrivateModelsMode;
@@ -11077,7 +11075,6 @@ export type UpdateOrganizationPrivateModelsPolicyRequest = {
     disable_local_agents?: boolean;
     disable_seren_models?: boolean;
     fallback_models?: Array<string> | null;
-    force_private_model?: boolean;
     hide_model_picker?: boolean;
     mode: OrganizationPrivateModelsMode;
     model_id?: string | null;

@@ -33,7 +33,6 @@ export interface OrganizationPrivateModelsPolicy {
   fallback_models?: string[] | null;
   ordered_model_ids?: string[] | null;
   global_ordered_model_ids?: string[] | null;
-  force_private_model: boolean;
   disable_seren_models: boolean;
   disable_local_agents: boolean;
   disable_external_model_providers: boolean;
@@ -52,6 +51,20 @@ export function allowsSerenAgent(
   policy: OrganizationPrivateModelsPolicy | null | undefined,
 ): boolean {
   return policy?.allow_seren_agent ?? true;
+}
+
+export function allowsSerenPublicModels(
+  policy: OrganizationPrivateModelsPolicy | null | undefined,
+): boolean {
+  if (!policy) {
+    return true;
+  }
+
+  return (
+    policy.mode !== "private_org_agent" &&
+    (policy.allow_seren_agent ?? true) &&
+    !policy.disable_seren_models
+  );
 }
 
 export function allowsSerenPrivateAgent(

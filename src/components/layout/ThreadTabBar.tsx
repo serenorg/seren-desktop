@@ -12,7 +12,7 @@ import {
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
-  allowsSerenAgent,
+  allowsSerenPublicModels,
   allowsSerenPrivateAgent,
 } from "@/services/organization-policy";
 import { agentStore } from "@/stores/agent.store";
@@ -178,7 +178,7 @@ export const ThreadTabBar: Component = () => {
 
         <Show when={showNewMenu()}>
           <div class="absolute top-full right-0 min-w-[160px] bg-surface-2 border border-border rounded-lg p-1 z-20 shadow-[var(--shadow-lg)] animate-[slideInDown_150ms_ease]">
-            <Show when={allowsSerenAgent(authStore.privateChatPolicy)}>
+            <Show when={allowsSerenPublicModels(authStore.privateChatPolicy)}>
               <button
                 type="button"
                 class="flex items-center gap-2 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"

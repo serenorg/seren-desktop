@@ -16,7 +16,7 @@ import type { InstalledSkill, Skill } from "@/lib/skills";
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
-  allowsSerenAgent,
+  allowsSerenPublicModels,
   allowsSerenPrivateAgent,
 } from "@/services/organization-policy";
 import { skills as skillsService } from "@/services/skills";
@@ -385,7 +385,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         <Show when={showLauncher()}>
           <div class="absolute top-[calc(100%+4px)] left-3 right-3 bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] overflow-hidden py-1">
             {/* Primary Seren chat path */}
-            <Show when={allowsSerenAgent(authStore.privateChatPolicy)}>
+            <Show when={allowsSerenPublicModels(authStore.privateChatPolicy)}>
               <button
                 type="button"
                 data-testid="new-seren-chat"
