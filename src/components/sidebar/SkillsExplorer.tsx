@@ -85,6 +85,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
     if (!q) return skillsStore.installed;
     return skillsStore.installed.filter(
       (s) =>
+        (s.displayName ?? s.name).toLowerCase().includes(q) ||
         s.name.toLowerCase().includes(q) ||
         (s.description ?? "").toLowerCase().includes(q) ||
         s.tags.some((t) => t.toLowerCase().includes(q)),
@@ -882,7 +883,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2">
                           <span class="text-[13px] font-medium text-foreground truncate">
-                            {skill.name}
+                            {skill.displayName ?? skill.name}
                           </span>
                           <span
                             class="shrink-0 px-1 py-0 text-[10px] font-semibold rounded bg-surface-3 text-muted-foreground"
@@ -1241,7 +1242,7 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                         {/* Info */}
                         <div class="flex-1 min-w-0">
                           <span class="text-[13px] font-medium text-foreground truncate block">
-                            {skill.name}
+                            {skill.displayName ?? skill.name}
                           </span>
                           <Show when={skill.description}>
                             <p class="m-0 mt-0.5 text-[12px] text-muted-foreground truncate">

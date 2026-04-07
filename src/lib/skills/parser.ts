@@ -203,6 +203,26 @@ function humanizeSlug(value: string): string {
 }
 
 /**
+ * Humanize a skill name from a catalog index entry.
+ * Returns the name as-is if it already has spaces or capitalization,
+ * humanizes it if it looks like a slug, and falls back to the slug
+ * if the name is empty.
+ *
+ * Used by the catalog ingestion path where the index `name` field
+ * is often the directory basename (e.g. "backtester", "grid-trader").
+ */
+export function humanizeSkillName(name: string, fallbackSlug?: string): string {
+  const trimmed = name?.trim() ?? "";
+  if (trimmed) {
+    return SKILL_SLUG_PATTERN.test(trimmed) ? humanizeSlug(trimmed) : trimmed;
+  }
+  if (fallbackSlug) {
+    return humanizeSlug(fallbackSlug);
+  }
+  return "Unnamed Skill";
+}
+
+/**
  * Resolve a human-friendly skill name.
  * Prefers Markdown H1, then metadata name, then fallback slug.
  */

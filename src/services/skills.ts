@@ -8,6 +8,7 @@ import { log } from "@/lib/logger";
 import {
   computeContentHash,
   getSkillPath,
+  humanizeSkillName,
   type InstalledSkill,
   parseSkillMd,
   type RemoteSkillRevision,
@@ -94,12 +95,18 @@ function githubApiHeaders(): HeadersInit {
 
 /**
  * Transform an index entry to a Skill.
+ *
+ * The catalog index `name` is often a slug-style directory basename
+ * (e.g. `backtester`, `grid-trader`) when the upstream SKILL.md does
+ * not provide a `display-name` in its frontmatter. Humanize the name
+ * here so the UI never renders raw slugs even when the catalog or a
+ * specific SKILL.md is missing display metadata.
  */
 function indexEntryToSkill(entry: SkillIndexEntry): Skill {
   return {
     id: `${entry.source}:${entry.slug}`,
     slug: entry.slug,
-    name: entry.name,
+    name: humanizeSkillName(entry.name, entry.slug),
     displayName: entry.displayName,
     description: entry.description,
     source: entry.source,

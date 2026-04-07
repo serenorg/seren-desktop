@@ -887,7 +887,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
 
                             <div class="flex-1 min-w-0">
                               <div class="text-[13px] font-medium text-foreground">
-                                {skill.name}
+                                {skill.displayName ?? skill.name}
                                 {isActive() && isSearching && (
                                   <span class="ml-1.5 text-[10px] text-primary font-semibold">
                                     ●
