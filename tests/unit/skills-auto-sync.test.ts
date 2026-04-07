@@ -1,10 +1,7 @@
 // ABOUTME: Test that refresh() auto-refreshes stale upstream-managed skills.
 // ABOUTME: Verifies concurrency guard (#1289), summary tracking, and the fix for #1155.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const mockInstalled = vi.hoisted(() => [] as Array<Record<string, unknown>>);
-const mockAvailable = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSkillsService = vi.hoisted(() => ({
   fetchAllSkills: vi.fn().mockResolvedValue([]),

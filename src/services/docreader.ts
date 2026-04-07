@@ -102,7 +102,19 @@ export async function readDocument(attachment: Attachment): Promise<string> {
       errorText.slice(0, 500),
     );
     if (response.status === 402) {
-      updateBalanceFromError(errorText);
+      // 402 body is JSON containing { availableBalanceAtomic: "<atomic units>" }.
+      // Parse and forward the numeric balance so the wallet UI updates immediately.
+      try {
+        const data = JSON.parse(errorText);
+        if (data.availableBalanceAtomic !== undefined) {
+          const balanceAtomic = Number.parseInt(data.availableBalanceAtomic, 10);
+          if (!Number.isNaN(balanceAtomic)) {
+            updateBalanceFromError(balanceAtomic);
+          }
+        }
+      } catch {
+        // Body wasn't JSON — fall through to the user-facing error below.
+      }
       throw new Error(
         "Insufficient SerenBucks balance. Add funds to process documents.",
       );

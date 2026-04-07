@@ -140,10 +140,13 @@ export interface PromptCompleteEvent {
   stopReason: string;
   /** Synthetic completion emitted after load_session history replay. */
   historyReplay?: boolean;
-  /** Agent-forwarded metadata (usage stats, turn count). */
+  /** Agent-forwarded metadata (usage stats, turn count, optional model context window). */
   meta?: {
     usage?: { input_tokens?: number; output_tokens?: number };
     numTurns?: number;
+    /** Reported by the agent runtime when the model surfaces a context window
+     * size (e.g. Claude/Codex). Used by agent.store to track compaction state. */
+    contextWindow?: number;
   };
 }
 

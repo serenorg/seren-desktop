@@ -25,7 +25,11 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* Silence the TS 6.x deprecation of `baseUrl` so tsc can run.
+       The migration off baseUrl is tracked separately. */
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src", "tests"],
   "references": [{ "path": "./tsconfig.node.json" }]

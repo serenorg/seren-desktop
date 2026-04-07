@@ -200,18 +200,20 @@ export const GatewayToolApproval: Component = () => {
               </div>
 
               <Show when={provenance()?.userMessage}>
-                <div class="flex flex-col gap-1.5 mb-4">
-                  <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
-                    Triggered by:
-                  </span>
-                  <span class="text-[0.85rem] text-muted-foreground bg-surface-1 px-3 py-2 rounded-md border border-border italic leading-relaxed">
-                    "
-                    {provenance()?.userMessage?.length > 120
-                      ? `${provenance()?.userMessage?.slice(0, 120)}…`
-                      : provenance()?.userMessage}
-                    "
-                  </span>
-                </div>
+                {(userMessage) => (
+                  <div class="flex flex-col gap-1.5 mb-4">
+                    <span class="text-sm font-medium text-muted-foreground uppercase tracking-[0.5px]">
+                      Triggered by:
+                    </span>
+                    <span class="text-[0.85rem] text-muted-foreground bg-surface-1 px-3 py-2 rounded-md border border-border italic leading-relaxed">
+                      "
+                      {userMessage().length > 120
+                        ? `${userMessage().slice(0, 120)}…`
+                        : userMessage()}
+                      "
+                    </span>
+                  </div>
+                )}
               </Show>
 
               <Show when={provenance()?.isFromExternalContent}>

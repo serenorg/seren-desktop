@@ -499,7 +499,9 @@ export const skillsStore = {
     if (isAdding && isUpstreamManagedSkill(installed)) {
       try {
         const status = await skills.inspectSyncStatus(installed);
-        if (status.updateAvailable) {
+        // inspectSyncStatus may return null for non-upstream-managed skills;
+        // the gate above guarantees it isn't, but the type is honest about it.
+        if (status?.updateAvailable) {
           await skills.refreshInstalledSkill(installed);
           await this.refreshInstalled();
           log.info(

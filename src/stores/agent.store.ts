@@ -3980,7 +3980,7 @@ Structured summary:`;
         forkTitle,
         agentType,
         cwd,
-        null,
+        undefined,
         newAgentSessionId ?? undefined,
         serializeAgentConversationMetadata({
           pendingBootstrapPromptContext: bootstrapPromptContext,

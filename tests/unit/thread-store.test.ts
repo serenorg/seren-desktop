@@ -146,7 +146,7 @@ import { threadStore } from "@/stores/thread.store";
 import { setRootPath } from "@/stores/fileTree";
 import { conversationStore } from "@/stores/conversation.store";
 import { agentStore } from "@/stores/agent.store";
-import { listSessions } from "@/services/providers";
+import { type AgentSessionInfo, listSessions } from "@/services/providers";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 
 describe("threadStore", () => {
@@ -378,18 +378,26 @@ describe("threadStore", () => {
       };
 
       let resolveBackendSessions:
-        | ((value: Array<{ id: string }>) => void)
+        | ((value: AgentSessionInfo[]) => void)
         | undefined;
       vi.mocked(listSessions).mockImplementationOnce(
         () =>
-          new Promise<Array<{ id: string }>>((resolve) => {
+          new Promise<AgentSessionInfo[]>((resolve) => {
             resolveBackendSessions = resolve;
           }),
       );
 
       threadStore.selectThread("agent-1", "agent");
       threadStore.selectThread("chat-1", "chat");
-      resolveBackendSessions?.([{ id: "sess-1" }]);
+      resolveBackendSessions?.([
+        {
+          id: "sess-1",
+          agentType: "claude-code",
+          cwd: "/test",
+          status: "ready",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
 
       await vi.waitFor(() => {
         expect(listSessions).toHaveBeenCalledTimes(1);
