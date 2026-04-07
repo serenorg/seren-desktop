@@ -4,6 +4,7 @@
 import { createEffect, onCleanup, onMount, Show, untrack } from "solid-js";
 import { AboutDialog } from "@/components/common/AboutDialog";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
+import { OrganizationOtpModal } from "@/components/common/OrganizationOtpModal";
 import { GatewayToolApproval } from "@/components/gateway/GatewayToolApproval";
 import { AppShell } from "@/components/layout/AppShell";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
@@ -195,29 +196,32 @@ function App() {
   };
 
   return (
-    <Show
-      when={!authStore.isLoading}
-      fallback={
-        <div class="flex flex-col items-center justify-center h-screen gap-4 text-muted-foreground">
-          <div class="loading-spinner" />
-          <p>Loading...</p>
-        </div>
-      }
-    >
-      <AppShell onLoginSuccess={handleLoginSuccess} onLogout={handleLogout} />
-      <LowBalanceModal />
-      <DailyClaimPopup />
-      <X402PaymentApproval />
-      <Show when={runtime.capabilities.localMcp}>
-        <GatewayToolApproval />
+    <>
+      <Show
+        when={!authStore.isLoading}
+        fallback={
+          <div class="flex flex-col items-center justify-center h-screen gap-4 text-muted-foreground">
+            <div class="loading-spinner" />
+            <p>Loading...</p>
+          </div>
+        }
+      >
+        <AppShell onLoginSuccess={handleLoginSuccess} onLogout={handleLogout} />
+        <LowBalanceModal />
+        <DailyClaimPopup />
+        <X402PaymentApproval />
+        <Show when={runtime.capabilities.localMcp}>
+          <GatewayToolApproval />
+        </Show>
+        <Show when={runtime.capabilities.terminal}>
+          <ShellApproval />
+        </Show>
+        <Show when={runtime.mode === "desktop-native"}>
+          <AboutDialog />
+        </Show>
       </Show>
-      <Show when={runtime.capabilities.terminal}>
-        <ShellApproval />
-      </Show>
-      <Show when={runtime.mode === "desktop-native"}>
-        <AboutDialog />
-      </Show>
-    </Show>
+      <OrganizationOtpModal />
+    </>
   );
 }
 

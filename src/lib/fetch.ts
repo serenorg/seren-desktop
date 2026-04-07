@@ -15,33 +15,65 @@ export async function appFetch(
   init?: RequestInit,
 ): Promise<Response> {
   const fetchFn = await getTauriFetch();
-  const request = new Request(input, init);
-  const retryRequest = request.clone();
+  const baseRequest = new Request(input, init);
+  let refreshedForRequest = false;
+  let otpRetried = 0;
 
-  const response = await fetchFn(request);
+  while (true) {
+    const request = baseRequest.clone();
+    const response = await fetchFn(request);
 
-  // Handle 401 with auto-refresh (skip for auth endpoints to avoid loops)
-  if (response.status === 401 && !shouldSkipRefresh(request)) {
-    // Dynamic import to avoid circular dependency
-    const { refreshAccessToken } = await import("@/services/auth");
-    const refreshed = await refreshAccessToken();
+    if (
+      response.status === 401 &&
+      !shouldSkipRefresh(request) &&
+      !refreshedForRequest
+    ) {
+      const { refreshAccessToken } = await import("@/services/auth");
+      const refreshed = await refreshAccessToken();
+      refreshedForRequest = true;
 
-    if (refreshed) {
-      const newToken = await getToken();
-      if (newToken) {
-        retryRequest.headers.set("Authorization", `Bearer ${newToken}`);
+      if (refreshed) {
+        const newToken = await getToken();
+        if (newToken) {
+          baseRequest.headers.set("Authorization", `Bearer ${newToken}`);
+        }
 
-        // Close original response body before retrying
         try {
           await response.body?.cancel();
         } catch {
           // noop
         }
 
-        return fetchFn(retryRequest);
+        continue;
       }
     }
-  }
 
-  return response;
+    if (response.status === 403) {
+      const { organizationOtpService } = await import(
+        "@/services/organization-otp"
+      );
+
+      if (!organizationOtpService.shouldSkipOtp(request) && otpRetried < 2) {
+        const denial =
+          await organizationOtpService.isOtpRequiredResponse(response);
+
+        if (denial) {
+          const approved = await organizationOtpService.requestApproval(denial);
+          if (approved) {
+            otpRetried += 1;
+
+            try {
+              await response.body?.cancel();
+            } catch {
+              // noop
+            }
+
+            continue;
+          }
+        }
+      }
+    }
+
+    return response;
+  }
 }
