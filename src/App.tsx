@@ -235,12 +235,15 @@ function App() {
         const { message: showMessageDialog } = await import(
           "@tauri-apps/plugin-dialog"
         );
-        const reportError = async (msg: string) => {
-          console.error(`[ClaudeMemory] ${msg}`);
+        // Informational notice, not a panic. The interceptor runs in the
+        // background and the user can always fix the underlying issue from
+        // Settings — there is no need for a red error icon here.
+        const notifyUser = async (msg: string) => {
+          console.info(`[ClaudeMemory] ${msg}`);
           try {
             await showMessageDialog(msg, {
               title: "Claude Memory Interceptor",
-              kind: "error",
+              kind: "info",
             });
           } catch {
             // Dialog plugin unavailable in browser runtime — console is the fallback.
@@ -254,18 +257,20 @@ function App() {
               `[ClaudeMemory] startup migration: persisted=${report.persisted} failures=${report.failures}`,
             );
             if (report.failures > 0) {
-              await reportError(
-                `Claude memory interceptor: ${report.failures} file${
+              await notifyUser(
+                `${report.failures} Claude memory file${
                   report.failures === 1 ? "" : "s"
-                } could not be pushed to SerenDB and were left on disk. Check your SerenDB connection and retry from Settings → Code Indexing → Claude Code Auto-Memory → Migrate Existing Files.`,
+                } could not be pushed to SerenDB yet and ${
+                  report.failures === 1 ? "was" : "were"
+                } left on disk. The interceptor will retry automatically on the next write, or you can retry now from Settings → Code Indexing → Claude Code Auto-Memory → Migrate Existing Files.`,
               );
             }
           }
         } catch (err) {
           // Reset so a later project/auth change can retry.
           claudeMemoryStartedForAuth = null;
-          await reportError(
-            `Failed to start Claude memory interceptor: ${err}. Check your SerenDB project selection, then toggle the interceptor off and on again in Settings.`,
+          await notifyUser(
+            `The Claude memory interceptor could not start: ${err}. You can try again by toggling it off and on in Settings → Code Indexing → Claude Code Auto-Memory.`,
           );
         }
       } catch (error) {
