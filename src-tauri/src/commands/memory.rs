@@ -19,7 +19,7 @@ const TOKEN_KEY: &str = "token";
 /// Managed state for memory operations.
 pub struct MemoryState {
     base_url: String,
-    cache_path: PathBuf,
+    pub(crate) cache_path: PathBuf,
     cache: Mutex<Option<LocalCache>>,
 }
 
@@ -61,6 +61,42 @@ impl MemoryState {
         }
         Ok(())
     }
+}
+
+/// Write a memory directly to the local encrypted cache without requiring an
+/// authenticated cloud call. Used by the Claude memory interceptor which runs
+/// on a synchronous file-watcher thread — the existing `memory_sync` engine
+/// will push these entries to SerenDB on the next sync pass.
+///
+/// Returns the local UUID of the cached entry.
+pub fn persist_memory_local(
+    state: &MemoryState,
+    content: String,
+    memory_type: String,
+    metadata: serde_json::Value,
+) -> Result<String, String> {
+    state.ensure_cache()?;
+    let local_id = uuid::Uuid::new_v4();
+    let cached = CachedMemory {
+        id: local_id,
+        content,
+        memory_type,
+        metadata,
+        embedding: vec![0.0; 1536],
+        relevance_score: 1.0,
+        created_at: seren_memory_sdk::chrono::Utc::now(),
+        synced: false,
+        cloud_id: None,
+    };
+    let guard = state.cache.lock().map_err(|e| e.to_string())?;
+    if let Some(cache) = guard.as_ref() {
+        cache
+            .insert_memory(&cached)
+            .map_err(|e| format!("failed to insert cached memory: {e}"))?;
+    } else {
+        return Err("memory cache unavailable".to_string());
+    }
+    Ok(local_id.to_string())
 }
 
 /// Output type for bootstrap (serializable to frontend).
@@ -144,25 +180,12 @@ pub async fn memory_remember(
 
     // Write to local cache first (synced=false) so memory survives cloud failures
     // such as scale-to-zero cold starts. The sync engine will push pending entries later.
-    let local_id = uuid::Uuid::new_v4();
-    state.ensure_cache()?;
-    let cached = CachedMemory {
-        id: local_id,
-        content: content.clone(),
-        memory_type: memory_type.clone(),
-        metadata: serde_json::json!({}),
-        embedding: vec![0.0; 1536],
-        relevance_score: 1.0,
-        created_at: seren_memory_sdk::chrono::Utc::now(),
-        synced: false,
-        cloud_id: None,
-    };
-    {
-        let guard = state.cache.lock().map_err(|e| e.to_string())?;
-        if let Some(cache) = guard.as_ref() {
-            cache.insert_memory(&cached).ok();
-        }
-    }
+    let local_id = persist_memory_local(
+        &state,
+        content.clone(),
+        memory_type.clone(),
+        serde_json::json!({}),
+    )?;
 
     // Attempt cloud sync (best-effort; service may be warming up from scale-to-zero).
     match client
@@ -172,7 +195,7 @@ pub async fn memory_remember(
         Ok(result) => Ok(result),
         Err(e) => {
             log::warn!("Cloud remember failed (local cache saved, will sync later): {e}");
-            Ok(local_id.to_string())
+            Ok(local_id)
         }
     }
 }
