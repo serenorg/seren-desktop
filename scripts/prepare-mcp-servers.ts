@@ -9,6 +9,8 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const SOURCE = path.join(ROOT, "mcp-servers", "playwright-stealth");
 const DEST_PARENT = path.join(ROOT, "src-tauri", "mcp-servers");
 const DEST = path.join(DEST_PARENT, "playwright-stealth");
+const DEST_NEW = path.join(DEST_PARENT, "playwright-stealth.new");
+const DEST_OLD = path.join(DEST_PARENT, "playwright-stealth.old");
 const RM_RETRY_OPTS = { recursive: true, force: true, maxRetries: 10, retryDelay: 100 } as const;
 
 // Main
@@ -30,14 +32,37 @@ execSync("pnpm install --node-linker=hoisted", { cwd: SOURCE, stdio: "inherit" }
 console.log("Building...");
 execSync("pnpm build", { cwd: SOURCE, stdio: "inherit" });
 
-// 3. Clean destination
-if (fs.existsSync(DEST_PARENT)) {
-	console.log("Cleaning destination...");
-	fs.rmSync(DEST_PARENT, RM_RETRY_OPTS);
+// 3. Atomic swap: copy to sibling, then rename into place.
+//
+// The previous implementation wiped DEST_PARENT then cpSync'd the source back,
+// leaving a ~1-3s window where src-tauri/mcp-servers/playwright-stealth/ did not
+// exist. Tauri's build script walks that tree on fresh builds to emit
+// `rerun-if-changed` entries for bundle resources and aborts with
+// "resource path doesn't exist" if a file vanishes mid-walk. Running both
+// concurrently via `beforeDevCommand` reliably raced on cold builds (#1505).
+//
+// Two renameSync calls on the same filesystem shrink that window to a few
+// microseconds, narrow enough that the walker will not observe a missing dest.
+fs.mkdirSync(DEST_PARENT, { recursive: true });
+
+if (fs.existsSync(DEST_NEW)) {
+	fs.rmSync(DEST_NEW, RM_RETRY_OPTS);
+}
+console.log("Staging new bundle at playwright-stealth.new...");
+fs.cpSync(SOURCE, DEST_NEW, { recursive: true });
+
+if (fs.existsSync(DEST_OLD)) {
+	fs.rmSync(DEST_OLD, RM_RETRY_OPTS);
 }
 
-// 4. Simple copy - no symlink handling needed since hoisted mode creates real files
-console.log("Copying to bundle location...");
-fs.cpSync(SOURCE, DEST, { recursive: true });
+console.log("Swapping into place...");
+if (fs.existsSync(DEST)) {
+	fs.renameSync(DEST, DEST_OLD);
+}
+fs.renameSync(DEST_NEW, DEST);
+
+if (fs.existsSync(DEST_OLD)) {
+	fs.rmSync(DEST_OLD, RM_RETRY_OPTS);
+}
 
 console.log("MCP servers prepared successfully.");
