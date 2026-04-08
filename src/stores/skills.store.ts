@@ -4,11 +4,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createStore } from "solid-js/store";
 import { log } from "@/lib/logger";
-import type {
-  InstalledSkill,
-  Skill,
-  SkillScope,
-  SkillsState,
+import {
+  filterHostCompatibleCatalog,
+  type InstalledSkill,
+  isSkillCompatibleWithHost,
+  type Skill,
+  type SkillScope,
+  type SkillsState,
 } from "@/lib/skills";
 import {
   isPublisherManagedSkill,
@@ -449,14 +451,22 @@ export const skillsStore = {
     const refs = threadSkillsState[key];
 
     // Explicit thread override (including empty [] = "no skills")
+    // Fail-closed on host exclusion: a skill that declares excludeHosts
+    // including "seren-desktop" is never resolved, even if a stale
+    // project config or cached ref still points at it.
+    // Spec: serenorg/seren-desktop#1496
     if (Array.isArray(refs)) {
-      return this.resolveRefs(refs);
+      return this.resolveRefs(refs).filter((skill) =>
+        isSkillCompatibleWithHost(skill),
+      );
     }
 
     // No override yet — fall back to project/global defaults so existing
     // threads don't lose their skills on upgrade. New threads get an
     // explicit empty override when the user first toggles a skill.
-    return this.getProjectSkills(projectRoot);
+    return this.getProjectSkills(projectRoot).filter((skill) =>
+      isSkillCompatibleWithHost(skill),
+    );
   },
 
   /**
@@ -594,9 +604,19 @@ export const skillsStore = {
     setState("error", null);
 
     try {
-      const available = await skills.fetchAllSkills(skipCache);
+      const all = await skills.fetchAllSkills(skipCache);
+      // Filter out skills that exclude the Seren Desktop host. These are
+      // CLI-only skills and should never appear in Desktop discovery.
+      // Spec: serenorg/seren-desktop#1496
+      const available = filterHostCompatibleCatalog(all);
+      const excluded = all.length - available.length;
       setState("available", available);
-      log.info("[SkillsStore] Loaded", available.length, "available skills");
+      log.info(
+        "[SkillsStore] Loaded",
+        available.length,
+        "available skills",
+        excluded > 0 ? `(${excluded} host-excluded)` : "",
+      );
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load skills";
@@ -618,7 +638,21 @@ export const skillsStore = {
       const fileTree = getFileTreeState();
       const projectRoot = fileTree.rootPath;
 
-      const installed = await skills.listAllInstalled(projectRoot);
+      const all = await skills.listAllInstalled(projectRoot);
+
+      // Drop host-excluded skills (CLI-only skills installed by mistake
+      // from the claude/ scope). They never show up in the UI and cannot
+      // be resolved via getThreadSkills.
+      // Spec: serenorg/seren-desktop#1496
+      const installed = all.filter((skill) => isSkillCompatibleWithHost(skill));
+      const excluded = all.length - installed.length;
+      if (excluded > 0) {
+        log.info(
+          "[SkillsStore]",
+          excluded,
+          "installed skill(s) host-excluded from Desktop",
+        );
+      }
 
       // Apply enabled state from localStorage
       for (const skill of installed) {

@@ -106,6 +106,9 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
       if (currentKey === "includes") {
         metadata.includes = [...(metadata.includes ?? []), value];
       }
+      if (currentKey === "exclude-hosts" || currentKey === "excludeHosts") {
+        metadata.excludeHosts = [...(metadata.excludeHosts ?? []), value];
+      }
       continue;
     }
 
@@ -124,6 +127,8 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
         if (key === "globs") metadata.globs = [];
         if (key === "alwaysAllow") metadata.alwaysAllow = [];
         if (key === "includes") metadata.includes = [];
+        if (key === "exclude-hosts" || key === "excludeHosts")
+          metadata.excludeHosts = [];
         continue;
       }
 
@@ -142,6 +147,8 @@ function parseYamlFrontmatter(yaml: string): SkillMetadata {
         if (key === "globs") metadata.globs = items;
         if (key === "alwaysAllow") metadata.alwaysAllow = items;
         if (key === "includes") metadata.includes = items;
+        if (key === "exclude-hosts" || key === "excludeHosts")
+          metadata.excludeHosts = items;
         continue;
       }
 
