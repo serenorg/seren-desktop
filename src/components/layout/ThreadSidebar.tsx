@@ -1069,7 +1069,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                             <span class="text-xs">
                               {thread.agentType === "codex"
                                 ? "\u26A1"
-                                : "\u{1F916}"}
+                                : thread.agentType === "gemini"
+                                  ? "\u2728"
+                                  : "\u{1F916}"}
                             </span>
                           </Show>
                         </div>
