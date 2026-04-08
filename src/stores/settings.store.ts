@@ -93,6 +93,17 @@ export interface Settings {
 
   // Memory settings
   memoryEnabled: boolean;
+  /**
+   * Intercept Claude Code auto-memory writes (~/.claude/projects/*\/memory/*.md)
+   * and redirect them to SerenDB through the existing memory stack. When off,
+   * Claude Code's plaintext memory files are left untouched on disk.
+   */
+  claudeMemoryInterceptEnabled: boolean;
+  /**
+   * Migrate any pre-existing plaintext memory files to SerenDB on app startup.
+   * Only applies when the interceptor is enabled.
+   */
+  claudeMemoryMigrateOnStartup: boolean;
 
   // Agent settings
   agentSandboxMode: "read-only" | "workspace-write" | "full-access";
@@ -180,6 +191,8 @@ const DEFAULT_SETTINGS: Settings = {
   semanticIndexingEnabled: false,
   // Memory
   memoryEnabled: false,
+  claudeMemoryInterceptEnabled: true,
+  claudeMemoryMigrateOnStartup: true,
   // Agent
   agentSandboxMode: "workspace-write",
   agentApprovalPolicy: "on-request",
