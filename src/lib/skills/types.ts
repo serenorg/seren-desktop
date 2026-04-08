@@ -30,6 +30,13 @@ export interface SkillMetadata {
   alwaysAllow?: string[];
   /** Repo-relative paths to bundle as shared dependencies under _deps/ */
   includes?: string[];
+  /**
+   * Hosts this skill is NOT compatible with. When the current host matches
+   * one of these values, the skill is filtered from discovery and blocked
+   * from invocation. Supported host tokens: "seren-desktop".
+   * Spec: serenorg/seren-desktop#1496
+   */
+  excludeHosts?: string[];
 }
 
 /**
@@ -63,6 +70,12 @@ export interface Skill {
    * the GitHub API call entirely. (#1476)
    */
   lastModified?: string;
+  /**
+   * Hosts this skill is NOT compatible with. Propagated from SKILL.md
+   * frontmatter. Used to filter Desktop-incompatible skills from catalog
+   * discovery. Spec: serenorg/seren-desktop#1496
+   */
+  excludeHosts?: string[];
 }
 
 export interface SkillSyncState {
@@ -159,6 +172,12 @@ export interface SkillIndexEntry {
    * older indexes — desktop falls back to GitHub API when missing. (#1476)
    */
   lastModified?: string;
+  /**
+   * Hosts this skill is NOT compatible with. Present in R2 index entries
+   * that declare host exclusion. Used to filter CLI-only skills from
+   * Desktop discovery. Spec: serenorg/seren-desktop#1496
+   */
+  excludeHosts?: string[];
 }
 
 /**

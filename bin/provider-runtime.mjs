@@ -7,6 +7,13 @@ import { createProviderHandlers } from "./browser-local/providers.mjs";
 import { addClient, emit, removeClient } from "./browser-local/events.mjs";
 import { handleRpcMessage, registerHandler } from "./browser-local/rpc.mjs";
 
+// Seren Desktop host marker: propagated to every spawned child (Claude CLI,
+// Codex, Gemini, skills) via process.env inheritance. Skills can detect the
+// Desktop runtime via SEREN_HOST=seren-desktop and fail closed when needed.
+// Spec: serenorg/seren-desktop#1496
+process.env.SEREN_HOST = "seren-desktop";
+process.env.SEREN_DESKTOP = "1";
+
 function usage() {
   console.log(`
 Usage: seren-provider-runtime [--host <address>] [--port <number>] [--token <value>]

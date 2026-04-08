@@ -481,6 +481,18 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Inject the Seren Desktop host marker into the process environment.
+            // Every child process (provider runtime, Claude/Codex/Gemini CLI,
+            // skills spawned by those agents) inherits these vars and can
+            // detect that it's running under Seren Desktop.
+            // Spec: serenorg/seren-desktop#1496
+            // SAFETY: set_var is unsafe in Rust 2024. Called exactly once
+            // during app setup before any threads spawn child processes.
+            unsafe {
+                std::env::set_var("SEREN_HOST", "seren-desktop");
+                std::env::set_var("SEREN_DESKTOP", "1");
+            }
+
             // Build native menu bar for all platforms
             {
                 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};

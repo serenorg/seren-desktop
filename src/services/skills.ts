@@ -1069,7 +1069,7 @@ export const skills = {
             description: parsed.metadata.description || "",
             source: "local" as SkillSource,
             tags: [],
-
+            excludeHosts: parsed.metadata.excludeHosts,
             scope,
             skillsDir,
             dirName,
