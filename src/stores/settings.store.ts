@@ -183,7 +183,7 @@ const DEFAULT_SETTINGS: Settings = {
   // Agent
   agentSandboxMode: "workspace-write",
   agentApprovalPolicy: "on-request",
-  agentSearchEnabled: false,
+  agentSearchEnabled: true,
   agentNetworkEnabled: true,
   agentAutoApproveReads: true,
   // Voice
