@@ -1,5 +1,6 @@
-// ABOUTME: Intercepts Claude Code auto-memory writes and persists them to SerenDB.
-// ABOUTME: Watches ~/.claude/projects/*/memory/ and awaits a real cloud write per file.
+// ABOUTME: Intercepts Claude Code auto-memory writes and persists them to SerenDB SQL.
+// ABOUTME: Watches ~/.claude/projects/*/memory/ and INSERTs each file as a row in
+// ABOUTME: claude_agent_preferences. Storage is a separate SerenDB project from user memory.
 
 use std::collections::HashMap;
 use std::fs;
@@ -8,20 +9,22 @@ use std::sync::{Arc, Mutex};
 
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
+use tauri_plugin_store::StoreExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-
-use seren_memory_sdk::client::MemoryClient;
-
-use crate::commands::memory::MemoryState;
 
 const AUTH_STORE: &str = "auth.json";
 const AUTH_TOKEN_KEY: &str = "token";
 const RENDERED_INDEX_FILENAME: &str = "MEMORY.md";
 const PROJECT_ID_FILENAME: &str = "project_id";
-const DEFAULT_MEMORY_TYPE: &str = "claude_preference";
+const DEFAULT_PREF_TYPE: &str = "claude_preference";
+
+/// Hardcoded SerenDB SQL endpoint for the seren-db publisher. The frontend uses
+/// the same path through the generated SDK; we hit it directly from Rust so the
+/// watcher can persist files without round-tripping through JS.
+const SERENDB_QUERY_URL: &str = "https://api.serendb.com/publishers/seren-db/query";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,13 +60,22 @@ pub enum ProjectIdentitySource {
     GeneratedUuid,
 }
 
-/// Event emitted to the frontend after a successful SerenDB write.
+/// SerenDB destination for the interceptor — a project + branch + database
+/// triple resolved by the frontend `ensureClaudeMemoryProvisioned()` helper
+/// before the watcher starts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerenDbConfig {
+    pub project_id: String,
+    pub branch_id: String,
+    pub database_name: String,
+}
+
+/// Event emitted to the frontend after a successful SerenDB SQL INSERT.
 #[derive(Debug, Clone, Serialize)]
 pub struct InterceptSuccessEvent {
     pub path: String,
     pub name: Option<String>,
     pub memory_type: String,
-    pub serendb_response: String,
 }
 
 /// Event emitted when the cloud write fails; the file is left on disk so the
@@ -81,7 +93,7 @@ struct WatcherSlot {
     stop_tx: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
     running: bool,
-    project_id: Option<Uuid>,
+    config: Option<SerenDbConfig>,
 }
 
 impl Default for WatcherSlot {
@@ -91,7 +103,7 @@ impl Default for WatcherSlot {
             stop_tx: None,
             task: None,
             running: false,
-            project_id: None,
+            config: None,
         }
     }
 }
@@ -141,6 +153,32 @@ pub fn should_intercept_path(path: &Path) -> bool {
         .and_then(|n| n.to_str())
         .map(|n| n == "memory")
         .unwrap_or(false)
+}
+
+/// Extract the encoded Claude project directory name from a memory file path.
+/// `/.../.claude/projects/-Users-x-foo/memory/bar.md` → `-Users-x-foo`.
+/// Returns `None` if the path does not match the expected layout.
+pub fn extract_claude_project_dir_name(path: &Path) -> Option<String> {
+    let memory_dir = path.parent()?;
+    let project_dir = memory_dir.parent()?;
+    project_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(String::from)
+}
+
+/// Derive a `pref_key` from a memory file path: the filename without the
+/// `.md` extension. The combination `(project_path, pref_key)` is the
+/// `UNIQUE` constraint on `claude_agent_preferences`, so re-intercepting an
+/// updated file overwrites the row instead of duplicating it.
+pub fn derive_pref_key(path: &Path) -> Option<String> {
+    let file_name = path.file_name().and_then(|n| n.to_str())?;
+    Some(
+        file_name
+            .strip_suffix(".md")
+            .unwrap_or(file_name)
+            .to_string(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +343,78 @@ pub fn parse_memory_file(contents: &str) -> ParsedMemoryFile {
 }
 
 // ---------------------------------------------------------------------------
+// SQL escaping + query builders
+//
+// We do not have parameterized queries on the SerenDB `/query` endpoint
+// (the `QueryRequest` schema only takes a single `query` string). To prevent
+// SQL injection from arbitrary file content, we escape every value into a
+// Postgres standard string literal: `'value'` with single quotes doubled.
+// This is safe for Postgres when `standard_conforming_strings = on` (the
+// default since 9.1) — backslashes are NOT escape characters in standard
+// strings.
+// ---------------------------------------------------------------------------
+
+/// Escape a string for embedding in a Postgres standard SQL string literal.
+/// Returns the value wrapped in single quotes with internal `'` doubled.
+///
+/// Example: `O'Brien` → `'O''Brien'`.
+pub fn quote_sql_string(value: &str) -> String {
+    let escaped = value.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
+/// `NULL` if the option is `None`, otherwise a quoted SQL string.
+fn quote_optional(value: Option<&str>) -> String {
+    match value {
+        Some(v) => quote_sql_string(v),
+        None => "NULL".to_string(),
+    }
+}
+
+/// Build the `INSERT ... ON CONFLICT DO UPDATE` statement that upserts a
+/// `claude_agent_preferences` row. The `(project_path, pref_key)` UNIQUE
+/// constraint means re-intercepting an updated file overwrites instead of
+/// duplicating, which preserves the spec's idempotent-write semantics.
+pub fn build_upsert_preference_sql(
+    project_path: &str,
+    pref_key: &str,
+    pref_type: &str,
+    description: Option<&str>,
+    content: &str,
+    source_file: &str,
+) -> String {
+    format!(
+        "INSERT INTO claude_agent_preferences \
+         (project_path, pref_key, pref_type, description, content, source_file, updated_at) \
+         VALUES ({project_path}, {pref_key}, {pref_type}, {description}, {content}, {source_file}, now()) \
+         ON CONFLICT (project_path, pref_key) DO UPDATE SET \
+         pref_type = EXCLUDED.pref_type, \
+         description = EXCLUDED.description, \
+         content = EXCLUDED.content, \
+         source_file = EXCLUDED.source_file, \
+         updated_at = now();",
+        project_path = quote_sql_string(project_path),
+        pref_key = quote_sql_string(pref_key),
+        pref_type = quote_sql_string(pref_type),
+        description = quote_optional(description),
+        content = quote_sql_string(content),
+        source_file = quote_sql_string(source_file),
+    )
+}
+
+/// Build a SELECT to read all preferences for a project, ordered by pref_type
+/// and pref_key for stable rendering. Used by `MEMORY.md` rendering.
+pub fn build_select_preferences_sql(project_path: &str) -> String {
+    format!(
+        "SELECT pref_key, pref_type, description, content, source_file \
+         FROM claude_agent_preferences \
+         WHERE project_path = {project_path} \
+         ORDER BY pref_type, pref_key;",
+        project_path = quote_sql_string(project_path),
+    )
+}
+
+// ---------------------------------------------------------------------------
 // MEMORY.md rendering
 // ---------------------------------------------------------------------------
 
@@ -325,22 +435,153 @@ pub fn write_rendered_memory_md(
     Ok(final_path)
 }
 
+/// Render rows from `claude_agent_preferences` as a Markdown document Claude
+/// Code can read at session start.
+pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String {
+    if rows.is_empty() {
+        return "# Claude Memory\n\n_No preferences stored yet._\n".to_string();
+    }
+    let mut out = String::from("# Claude Memory\n\n");
+    for row in rows {
+        // Schema: pref_key, pref_type, description, content, source_file
+        let pref_key = row.first().and_then(|v| v.as_str()).unwrap_or("");
+        let pref_type = row.get(1).and_then(|v| v.as_str()).unwrap_or("");
+        let description = row.get(2).and_then(|v| v.as_str()).unwrap_or("");
+        let content = row.get(3).and_then(|v| v.as_str()).unwrap_or("");
+        let source_file = row.get(4).and_then(|v| v.as_str()).unwrap_or("");
+
+        out.push_str("---\n");
+        out.push_str(&format!("name: {pref_key}\n"));
+        out.push_str(&format!("type: {pref_type}\n"));
+        if !description.is_empty() {
+            out.push_str(&format!("description: {description}\n"));
+        }
+        if !source_file.is_empty() {
+            out.push_str(&format!("source_file: {source_file}\n"));
+        }
+        out.push_str("---\n");
+        out.push_str(content);
+        if !content.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------
-// Core interception logic (testable without Tauri)
+// SerenDB SQL HTTP client
 // ---------------------------------------------------------------------------
 
-/// Read a single memory file, push it to SerenDB via the supplied
-/// authenticated [`MemoryClient`], and delete the file **only** on cloud
+/// Minimal SerenDB SQL client. Holds a `reqwest::Client` plus the OAuth
+/// bearer token used to authenticate `/query` calls. We do NOT depend on
+/// `seren-memory-sdk` — that's the user-memory store, a different SerenDB
+/// surface entirely.
+#[derive(Debug, Clone)]
+pub struct SerenDbSqlClient {
+    http: reqwest::Client,
+    token: String,
+}
+
+impl SerenDbSqlClient {
+    pub fn new(token: String) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            token,
+        }
+    }
+
+    /// Execute a SQL statement against `(project_id, branch_id, database_name)`.
+    /// Returns the parsed `QueryResult` rows on success. Network or HTTP-level
+    /// errors are surfaced as `Err(String)`.
+    pub async fn run_sql(
+        &self,
+        config: &SerenDbConfig,
+        sql: &str,
+        read_only: bool,
+    ) -> Result<QueryResult, String> {
+        let body = serde_json::json!({
+            "project_id": config.project_id,
+            "branch_id": config.branch_id,
+            "database": config.database_name,
+            "query": sql,
+            "read_only": read_only,
+        });
+
+        let resp = self
+            .http
+            .post(SERENDB_QUERY_URL)
+            .bearer_auth(&self.token)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("SerenDB query request failed: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            let truncated = if text.len() > 500 {
+                format!("{}…", &text[..500])
+            } else {
+                text
+            };
+            return Err(format!(
+                "SerenDB query returned HTTP {}: {truncated}",
+                status.as_u16()
+            ));
+        }
+
+        let envelope: QueryEnvelope = resp
+            .json()
+            .await
+            .map_err(|e| format!("SerenDB response parse error: {e}"))?;
+        Ok(envelope.data)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct QueryEnvelope {
+    data: QueryResult,
+}
+
+/// Result rows from a SerenDB SQL `/query` call. Mirrors the OpenAPI
+/// `QueryResult` type so deserialization works without depending on the
+/// generated TypeScript SDK.
+#[derive(Debug, Deserialize, Clone)]
+pub struct QueryResult {
+    #[allow(dead_code)]
+    pub columns: Vec<String>,
+    pub row_count: usize,
+    pub rows: Vec<Vec<serde_json::Value>>,
+}
+
+// ---------------------------------------------------------------------------
+// Core interception logic
+// ---------------------------------------------------------------------------
+
+/// Outcome of a single [`process_memory_file`] call.
+#[derive(Debug, Clone)]
+pub enum ProcessOutcome {
+    Skipped,
+    Persisted {
+        name: Option<String>,
+        memory_type: String,
+    },
+}
+
+/// Read a single memory file, INSERT it into `claude_agent_preferences` via
+/// the supplied `SerenDbSqlClient`, and delete the file **only** on cloud
 /// success. On failure the file is left on disk so the watcher can retry.
 ///
 /// This is the single unit of work for the interceptor — the tokio event
-/// loop calls it, the startup migration calls it, and the SerenDB
-/// round-trip integration test calls it. It does NOT touch the local
-/// `seren-memory-sdk` cache or any other memory stack.
+/// loop calls it, the startup migration calls it, and the integration test
+/// calls it. It does NOT touch the user-memory store (`memory_remember` /
+/// `seren-memory-sdk`) — Claude memory is a separate SerenDB project.
 pub async fn process_memory_file(
     path: &Path,
-    client: &MemoryClient,
-    project_id: Option<Uuid>,
+    client: &SerenDbSqlClient,
+    config: &SerenDbConfig,
 ) -> Result<ProcessOutcome, String> {
     if !path.exists() {
         return Ok(ProcessOutcome::Skipped);
@@ -357,33 +598,66 @@ pub async fn process_memory_file(
         .frontmatter
         .memory_type
         .clone()
-        .unwrap_or_else(|| DEFAULT_MEMORY_TYPE.to_string());
+        .unwrap_or_else(|| DEFAULT_PREF_TYPE.to_string());
 
-    // Await the REAL cloud write. On Err we return without deleting the file.
-    let serendb_response = client
-        .remember(&contents, &memory_type, project_id, None)
+    let project_path = extract_claude_project_dir_name(path)
+        .ok_or_else(|| format!("could not derive project path from {}", path.display()))?;
+    let pref_key = derive_pref_key(path)
+        .ok_or_else(|| format!("could not derive pref_key from {}", path.display()))?;
+    let source_file = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(String::from)
+        .unwrap_or_default();
+
+    let sql = build_upsert_preference_sql(
+        &project_path,
+        &pref_key,
+        &memory_type,
+        parsed.frontmatter.description.as_deref(),
+        &parsed.body,
+        &source_file,
+    );
+
+    // Await the REAL SerenDB SQL INSERT. On Err we return without deleting
+    // the file so the watcher can retry on the next event.
+    client
+        .run_sql(config, &sql, /* read_only */ false)
         .await
-        .map_err(|e| format!("serendb remember failed: {e}"))?;
+        .map_err(|e| format!("serendb INSERT failed: {e}"))?;
 
-    // Cloud write succeeded — now remove the plaintext file.
     fs::remove_file(path).map_err(|e| format!("failed to delete {}: {e}", path.display()))?;
 
     Ok(ProcessOutcome::Persisted {
         name: parsed.frontmatter.name,
         memory_type,
-        serendb_response,
     })
 }
 
-/// Outcome of a single [`process_memory_file`] call.
-#[derive(Debug, Clone)]
-pub enum ProcessOutcome {
-    Skipped,
-    Persisted {
-        name: Option<String>,
-        memory_type: String,
-        serendb_response: String,
-    },
+/// Render `MEMORY.md` for a given Claude project directory by SELECTing all
+/// preference rows from SerenDB and formatting them as Markdown.
+pub async fn render_memory_md_from_db(
+    client: &SerenDbSqlClient,
+    config: &SerenDbConfig,
+    claude_project_dir: &Path,
+) -> Result<PathBuf, String> {
+    let project_path = claude_project_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "invalid claude project dir name".to_string())?;
+
+    let sql = build_select_preferences_sql(project_path);
+    let result = client
+        .run_sql(config, &sql, /* read_only */ true)
+        .await
+        .map_err(|e| format!("serendb SELECT failed: {e}"))?;
+    log::info!(
+        "[ClaudeMemory] SELECT returned {} preference rows for project {}",
+        result.row_count,
+        project_path
+    );
+    let rendered = render_preferences_as_markdown(&result.rows);
+    write_rendered_memory_md(claude_project_dir, &rendered)
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +665,6 @@ pub enum ProcessOutcome {
 // ---------------------------------------------------------------------------
 
 fn read_auth_token(app: &AppHandle) -> Result<String, String> {
-    use tauri_plugin_store::StoreExt;
     let token = app
         .store(AUTH_STORE)
         .map_err(|e| e.to_string())?
@@ -404,10 +677,9 @@ fn read_auth_token(app: &AppHandle) -> Result<String, String> {
     Ok(token)
 }
 
-fn build_client(app: &AppHandle) -> Result<MemoryClient, String> {
+fn build_sql_client(app: &AppHandle) -> Result<SerenDbSqlClient, String> {
     let token = read_auth_token(app)?;
-    let base_url = app.state::<MemoryState>().base_url().to_string();
-    Ok(MemoryClient::new(base_url, token))
+    Ok(SerenDbSqlClient::new(token))
 }
 
 // ---------------------------------------------------------------------------
@@ -415,14 +687,13 @@ fn build_client(app: &AppHandle) -> Result<MemoryClient, String> {
 // ---------------------------------------------------------------------------
 
 /// Start watching `~/.claude/projects` recursively. Any `.md` write inside a
-/// `memory/` subdirectory will be intercepted, pushed to SerenDB, and deleted.
-///
-/// `project_id` is the user's active SerenDB project UUID — this is the same
-/// project the rest of the app uses for memory operations.
-pub fn start_watcher(app: AppHandle, project_id: Option<Uuid>) -> Result<PathBuf, String> {
+/// `memory/` subdirectory is intercepted, INSERTed into the
+/// `claude_agent_preferences` table in the supplied SerenDB destination, and
+/// deleted from disk on success.
+pub fn start_watcher(app: AppHandle, config: SerenDbConfig) -> Result<PathBuf, String> {
     // Validate credentials up-front so the user sees the error in the UI
     // instead of discovering it via a silent watcher failure later.
-    let _ = build_client(&app)?;
+    let _ = build_sql_client(&app)?;
 
     let root = claude_projects_root()?;
     fs::create_dir_all(&root).map_err(|e| format!("failed to create claude projects root: {e}"))?;
@@ -446,8 +717,6 @@ pub fn start_watcher(app: AppHandle, project_id: Option<Uuid>) -> Result<PathBuf
             }
             for path in event.paths {
                 if should_intercept_path(&path) {
-                    // Unbounded tokio channel; send() is sync and non-blocking,
-                    // so this is safe on the notify thread.
                     let _ = tx_for_callback.send(path);
                 }
             }
@@ -460,16 +729,15 @@ pub fn start_watcher(app: AppHandle, project_id: Option<Uuid>) -> Result<PathBuf
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|e| format!("failed to watch {}: {e}", root.display()))?;
 
-    // Spawn the async consumer. The channel is drained and each path is
-    // processed with a fresh MemoryClient (so token rotations are picked up).
     let app_for_task = app.clone();
+    let config_for_task = config.clone();
     let task = tokio::spawn(async move {
         loop {
             tokio::select! {
                 maybe_path = event_rx.recv() => {
                     match maybe_path {
                         Some(path) => {
-                            handle_event(&app_for_task, path, project_id).await;
+                            handle_event(&app_for_task, path, &config_for_task).await;
                         }
                         None => break,
                     }
@@ -486,13 +754,14 @@ pub fn start_watcher(app: AppHandle, project_id: Option<Uuid>) -> Result<PathBuf
     slot.stop_tx = Some(stop_tx);
     slot.task = Some(task);
     slot.running = true;
-    slot.project_id = project_id;
+    slot.config = Some(config.clone());
     drop(slot);
 
     log::info!(
-        "[ClaudeMemory] watcher started on {} (project_id={:?})",
+        "[ClaudeMemory] watcher started on {} (project_id={}, database={})",
         root.display(),
-        project_id
+        config.project_id,
+        config.database_name
     );
     Ok(root)
 }
@@ -516,7 +785,7 @@ fn tear_down_locked(slot: &mut WatcherSlot) {
     }
     slot.watcher = None;
     slot.running = false;
-    slot.project_id = None;
+    slot.config = None;
 }
 
 /// Is the watcher currently running?
@@ -531,14 +800,14 @@ fn is_interesting_event(kind: &EventKind) -> bool {
     )
 }
 
-async fn handle_event(app: &AppHandle, path: PathBuf, project_id: Option<Uuid>) {
-    let memory_type_fallback = DEFAULT_MEMORY_TYPE.to_string();
+async fn handle_event(app: &AppHandle, path: PathBuf, config: &SerenDbConfig) {
+    let memory_type_fallback = DEFAULT_PREF_TYPE.to_string();
 
-    let client = match build_client(app) {
+    let client = match build_sql_client(app) {
         Ok(c) => c,
         Err(e) => {
             log::warn!(
-                "[ClaudeMemory] skipping {}: cannot build SerenDB client: {e}",
+                "[ClaudeMemory] skipping {}: cannot build SerenDB SQL client: {e}",
                 path.display()
             );
             let _ = app.emit(
@@ -553,14 +822,10 @@ async fn handle_event(app: &AppHandle, path: PathBuf, project_id: Option<Uuid>) 
         }
     };
 
-    match process_memory_file(&path, &client, project_id).await {
-        Ok(ProcessOutcome::Persisted {
-            name,
-            memory_type,
-            serendb_response,
-        }) => {
+    match process_memory_file(&path, &client, config).await {
+        Ok(ProcessOutcome::Persisted { name, memory_type }) => {
             log::info!(
-                "[ClaudeMemory] persisted {} to SerenDB and removed plaintext file",
+                "[ClaudeMemory] persisted {} to claude_agent_preferences and removed plaintext file",
                 path.display()
             );
             let _ = app.emit(
@@ -569,7 +834,6 @@ async fn handle_event(app: &AppHandle, path: PathBuf, project_id: Option<Uuid>) 
                     path: path.to_string_lossy().to_string(),
                     name,
                     memory_type,
-                    serendb_response,
                 },
             );
         }
@@ -595,14 +859,15 @@ async fn handle_event(app: &AppHandle, path: PathBuf, project_id: Option<Uuid>) 
 // Startup migration
 // ---------------------------------------------------------------------------
 
-/// Walk every `~/.claude/projects/*/memory/` directory and push any pre-existing
-/// `.md` files to SerenDB. Returns the number successfully persisted. Files
-/// whose cloud write fails are left on disk and counted in `failures`.
+/// Walk every `~/.claude/projects/*/memory/` directory and INSERT any
+/// pre-existing `.md` files into SerenDB. Returns the number successfully
+/// persisted. Files whose cloud write fails are left on disk and counted in
+/// `failures`.
 pub async fn migrate_existing_files(
     app: &AppHandle,
-    project_id: Option<Uuid>,
+    config: &SerenDbConfig,
 ) -> Result<MigrationReport, String> {
-    let client = build_client(app)?;
+    let client = build_sql_client(app)?;
     let root = claude_projects_root()?;
     if !root.exists() {
         return Ok(MigrationReport::default());
@@ -626,7 +891,7 @@ pub async fn migrate_existing_files(
             if !should_intercept_path(&path) {
                 continue;
             }
-            match process_memory_file(&path, &client, project_id).await {
+            match process_memory_file(&path, &client, config).await {
                 Ok(ProcessOutcome::Persisted { .. }) => report.persisted += 1,
                 Ok(ProcessOutcome::Skipped) => {}
                 Err(e) => {
@@ -655,7 +920,7 @@ pub struct MigrationReport {
 }
 
 // ---------------------------------------------------------------------------
-// Pure-function tests (no network, no SDK internals)
+// Pure-function tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -744,6 +1009,21 @@ mod tests {
     }
 
     #[test]
+    fn extract_claude_project_dir_name_from_memory_path() {
+        let path = Path::new("/home/a/.claude/projects/-Users-x-foo/memory/feedback_test.md");
+        assert_eq!(
+            extract_claude_project_dir_name(path),
+            Some("-Users-x-foo".to_string())
+        );
+    }
+
+    #[test]
+    fn derive_pref_key_strips_md_extension() {
+        let path = Path::new("/some/dir/feedback_smoke_test.md");
+        assert_eq!(derive_pref_key(path), Some("feedback_smoke_test".to_string()));
+    }
+
+    #[test]
     fn write_rendered_memory_md_is_atomic_overwrite() {
         let tmp = TempDir::new().expect("tempdir");
         let dir = tmp.path().join("-proj");
@@ -753,22 +1033,124 @@ mod tests {
         assert_eq!(fs::read_to_string(&second).unwrap(), "second render");
         assert!(!dir.join("MEMORY.md.tmp").exists());
     }
+
+    // ---- SQL builder tests (the heart of the #1509 storage rebuild) ------
+
+    #[test]
+    fn quote_sql_string_doubles_single_quotes() {
+        assert_eq!(quote_sql_string("plain"), "'plain'");
+        assert_eq!(quote_sql_string("O'Brien"), "'O''Brien'");
+        assert_eq!(
+            quote_sql_string("multiple ' single ' quotes"),
+            "'multiple '' single '' quotes'"
+        );
+        assert_eq!(quote_sql_string(""), "''");
+    }
+
+    #[test]
+    fn quote_sql_string_does_not_treat_backslash_as_escape() {
+        // Postgres standard strings (standard_conforming_strings = on, the
+        // default) treat backslashes literally. We must not transform them.
+        assert_eq!(quote_sql_string("a\\b"), "'a\\b'");
+        assert_eq!(quote_sql_string("a\\nb"), "'a\\nb'");
+    }
+
+    #[test]
+    fn build_upsert_preference_sql_escapes_all_user_input() {
+        // The most important test: a project_path or content with embedded
+        // single quotes must NOT break out of the SQL string. This is the
+        // injection-prevention guarantee for the #1509 storage layer.
+        let sql = build_upsert_preference_sql(
+            "-Users-x-evil'project",       // injection attempt in project_path
+            "feedback_'; DROP TABLE foo;", // injection attempt in pref_key
+            "feedback",
+            Some("description with ' quote"),
+            "content with multiple ' embedded ' quotes",
+            "feedback_evil.md",
+        );
+
+        // The injection vectors must all be doubled, not opened.
+        assert!(sql.contains("'-Users-x-evil''project'"));
+        assert!(sql.contains("'feedback_''; DROP TABLE foo;'"));
+        assert!(sql.contains("'description with '' quote'"));
+        assert!(sql.contains("'content with multiple '' embedded '' quotes'"));
+        // Sanity: the statement is well-formed (correct table, ON CONFLICT clause).
+        assert!(sql.contains("INSERT INTO claude_agent_preferences"));
+        assert!(sql.contains("ON CONFLICT (project_path, pref_key) DO UPDATE"));
+    }
+
+    #[test]
+    fn build_upsert_preference_sql_handles_null_description() {
+        let sql = build_upsert_preference_sql(
+            "-proj",
+            "no_desc",
+            "feedback",
+            None,
+            "body",
+            "no_desc.md",
+        );
+        // None description must serialize as the literal NULL keyword,
+        // not as a quoted empty string.
+        assert!(sql.contains(", NULL,"));
+    }
+
+    #[test]
+    fn build_select_preferences_sql_escapes_project_path() {
+        let sql = build_select_preferences_sql("-Users-x-evil'project");
+        assert!(sql.contains("'-Users-x-evil''project'"));
+        assert!(sql.contains("FROM claude_agent_preferences"));
+        assert!(sql.contains("ORDER BY pref_type, pref_key"));
+    }
+
+    #[test]
+    fn render_preferences_as_markdown_empty_returns_placeholder() {
+        let rendered = render_preferences_as_markdown(&[]);
+        assert!(rendered.contains("# Claude Memory"));
+        assert!(rendered.contains("No preferences stored yet"));
+    }
+
+    #[test]
+    fn render_preferences_as_markdown_includes_each_row() {
+        let rows = vec![
+            vec![
+                serde_json::json!("feedback_one"),
+                serde_json::json!("feedback"),
+                serde_json::json!("first description"),
+                serde_json::json!("first body"),
+                serde_json::json!("feedback_one.md"),
+            ],
+            vec![
+                serde_json::json!("project_two"),
+                serde_json::json!("project"),
+                serde_json::json!(null),
+                serde_json::json!("second body"),
+                serde_json::json!("project_two.md"),
+            ],
+        ];
+        let rendered = render_preferences_as_markdown(&rows);
+        assert!(rendered.contains("name: feedback_one"));
+        assert!(rendered.contains("type: feedback"));
+        assert!(rendered.contains("description: first description"));
+        assert!(rendered.contains("first body"));
+        assert!(rendered.contains("name: project_two"));
+        assert!(rendered.contains("type: project"));
+        assert!(rendered.contains("second body"));
+    }
 }
 
 // ---------------------------------------------------------------------------
-// SerenDB round-trip integration test (ignored by default)
+// SerenDB SQL round-trip integration test (ignored by default)
 //
 // This is the ONLY test that talks to the network. It proves the spec:
-// a file intercepted by our code ends up in SerenDB and comes back out via
-// `MemoryClient::recall()`. Run with:
+// a file intercepted by our code ends up as a row in the
+// `claude_agent_preferences` table and comes back out via SELECT.
 //
-//   SEREN_CLAUDE_MEMORY_TEST_TOKEN=<token> \
-//   SEREN_CLAUDE_MEMORY_TEST_PROJECT=<project-uuid> \
+//   SEREN_CLAUDE_MEMORY_TEST_TOKEN=<oauth-bearer-token> \
+//   SEREN_CLAUDE_MEMORY_TEST_PROJECT_ID=<serendb-project-uuid> \
+//   SEREN_CLAUDE_MEMORY_TEST_BRANCH_ID=<serendb-branch-uuid> \
+//   SEREN_CLAUDE_MEMORY_TEST_DATABASE=<serendb-database-name> \
 //   cargo test --lib claude_memory -- --ignored --nocapture \
-//     serendb_roundtrip_persists_and_recalls
-//
-// Optional env vars:
-//   SEREN_CLAUDE_MEMORY_TEST_BASE_URL (default: https://memory.serendb.com)
+//     serendb_sql_roundtrip_persists_and_selects
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -780,69 +1162,82 @@ mod integration {
         match std::env::var(name) {
             Ok(v) if !v.trim().is_empty() => v,
             _ => panic!(
-                "{name} is not set — SerenDB roundtrip test requires a live token and project UUID"
+                "{name} is not set — SerenDB SQL roundtrip test requires live credentials"
             ),
         }
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "requires live SerenDB credentials; see module docs"]
-    async fn serendb_roundtrip_persists_and_recalls() {
+    async fn serendb_sql_roundtrip_persists_and_selects() {
         let token = require_env("SEREN_CLAUDE_MEMORY_TEST_TOKEN");
-        let project_raw = require_env("SEREN_CLAUDE_MEMORY_TEST_PROJECT");
-        let project_id = Uuid::parse_str(&project_raw).expect("project id must be a UUID");
-        let base_url = std::env::var("SEREN_CLAUDE_MEMORY_TEST_BASE_URL")
-            .unwrap_or_else(|_| "https://memory.serendb.com".to_string());
+        let project_id = require_env("SEREN_CLAUDE_MEMORY_TEST_PROJECT_ID");
+        let branch_id = require_env("SEREN_CLAUDE_MEMORY_TEST_BRANCH_ID");
+        let database_name = require_env("SEREN_CLAUDE_MEMORY_TEST_DATABASE");
 
-        // Build the SAME client the production code would build.
-        let client = MemoryClient::new(base_url, token);
+        let client = SerenDbSqlClient::new(token);
+        let config = SerenDbConfig {
+            project_id,
+            branch_id,
+            database_name,
+        };
 
-        // Write a memory file into a temp Claude-style memory directory so we
-        // exercise the full parse + persist + delete path our production
-        // watcher uses, not a shortcut that calls client.remember directly.
+        // Spin up a temp Claude-style memory directory and write a marker file.
         let tmp = TempDir::new().expect("tempdir");
-        let memory_dir = tmp.path().join("-test-proj").join("memory");
+        let project_dir_name = format!("-test-roundtrip-{}", Uuid::new_v4());
+        let memory_dir = tmp.path().join(&project_dir_name).join("memory");
         fs::create_dir_all(&memory_dir).unwrap();
 
-        // Unique marker so we can find this row on recall even if the project
-        // has many other memories. Embedded in both the body and the frontmatter.
-        let marker = format!("claude-memory-roundtrip-{}", Uuid::new_v4());
+        let marker = format!("MARKER-{}", Uuid::new_v4());
         let file_path = memory_dir.join("feedback_roundtrip.md");
         let contents = format!(
-            "---\nname: roundtrip_{marker}\ndescription: integration test marker\ntype: feedback\n---\nMARKER={marker}\nclaude-memory-interceptor roundtrip test — safe to delete.\n"
+            "---\nname: roundtrip\ndescription: integration test marker\ntype: feedback\n---\n{marker} — claude-memory SQL roundtrip test, safe to delete.\n"
         );
         fs::write(&file_path, &contents).unwrap();
 
-        // Exercise OUR code under test.
-        let outcome = process_memory_file(&file_path, &client, Some(project_id))
+        // Exercise the production code path.
+        let outcome = process_memory_file(&file_path, &client, &config)
             .await
             .expect("process_memory_file must succeed against live SerenDB");
-
         match outcome {
             ProcessOutcome::Persisted { memory_type, .. } => {
-                assert_eq!(memory_type, "feedback", "memory_type comes from frontmatter");
+                assert_eq!(memory_type, "feedback");
             }
             other => panic!("expected Persisted, got {other:?}"),
         }
-
-        // The plaintext file must be gone once the cloud write succeeded.
         assert!(
             !file_path.exists(),
-            "file must be deleted after successful SerenDB write"
+            "file must be deleted after successful SerenDB SQL INSERT"
         );
 
-        // Round-trip: recall by unique marker and assert the content came back.
-        let results = client
-            .recall(&marker, Some(project_id), Some(10))
+        // Round-trip: SELECT the row back via the SAME client and assert
+        // the marker comes back from SerenDB.
+        let select = build_select_preferences_sql(&project_dir_name);
+        let result = client
+            .run_sql(&config, &select, true)
             .await
-            .expect("recall against SerenDB must succeed");
-
-        let hit = results.iter().find(|r| r.content.contains(&marker));
+            .expect("SELECT against live SerenDB must succeed");
         assert!(
-            hit.is_some(),
-            "expected to recall a memory containing MARKER={marker}; got {} results: {:?}",
-            results.len(),
-            results.iter().map(|r| &r.content).collect::<Vec<_>>()
+            result.row_count >= 1,
+            "expected at least one row, got {}",
+            result.row_count
         );
+        let any_marker = result.rows.iter().any(|row| {
+            row.iter()
+                .any(|v| v.as_str().is_some_and(|s| s.contains(&marker)))
+        });
+        assert!(
+            any_marker,
+            "expected SELECT to return a row containing {marker}; rows: {:?}",
+            result.rows
+        );
+
+        // Cleanup: delete the test row so the table doesn't accumulate
+        // marker rows across runs.
+        let cleanup = format!(
+            "DELETE FROM claude_agent_preferences WHERE project_path = {};",
+            quote_sql_string(&project_dir_name)
+        );
+        let _ = client.run_sql(&config, &cleanup, false).await;
     }
 }

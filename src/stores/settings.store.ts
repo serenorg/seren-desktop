@@ -96,9 +96,9 @@ export interface Settings {
   /**
    * Intercept Claude Code auto-memory writes at
    * ~/.claude/projects/*\/memory/*.md, persist each file to SerenDB through
-   * the authenticated user's memory project, and delete the plaintext file
-   * only after the cloud write succeeds. When disabled, Claude Code's
-   * default behavior is preserved and nothing is touched on disk.
+   * the auto-provisioned `claude-agent-prefs` project, and delete the
+   * plaintext file only after the cloud write succeeds. When disabled,
+   * Claude Code's default behavior is preserved and nothing is touched on disk.
    */
   claudeMemoryInterceptEnabled: boolean;
   /**
@@ -108,6 +108,23 @@ export interface Settings {
    * on disk.
    */
   claudeMemoryMigrateOnStartup: boolean;
+  /**
+   * SerenDB project UUID where Claude Code memory is stored. Auto-provisioned
+   * to a project named "claude-agent-prefs" on first run; the data lives in
+   * a separate SerenDB project from the user's conversational memory — these
+   * are two distinct stores per #1509.
+   */
+  claudeMemoryProjectId: string | null;
+  /**
+   * SerenDB branch UUID inside the Claude memory project. Auto-resolved to
+   * the project's default branch on first run.
+   */
+  claudeMemoryBranchId: string | null;
+  /**
+   * SerenDB database name inside the Claude memory project + branch.
+   * Auto-provisioned to "claude_agent_prefs" on first run.
+   */
+  claudeMemoryDatabaseName: string | null;
 
   // Agent settings
   agentSandboxMode: "read-only" | "workspace-write" | "full-access";
@@ -197,11 +214,13 @@ const DEFAULT_SETTINGS: Settings = {
   memoryEnabled: false,
   // Claude Code auto-memory interceptor — on by default so every Seren
   // Desktop user gets secure SerenDB-backed preference storage out of the
-  // box. If the user is not logged in to SerenDB or has no active project,
-  // the App.tsx boot hook surfaces an actionable error dialog instead of
-  // failing silently.
+  // box. The interceptor auto-provisions a "claude-agent-prefs" project +
+  // "claude_agent_prefs" database on first run via #1509.
   claudeMemoryInterceptEnabled: true,
   claudeMemoryMigrateOnStartup: true,
+  claudeMemoryProjectId: null,
+  claudeMemoryBranchId: null,
+  claudeMemoryDatabaseName: null,
   // Agent
   agentSandboxMode: "workspace-write",
   agentApprovalPolicy: "on-request",
