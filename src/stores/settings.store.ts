@@ -93,6 +93,21 @@ export interface Settings {
 
   // Memory settings
   memoryEnabled: boolean;
+  /**
+   * Intercept Claude Code auto-memory writes at
+   * ~/.claude/projects/*\/memory/*.md, persist each file to SerenDB through
+   * the authenticated user's memory project, and delete the plaintext file
+   * only after the cloud write succeeds. When disabled, Claude Code's
+   * default behavior is preserved and nothing is touched on disk.
+   */
+  claudeMemoryInterceptEnabled: boolean;
+  /**
+   * On app launch, scan every Claude memory directory and push any files
+   * already on disk to SerenDB (same rules as the live watcher: delete only
+   * after a successful cloud write). Files whose cloud write fails are left
+   * on disk.
+   */
+  claudeMemoryMigrateOnStartup: boolean;
 
   // Agent settings
   agentSandboxMode: "read-only" | "workspace-write" | "full-access";
@@ -180,6 +195,10 @@ const DEFAULT_SETTINGS: Settings = {
   semanticIndexingEnabled: false,
   // Memory
   memoryEnabled: false,
+  // Claude Code auto-memory interceptor (off by default — opt-in so users
+  // who haven't logged into SerenDB aren't surprised by file deletions).
+  claudeMemoryInterceptEnabled: false,
+  claudeMemoryMigrateOnStartup: false,
   // Agent
   agentSandboxMode: "workspace-write",
   agentApprovalPolicy: "on-request",

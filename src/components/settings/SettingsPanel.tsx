@@ -10,6 +10,12 @@ import {
   Show,
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
+import {
+  getClaudeMemoryStatus,
+  migrateExistingClaudeMemory,
+  startClaudeMemoryInterceptor,
+  stopClaudeMemoryInterceptor,
+} from "@/services/claudeMemory";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
@@ -52,6 +58,77 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     createSignal<SettingsSection>("chat");
   const [showResetConfirm, setShowResetConfirm] = createSignal(false);
   const [showClearConfirm, setShowClearConfirm] = createSignal(false);
+
+  // Claude Code auto-memory interceptor state. The watcher lives in Rust;
+  // the panel only reflects its current status and exposes the controls.
+  const [claudeMemoryRunning, setClaudeMemoryRunning] = createSignal(false);
+  const [claudeMemoryWatchingRoot, setClaudeMemoryWatchingRoot] = createSignal<
+    string | null
+  >(null);
+  const [claudeMemoryBusy, setClaudeMemoryBusy] = createSignal(false);
+  const [claudeMemoryMessage, setClaudeMemoryMessage] = createSignal<
+    string | null
+  >(null);
+
+  const refreshClaudeMemoryStatus = async () => {
+    try {
+      const status = await getClaudeMemoryStatus();
+      setClaudeMemoryRunning(status.running);
+      setClaudeMemoryWatchingRoot(status.watching_root);
+    } catch (err) {
+      console.warn("[ClaudeMemory] status read failed", err);
+    }
+  };
+
+  const handleClaudeMemoryToggle = async (enabled: boolean) => {
+    handleBooleanChange("claudeMemoryInterceptEnabled", enabled);
+    setClaudeMemoryBusy(true);
+    setClaudeMemoryMessage(null);
+    try {
+      const status = enabled
+        ? await startClaudeMemoryInterceptor()
+        : await stopClaudeMemoryInterceptor();
+      setClaudeMemoryRunning(status.running);
+      setClaudeMemoryWatchingRoot(status.watching_root);
+      if (enabled && !status.running) {
+        setClaudeMemoryMessage(
+          "Could not start the interceptor. Make sure you are logged in to SerenDB and have an active project selected.",
+        );
+      }
+    } catch (err) {
+      setClaudeMemoryMessage(
+        `Failed to ${enabled ? "start" : "stop"} interceptor: ${err}`,
+      );
+      console.error("[ClaudeMemory] toggle failed", err);
+    } finally {
+      setClaudeMemoryBusy(false);
+    }
+  };
+
+  const handleClaudeMemoryMigrate = async () => {
+    setClaudeMemoryBusy(true);
+    setClaudeMemoryMessage(null);
+    try {
+      const report = await migrateExistingClaudeMemory();
+      const { persisted, failures } = report;
+      if (persisted === 0 && failures === 0) {
+        setClaudeMemoryMessage("No plaintext memory files found.");
+      } else if (failures === 0) {
+        setClaudeMemoryMessage(
+          `Pushed ${persisted} file${persisted === 1 ? "" : "s"} to SerenDB.`,
+        );
+      } else {
+        setClaudeMemoryMessage(
+          `Pushed ${persisted}, left ${failures} on disk (cloud write failed — will retry).`,
+        );
+      }
+    } catch (err) {
+      setClaudeMemoryMessage(`Migration failed: ${err}`);
+      console.error("[ClaudeMemory] migration failed", err);
+    } finally {
+      setClaudeMemoryBusy(false);
+    }
+  };
 
   const handleNumberChange = (key: keyof Settings, value: string) => {
     const num = Number.parseFloat(value);
@@ -151,6 +228,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       "seren:open-settings-section",
       handleOpenSection as EventListener,
     );
+    void refreshClaudeMemoryStatus();
   });
 
   onCleanup(() => {
@@ -1339,6 +1417,99 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 </span>
               </label>
             </div>
+
+            <h4 class="mt-6 mb-3 text-base font-semibold text-muted-foreground border-t border-border-medium pt-5">
+              Claude Code Auto-Memory Interceptor
+            </h4>
+            <p class="m-0 mb-4 text-[0.85rem] text-muted-foreground leading-relaxed">
+              Claude Code's built-in auto-memory writes plain markdown files to{" "}
+              <code class="px-1 py-0.5 rounded bg-border/40 text-[0.78rem]">
+                ~/.claude/projects/*/memory/
+              </code>
+              . When enabled, Seren Desktop intercepts every write, persists it
+              to SerenDB via your authenticated memory project, and deletes the
+              plaintext file only after the cloud write succeeds. If the cloud
+              write fails the file is left on disk and the watcher retries on
+              the next event — no data loss.
+            </p>
+
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.claudeMemoryInterceptEnabled}
+                  disabled={claudeMemoryBusy()}
+                  onChange={(e) =>
+                    handleClaudeMemoryToggle(e.currentTarget.checked)
+                  }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
+                />
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Secure Claude Memory Storage
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Watch Claude Code memory directories, persist writes to
+                    SerenDB through the existing authenticated memory stack, and
+                    remove the plaintext files from disk only on cloud success.
+                    Requires a SerenDB login and an active project.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div class="flex items-start justify-start gap-4 py-3 border-b border-border">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settingsState.app.claudeMemoryMigrateOnStartup}
+                  onChange={(e) =>
+                    handleBooleanChange(
+                      "claudeMemoryMigrateOnStartup",
+                      e.currentTarget.checked,
+                    )
+                  }
+                  class="w-[18px] h-[18px] mt-0.5 accent-accent cursor-pointer"
+                />
+                <span class="flex flex-col gap-0.5">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Migrate Existing Files On Startup
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    On app launch, scan every Claude memory directory and push
+                    any pre-existing <code>.md</code> files to SerenDB using the
+                    same delete-on-cloud-success rule.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-between py-3 border-b border-border">
+              <div class="flex flex-col gap-0.5">
+                <span class="text-[0.85rem] font-medium text-foreground">
+                  Interceptor Status
+                </span>
+                <span class="text-[0.78rem] text-muted-foreground">
+                  {claudeMemoryRunning()
+                    ? `Watching ${claudeMemoryWatchingRoot() ?? "Claude projects directory"}`
+                    : "Watcher is stopped."}
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={claudeMemoryBusy()}
+                class="px-3 py-1.5 text-[0.8rem] rounded-md border border-border-strong bg-transparent hover:bg-border text-foreground cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleClaudeMemoryMigrate}
+              >
+                {claudeMemoryBusy() ? "Working…" : "Migrate Existing Files"}
+              </button>
+            </div>
+
+            <Show when={claudeMemoryMessage()}>
+              <p class="m-0 mt-2 text-[0.78rem] text-muted-foreground">
+                {claudeMemoryMessage()}
+              </p>
+            </Show>
           </section>
         </Show>
 
