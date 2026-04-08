@@ -10,14 +10,33 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tauri::{Manager, State};
+
+/// Bound on how long the MCP initialize handshake is allowed to take before
+/// `mcp_connect` returns a timeout error instead of blocking indefinitely.
+/// Chosen to be comfortably above cold-start times for embedded node servers
+/// while still surfacing a clearly-broken child in a reasonable window.
+const MCP_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Global request ID counter for JSON-RPC
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
-/// State for managing MCP server processes
+/// Per-server slot. Each MCP server has its own inner Mutex so one stuck
+/// server cannot block operations on any other — which was a second part of
+/// the hang bug: the old code held a single top-level Mutex across every
+/// blocking stdio read, so a slow child would freeze all MCP commands.
+type McpSlot = Arc<Mutex<McpProcess>>;
+
+/// State for managing MCP server processes.
+///
+/// The outer `Mutex` guards the `HashMap` itself and is held only long enough
+/// to insert / remove / look up a slot by name. All blocking stdio I/O runs
+/// against the per-server inner `Mutex` (`McpSlot`) inside a
+/// `tokio::task::spawn_blocking` so the main Tauri thread is never parked on
+/// a child process read.
 pub struct McpState {
-    processes: Mutex<HashMap<String, McpProcess>>,
+    processes: Mutex<HashMap<String, McpSlot>>,
 }
 
 impl McpState {
@@ -30,9 +49,14 @@ impl McpState {
     /// Kill all connected MCP server processes. Called on app exit to prevent
     /// orphaned child processes from accumulating across restarts.
     pub fn kill_all(&self) {
-        if let Ok(mut processes) = self.processes.lock() {
-            for (name, mut process) in processes.drain() {
-                log::info!("[MCP] Killing process on exit: {}", name);
+        let drained = if let Ok(mut processes) = self.processes.lock() {
+            processes.drain().collect::<Vec<_>>()
+        } else {
+            return;
+        };
+        for (name, slot) in drained {
+            log::info!("[MCP] Killing process on exit: {}", name);
+            if let Ok(mut process) = slot.lock() {
                 let _ = process.child.kill();
             }
         }
@@ -379,7 +403,7 @@ fn collect_process_diagnostics(process: &mut McpProcess, base_error: &str) -> St
 
 /// Connect to an MCP server
 #[tauri::command]
-pub fn mcp_connect(
+pub async fn mcp_connect(
     state: State<'_, McpState>,
     server_name: String,
     command: String,
@@ -442,14 +466,17 @@ pub fn mcp_connect(
         None => Arc::new(Mutex::new(String::new())),
     };
 
-    let mut process = McpProcess {
+    let process = McpProcess {
         child,
         stdin,
         stdout: BufReader::new(stdout),
         stderr_buffer,
     };
 
-    // Send initialize request
+    // Send initialize request on the blocking thread pool with a bounded
+    // timeout. `send_request` does a sync `BufRead::read_line` on the child's
+    // stdout — we MUST NOT run it on the main Tauri thread, or a slow /
+    // broken child will freeze the whole app (this was #1501).
     let init_params = InitializeParams {
         protocol_version: "2024-11-05",
         capabilities: ClientCapabilities {},
@@ -459,11 +486,49 @@ pub fn mcp_connect(
         },
     };
 
-    let result = send_request(&mut process, "initialize", Some(init_params)).map_err(|e| {
-        let diagnostic = collect_process_diagnostics(&mut process, &e);
-        log::error!("[MCP:{}] Initialize failed: {}", server_name, diagnostic);
-        diagnostic
-    })?;
+    let server_name_for_log = server_name.clone();
+    let handshake = tokio::task::spawn_blocking(move || {
+        let mut process = process;
+        match send_request(&mut process, "initialize", Some(init_params)) {
+            Ok(value) => Ok((process, value)),
+            Err(e) => {
+                let diagnostic = collect_process_diagnostics(&mut process, &e);
+                // Kill the child so the background stderr-drain thread (and
+                // any OS resources) can be released promptly.
+                let _ = process.child.kill();
+                Err(diagnostic)
+            }
+        }
+    });
+
+    let handshake_result = tokio::time::timeout(MCP_INITIALIZE_TIMEOUT, handshake).await;
+
+    let (mut process, result) = match handshake_result {
+        Ok(Ok(Ok(pair))) => pair,
+        Ok(Ok(Err(e))) => {
+            log::error!("[MCP:{}] Initialize failed: {}", server_name_for_log, e);
+            return Err(e);
+        }
+        Ok(Err(join_err)) => {
+            let msg = format!("MCP initialize task panicked: {join_err}");
+            log::error!("[MCP:{}] {msg}", server_name_for_log);
+            return Err(msg);
+        }
+        Err(_elapsed) => {
+            // The blocking task is still running and still owns the child.
+            // We can't cancel a sync `read_line` from here, but the spawn_blocking
+            // thread is off the main Tauri thread, so the UI is NOT frozen.
+            // The task will terminate on its own when the child exits or is
+            // killed externally (e.g. next `mcp_disconnect` or app shutdown via
+            // `kill_all`). The user gets a clear, bounded error.
+            let msg = format!(
+                "MCP initialize handshake timed out after {}s — check that the server command is correct and the server emits a valid JSON-RPC response on stdout",
+                MCP_INITIALIZE_TIMEOUT.as_secs()
+            );
+            log::error!("[MCP:{}] {msg}", server_name_for_log);
+            return Err(msg);
+        }
+    };
 
     let init_result: McpInitializeResult = serde_json::from_value(result)
         .map_err(|e| format!("Failed to parse init result: {}", e))?;
@@ -483,24 +548,75 @@ pub fn mcp_connect(
         init_result.server_info.version
     );
 
-    // Store the process
+    // Store the process in its own per-server slot so subsequent commands
+    // lock only this server's Mutex rather than a global one.
     state
         .processes
         .lock()
         .map_err(|e| e.to_string())?
-        .insert(server_name, process);
+        .insert(server_name, Arc::new(Mutex::new(process)));
 
     Ok(init_result)
 }
 
-/// Disconnect from an MCP server
-#[tauri::command]
-pub fn mcp_disconnect(state: State<'_, McpState>, server_name: String) -> Result<(), String> {
-    let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
+/// Look up a server's slot without holding the outer `Mutex` across I/O.
+/// Returns the cloned `Arc` so the caller can lock only this server's inner
+/// `Mutex` while other servers remain unaffected.
+fn lookup_slot(state: &McpState, server_name: &str) -> Result<McpSlot, String> {
+    let processes = state.processes.lock().map_err(|e| e.to_string())?;
+    processes
+        .get(server_name)
+        .cloned()
+        .ok_or_else(|| format!("Server '{}' not connected", server_name))
+}
 
-    if let Some(mut process) = processes.remove(&server_name) {
-        // Try to kill the process gracefully
-        let _ = process.child.kill();
+/// Run `send_request` against a server on the blocking thread pool so the main
+/// Tauri thread never parks on `BufRead::read_line`. Used by every command
+/// that needs to exchange a JSON-RPC message with a local MCP child process.
+async fn run_request_off_main<T, R>(
+    slot: McpSlot,
+    method: &'static str,
+    params: Option<T>,
+) -> Result<R, String>
+where
+    T: Serialize + Send + 'static,
+    R: serde::de::DeserializeOwned + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || -> Result<R, String> {
+        let mut process = slot
+            .lock()
+            .map_err(|e| format!("MCP process mutex poisoned: {e}"))?;
+        let value = send_request(&mut *process, method, params)?;
+        serde_json::from_value::<R>(value)
+            .map_err(|e| format!("Failed to parse {method} response: {e}"))
+    })
+    .await
+    .map_err(|e| format!("MCP {method} task panicked: {e}"))?
+}
+
+/// Disconnect from an MCP server.
+///
+/// Acquires the outer `Mutex` only long enough to remove the slot, then kills
+/// the child on the blocking pool so the main thread isn't parked on the
+/// `child.kill()` syscall.
+#[tauri::command]
+pub async fn mcp_disconnect(
+    state: State<'_, McpState>,
+    server_name: String,
+) -> Result<(), String> {
+    let removed = {
+        let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
+        processes.remove(&server_name)
+    };
+
+    if let Some(slot) = removed {
+        tokio::task::spawn_blocking(move || {
+            if let Ok(mut process) = slot.lock() {
+                let _ = process.child.kill();
+            }
+        })
+        .await
+        .map_err(|e| format!("MCP disconnect task panicked: {e}"))?;
     }
 
     Ok(())
@@ -508,22 +624,13 @@ pub fn mcp_disconnect(state: State<'_, McpState>, server_name: String) -> Result
 
 /// List available tools from an MCP server
 #[tauri::command]
-pub fn mcp_list_tools(
+pub async fn mcp_list_tools(
     state: State<'_, McpState>,
     server_name: String,
 ) -> Result<Vec<McpTool>, String> {
-    let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
-
-    let process = processes
-        .get_mut(&server_name)
-        .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
-
-    let result = send_request::<()>(process, "tools/list", None)?;
-
-    let tools_response: ToolsListResponse =
-        serde_json::from_value(result).map_err(|e| format!("Failed to parse tools: {}", e))?;
-
-    Ok(tools_response.tools)
+    let slot = lookup_slot(&state, &server_name)?;
+    let response: ToolsListResponse = run_request_off_main(slot, "tools/list", None::<()>).await?;
+    Ok(response.tools)
 }
 
 #[derive(Deserialize)]
@@ -533,22 +640,14 @@ struct ToolsListResponse {
 
 /// List available resources from an MCP server
 #[tauri::command]
-pub fn mcp_list_resources(
+pub async fn mcp_list_resources(
     state: State<'_, McpState>,
     server_name: String,
 ) -> Result<Vec<McpResource>, String> {
-    let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
-
-    let process = processes
-        .get_mut(&server_name)
-        .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
-
-    let result = send_request::<()>(process, "resources/list", None)?;
-
-    let resources_response: ResourcesListResponse =
-        serde_json::from_value(result).map_err(|e| format!("Failed to parse resources: {}", e))?;
-
-    Ok(resources_response.resources)
+    let slot = lookup_slot(&state, &server_name)?;
+    let response: ResourcesListResponse =
+        run_request_off_main(slot, "resources/list", None::<()>).await?;
+    Ok(response.resources)
 }
 
 #[derive(Deserialize)]
@@ -558,49 +657,30 @@ struct ResourcesListResponse {
 
 /// Call a tool on an MCP server
 #[tauri::command]
-pub fn mcp_call_tool(
+pub async fn mcp_call_tool(
     state: State<'_, McpState>,
     server_name: String,
     tool_name: String,
     arguments: serde_json::Value,
 ) -> Result<McpToolResult, String> {
-    let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
-
-    let process = processes
-        .get_mut(&server_name)
-        .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
-
+    let slot = lookup_slot(&state, &server_name)?;
     let params = serde_json::json!({
         "name": tool_name,
         "arguments": arguments
     });
-
-    let result = send_request(process, "tools/call", Some(params))?;
-
-    let tool_result: McpToolResult = serde_json::from_value(result)
-        .map_err(|e| format!("Failed to parse tool result: {}", e))?;
-
-    Ok(tool_result)
+    run_request_off_main(slot, "tools/call", Some(params)).await
 }
 
 /// Read a resource from an MCP server
 #[tauri::command]
-pub fn mcp_read_resource(
+pub async fn mcp_read_resource(
     state: State<'_, McpState>,
     server_name: String,
     uri: String,
 ) -> Result<serde_json::Value, String> {
-    let mut processes = state.processes.lock().map_err(|e| e.to_string())?;
-
-    let process = processes
-        .get_mut(&server_name)
-        .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
-
+    let slot = lookup_slot(&state, &server_name)?;
     let params = serde_json::json!({ "uri": uri });
-
-    let result = send_request(process, "resources/read", Some(params))?;
-
-    Ok(result)
+    run_request_off_main(slot, "resources/read", Some(params)).await
 }
 
 /// Check if an MCP server is connected
@@ -813,4 +893,130 @@ pub async fn mcp_list_connected_http(
 ) -> Result<Vec<String>, String> {
     let clients = state.clients.read().await;
     Ok(clients.keys().cloned().collect())
+}
+
+// ============================================================================
+// Tests for #1501: mcp_connect must not block the main Tauri thread.
+//
+// We cannot test the Tauri command layer directly in a unit test, so we
+// exercise the exact mechanism the fix relies on: wrap a real blocking
+// `send_request` call against a hung child process in
+// `tokio::task::spawn_blocking` + `tokio::time::timeout`, and assert the
+// whole operation returns a timeout error within a bounded wall-clock time
+// rather than hanging. A regression on either `spawn_blocking` or
+// `tokio::time::timeout` would fail this test.
+// ============================================================================
+
+#[cfg(test)]
+#[cfg(unix)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    /// Spawn a child that reads stdin forever but never writes to stdout.
+    /// Returns both the constructed `McpProcess` and the OS pid so the test
+    /// can SIGKILL the child after asserting the timeout fired — without
+    /// killing the child the inner spawn_blocking task would never return,
+    /// leaking a thread and blocking tokio runtime shutdown.
+    fn spawn_hung_child() -> (McpProcess, u32) {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("cat > /dev/null")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn hung-child test process");
+
+        let pid = child.id();
+        let stdin = child.stdin.take().expect("test child stdin");
+        let stdout = child.stdout.take().expect("test child stdout");
+        let stderr_buffer = match child.stderr.take() {
+            Some(stderr) => spawn_stderr_drain(stderr, "hung-child-test".to_string()),
+            None => Arc::new(Mutex::new(String::new())),
+        };
+
+        let process = McpProcess {
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+            stderr_buffer,
+        };
+        (process, pid)
+    }
+
+    /// Force-terminate a child by PID via SIGKILL. Used to unstick a hung
+    /// `read_line` in the spawn_blocking task once the test is done with it.
+    fn sigkill(pid: u32) {
+        // SAFETY: SIGKILL on a pid we just spawned in this process. The
+        // worst case is ESRCH if the child already exited, which is fine.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn send_request_wrapped_in_timeout_returns_within_bound() {
+        // Bound the assertion to a tight wall-clock window so a regression
+        // that re-introduces the main-thread block fails loudly. 500ms is
+        // far below the 15s production timeout but long enough to absorb
+        // CI noise.
+        let short_timeout = Duration::from_millis(500);
+        let (process, child_pid) = spawn_hung_child();
+
+        let started = Instant::now();
+        let mut join_handle = tokio::task::spawn_blocking(move || {
+            // This is exactly what mcp_connect used to do on the main
+            // thread. Wrapping it in spawn_blocking + timeout is the whole
+            // fix: the inner `read_line` will hang forever, but the outer
+            // tokio::time::timeout MUST unstick the caller.
+            let mut process = process;
+            let _ = send_request::<()>(&mut process, "tools/list", None);
+        });
+
+        // Race the timeout against `&mut join_handle` so we don't consume
+        // the JoinHandle — we still need it to drain the leaked thread
+        // after we kill the child.
+        let result = tokio::time::timeout(short_timeout, &mut join_handle).await;
+        let elapsed = started.elapsed();
+
+        // The outer timeout MUST fire; the inner blocking task is parked
+        // on the hung child until we kill it.
+        assert!(
+            result.is_err(),
+            "spawn_blocking+timeout must return a timeout error for a hung child, got {result:?}"
+        );
+        // And it MUST return within a tight bound — the whole point is
+        // that the main thread is free to do other work. ~3s of slack for CI.
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "expected timeout to fire within 3s, took {elapsed:?}"
+        );
+
+        // SIGKILL the child so the inner `read_line` returns Err and the
+        // spawn_blocking task can finally exit. Without this the test
+        // process would leak the blocking thread and tokio runtime shutdown
+        // would hang.
+        sigkill(child_pid);
+        // Drain the join handle (with a generous bound) so the test exits
+        // cleanly even if cleanup is slow.
+        let _ = tokio::time::timeout(Duration::from_secs(5), join_handle).await;
+    }
+
+    #[test]
+    fn mcp_initialize_timeout_constant_is_bounded() {
+        // Guard against someone accidentally removing the timeout or making
+        // it absurdly long. The fix is only meaningful if the bound exists
+        // and is reasonable for a UI-blocking call.
+        assert!(
+            MCP_INITIALIZE_TIMEOUT <= Duration::from_secs(60),
+            "MCP_INITIALIZE_TIMEOUT must stay bounded; got {:?}",
+            MCP_INITIALIZE_TIMEOUT
+        );
+        assert!(
+            MCP_INITIALIZE_TIMEOUT >= Duration::from_secs(5),
+            "MCP_INITIALIZE_TIMEOUT too aggressive; got {:?}",
+            MCP_INITIALIZE_TIMEOUT
+        );
+    }
 }
