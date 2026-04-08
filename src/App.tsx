@@ -107,6 +107,66 @@ function App() {
     // Load skills and threads after auth check completes
     await skillsStore.refresh();
     await threadStore.refresh();
+
+    // Claude Code auto-memory interceptor — opt-in. If the user enabled it
+    // but a precondition is missing (no SerenDB login, no active project) or
+    // the start call fails, we surface an actionable error dialog so the
+    // user knows what to fix. No silent failures.
+    try {
+      const { settingsStore } = await import("@/stores/settings.store");
+      if (settingsStore.get("claudeMemoryInterceptEnabled")) {
+        const { projectStore } = await import("@/stores/project.store");
+        const { message: showMessageDialog } = await import(
+          "@tauri-apps/plugin-dialog"
+        );
+        const reportError = async (msg: string) => {
+          console.error(`[ClaudeMemory] ${msg}`);
+          try {
+            await showMessageDialog(msg, {
+              title: "Claude Memory Interceptor",
+              kind: "error",
+            });
+          } catch {
+            // Dialog plugin unavailable (e.g. browser runtime) — the
+            // console.error above is the fallback.
+          }
+        };
+        if (!authStore.isAuthenticated) {
+          await reportError(
+            "Claude Code auto-memory interceptor is enabled but you are not logged in to SerenDB. Log in to start the interceptor, or turn it off in Settings → Code Indexing → Claude Code Auto-Memory.",
+          );
+        } else if (!projectStore.activeProject?.id) {
+          await reportError(
+            "Claude Code auto-memory interceptor is enabled but no active SerenDB project is selected. Select a project to start the interceptor, or turn it off in Settings → Code Indexing → Claude Code Auto-Memory.",
+          );
+        } else {
+          const { startClaudeMemoryInterceptor, migrateExistingClaudeMemory } =
+            await import("@/services/claudeMemory");
+          try {
+            await startClaudeMemoryInterceptor();
+            if (settingsStore.get("claudeMemoryMigrateOnStartup")) {
+              const report = await migrateExistingClaudeMemory();
+              console.info(
+                `[ClaudeMemory] startup migration: persisted=${report.persisted} failures=${report.failures}`,
+              );
+              if (report.failures > 0) {
+                await reportError(
+                  `Claude memory interceptor: ${report.failures} file${
+                    report.failures === 1 ? "" : "s"
+                  } could not be pushed to SerenDB on startup and were left on disk. Check your SerenDB connection and retry from Settings → Code Indexing → Claude Code Auto-Memory → Migrate Existing Files.`,
+                );
+              }
+            }
+          } catch (err) {
+            await reportError(
+              `Failed to start Claude memory interceptor: ${err}. Check your SerenDB login and project selection, then toggle the interceptor off and on again in Settings.`,
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[ClaudeMemory] boot hook crashed: ${error}`);
+    }
   });
 
   // Periodically refresh available skills so newly published skills appear without restart.
