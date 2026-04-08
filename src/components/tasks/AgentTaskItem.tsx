@@ -91,7 +91,8 @@ function eventSummary(data: Record<string, unknown>): string {
 function getInputRequest(task: AgentTask): InputRequestPayload | null {
   if (task.status !== "input_required") return null;
   const output = task.output;
-  if (!output || typeof output !== "object" || Array.isArray(output)) return null;
+  if (!output || typeof output !== "object" || Array.isArray(output))
+    return null;
 
   const request = output as Record<string, unknown>;
   return {
@@ -347,7 +348,9 @@ export const AgentTaskItem: Component<AgentTaskItemProps> = (props) => {
           </Show>
 
           {/* Output */}
-          <Show when={props.task.output && props.task.status !== "input_required"}>
+          <Show
+            when={props.task.output && props.task.status !== "input_required"}
+          >
             <div class="mt-2">
               <div class="text-[11px] text-muted-foreground mb-1 font-medium uppercase tracking-wider">
                 Output

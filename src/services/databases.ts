@@ -26,7 +26,7 @@ import {
 export type Database = DatabaseWithOwner;
 
 // Re-export types for backwards compatibility
-export type { Organization, Project, Branch };
+export type { Branch, Organization, Project };
 
 /**
  * Database service for Seren API operations.

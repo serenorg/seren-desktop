@@ -1119,10 +1119,7 @@ export const agentStore = {
               providerService
                 .launchLogin(data.agentType)
                 .catch((err) =>
-                  console.error(
-                    "[AgentStore] launchLogin failed:",
-                    err,
-                  ),
+                  console.error("[AgentStore] launchLogin failed:", err),
                 );
               return;
             }

@@ -156,7 +156,6 @@ function injectRuntimeConfig(html, origin, projectRoot) {
       agents: true,
       localFiles: true,
       localMcp: false,
-      openclaw: false,
       terminal: false,
       updater: false,
       remoteSerenAgent: true,

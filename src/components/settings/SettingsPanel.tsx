@@ -10,8 +10,8 @@ import {
   Show,
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
-import { authStore } from "@/stores/auth.store";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
+import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { providerStore } from "@/stores/provider.store";

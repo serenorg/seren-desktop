@@ -206,14 +206,14 @@ function getAvailableToolsForChat(): Array<{
 }
 
 export {
-  mcpChatState,
-  createToolCallRequest,
-  findRequest,
   approveToolCall,
-  denyToolCall,
-  getPendingRequests,
-  getCompletedRequests,
   clearCompletedRequests,
-  hasPendingApprovals,
+  createToolCallRequest,
+  denyToolCall,
+  findRequest,
   getAvailableToolsForChat,
+  getCompletedRequests,
+  getPendingRequests,
+  hasPendingApprovals,
+  mcpChatState,
 };

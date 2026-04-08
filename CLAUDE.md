@@ -165,12 +165,11 @@ All tool calls require user approval via ActionConfirmation.
 
 Before cutting ANY new release tag, you MUST run a full audit:
 1. Audit the agent startup flow (ACP spawn, CLI install, event wiring)
-2. Audit OpenClaw (process lifecycle, path resolution, config, WebSocket)
-3. Audit embedded runtime discovery (platform subdirs, PATH construction)
-4. Check for resource leaks, race conditions, and silent failures
-5. **Verify embedded tool invocations actually execute** — don't just check paths exist, run `node --version`, `npm install`, and `acp_agent` with the embedded runtime to confirm they work end-to-end
-6. File GitHub tickets for any bugs found
-7. Fix critical/high bugs BEFORE tagging the release
+2. Audit embedded runtime discovery (platform subdirs, PATH construction)
+3. Check for resource leaks, race conditions, and silent failures
+4. **Verify embedded tool invocations actually execute** — don't just check paths exist, run `node --version`, `npm install`, and `acp_agent` with the embedded runtime to confirm they work end-to-end
+5. File GitHub tickets for any bugs found
+6. Fix critical/high bugs BEFORE tagging the release
 
 NEVER tag a release without completing this audit. No exceptions.
 

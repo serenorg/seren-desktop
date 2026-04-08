@@ -107,7 +107,10 @@ export async function readDocument(attachment: Attachment): Promise<string> {
       try {
         const data = JSON.parse(errorText);
         if (data.availableBalanceAtomic !== undefined) {
-          const balanceAtomic = Number.parseInt(data.availableBalanceAtomic, 10);
+          const balanceAtomic = Number.parseInt(
+            data.availableBalanceAtomic,
+            10,
+          );
           if (!Number.isNaN(balanceAtomic)) {
             updateBalanceFromError(balanceAtomic);
           }

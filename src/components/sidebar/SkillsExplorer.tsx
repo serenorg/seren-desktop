@@ -1152,7 +1152,9 @@ export const SkillsExplorer: Component<SkillsExplorerProps> = (props) => {
                                 </div>
                               </Show>
                               <Show
-                                when={getAffectedLiveThreadIds(skill).length > 0}
+                                when={
+                                  getAffectedLiveThreadIds(skill).length > 0
+                                }
                               >
                                 <div class="mt-2 text-warning">
                                   {getAffectedLiveThreadIds(skill).length} live

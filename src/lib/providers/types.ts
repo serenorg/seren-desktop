@@ -4,11 +4,7 @@
 /**
  * Supported LLM provider identifiers.
  */
-export type ProviderId =
-  | "seren"
-  | "seren-private"
-  | "anthropic"
-  | "openai";
+export type ProviderId = "seren" | "seren-private" | "anthropic" | "openai";
 
 /**
  * Authentication method for a provider.
