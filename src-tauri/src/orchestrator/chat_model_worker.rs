@@ -1026,6 +1026,7 @@ impl ChatModelWorker {
         matches!(
             name,
             "read_file"
+                | "read_file_base64"
                 | "write_file"
                 | "list_directory"
                 | "path_exists"
@@ -1064,6 +1065,16 @@ impl ChatModelWorker {
                     return ("Missing required parameter: path".to_string(), true);
                 }
                 match crate::files::read_file(path) {
+                    Ok(content) => (content, false),
+                    Err(e) => (e, true),
+                }
+            }
+            "read_file_base64" => {
+                let path = args["path"].as_str().unwrap_or("").to_string();
+                if path.is_empty() {
+                    return ("Missing required parameter: path".to_string(), true);
+                }
+                match crate::files::read_file_base64(path) {
                     Ok(content) => (content, false),
                     Err(e) => (e, true),
                 }
@@ -2179,6 +2190,40 @@ mod tests {
         let (content, is_error) = ChatModelWorker::execute_tool("read_file", "{}").await;
         assert!(is_error);
         assert!(content.contains("Missing required parameter"));
+    }
+
+    #[tokio::test]
+    async fn execute_tool_read_file_base64_round_trips_bytes() {
+        // Critical regression guard: the read_file_base64 dispatcher arm must
+        // hand off to crate::files::read_file_base64 and return real base64.
+        // Without this wiring, agents have no typed path to upload binary
+        // files (PDF, images) to API publishers like seren-docreader.
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        use std::io::Write;
+
+        // Use a binary payload that includes a NUL byte so a string-based
+        // read_file would either fail or corrupt the content — proves the
+        // base64 path is reading raw bytes, not UTF-8.
+        let payload: &[u8] = &[0x25, 0x50, 0x44, 0x46, 0x00, 0xFF, 0xC0, 0xA9];
+        let mut tmp = tempfile::NamedTempFile::new().expect("create tempfile");
+        tmp.write_all(payload).expect("write payload");
+        let path = tmp.path().to_string_lossy().to_string();
+
+        let args = serde_json::json!({ "path": path }).to_string();
+        let (content, is_error) =
+            ChatModelWorker::execute_tool("read_file_base64", &args).await;
+
+        assert!(!is_error, "read_file_base64 returned error: {}", content);
+        let decoded = STANDARD
+            .decode(content.as_bytes())
+            .expect("dispatcher must return valid base64");
+        assert_eq!(decoded, payload, "round-tripped bytes must match input");
+
+        // Empty path is a user error, not a panic.
+        let (err_content, err_flag) =
+            ChatModelWorker::execute_tool("read_file_base64", "{}").await;
+        assert!(err_flag);
+        assert!(err_content.contains("Missing required parameter"));
     }
 
     #[tokio::test]

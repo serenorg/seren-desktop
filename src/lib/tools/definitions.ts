@@ -209,6 +209,29 @@ export const FILE_TOOLS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "read_file_base64",
+      description:
+        "Read a file from the local filesystem and return its bytes as a base64-encoded string. " +
+        "Use this for binary files (PDF, images, audio, video, Office documents) when you need to " +
+        "upload them to a publisher API that accepts base64 input — for example, sending a PDF to " +
+        'the seren-docreader publisher\'s /process endpoint via seren__call_publisher with {"file": "<base64-string>"}. ' +
+        "Prefer read_file for plain text. Files up to 50 MB are supported.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "The absolute or relative path to the binary file to read and base64-encode",
+          },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "list_directory",
       description:
         "List all files and subdirectories in a directory. Returns name, path, and whether each entry is a directory.",
