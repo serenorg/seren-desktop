@@ -124,6 +124,35 @@ function isAuthError(message) {
 const ACP_PROTOCOL_VERSION = 1;
 
 /**
+ * Static list of supported Gemini models. ACP `initialize` does not return
+ * a model list (Codex's `model/list` RPC has no equivalent in gemini-cli's
+ * ACP surface), so we hardcode the publicly-available Gemini 2.5 family
+ * to give the user a visible model picker. (#1480)
+ *
+ * Update this list when Google ships new models. Phase 2 follow-up could
+ * query gemini-cli at startup if upstream adds a list endpoint.
+ */
+const GEMINI_AVAILABLE_MODELS = [
+  {
+    modelId: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    description: "Most capable Gemini model — 1M context window",
+  },
+  {
+    modelId: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    description: "Fast and cheap — 1M context window",
+  },
+  {
+    modelId: "gemini-2.5-flash-lite",
+    name: "Gemini 2.5 Flash Lite",
+    description: "Lowest cost / latency — 1M context window",
+  },
+];
+
+const GEMINI_DEFAULT_MODEL_ID = "gemini-2.5-pro";
+
+/**
  * Map Seren's approval policies to gemini-cli's --approval-mode values.
  *   - "never" / "auto"           → "auto_edit" (auto-approve safe edits)
  *   - "on-request" / "untrusted" → "default"   (prompt for approval)
@@ -229,6 +258,11 @@ function createGeminiSessionRecord({
     timeoutSecs: timeoutSecs ?? undefined,
     geminiVersion: null,
     currentModeId: currentModeId ?? "default",
+    // Default to Gemini 2.5 Pro until the user picks something else.
+    // Switching is wired through setSessionModel; the runtime persists
+    // the choice but does NOT yet re-spawn gemini-cli with --model
+    // (phase 2 of #1480 follow-up).
+    currentModelId: GEMINI_DEFAULT_MODEL_ID,
   };
 }
 
@@ -552,8 +586,8 @@ function buildSessionStatus(session, status = session.status) {
       version: session.geminiVersion ?? "unknown",
     },
     models: {
-      currentModelId: null,
-      availableModels: [],
+      currentModelId: session.currentModelId ?? GEMINI_DEFAULT_MODEL_ID,
+      availableModels: GEMINI_AVAILABLE_MODELS,
     },
     modes: geminiModes(session),
     configOptions: [],
@@ -924,6 +958,28 @@ export function createGeminiRuntime({ emit }) {
     });
   }
 
+  /**
+   * Update the active model for a Gemini session. Persists the choice on the
+   * session record and emits a status update so the UI re-renders the picker.
+   *
+   * Phase 1 (this PR): the choice is persisted but is not yet sent to
+   * gemini-cli — Gemini's --model flag is set at spawn time, so changing
+   * models mid-session would require re-spawning the process. Phase 2
+   * follow-up will plumb this through.
+   */
+  async function setModel({ sessionId, modelId }) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`No Gemini session: ${sessionId}`);
+    }
+    const known = GEMINI_AVAILABLE_MODELS.find((m) => m.modelId === modelId);
+    if (!known) {
+      throw new Error(`Unknown Gemini model: ${modelId}`);
+    }
+    session.currentModelId = modelId;
+    emit("provider://session-status", buildSessionStatus(session));
+  }
+
   return {
     hasSession(sessionId) {
       return sessions.has(sessionId);
@@ -935,5 +991,6 @@ export function createGeminiRuntime({ emit }) {
     listSessions,
     setPermissionMode,
     respondToPermission,
+    setModel,
   };
 }

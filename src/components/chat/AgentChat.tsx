@@ -269,17 +269,33 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     // Thread's declared agent type takes priority so the controls always
     // reflect the selected thread, not a session from a different thread.
     const threadType = activeAgentThread()?.agentType;
-    if (threadType === "codex" || threadType === "claude-code") {
+    if (
+      threadType === "codex" ||
+      threadType === "claude-code" ||
+      threadType === "gemini"
+    ) {
       return threadType;
     }
     const sessionAgent = threadSession()?.info.agentType;
-    if (sessionAgent === "codex" || sessionAgent === "claude-code") {
+    if (
+      sessionAgent === "codex" ||
+      sessionAgent === "claude-code" ||
+      sessionAgent === "gemini"
+    ) {
       return sessionAgent;
     }
     return agentStore.selectedAgentType;
   });
-  const lockedAgentName = () =>
-    lockedAgentType() === "codex" ? "Codex" : "Claude Code";
+  const lockedAgentName = () => {
+    switch (lockedAgentType()) {
+      case "codex":
+        return "Codex";
+      case "gemini":
+        return "Gemini";
+      default:
+        return "Claude Code";
+    }
+  };
 
   // Get the current working directory from file tree
   const getCwd = () => {
@@ -1488,7 +1504,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           const agentModelId = agentStore.activeSession?.currentModelId;
           const chatModelId = mapAgentModelToChat(agentModelId, agentType);
           const modelName = getModelDisplayName(chatModelId);
-          const agentName = agentType === "codex" ? "Codex" : "Claude Code";
+          const agentName =
+            agentType === "codex"
+              ? "Codex"
+              : agentType === "gemini"
+                ? "Gemini"
+                : "Claude Code";
           const reason = agentStore.agentFallbackReason;
           const title =
             reason === "prompt_too_long"
