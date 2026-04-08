@@ -5,11 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
-use uuid::Uuid;
+use tauri::AppHandle;
 
-use crate::claude_memory;
-use crate::commands::memory::MemoryState;
+use crate::claude_memory::{self, SerenDbConfig};
 
 /// Hard upper bound on how long `claude_memory_start` is allowed to take
 /// before returning a timeout error to the caller. The watcher does an
@@ -33,13 +31,23 @@ pub struct ClaudeMemoryProjectIdentity {
     pub source: String,
 }
 
-fn parse_project_id(project_id: Option<String>) -> Result<Option<Uuid>, String> {
-    match project_id.as_deref() {
-        Some(s) if !s.is_empty() => Uuid::parse_str(s)
-            .map(Some)
-            .map_err(|e| format!("invalid project_id UUID: {e}")),
-        _ => Ok(None),
+fn build_config(
+    project_id: String,
+    branch_id: String,
+    database_name: String,
+) -> Result<SerenDbConfig, String> {
+    if project_id.is_empty() || branch_id.is_empty() || database_name.is_empty() {
+        return Err(
+            "claude_memory_start requires non-empty projectId, branchId, and databaseName \
+             (the frontend's ensureClaudeMemoryProvisioned helper should have populated these)"
+                .to_string(),
+        );
     }
+    Ok(SerenDbConfig {
+        project_id,
+        branch_id,
+        database_name,
+    })
 }
 
 /// Start watching `~/.claude/projects/*/memory/` for Claude Code memory writes.
@@ -50,15 +58,23 @@ fn parse_project_id(project_id: Option<String>) -> Result<Option<Uuid>, String> 
 /// could freeze the UI. We dispatch the entire body onto the blocking pool and
 /// cap it with a timeout so the IPC caller is never parked indefinitely.
 ///
-/// Same fix shape as #1503 / `mcp_connect`. Resolves #1507.
+/// The frontend's `ensureClaudeMemoryProvisioned()` helper auto-creates the
+/// `claude-agent-prefs` SerenDB project, the `claude_agent_prefs` database,
+/// and the `claude_agent_preferences` table on first run, then passes the
+/// resolved identifiers down to this command. Per #1509, Claude memory is
+/// stored in a separate SerenDB project from the user's conversational
+/// memory — these are two distinct stores and must not share storage.
 #[tauri::command]
 pub async fn claude_memory_start(
     app: AppHandle,
-    project_id: Option<String>,
+    project_id: String,
+    branch_id: String,
+    database_name: String,
 ) -> Result<ClaudeMemoryStatus, String> {
-    let project_uuid = parse_project_id(project_id)?;
+    let config = build_config(project_id, branch_id, database_name)?;
 
-    let join = tokio::task::spawn_blocking(move || claude_memory::start_watcher(app, project_uuid));
+    let join =
+        tokio::task::spawn_blocking(move || claude_memory::start_watcher(app, config));
     let root = match tokio::time::timeout(CLAUDE_MEMORY_START_TIMEOUT, join).await {
         Ok(Ok(Ok(path))) => path,
         Ok(Ok(Err(e))) => return Err(e),
@@ -122,15 +138,17 @@ pub fn claude_memory_status() -> Result<ClaudeMemoryStatus, String> {
     })
 }
 
-/// Walk every existing Claude memory directory and push any files already on
-/// disk to SerenDB. Returns persisted + failures.
+/// Walk every existing Claude memory directory and INSERT any pre-existing
+/// `.md` files into `claude_agent_preferences`. Returns persisted + failures.
 #[tauri::command]
 pub async fn claude_memory_migrate_existing(
     app: AppHandle,
-    project_id: Option<String>,
+    project_id: String,
+    branch_id: String,
+    database_name: String,
 ) -> Result<claude_memory::MigrationReport, String> {
-    let project_uuid = parse_project_id(project_id)?;
-    claude_memory::migrate_existing_files(&app, project_uuid).await
+    let config = build_config(project_id, branch_id, database_name)?;
+    claude_memory::migrate_existing_files(&app, &config).await
 }
 
 /// Resolve a stable project identifier for `project_cwd` (git remote or UUID).
@@ -152,43 +170,43 @@ pub fn claude_memory_get_project_identity(
 }
 
 /// Render `~/.claude/projects/<encoded(project_cwd)>/MEMORY.md` from the
-/// authenticated user's SerenDB memory bootstrap. The frontend calls this
-/// when a project is opened so Claude Code reads fresh content next session.
+/// `claude_agent_preferences` table in SerenDB. The frontend calls this when
+/// a project is opened so Claude Code reads fresh content next session.
 #[tauri::command]
 pub async fn claude_memory_render_memory_md(
     app: AppHandle,
-    state: State<'_, MemoryState>,
     project_cwd: String,
-    project_id: Option<String>,
+    project_id: String,
+    branch_id: String,
+    database_name: String,
 ) -> Result<String, String> {
+    let config = build_config(project_id, branch_id, database_name)?;
     let root = claude_memory::claude_projects_root()?;
     let encoded = claude_memory::encode_project_dir(Path::new(&project_cwd));
     let claude_project_dir: PathBuf = root.join(&encoded);
 
-    let rendered = match super::memory::memory_bootstrap(app, state, project_id).await {
-        Ok(Some(prompt)) if !prompt.trim().is_empty() => prompt,
-        Ok(_) => "# Claude Memory\n\n_No preferences stored yet._\n".to_string(),
-        Err(e) => {
-            log::warn!("[ClaudeMemory] memory_bootstrap failed during render: {e}");
-            format!(
-                "# Claude Memory\n\n> Preferences are rehydrating from SerenDB. This message will be replaced on the next successful sync.\n\n_Last error: {e}_\n"
-            )
-        }
+    let token = {
+        use tauri_plugin_store::StoreExt;
+        app.store("auth.json")
+            .map_err(|e| e.to_string())?
+            .get("token")
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_default()
     };
+    if token.is_empty() {
+        return Err("unauthorized".to_string());
+    }
 
-    let final_path = claude_memory::write_rendered_memory_md(&claude_project_dir, &rendered)?;
+    let client = claude_memory::SerenDbSqlClient::new(token);
+    let final_path =
+        claude_memory::render_memory_md_from_db(&client, &config, &claude_project_dir).await?;
     Ok(final_path.to_string_lossy().to_string())
 }
 
 // ============================================================================
-// Tests for #1507: claude_memory_start must not block the main Tauri thread.
-//
-// We can't construct a real `AppHandle` in a unit test, so we exercise the
-// exact same primitive the fix relies on — `tokio::task::spawn_blocking` +
-// `tokio::time::timeout` — against a worst-case blocking workload, and
-// assert the timeout fires within a tight wall-clock bound. A regression on
-// either primitive (or someone removing the timeout wrapper from
-// `claude_memory_start`) would fail this test.
+// Tests for #1507 (claude_memory_start must not block the main Tauri thread).
+// The pattern itself is verified here; the SQL builder + injection-prevention
+// tests live in `claude_memory::tests` since that's where the SQL helpers live.
 // ============================================================================
 
 #[cfg(test)]
@@ -204,14 +222,6 @@ mod tests {
         // spawn_blocking + timeout MUST return control to the caller within
         // the timeout bound, otherwise the production fix is not actually
         // protecting the main Tauri thread.
-        //
-        // We use `std::thread::sleep(1500ms)` rather than a much longer sleep
-        // because tokio's blocking pool waits for in-flight tasks at runtime
-        // shutdown — we cannot cancel a `thread::sleep` from outside, so the
-        // sleep duration is the lower bound on test wall-clock time after the
-        // assertion. 1500ms is comfortably longer than the 500ms outer
-        // timeout (so the test still exercises the timeout path) but short
-        // enough to keep the test runtime fast.
         let inner_blocking_duration = Duration::from_millis(1500);
         let outer_timeout = Duration::from_millis(500);
         let started = Instant::now();
@@ -226,9 +236,6 @@ mod tests {
             result.is_err(),
             "spawn_blocking + timeout MUST return a timeout error when the inner work blocks; got {result:?}"
         );
-        // The timeout MUST fire within ~the outer bound, with a generous CI
-        // slack. The whole point of #1507's fix is that the caller is not
-        // parked for the duration of the inner blocking work.
         assert!(
             elapsed_to_timeout < Duration::from_secs(2),
             "expected timeout to fire within 2s (the main Tauri thread is not parked); took {elapsed_to_timeout:?}"
@@ -237,9 +244,6 @@ mod tests {
 
     #[test]
     fn claude_memory_start_timeout_constant_is_bounded() {
-        // Guard against someone accidentally removing the start timeout or
-        // making it absurdly long. The fix is only meaningful if the bound
-        // is reasonable for a UI-blocking call.
         assert!(
             CLAUDE_MEMORY_START_TIMEOUT <= Duration::from_secs(60),
             "CLAUDE_MEMORY_START_TIMEOUT must stay bounded; got {:?}",
@@ -250,5 +254,13 @@ mod tests {
             "CLAUDE_MEMORY_START_TIMEOUT too aggressive; got {:?}",
             CLAUDE_MEMORY_START_TIMEOUT
         );
+    }
+
+    #[test]
+    fn build_config_rejects_empty_strings() {
+        assert!(build_config("".into(), "b".into(), "d".into()).is_err());
+        assert!(build_config("p".into(), "".into(), "d".into()).is_err());
+        assert!(build_config("p".into(), "b".into(), "".into()).is_err());
+        assert!(build_config("p".into(), "b".into(), "d".into()).is_ok());
     }
 }

@@ -8,6 +8,7 @@ import {
   type Organization,
 } from "@/api";
 import {
+  serenDbCreateDatabase as apiCreateDatabase,
   serenDbCreateProject as apiCreateProject,
   serenDbDeleteProject as apiDeleteProject,
   serenDbGetBranch as apiGetBranch,
@@ -17,9 +18,11 @@ import {
   serenDbListBranches as apiListBranches,
   serenDbListDatabases as apiListDatabases,
   serenDbListProjects as apiListProjects,
+  serenDbQuery as apiQuery,
   type Branch,
   type DatabaseWithOwner,
   type Project,
+  type QueryResult,
 } from "@/api/seren-db";
 
 // Use DatabaseWithOwner as the Database type (list endpoint returns this)
@@ -156,6 +159,79 @@ export const databases = {
     const dbs = data?.data || [];
     console.log("[Databases] Found", dbs.length, "databases");
     return dbs;
+  },
+
+  /**
+   * Create a new database on a branch.
+   * Wraps `serenDbCreateDatabase`.
+   */
+  async createDatabase(
+    projectId: string,
+    branchId: string,
+    name: string,
+    ownerName?: string,
+  ): Promise<{ id: string; name: string; branch_id: string }> {
+    console.log(
+      "[Databases] Creating database:",
+      name,
+      "in project:",
+      projectId,
+      "branch:",
+      branchId,
+    );
+    const { data, error } = await apiCreateDatabase({
+      path: { id: projectId, bid: branchId },
+      body: { name, owner_name: ownerName ?? null },
+      throwOnError: false,
+    });
+    if (error || !data?.data) {
+      console.error("[Databases] Error creating database:", error);
+      throw new Error("Failed to create database");
+    }
+    return {
+      id: data.data.id,
+      name: data.data.name,
+      branch_id: data.data.branch_id,
+    };
+  },
+
+  /**
+   * Execute a SQL statement against a SerenDB database.
+   * Wraps `serenDbQuery`. The query is executed in a read-write transaction
+   * unless `readOnly` is true.
+   */
+  async runSql(
+    projectId: string,
+    branchId: string | null,
+    databaseName: string | null,
+    query: string,
+    readOnly: boolean = false,
+  ): Promise<QueryResult> {
+    const { data, error } = await apiQuery({
+      body: {
+        project_id: projectId,
+        branch_id: branchId,
+        database: databaseName ?? undefined,
+        query,
+        read_only: readOnly,
+      },
+      throwOnError: false,
+    });
+    if (error || !data?.data) {
+      console.error("[Databases] Error running SQL:", error);
+      throw new Error(
+        `SerenDB query failed: ${
+          typeof error === "object" && error !== null && "message" in error
+            ? String((error as { message: unknown }).message)
+            : "unknown error"
+        }`,
+      );
+    }
+    return {
+      columns: data.data.columns,
+      row_count: data.data.row_count,
+      rows: data.data.rows,
+    };
   },
 
   /**

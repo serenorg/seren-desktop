@@ -32,7 +32,6 @@ import {
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
 import { fileTreeState, initDefaultRootIfNeeded } from "@/stores/fileTree";
-import { projectStore } from "@/stores/project.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -196,17 +195,18 @@ function App() {
   }, authStore.isAuthenticated);
 
   // Claude Code auto-memory interceptor — start only after the user is
-  // authenticated AND has an active SerenDB project. Not-logged-in at boot
-  // is a normal state, not an error, so we do NOT raise a dialog until a
-  // real failure happens (cloud error, bad project, migration failure).
+  // authenticated. The interceptor auto-provisions its own SerenDB project
+  // (`claude-agent-prefs`) and database (`claude_agent_prefs`) on first
+  // run via `ensureClaudeMemoryProvisioned()`, so we do NOT need
+  // `projectStore.activeProject` to be set. Not-logged-in at boot is a
+  // normal state, not an error, so we do NOT raise a dialog until a real
+  // failure happens (cloud error, provisioning failure, migration failure).
   // A guard variable ensures we only start once per authenticated session.
   let claudeMemoryStartedForAuth: string | null = null;
   createEffect(() => {
     const isAuth = authStore.isAuthenticated;
-    const projectId = projectStore.activeProject?.id ?? null;
-    // Track dependencies explicitly so createEffect re-runs on either change.
+    // Track the dependency explicitly so createEffect re-runs when auth changes.
     void isAuth;
-    void projectId;
 
     untrack(async () => {
       try {
@@ -215,16 +215,16 @@ function App() {
           claudeMemoryStartedForAuth = null;
           return;
         }
-        if (!isAuth || !projectId) {
-          // Normal "not ready yet" state — no dialog, just log at debug.
+        if (!isAuth) {
+          // Normal "not authenticated yet" state — no dialog, just debug log.
           console.debug(
-            "[ClaudeMemory] waiting for auth + project before starting interceptor",
+            "[ClaudeMemory] waiting for SerenDB login before starting interceptor",
           );
           claudeMemoryStartedForAuth = null;
           return;
         }
-        // Only start once per (auth session, project) tuple.
-        const key = `${isAuth ? "auth" : "anon"}::${projectId}`;
+        // Only start once per authenticated session.
+        const key = "auth-session";
         if (claudeMemoryStartedForAuth === key) {
           return;
         }

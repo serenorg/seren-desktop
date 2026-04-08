@@ -32,13 +32,6 @@ impl MemoryState {
         }
     }
 
-    /// Read-only accessor for the memory service base URL so other modules
-    /// (e.g. the Claude Code memory interceptor) can build their own clients
-    /// against the same endpoint without duplicating the constant.
-    pub fn base_url(&self) -> &str {
-        &self.base_url
-    }
-
     /// Create a MemoryClient using the current token from the Tauri store.
     fn client(&self, app: &tauri::AppHandle) -> Result<MemoryClient, String> {
         use tauri_plugin_store::StoreExt;
