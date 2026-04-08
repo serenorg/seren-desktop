@@ -788,6 +788,16 @@ export function createGeminiRuntime({ emit }) {
         reject: rejectPromise,
       };
     });
+    // Four sites can reject pendingPrompt before the success-path
+    // `await pendingPrompt` below ever runs: sendPrompt's own catch,
+    // process-exit handler, cancelPrompt, and terminateSession. Without a
+    // handler here, any of those leaves pendingPrompt as an orphaned
+    // rejected promise → Node 22 unhandledRejection → the runtime process
+    // crashes, killing every session (including Claude Code) sharing the
+    // runtime. The real error still flows through `await sendRequest(...)`
+    // → catch → `throw`; this no-op handler only marks pendingPrompt as
+    // handled so the orphaned-rejection path is silent. See #1486.
+    pendingPrompt.catch(() => {});
 
     try {
       // ACP `session/prompt` returns when the agent finishes the turn. The
