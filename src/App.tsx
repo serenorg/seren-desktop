@@ -32,6 +32,7 @@ import {
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { chatStore } from "@/stores/chat.store";
 import { fileTreeState, initDefaultRootIfNeeded } from "@/stores/fileTree";
+import { projectStore } from "@/stores/project.store";
 import { providerStore } from "@/stores/provider.store";
 import { loadAllSettings } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
@@ -108,65 +109,12 @@ function App() {
     await skillsStore.refresh();
     await threadStore.refresh();
 
-    // Claude Code auto-memory interceptor — opt-in. If the user enabled it
-    // but a precondition is missing (no SerenDB login, no active project) or
-    // the start call fails, we surface an actionable error dialog so the
-    // user knows what to fix. No silent failures.
-    try {
-      const { settingsStore } = await import("@/stores/settings.store");
-      if (settingsStore.get("claudeMemoryInterceptEnabled")) {
-        const { projectStore } = await import("@/stores/project.store");
-        const { message: showMessageDialog } = await import(
-          "@tauri-apps/plugin-dialog"
-        );
-        const reportError = async (msg: string) => {
-          console.error(`[ClaudeMemory] ${msg}`);
-          try {
-            await showMessageDialog(msg, {
-              title: "Claude Memory Interceptor",
-              kind: "error",
-            });
-          } catch {
-            // Dialog plugin unavailable (e.g. browser runtime) — the
-            // console.error above is the fallback.
-          }
-        };
-        if (!authStore.isAuthenticated) {
-          await reportError(
-            "Claude Code auto-memory interceptor is enabled but you are not logged in to SerenDB. Log in to start the interceptor, or turn it off in Settings → Code Indexing → Claude Code Auto-Memory.",
-          );
-        } else if (!projectStore.activeProject?.id) {
-          await reportError(
-            "Claude Code auto-memory interceptor is enabled but no active SerenDB project is selected. Select a project to start the interceptor, or turn it off in Settings → Code Indexing → Claude Code Auto-Memory.",
-          );
-        } else {
-          const { startClaudeMemoryInterceptor, migrateExistingClaudeMemory } =
-            await import("@/services/claudeMemory");
-          try {
-            await startClaudeMemoryInterceptor();
-            if (settingsStore.get("claudeMemoryMigrateOnStartup")) {
-              const report = await migrateExistingClaudeMemory();
-              console.info(
-                `[ClaudeMemory] startup migration: persisted=${report.persisted} failures=${report.failures}`,
-              );
-              if (report.failures > 0) {
-                await reportError(
-                  `Claude memory interceptor: ${report.failures} file${
-                    report.failures === 1 ? "" : "s"
-                  } could not be pushed to SerenDB on startup and were left on disk. Check your SerenDB connection and retry from Settings → Code Indexing → Claude Code Auto-Memory → Migrate Existing Files.`,
-                );
-              }
-            }
-          } catch (err) {
-            await reportError(
-              `Failed to start Claude memory interceptor: ${err}. Check your SerenDB login and project selection, then toggle the interceptor off and on again in Settings.`,
-            );
-          }
-        }
-      }
-    } catch (error) {
-      console.error(`[ClaudeMemory] boot hook crashed: ${error}`);
-    }
+    // Claude Code auto-memory interceptor — does NOT run at boot. The
+    // reactive createEffect below waits until the user is authenticated
+    // AND has an active SerenDB project, then attempts to start the
+    // watcher. Not-logged-in at boot is a normal state, not an error, and
+    // must not raise a dialog. Actual failures (cloud errors, migration
+    // failures) do raise a dialog because they mean something broke.
   });
 
   // Periodically refresh available skills so newly published skills appear without restart.
@@ -246,6 +194,85 @@ function App() {
 
     return isAuth;
   }, authStore.isAuthenticated);
+
+  // Claude Code auto-memory interceptor — start only after the user is
+  // authenticated AND has an active SerenDB project. Not-logged-in at boot
+  // is a normal state, not an error, so we do NOT raise a dialog until a
+  // real failure happens (cloud error, bad project, migration failure).
+  // A guard variable ensures we only start once per authenticated session.
+  let claudeMemoryStartedForAuth: string | null = null;
+  createEffect(() => {
+    const isAuth = authStore.isAuthenticated;
+    const projectId = projectStore.activeProject?.id ?? null;
+    // Track dependencies explicitly so createEffect re-runs on either change.
+    void isAuth;
+    void projectId;
+
+    untrack(async () => {
+      try {
+        const { settingsStore } = await import("@/stores/settings.store");
+        if (!settingsStore.get("claudeMemoryInterceptEnabled")) {
+          claudeMemoryStartedForAuth = null;
+          return;
+        }
+        if (!isAuth || !projectId) {
+          // Normal "not ready yet" state — no dialog, just log at debug.
+          console.debug(
+            "[ClaudeMemory] waiting for auth + project before starting interceptor",
+          );
+          claudeMemoryStartedForAuth = null;
+          return;
+        }
+        // Only start once per (auth session, project) tuple.
+        const key = `${isAuth ? "auth" : "anon"}::${projectId}`;
+        if (claudeMemoryStartedForAuth === key) {
+          return;
+        }
+        claudeMemoryStartedForAuth = key;
+
+        const { startClaudeMemoryInterceptor, migrateExistingClaudeMemory } =
+          await import("@/services/claudeMemory");
+        const { message: showMessageDialog } = await import(
+          "@tauri-apps/plugin-dialog"
+        );
+        const reportError = async (msg: string) => {
+          console.error(`[ClaudeMemory] ${msg}`);
+          try {
+            await showMessageDialog(msg, {
+              title: "Claude Memory Interceptor",
+              kind: "error",
+            });
+          } catch {
+            // Dialog plugin unavailable in browser runtime — console is the fallback.
+          }
+        };
+        try {
+          await startClaudeMemoryInterceptor();
+          if (settingsStore.get("claudeMemoryMigrateOnStartup")) {
+            const report = await migrateExistingClaudeMemory();
+            console.info(
+              `[ClaudeMemory] startup migration: persisted=${report.persisted} failures=${report.failures}`,
+            );
+            if (report.failures > 0) {
+              await reportError(
+                `Claude memory interceptor: ${report.failures} file${
+                  report.failures === 1 ? "" : "s"
+                } could not be pushed to SerenDB and were left on disk. Check your SerenDB connection and retry from Settings → Code Indexing → Claude Code Auto-Memory → Migrate Existing Files.`,
+              );
+            }
+          }
+        } catch (err) {
+          // Reset so a later project/auth change can retry.
+          claudeMemoryStartedForAuth = null;
+          await reportError(
+            `Failed to start Claude memory interceptor: ${err}. Check your SerenDB project selection, then toggle the interceptor off and on again in Settings.`,
+          );
+        }
+      } catch (error) {
+        console.error(`[ClaudeMemory] reactive start crashed: ${error}`);
+      }
+    });
+  });
 
   const handleLoginSuccess = () => {
     setAuthenticated({ id: "", email: "", name: "" });
