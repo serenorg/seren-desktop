@@ -19,10 +19,6 @@ import { getRuntimeConfig } from "@/lib/runtime";
 import { shortcuts } from "@/lib/shortcuts";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
-import {
-  migrateExistingClaudeMemory,
-  startClaudeMemoryInterceptor,
-} from "@/services/claudeMemory";
 import { syncMemories } from "@/services/memory";
 import { telemetry } from "@/services/telemetry";
 import { agentStore } from "@/stores/agent.store";
@@ -86,30 +82,6 @@ function App() {
 
     // Load all settings including app settings (chatDefaultModel, etc.) and MCP settings
     await loadAllSettings();
-
-    // Start the Claude Code auto-memory interceptor if enabled. This watches
-    // ~/.claude/projects/*\/memory/ for plaintext memory writes and redirects
-    // them into SerenDB through the existing memory stack. Failures are
-    // non-fatal — the app still works, we just log a warning.
-    const { settingsStore } = await import("@/stores/settings.store");
-    if (settingsStore.get("claudeMemoryInterceptEnabled")) {
-      try {
-        await startClaudeMemoryInterceptor();
-        if (settingsStore.get("claudeMemoryMigrateOnStartup")) {
-          const migrated = await migrateExistingClaudeMemory();
-          if (migrated > 0) {
-            console.info(
-              `[ClaudeMemory] Migrated ${migrated} plaintext memory file(s) to SerenDB on startup.`,
-            );
-          }
-        }
-      } catch (error) {
-        console.warn(
-          "[ClaudeMemory] Failed to start auto-memory interceptor:",
-          error,
-        );
-      }
-    }
 
     // Load provider settings - this restores the last used model from previous session
     await providerStore.loadSettings();
