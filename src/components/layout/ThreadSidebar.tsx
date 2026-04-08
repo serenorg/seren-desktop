@@ -384,7 +384,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         </button>
 
         <Show when={showLauncher()}>
-          <div class="absolute top-[calc(100%+4px)] left-3 right-3 bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] overflow-hidden py-1">
+          <div class="absolute top-[calc(100%+4px)] left-3 right-3 max-h-[60vh] overflow-y-auto bg-surface-2 border border-border rounded-lg z-20 shadow-lg animate-[slideDown_150ms_ease] py-1">
             {/* Primary Seren chat path */}
             <Show when={allowsSerenPublicModels(authStore.privateChatPolicy)}>
               <button
