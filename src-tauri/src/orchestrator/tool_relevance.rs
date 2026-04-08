@@ -36,6 +36,7 @@ const RECENCY_BOOST: f32 = 2.0;
 /// without them it cannot read/write files or execute commands.
 const PINNED_TOOL_NAMES: &[&str] = &[
     "read_file",
+    "read_file_base64",
     "write_file",
     "list_directory",
     "path_exists",
@@ -745,14 +746,18 @@ mod tests {
 
     #[test]
     fn pinned_local_tools_always_included() {
-        // Simulate 138 tools: 7 local + 131 gateway tools.
+        // Simulate 139 tools: 8 local + 131 gateway tools.
         // Query is domain-specific with zero overlap with local tool names.
         let mut tools: Vec<serde_json::Value> = Vec::new();
 
-        // Add all 7 pinned local tools
+        // Add all pinned local tools
         tools.push(make_tool(
             "read_file",
             "Read file contents from the filesystem",
+        ));
+        tools.push(make_tool(
+            "read_file_base64",
+            "Read a file and return its bytes as base64",
         ));
         tools.push(make_tool("write_file", "Write content to a file on disk"));
         tools.push(make_tool("list_directory", "List entries in a directory"));
@@ -802,7 +807,7 @@ mod tests {
             &tools,
         );
 
-        // All 7 pinned tools must be present
+        // All pinned tools must be present
         for pinned_name in PINNED_TOOL_NAMES {
             let found = result
                 .iter()
