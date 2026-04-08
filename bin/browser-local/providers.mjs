@@ -1375,9 +1375,7 @@ export function createProviderHandlers({ emit }) {
     const session = sessions.get(sessionId);
     if (!session) {
       if (geminiRuntime.hasSession(sessionId)) {
-        // Gemini's model is fixed per session — silently no-op so the UI
-        // doesn't error when the user clicks the model selector.
-        return null;
+        return geminiRuntime.setModel({ sessionId, modelId });
       }
       return claudeRuntime.setModel({ sessionId, modelId });
     }
