@@ -221,6 +221,19 @@ export interface ErrorEvent {
   error: string;
 }
 
+/**
+ * Emitted by an agent runtime (gemini-runtime today) when a spawn fails
+ * because the user has not yet authenticated with the upstream CLI.
+ * Triggers the desktop to call `launchLogin(agentType)` automatically so
+ * the user finishes sign-in in a Terminal/browser without needing to know
+ * the CLI command. (#1476)
+ */
+export interface LoginRequiredEvent {
+  sessionId: string;
+  agentType: AgentType;
+  reason: string;
+}
+
 // Union type for all provider runtime events
 export type AgentEvent =
   | { type: "messageChunk"; data: MessageChunkEvent }
@@ -234,7 +247,8 @@ export type AgentEvent =
   | { type: "configOptionsUpdate"; data: ConfigOptionsUpdateEvent }
   | { type: "sessionStatus"; data: SessionStatusEvent }
   | { type: "userMessage"; data: UserMessageEvent }
-  | { type: "error"; data: ErrorEvent };
+  | { type: "error"; data: ErrorEvent }
+  | { type: "loginRequired"; data: LoginRequiredEvent };
 
 async function invokeProvider<T>(
   command: string,
@@ -499,6 +513,7 @@ const EVENT_SUFFIXES = {
   configOptionsUpdate: "config-options-update",
   userMessage: "user-message",
   error: "error",
+  loginRequired: "login-required",
 } as const;
 
 type EventType = keyof typeof EVENT_SUFFIXES;
@@ -717,6 +732,11 @@ export async function subscribeToAllEvents(
   unlisteners.push(
     await subscribeToEvent<ErrorEvent>("error", (data) =>
       callback({ type: "error", data }),
+    ),
+  );
+  unlisteners.push(
+    await subscribeToEvent<LoginRequiredEvent>("loginRequired", (data) =>
+      callback({ type: "loginRequired", data }),
     ),
   );
 

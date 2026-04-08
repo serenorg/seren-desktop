@@ -1087,6 +1087,46 @@ export const agentStore = {
             const eventSessionId = event.data.sessionId;
             if (!eventSessionId) return;
 
+            // Auth failure during spawn — handle BEFORE the session-routing
+            // logic below, because the session is not yet registered in
+            // state.sessions when this fires (the spawn promise is still
+            // pending). Auto-trigger launchLogin so the user can finish
+            // signing in without knowing the CLI command. (#1476)
+            if (event.type === "loginRequired") {
+              const data = event.data;
+              console.log(
+                "[AgentStore] Login required for",
+                data.agentType,
+                "— auto-launching login flow:",
+                data.reason,
+              );
+              setState(
+                "error",
+                `${
+                  data.agentType === "gemini"
+                    ? "Gemini"
+                    : data.agentType === "codex"
+                      ? "Codex"
+                      : "Claude Code"
+                } sign-in required. Opening a Terminal window — finish the login there, then click + New Agent → ${
+                  data.agentType === "gemini"
+                    ? "Gemini Agent"
+                    : data.agentType === "codex"
+                      ? "Codex Agent"
+                      : "Claude Agent"
+                } again.`,
+              );
+              providerService
+                .launchLogin(data.agentType)
+                .catch((err) =>
+                  console.error(
+                    "[AgentStore] launchLogin failed:",
+                    err,
+                  ),
+                );
+              return;
+            }
+
             // Drop events for sessions that have been explicitly terminated —
             // UNLESS a new spawn is in progress for this ID (spawnContextMap).
             // Without the first check, late errors from dead sessions leak in.

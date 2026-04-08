@@ -80,16 +80,24 @@ export default defineConfig(async () => ({
 
   // Path aliases
   resolve: {
-    alias: {
-      "@": resolve(__dirname, "src"),
-      // Shim qrcode CJS → ESM for Thirdweb's dynamic import("qrcode")
-      qrcode: resolve(__dirname, "src/lib/qrcode-shim.ts"),
-    },
+    alias: [
+      { find: "@", replacement: resolve(__dirname, "src") },
+      // Shim qrcode CJS → ESM for Thirdweb's dynamic import("qrcode").
+      // Match the bare specifier ONLY — subpaths like "qrcode/lib/browser.js"
+      // must still resolve to the real package so Vite's optimizeDeps can
+      // prebundle the CJS file for the shim to import. (#1476)
+      {
+        find: /^qrcode$/,
+        replacement: resolve(__dirname, "src/lib/qrcode-shim.ts"),
+      },
+    ],
   },
 
   // Optimize Monaco Editor
   optimizeDeps: {
-    include: ["monaco-editor", "qrcode"],
+    // Prebundle the subpath that src/lib/qrcode-shim.ts imports so Vite
+    // converts the CJS `require()` calls into browser-safe ESM at startup.
+    include: ["monaco-editor", "qrcode", "qrcode/lib/browser.js"],
   },
 
   // Build configuration for Monaco workers and store co-location.

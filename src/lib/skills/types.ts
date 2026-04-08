@@ -56,6 +56,13 @@ export interface Skill {
   author?: string;
   /** Version string */
   version?: string;
+  /**
+   * ISO timestamp of the last commit that touched this skill's SKILL.md.
+   * Provided by R2 index v2+ — populated by `seren-skills/scripts/build-index.mjs`
+   * via `git log -1 --format=%cI`. Used by upstream staleness checks to skip
+   * the GitHub API call entirely. (#1476)
+   */
+  lastModified?: string;
 }
 
 export interface SkillSyncState {
@@ -146,6 +153,12 @@ export interface SkillIndexEntry {
   tags: string[];
   author?: string;
   version?: string;
+  /**
+   * ISO timestamp of the last commit that touched this skill's SKILL.md.
+   * Present in R2 index v2+ only. Optional for backward compatibility with
+   * older indexes — desktop falls back to GitHub API when missing. (#1476)
+   */
+  lastModified?: string;
 }
 
 /**

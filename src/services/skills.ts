@@ -114,6 +114,7 @@ function indexEntryToSkill(entry: SkillIndexEntry): Skill {
     tags: entry.tags,
     author: entry.author,
     version: entry.version,
+    lastModified: entry.lastModified,
   };
 }
 
@@ -131,6 +132,7 @@ function skillToIndexEntry(skill: Skill): SkillIndexEntry {
     tags: skill.tags,
     author: skill.author,
     version: skill.version,
+    lastModified: skill.lastModified,
   };
 }
 
@@ -189,6 +191,18 @@ async function fetchSkillFromRepo(path: string): Promise<Skill | null> {
 let cachedRepoTree: GitHubTreeNode[] | null = null;
 
 /**
+ * Per-skill `lastModified` map from the most recent R2 v2+ index fetch,
+ * keyed by canonical `sourceUrl`. Used by `fetchRemoteSkillRevision` to
+ * skip the GitHub commits API call entirely when an authoritative timestamp
+ * is already available locally. (#1476)
+ *
+ * Cleared and repopulated on every R2 fetch. Empty when only a v1 index
+ * (without per-skill timestamps) has been fetched, in which case the
+ * GitHub fallback path runs as before.
+ */
+const cachedLastModifiedBySourceUrl = new Map<string, string>();
+
+/**
  * Fetch all available skills from GitHub repository tree.
  */
 async function fetchSkillsFromR2Index(): Promise<Skill[]> {
@@ -208,6 +222,16 @@ async function fetchSkillsFromR2Index(): Promise<Skill[]> {
   // can discover sibling files without hitting the GitHub API.
   if (payload.tree) {
     cachedRepoTree = payload.tree.map((path) => ({ path, type: "blob" }));
+  }
+
+  // Populate the lastModified-by-sourceUrl cache from R2 v2+ entries.
+  // Replace the entire cache so deletions and renames in the upstream
+  // repo don't leave stale entries pointing at the wrong timestamp.
+  cachedLastModifiedBySourceUrl.clear();
+  for (const entry of payload.skills) {
+    if (entry.lastModified && entry.sourceUrl) {
+      cachedLastModifiedBySourceUrl.set(entry.sourceUrl, entry.lastModified);
+    }
   }
 
   return payload.skills.map(indexEntryToSkill);
@@ -316,9 +340,39 @@ function remoteRevisionShortSha(sha?: string): string {
   return sha.slice(0, 7);
 }
 
+/**
+ * Build a synthetic RemoteSkillRevision from an R2 v2+ `lastModified`
+ * timestamp. The ISO string IS the synthetic SHA: it changes when and only
+ * when the upstream commit changes, which is exactly what the freshness
+ * check needs (`remoteRevision.sha !== syncedRevision`). Persisted as
+ * `syncedRevision` after install — same string is used for every comparison.
+ *
+ * Skipping the GitHub commits API saves N+1 requests per refresh and
+ * removes the anonymous-rate-limit blast radius. (#1476)
+ */
+function syntheticRevisionFromLastModified(
+  lastModified: string,
+): RemoteSkillRevision {
+  return {
+    sha: lastModified,
+    shortSha: lastModified.slice(0, 10),
+    committedAt: lastModified,
+    message: undefined,
+    url: undefined,
+    changedFiles: [],
+  };
+}
+
 async function fetchRemoteSkillRevision(
   sourceUrl: string,
 ): Promise<RemoteSkillRevision | null> {
+  // R2 v2+ index ships per-skill `lastModified`. Prefer it over the GitHub
+  // commits API to avoid burning anonymous rate limit on idle refreshes.
+  const cachedLastModified = cachedLastModifiedBySourceUrl.get(sourceUrl);
+  if (cachedLastModified) {
+    return syntheticRevisionFromLastModified(cachedLastModified);
+  }
+
   const dirPrefix = deriveRepoDirPrefix(sourceUrl);
   if (!dirPrefix) return null;
   const path = normalizeRepoDirPath(dirPrefix);
