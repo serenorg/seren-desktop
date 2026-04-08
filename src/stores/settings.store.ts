@@ -195,10 +195,13 @@ const DEFAULT_SETTINGS: Settings = {
   semanticIndexingEnabled: false,
   // Memory
   memoryEnabled: false,
-  // Claude Code auto-memory interceptor (off by default — opt-in so users
-  // who haven't logged into SerenDB aren't surprised by file deletions).
-  claudeMemoryInterceptEnabled: false,
-  claudeMemoryMigrateOnStartup: false,
+  // Claude Code auto-memory interceptor — on by default so every Seren
+  // Desktop user gets secure SerenDB-backed preference storage out of the
+  // box. If the user is not logged in to SerenDB or has no active project,
+  // the App.tsx boot hook surfaces an actionable error dialog instead of
+  // failing silently.
+  claudeMemoryInterceptEnabled: true,
+  claudeMemoryMigrateOnStartup: true,
   // Agent
   agentSandboxMode: "workspace-write",
   agentApprovalPolicy: "on-request",
