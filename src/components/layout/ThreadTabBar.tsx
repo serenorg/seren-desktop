@@ -79,7 +79,7 @@ export const ThreadTabBar: Component = () => {
   const threadIcon = (thread: Thread) => {
     if (thread.kind === "chat") return "💬";
     if (thread.agentType === "codex") return "⚡";
-    if (thread.agentType === "gemini") return "✦";
+    if (thread.agentType === "gemini") return "✨";
     return "🤖";
   };
 
@@ -247,7 +247,7 @@ export const ThreadTabBar: Component = () => {
                     : undefined
                 }
               >
-                <span class="text-[13px] w-[18px] text-center">✦</span>
+                <span class="text-[13px] w-[18px] text-center">✨</span>
                 Gemini Agent
               </button>
             </Show>

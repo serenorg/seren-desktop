@@ -16,6 +16,16 @@ import readline from "node:readline";
  * Resolve the installed gemini binary path. GUI apps don't inherit shell PATH
  * updates, so we check well-known npm-global install locations before falling
  * back to the bare command name.
+ *
+ * IMPORTANT: prefer the embedded-runtime npm install path (`<prefix>/bin/gemini`
+ * on Unix, `<nodeDir>/gemini.cmd` on Windows) over ANY system install. The
+ * Homebrew gemini-cli formula skips the keytar postinstall, so a Homebrew
+ * binary on PATH cannot read its own keychain when spawned from a GUI app
+ * and fails with "GEMINI_API_KEY environment variable" (#1476). Falling back
+ * to a Homebrew install would silently break first-run auth.
+ *
+ * The bare "gemini" return value is the signal to the caller that no install
+ * was found and ensureCli() should run.
  */
 function resolveGeminiBinary() {
   if (process.platform === "win32") {
@@ -23,9 +33,12 @@ function resolveGeminiBinary() {
     const appData = process.env.APPDATA ?? "";
     const nodeDir = path.dirname(process.execPath);
     const candidates = [
-      ...(appData ? [path.join(appData, "npm", "gemini.cmd")] : []),
+      // Embedded runtime install (preferred — keytar postinstall ran here)
       path.join(nodeDir, "gemini.cmd"),
       path.join(nodeDir, "gemini"),
+      // System-wide npm install
+      ...(appData ? [path.join(appData, "npm", "gemini.cmd")] : []),
+      // Generic user-local fallback
       path.join(home, ".local", "bin", "gemini.exe"),
     ];
     for (const candidate of candidates) {
@@ -36,10 +49,12 @@ function resolveGeminiBinary() {
     const prefix = path.dirname(nodeDir);
     const home = os.homedir();
     const candidates = [
+      // Embedded runtime install (preferred — keytar postinstall ran here)
       path.join(prefix, "bin", "gemini"),
+      // Generic user-local fallback
       path.join(home, ".local", "bin", "gemini"),
-      "/usr/local/bin/gemini",
-      "/opt/homebrew/bin/gemini",
+      // NOTE: /usr/local/bin/gemini and /opt/homebrew/bin/gemini are
+      // intentionally NOT in this list. See block comment above.
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) return candidate;
@@ -70,16 +85,32 @@ function killChildTree(child) {
   }
 }
 
+/**
+ * Detect whether an error message from gemini-cli (or our own spawn pipeline)
+ * indicates the user needs to run `gemini login`. Catches the literal string
+ * gemini-cli prints when it cannot find credentials, the keychain failure
+ * mode shipped by Homebrew's broken keytar, and the desktop's own
+ * `Gemini API key is missing` wrapping.
+ */
 function isAuthError(message) {
   const lower = String(message).toLowerCase();
-  return (
-    lower.includes("not authenticated") ||
-    lower.includes("authentication required") ||
-    lower.includes("auth required") ||
-    lower.includes("login required") ||
-    lower.includes("not logged in") ||
-    lower.includes("please run") && lower.includes("login")
-  );
+  if (lower.includes("not authenticated")) return true;
+  if (lower.includes("authentication required")) return true;
+  if (lower.includes("auth required")) return true;
+  if (lower.includes("login required")) return true;
+  if (lower.includes("not logged in")) return true;
+  if (lower.includes("please run") && lower.includes("login")) return true;
+  // Verbatim gemini-cli error when GEMINI_API_KEY env var is missing AND
+  // no keychain credentials are available. (#1476)
+  if (lower.includes("gemini_api_key")) return true;
+  if (lower.includes("api key is missing")) return true;
+  if (lower.includes("api key is not configured")) return true;
+  // Homebrew's gemini-cli ships broken keytar; the keychain init failure
+  // is a leading indicator that the next request will fail with auth.
+  if (lower.includes("keychain initialization") && lower.includes("keytar")) {
+    return true;
+  }
+  return false;
 }
 
 // ============================================================================
@@ -532,10 +563,24 @@ function buildSessionStatus(session, status = session.status) {
 function attachProcessListeners(emit, sessions, session) {
   session.output.on("line", (line) => handleLine(emit, session, line));
 
+  // Buffer the latest stderr lines so the spawn-time catch block has
+  // something to inspect when the JSON-RPC initialize call fails. gemini-cli
+  // writes its auth/keychain errors to stderr, not over JSON-RPC, so without
+  // this buffer the desktop only sees a generic "process exited" error.
+  session.stderrTail = "";
   session.process.stderr.on("data", (chunk) => {
-    const message = String(chunk).trim();
-    if (message.length > 0) {
-      console.log(`[browser-local][gemini] ${message}`);
+    const message = String(chunk);
+    if (!message) return;
+    session.stderrTail = (session.stderrTail + message).slice(-4096);
+    const trimmed = message.trim();
+    if (trimmed.length > 0) {
+      console.log(`[browser-local][gemini] ${trimmed}`);
+    }
+
+    // Proactively detect auth failures from stderr while initialize is
+    // still in flight — gives the catch block a richer error to surface.
+    if (!session.authErrorDetected && isAuthError(trimmed)) {
+      session.authErrorDetected = true;
     }
   });
 
@@ -644,12 +689,33 @@ export function createGeminiRuntime({ emit }) {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // Auth failure can surface either via the JSON-RPC error message
+      // returned by initialize/session/new OR via stderr (see attachProcessListeners
+      // — keytar/keychain failures land on stderr, not JSON-RPC).
+      const stderrTail = session.stderrTail ?? "";
+      const authFailed =
+        session.authErrorDetected ||
+        isAuthError(message) ||
+        isAuthError(stderrTail);
+
       sessions.delete(sessionId);
       killChildTree(processHandle);
+
+      if (authFailed) {
+        // Emit a typed event so agent.store can auto-trigger launchLogin
+        // and surface a clear next-step toast to the user. This is the
+        // Gemini equivalent of Claude/Codex's first-spawn login prompt.
+        emit("provider://login-required", {
+          sessionId,
+          agentType: "gemini",
+          reason: message || stderrTail || "Gemini authentication required.",
+        });
+      }
+
       emit("provider://error", {
         sessionId,
-        error: isAuthError(message)
-          ? "Gemini authentication required. Run `gemini login` and try again."
+        error: authFailed
+          ? "Gemini authentication required. Opening `gemini login` in a Terminal window — finish the sign-in there, then click + New Agent → Gemini Agent again."
           : message,
       });
       throw error;

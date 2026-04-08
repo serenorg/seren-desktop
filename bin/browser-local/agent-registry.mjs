@@ -277,6 +277,64 @@ async function ensureClaudeCodeViaNativeInstaller(emit) {
 }
 
 /**
+ * Resolve the installed Gemini CLI binary path.
+ *
+ * Mirrors `resolveInstalledClaudeBinary()` below. Prefers the binary that
+ * the embedded runtime's `npm install -g @google/gemini-cli` would have
+ * placed at `<prefix>/bin/gemini` (Unix) or `<nodeDir>/gemini.cmd` (Windows)
+ * over any system install (Homebrew, system npm, etc.).
+ *
+ * Why: Homebrew's gemini-cli formula skips the `node-gyp rebuild` postinstall
+ * step that compiles `keytar.node`, so the Homebrew binary cannot read
+ * stored credentials when launched as a child process from a GUI app and
+ * fails immediately with "When using Gemini API, you must specify the
+ * GEMINI_API_KEY environment variable" (#1476). Preferring the embedded
+ * install ensures Seren controls the install path end-to-end and the
+ * keychain integration actually works.
+ *
+ * Returns the bare "gemini" string if no install is found, so the caller
+ * can trigger ensureCli() to install via the embedded runtime's npm.
+ */
+function resolveInstalledGeminiBinary() {
+  if (process.platform === "win32") {
+    const home = os.homedir();
+    const appData = process.env.APPDATA ?? "";
+    const nodeDir = path.dirname(process.execPath);
+    const candidates = [
+      // npm global install via embedded runtime's npm (prefix = node dir on Windows)
+      path.join(nodeDir, "gemini.cmd"),
+      path.join(nodeDir, "gemini"),
+      // npm global install via system npm
+      ...(appData ? [path.join(appData, "npm", "gemini.cmd")] : []),
+      // Generic install fallbacks
+      path.join(home, ".local", "bin", "gemini.exe"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  } else {
+    const home = os.homedir();
+    const nodeDir = path.dirname(process.execPath);
+    const prefix = path.dirname(nodeDir);
+    const candidates = [
+      // npm global install via embedded runtime's npm — check FIRST so a
+      // broken Homebrew install doesn't shadow our working bundled one.
+      path.join(prefix, "bin", "gemini"),
+      // Generic user-local install fallbacks
+      path.join(home, ".local", "bin", "gemini"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return "gemini";
+}
+
+/**
  * Resolve the installed Claude Code binary path.
  * GUI apps don't inherit shell PATH updates made by installers, so check
  * well-known install locations before falling back to bare command name.
@@ -398,7 +456,13 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       description: "Google Gemini via gemini-cli (Agent Client Protocol)",
       command: "gemini",
       async getAvailability() {
-        const installed = await isCommandAvailable("gemini");
+        // Resolve via the embedded-install-aware path, NOT bare PATH lookup.
+        // A Homebrew gemini-cli on PATH cannot read its own keychain when
+        // spawned from a GUI app (#1476), so we report the agent as needing
+        // install whenever our embedded npm install path is empty — even if
+        // some other gemini is on PATH.
+        const resolved = resolveInstalledGeminiBinary();
+        const installed = resolved !== "gemini";
         return {
           type: "gemini",
           name: "Gemini",
@@ -417,6 +481,13 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return true;
       },
       async ensureCli() {
+        // Short-circuit if our embedded install already exists. This prevents
+        // re-running npm on every spawn while still bypassing broken system
+        // installs that might be on PATH.
+        const resolved = resolveInstalledGeminiBinary();
+        if (resolved !== "gemini") {
+          return resolved;
+        }
         return ensureGlobalNpmPackage({
           emit,
           command: "gemini",
@@ -425,7 +496,10 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         });
       },
       launchLogin() {
-        launchLoginCommand("gemini");
+        // Use the resolved embedded-install path so the user runs `gemini login`
+        // with the WORKING binary (with compiled keytar), not the broken one.
+        const resolved = resolveInstalledGeminiBinary();
+        launchLoginCommand(resolved !== "gemini" ? resolved : "gemini");
       },
     },
   };

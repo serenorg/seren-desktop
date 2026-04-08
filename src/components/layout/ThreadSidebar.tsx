@@ -498,7 +498,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                   }
                 }}
               >
-                <span class="text-[14px]">{"\u2726"}</span>
+                <span class="text-[14px]">{"\u2728"}</span>
                 <span class="font-medium">Gemini Agent</span>
               </button>
             </Show>
