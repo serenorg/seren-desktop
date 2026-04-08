@@ -236,16 +236,16 @@ function resetAgentTasksState(): void {
 }
 
 export {
-  state as agentTasksState,
-  loadTasks,
-  runAgent,
-  followTask,
-  stopFollowing,
-  refreshTask,
   cancelTask,
-  resumeTask,
+  followTask,
   getActiveTask,
   getEventsForTask,
-  resetAgentTasksState,
   isTerminalStatus,
+  loadTasks,
+  refreshTask,
+  resetAgentTasksState,
+  resumeTask,
+  runAgent,
+  state as agentTasksState,
+  stopFollowing,
 };

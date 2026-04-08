@@ -368,7 +368,10 @@ export function getBuiltinToolSchemas(): McpToolInfo[] {
     .map((t) => ({
       name: t.name,
       description: t.description,
-      inputSchema: (t.inputSchema ?? { type: "object", properties: {} }) as McpToolInfo["inputSchema"],
+      inputSchema: (t.inputSchema ?? {
+        type: "object",
+        properties: {},
+      }) as McpToolInfo["inputSchema"],
     }));
 }
 
@@ -381,7 +384,11 @@ export async function callSerenTool(
   args: Record<string, unknown>,
 ) {
   if (!isConnected) {
-    throw new McpGatewayError("MCP Gateway not connected", 503, MCP_GATEWAY_URL);
+    throw new McpGatewayError(
+      "MCP Gateway not connected",
+      503,
+      MCP_GATEWAY_URL,
+    );
   }
   const startTime = Date.now();
   const result = await mcpClient.callToolHttp(SEREN_MCP_SERVER_NAME, {

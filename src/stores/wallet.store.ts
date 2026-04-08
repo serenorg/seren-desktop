@@ -383,19 +383,19 @@ export const walletStore = {
 
 // Export state and actions
 export {
-  walletState,
-  refreshBalance,
-  startAutoRefresh,
-  stopAutoRefresh,
-  dismissLowBalanceWarning,
-  shouldShowLowBalanceWarning,
-  isTopUpInProgress,
-  setTopUpInProgress,
-  resetWalletState,
   checkDailyClaim,
   claimDaily,
   dismissDailyClaim,
+  dismissLowBalanceWarning,
+  isTopUpInProgress,
+  refreshBalance,
+  resetWalletState,
+  setTopUpInProgress,
+  shouldShowLowBalanceWarning,
+  startAutoRefresh,
   startDailyClaimPolling,
+  stopAutoRefresh,
   stopDailyClaimPolling,
   updateBalanceFromError,
+  walletState,
 };

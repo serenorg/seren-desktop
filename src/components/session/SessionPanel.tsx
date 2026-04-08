@@ -303,7 +303,6 @@ const SessionListView: Component<{
       }
     >
       <div class="flex flex-col">
-        {/* biome-ignore lint/a11y/useSemanticElements: session list items are interactive */}
         <For each={props.sessions}>
           {(session) => (
             <button

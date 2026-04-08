@@ -17,8 +17,8 @@ import {
   allowsClaudeAgent,
   allowsCodexAgent,
   allowsGeminiAgent,
-  allowsSerenPublicModels,
   allowsSerenPrivateAgent,
+  allowsSerenPublicModels,
 } from "@/services/organization-policy";
 import { skills as skillsService } from "@/services/skills";
 import { agentStore } from "@/stores/agent.store";

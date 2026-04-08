@@ -19,8 +19,8 @@ import {
   type ProviderModel,
 } from "@/lib/providers";
 import { type Model, modelsService } from "@/services/models";
-import { privateModelsService } from "@/services/private-models";
 import { allowsSerenPublicModels } from "@/services/organization-policy";
+import { privateModelsService } from "@/services/private-models";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";

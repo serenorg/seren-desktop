@@ -47,8 +47,8 @@ import {
   retryOrchestration,
 } from "@/services/orchestrator";
 import {
-  allowsSerenPublicModels,
   allowsSerenPrivateAgent,
+  allowsSerenPublicModels,
 } from "@/services/organization-policy";
 import type { ToolCallEvent } from "@/services/providers";
 import { skills } from "@/services/skills";

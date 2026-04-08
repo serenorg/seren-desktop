@@ -169,4 +169,4 @@ export async function initDefaultRootIfNeeded(): Promise<void> {
   }
 }
 
-export { fileTreeState, expandedPaths };
+export { expandedPaths, fileTreeState };

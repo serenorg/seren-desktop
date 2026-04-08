@@ -192,4 +192,4 @@ export function getDebounceDelay(): number {
   return debounceMs();
 }
 
-export { isEnabled, debounceMs };
+export { debounceMs, isEnabled };

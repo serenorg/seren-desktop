@@ -27,7 +27,8 @@ import { catalog, type Publisher } from "./catalog";
 const SKILLS_REPO_OWNER = "serenorg";
 const SKILLS_REPO_NAME = "seren-skills";
 const SKILLS_REPO_BRANCH = "main";
-const SKILLS_R2_INDEX_URL = "https://pub-714fe894394345a0a8a102fbac2b208f.r2.dev/skills/index.json";
+const SKILLS_R2_INDEX_URL =
+  "https://pub-714fe894394345a0a8a102fbac2b208f.r2.dev/skills/index.json";
 const SKILLS_GITHUB_INDEX_URL = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/git/trees/${SKILLS_REPO_BRANCH}?recursive=1`;
 const SKILLS_RAW_URL = `https://raw.githubusercontent.com/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/${SKILLS_REPO_BRANCH}`;
 const INDEX_CACHE_KEY = "seren:skills_index";

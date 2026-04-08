@@ -10,8 +10,8 @@ import { storeAssistantResponse } from "@/services/memory";
 import {
   allowsClaudeAgent,
   allowsCodexAgent,
-  allowsSerenPublicModels,
   allowsSerenPrivateAgent,
+  allowsSerenPublicModels,
 } from "@/services/organization-policy";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
