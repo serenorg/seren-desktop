@@ -8,7 +8,6 @@ use tauri_plugin_store::StoreExt;
 
 pub mod commands {
     pub mod chat;
-    pub mod claude_memory;
     pub mod cli_installer;
     pub mod gateway_http;
     pub mod indexing;
@@ -26,7 +25,6 @@ pub mod services {
 }
 
 mod auth;
-mod claude_memory;
 mod claude_setup;
 mod embedded_runtime;
 mod files;
@@ -793,13 +791,6 @@ pub fn run() {
             commands::memory::memory_remember,
             commands::memory::memory_recall,
             commands::memory::memory_sync,
-            // Claude Code auto-memory interceptor commands
-            commands::claude_memory::claude_memory_start,
-            commands::claude_memory::claude_memory_stop,
-            commands::claude_memory::claude_memory_status,
-            commands::claude_memory::claude_memory_migrate_existing,
-            commands::claude_memory::claude_memory_get_project_identity,
-            commands::claude_memory::claude_memory_render_memory_md,
             // Runtime session commands
             commands::session::create_runtime_session,
             commands::session::get_runtime_session,
