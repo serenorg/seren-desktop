@@ -104,6 +104,13 @@ impl ProviderRuntimeState {
             command.env("PATH", embedded_path);
         }
 
+        // Scrub VSCode / Cursor / Electron extension-host env vars that
+        // would otherwise make the embedded node subprocess try to bootstrap
+        // as a VSCode extension host and hang in ESM resolution when
+        // `pnpm tauri dev` is launched from a VSCode/Cursor integrated
+        // terminal. See serenorg/seren-desktop#1516.
+        crate::embedded_runtime::sanitize_spawn_env(&mut command);
+
         let mut child = command
             .spawn()
             .map_err(|err| format!("Failed to spawn provider runtime: {}", err))?;
