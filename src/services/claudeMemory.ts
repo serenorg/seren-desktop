@@ -51,10 +51,18 @@ CREATE TABLE IF NOT EXISTS claude_agent_preference_audit (
 
 /**
  * How many times to poll a freshly-created database for readiness before
- * giving up. With a 2-second delay between attempts this gives ~60 seconds
+ * giving up. With a 2-second delay between attempts this gives ~3 minutes
  * total for the database's Postgres backend to finish provisioning.
+ *
+ * The original budget was 30 attempts / 60s, which was insufficient for
+ * first-run cold-start provisioning on Windows (reported in #1524): a
+ * user who upgrades to a version with auto-memory for the first time
+ * triggers project + database + Postgres backend creation in one shot,
+ * and the backend can take 60-120s to become queryable. 90 attempts
+ * (180s) gives a generous margin without changing the 2s poll interval
+ * (warm databases still return on the first or second attempt).
  */
-const DATABASE_READY_MAX_ATTEMPTS = 30;
+const DATABASE_READY_MAX_ATTEMPTS = 90;
 const DATABASE_READY_DELAY_MS = 2000;
 
 /**
@@ -113,16 +121,15 @@ export async function waitForDatabaseReady(
     } catch (err) {
       if (!isDatabaseNotReadyError(err)) {
         // Not a cold-start error — surface it immediately instead of
-        // burning the whole 60-second budget on a permanent failure.
+        // burning the whole budget on a permanent failure.
         throw err;
       }
       if (attempt === maxAttempts) {
+        const totalSeconds = (maxAttempts * delayMs) / 1000;
         throw new Error(
-          `SerenDB database "${databaseName}" did not become ready after ${maxAttempts} attempts (${
-            (maxAttempts * delayMs) / 1000
-          }s total). Last error: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          `SerenDB database "${databaseName}" did not become ready after ${maxAttempts} attempts (${totalSeconds}s total). ` +
+            `This can happen on first run when the database backend is still provisioning. ` +
+            `Last error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
       console.debug(
