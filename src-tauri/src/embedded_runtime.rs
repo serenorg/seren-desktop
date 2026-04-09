@@ -306,25 +306,51 @@ pub fn get_embedded_path() -> &'static str {
     EMBEDDED_PATH.get().map(|s| s.as_str()).unwrap_or("")
 }
 
-/// Environment variables that VSCode, Cursor, and the Claude Code extension
-/// inject into the extension host process and every subprocess spawned from
-/// the VSCode integrated terminal. When these leak into an embedded Node.js
-/// subprocess, Node tries to bootstrap as a VSCode extension host and hangs
-/// in ESM module resolution (looking for
-/// `vs/workbench/api/node/extensionHostProcess` which only exists inside the
-/// VSCode app bundle, not in our embedded-runtime tree).
+/// Environment variables injected by Electron-based parent processes
+/// (VSCode, Cursor, ToDesktop-wrapped apps, the Claude Code extension) that
+/// leak into every subprocess spawned from their integrated terminals.
 ///
-/// Strip them from every `Command` that spawns the embedded node binary or a
-/// node-based child (provider runtime, local MCP servers, etc.) BEFORE calling
-/// `.spawn()`. This is a no-op outside of VSCode/Cursor integrated terminals
-/// and fixes the "Timed out waiting for provider runtime readiness" kill-loop
-/// documented in serenorg/seren-desktop#1516.
-const VSCODE_POLLUTING_ENV_VARS: &[&str] = &[
-    // The two that actually trigger the hang — Node interprets
-    // ELECTRON_RUN_AS_NODE + VSCODE_ESM_ENTRYPOINT as "boot as an
-    // extension host" and tries to load a nonexistent entry point.
+/// Two classes of variables are stripped here:
+///
+/// 1. **Node.js / Electron runtime hijacks** (`ELECTRON_RUN_AS_NODE`,
+///    `VSCODE_ESM_ENTRYPOINT`, and the surrounding `VSCODE_*` family): when
+///    these leak into an embedded Node.js subprocess, Node tries to
+///    bootstrap as a VSCode extension host and hangs in ESM module
+///    resolution looking for `vs/workbench/api/node/extensionHostProcess`,
+///    which only exists inside the VSCode app bundle — not in our
+///    embedded-runtime tree. Documented in serenorg/seren-desktop#1516 /
+///    fixed in #1518.
+///
+/// 2. **CoreFoundation bundle-identity hijacks** (`__CFBundleIdentifier`,
+///    `__CF_USER_TEXT_ENCODING`): ToDesktop / Electron / Cursor inject
+///    these to tell macOS CoreFoundation which app bundle the process is
+///    part of. When a CoreFoundation-linked binary inherits them, CF tries
+///    to resolve the parent's bundle via LaunchServices from inside a
+///    foreign subprocess context. That lookup hangs or pulls in unrelated
+///    framework state (Metal, RenderBox) *before* our provider runtime's
+///    `server.listen()` is ever reached. The embedded Node.js binary
+///    statically links `CoreFoundation.framework`, so it's directly
+///    affected. Documented in serenorg/seren-desktop#1521.
+///
+/// Strip them from every `Command` that spawns the embedded node binary or
+/// a node-based child (provider runtime, local MCP servers, etc.) BEFORE
+/// calling `.spawn()`. This is a no-op outside of Electron-host terminals
+/// and fixes the "Timed out waiting for provider runtime readiness" loop
+/// documented in #1516.
+const POLLUTING_PARENT_ENV_VARS: &[&str] = &[
+    // The two Node.js / Electron vars that actually trigger the ESM
+    // bootstrap hijack — Node interprets ELECTRON_RUN_AS_NODE +
+    // VSCODE_ESM_ENTRYPOINT as "boot as an extension host" and tries to
+    // load a nonexistent entry point.
     "ELECTRON_RUN_AS_NODE",
     "VSCODE_ESM_ENTRYPOINT",
+    // The two CoreFoundation-private vars that trigger the bundle-lookup
+    // hang on macOS (#1521). `__CFBundleIdentifier` is the load-bearing
+    // one; `__CF_USER_TEXT_ENCODING` is stripped together because it's
+    // set by the same parent and has no reason to be inherited by an
+    // embedded subprocess.
+    "__CFBundleIdentifier",
+    "__CF_USER_TEXT_ENCODING",
     // Additional VSCode/Cursor vars that are noise at best and may
     // confuse downstream tooling — stripping them is cheap and keeps
     // the embedded node env clean.
@@ -360,15 +386,16 @@ impl CommandEnvSanitize for tokio::process::Command {
     }
 }
 
-/// Remove VSCode / Cursor / Electron-extension-host environment variables
-/// from a `Command` before spawning. Call this on every spawn of the embedded
-/// Node.js binary (and any other subprocess that might load it transitively).
+/// Remove environment variables injected by Electron-based parent processes
+/// (VSCode, Cursor, ToDesktop, Claude Code extension) from a `Command` before
+/// spawning. Call this on every spawn of the embedded Node.js binary (and any
+/// other subprocess that might load it transitively).
 ///
-/// See [`VSCODE_POLLUTING_ENV_VARS`] and serenorg/seren-desktop#1516 for the
-/// full motivation. Safe to call from any context — it's a pure env-scrub and
-/// does nothing when the variables aren't present.
+/// See [`POLLUTING_PARENT_ENV_VARS`] and serenorg/seren-desktop#1516 / #1521
+/// for the full motivation. Safe to call from any context — it's a pure
+/// env-scrub and does nothing when the variables aren't present.
 pub fn sanitize_spawn_env<C: CommandEnvSanitize>(command: &mut C) -> &mut C {
-    for var in VSCODE_POLLUTING_ENV_VARS {
+    for var in POLLUTING_PARENT_ENV_VARS {
         command.env_remove_str(var);
     }
     command
@@ -378,21 +405,29 @@ pub fn sanitize_spawn_env<C: CommandEnvSanitize>(command: &mut C) -> &mut C {
 mod tests {
     use super::*;
 
-    /// Critical test for serenorg/seren-desktop#1516.
+    /// Critical test for serenorg/seren-desktop#1516 and #1521.
     ///
-    /// Verifies that `sanitize_spawn_env` actually removes the two VSCode
-    /// variables that cause the embedded Node.js subprocess hang
-    /// (`ELECTRON_RUN_AS_NODE` + `VSCODE_ESM_ENTRYPOINT`), even when the
-    /// parent process has them set in its own environment. Without this
-    /// test, a future refactor that accidentally drops the `env_remove`
-    /// calls would re-introduce the "no chat window" regression without
-    /// any unit-level signal.
+    /// Verifies that `sanitize_spawn_env` actually removes the load-bearing
+    /// variables that cause the embedded Node.js subprocess hang when
+    /// spawned from a VSCode / Cursor / ToDesktop extension host process
+    /// tree. Without this test, a future refactor that accidentally drops
+    /// any of the `env_remove` calls would re-introduce the "no chat
+    /// window" regression without any unit-level signal.
+    ///
+    /// Four load-bearing variables in total:
+    ///   - `ELECTRON_RUN_AS_NODE` + `VSCODE_ESM_ENTRYPOINT` → Node tries to
+    ///     boot as a VSCode extension host and hangs in ESM resolution
+    ///     (#1516 / #1518).
+    ///   - `__CFBundleIdentifier` + `__CF_USER_TEXT_ENCODING` →
+    ///     CoreFoundation tries to resolve the parent's bundle identity
+    ///     via LaunchServices from inside the subprocess and hangs before
+    ///     `server.listen()` (#1521).
     ///
     /// We assert via `get_envs()` inspection because `tokio::process::Command`
     /// stores env overrides as explicit (key, None) entries when removed,
     /// which is exactly the shape we need to verify the scrub happened.
     #[test]
-    fn sanitize_spawn_env_removes_vscode_extension_host_vars() {
+    fn sanitize_spawn_env_removes_extension_host_and_corefoundation_vars() {
         let mut cmd = tokio::process::Command::new("/bin/true");
 
         sanitize_spawn_env(&mut cmd);
@@ -410,11 +445,16 @@ mod tests {
             })
             .collect();
 
-        // The two load-bearing variables MUST be explicitly removed.
-        // If either is missing from the override list (or present with
-        // a non-None value), the embedded node subprocess will inherit
-        // the parent's VSCode env and hang during ESM bootstrap.
-        let critical_vars = ["ELECTRON_RUN_AS_NODE", "VSCODE_ESM_ENTRYPOINT"];
+        // All four load-bearing variables MUST be explicitly removed.
+        // If any is missing from the override list (or present with a
+        // non-None value), the embedded node subprocess will inherit the
+        // parent's Electron-host env and hang during init.
+        let critical_vars = [
+            "ELECTRON_RUN_AS_NODE",
+            "VSCODE_ESM_ENTRYPOINT",
+            "__CFBundleIdentifier",
+            "__CF_USER_TEXT_ENCODING",
+        ];
         for var in critical_vars {
             let entry = overrides
                 .iter()
@@ -422,8 +462,9 @@ mod tests {
                 .unwrap_or_else(|| {
                     panic!(
                         "sanitize_spawn_env must env_remove \"{var}\" — without this the \
-                         provider runtime node subprocess hangs in ESM bootstrap when spawned \
-                         from a VSCode/Cursor integrated terminal (serenorg/seren-desktop#1516)"
+                         provider runtime node subprocess hangs when spawned from a \
+                         VSCode/Cursor/ToDesktop extension host process tree \
+                         (serenorg/seren-desktop#1516 / #1521)"
                     )
                 });
             assert!(
@@ -449,15 +490,15 @@ mod tests {
             .get_envs()
             .filter(|(k, v)| {
                 v.is_none()
-                    && VSCODE_POLLUTING_ENV_VARS
+                    && POLLUTING_PARENT_ENV_VARS
                         .iter()
                         .any(|p| *p == k.to_string_lossy())
             })
             .count();
         assert_eq!(
             removed_count,
-            VSCODE_POLLUTING_ENV_VARS.len(),
-            "every VSCODE_POLLUTING_ENV_VARS entry must appear exactly once as a removal"
+            POLLUTING_PARENT_ENV_VARS.len(),
+            "every POLLUTING_PARENT_ENV_VARS entry must appear exactly once as a removal"
         );
     }
 }
