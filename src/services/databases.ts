@@ -18,12 +18,13 @@ import {
   serenDbListBranches as apiListBranches,
   serenDbListDatabases as apiListDatabases,
   serenDbListProjects as apiListProjects,
-  serenDbQuery as apiQuery,
   type Branch,
   type DatabaseWithOwner,
   type Project,
   type QueryResult,
 } from "@/api/seren-db";
+import { API_BASE } from "@/lib/config";
+import { getSerenApiKey } from "@/lib/tauri-bridge";
 
 // Use DatabaseWithOwner as the Database type (list endpoint returns this)
 export type Database = DatabaseWithOwner;
@@ -197,8 +198,17 @@ export const databases = {
 
   /**
    * Execute a SQL statement against a SerenDB database.
-   * Wraps `serenDbQuery`. The query is executed in a read-write transaction
-   * unless `readOnly` is true.
+   *
+   * **Authenticates with the user's SerenDB API key** (stored under
+   * `auth.json.seren_api_key` via `getSerenApiKey()`), NOT the OAuth bearer
+   * token used by the rest of the app. The `/query` endpoint is the data
+   * plane for SerenDB SQL and requires the API key. This is why we bypass
+   * the generated `serenDbQuery` SDK call: that path routes through
+   * `customFetch` → gateway bridge which injects the OAuth Bearer token,
+   * which is the wrong credential for the SQL endpoint.
+   *
+   * The query is executed in a read-write transaction unless `readOnly` is
+   * true.
    */
   async runSql(
     projectId: string,
@@ -207,30 +217,59 @@ export const databases = {
     query: string,
     readOnly: boolean = false,
   ): Promise<QueryResult> {
-    const { data, error } = await apiQuery({
-      body: {
-        project_id: projectId,
-        branch_id: branchId,
-        database: databaseName ?? undefined,
-        query,
-        read_only: readOnly,
-      },
-      throwOnError: false,
-    });
-    if (error || !data?.data) {
-      console.error("[Databases] Error running SQL:", error);
+    const apiKey = await getSerenApiKey();
+    if (!apiKey) {
       throw new Error(
-        `SerenDB query failed: ${
-          typeof error === "object" && error !== null && "message" in error
-            ? String((error as { message: unknown }).message)
-            : "unknown error"
-        }`,
+        "SerenDB API key not available — cannot run SQL (log in to Seren Desktop first)",
+      );
+    }
+
+    const url = `${API_BASE}/publishers/seren-db/query`;
+    const body: Record<string, unknown> = {
+      project_id: projectId,
+      query,
+      read_only: readOnly,
+    };
+    if (branchId) {
+      body.branch_id = branchId;
+    }
+    if (databaseName) {
+      body.database = databaseName;
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      const truncated = text.length > 500 ? `${text.slice(0, 500)}…` : text;
+      throw new Error(
+        `SerenDB query failed: HTTP ${response.status} ${truncated}`,
+      );
+    }
+
+    const payload = (await response.json()) as {
+      data?: {
+        columns: string[];
+        row_count: number;
+        rows: unknown[][];
+      };
+    };
+    if (!payload.data) {
+      throw new Error(
+        "SerenDB query returned no data envelope — unexpected response shape",
       );
     }
     return {
-      columns: data.data.columns,
-      row_count: data.data.row_count,
-      rows: data.data.rows,
+      columns: payload.data.columns,
+      row_count: payload.data.row_count,
+      rows: payload.data.rows,
     };
   },
 

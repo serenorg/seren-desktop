@@ -185,19 +185,22 @@ pub async fn claude_memory_render_memory_md(
     let encoded = claude_memory::encode_project_dir(Path::new(&project_cwd));
     let claude_project_dir: PathBuf = root.join(&encoded);
 
-    let token = {
+    let api_key = {
         use tauri_plugin_store::StoreExt;
         app.store("auth.json")
             .map_err(|e| e.to_string())?
-            .get("token")
+            .get("seren_api_key")
             .and_then(|v| v.as_str().map(|s| s.to_string()))
             .unwrap_or_default()
     };
-    if token.is_empty() {
-        return Err("unauthorized".to_string());
+    if api_key.is_empty() {
+        return Err(
+            "SerenDB API key not available — log in to Seren Desktop so the key is provisioned"
+                .to_string(),
+        );
     }
 
-    let client = claude_memory::SerenDbSqlClient::new(token);
+    let client = claude_memory::SerenDbSqlClient::new(api_key);
     let final_path =
         claude_memory::render_memory_md_from_db(&client, &config, &claude_project_dir).await?;
     Ok(final_path.to_string_lossy().to_string())

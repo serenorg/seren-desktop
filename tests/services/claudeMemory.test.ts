@@ -60,6 +60,7 @@ import {
   migrateExistingClaudeMemory,
   startClaudeMemoryInterceptor,
   stopClaudeMemoryInterceptor,
+  waitForDatabaseReady,
 } from "@/services/claudeMemory";
 
 function resetMocks() {
@@ -95,11 +96,10 @@ describe("ensureClaudeMemoryProvisioned", () => {
       name: "claude_agent_prefs",
       branch_id: "branch-uuid",
     });
-    databasesMock.runSql.mockResolvedValueOnce({
-      columns: [],
-      row_count: 0,
-      rows: [],
-    });
+    // First runSql call is the readiness poll's `SELECT 1`; second is the DDL.
+    databasesMock.runSql
+      .mockResolvedValueOnce({ columns: ["?column?"], row_count: 1, rows: [[1]] })
+      .mockResolvedValueOnce({ columns: [], row_count: 0, rows: [] });
 
     const result = await ensureClaudeMemoryProvisioned();
     expect(result).toEqual({
@@ -118,11 +118,14 @@ describe("ensureClaudeMemoryProvisioned", () => {
       "claude_agent_prefs",
     );
 
-    // DDL was applied (CREATE TABLE for claude_agent_preferences) and
-    // routed to the correct database name.
-    expect(databasesMock.runSql).toHaveBeenCalledTimes(1);
-    const [pid, bid, dbName, sql, readOnly] =
-      databasesMock.runSql.mock.calls[0]!;
+    // Two runSql calls now: the SELECT 1 readiness poll, then the DDL.
+    expect(databasesMock.runSql).toHaveBeenCalledTimes(2);
+    const readinessCall = databasesMock.runSql.mock.calls[0]!;
+    expect(readinessCall[3]).toBe("SELECT 1"); // the probe
+    expect(readinessCall[4]).toBe(true); // read-only
+
+    const ddlCall = databasesMock.runSql.mock.calls[1]!;
+    const [pid, bid, dbName, sql, readOnly] = ddlCall;
     expect(pid).toBe("proj-uuid");
     expect(bid).toBe("branch-uuid");
     expect(dbName).toBe("claude_agent_prefs");
@@ -182,11 +185,10 @@ describe("ensureClaudeMemoryProvisioned", () => {
     databasesMock.listDatabases.mockResolvedValueOnce([
       { id: "existing-db", name: "claude_agent_prefs" },
     ]);
-    databasesMock.runSql.mockResolvedValueOnce({
-      columns: [],
-      row_count: 0,
-      rows: [],
-    });
+    // Readiness probe then DDL.
+    databasesMock.runSql
+      .mockResolvedValueOnce({ columns: ["?column?"], row_count: 1, rows: [[1]] })
+      .mockResolvedValueOnce({ columns: [], row_count: 0, rows: [] });
 
     const result = await ensureClaudeMemoryProvisioned();
     expect(result.projectId).toBe("existing-claude-proj");
@@ -196,6 +198,98 @@ describe("ensureClaudeMemoryProvisioned", () => {
     // Must NOT create a duplicate project or database.
     expect(databasesMock.createProject).not.toHaveBeenCalled();
     expect(databasesMock.createDatabase).not.toHaveBeenCalled();
+  });
+});
+
+describe("waitForDatabaseReady", () => {
+  beforeEach(resetMocks);
+
+  it("retries while the database is not ready and resolves when it becomes queryable", async () => {
+    // Two "Failed to connect to target database" errors then success on the third attempt.
+    databasesMock.runSql
+      .mockRejectedValueOnce(
+        new Error(
+          "SerenDB query failed: HTTP 500 Internal error: Failed to connect to target database",
+        ),
+      )
+      .mockRejectedValueOnce(
+        new Error(
+          "SerenDB query failed: HTTP 500 Internal error: Failed to connect to target database",
+        ),
+      )
+      .mockResolvedValueOnce({
+        columns: ["?column?"],
+        row_count: 1,
+        rows: [[1]],
+      });
+
+    const sleepMock = vi.fn(async (_ms: number) => {
+      /* no-op */
+    });
+    await waitForDatabaseReady(
+      "proj",
+      "branch",
+      "claude_agent_prefs",
+      /* maxAttempts */ 5,
+      /* delayMs */ 10,
+      sleepMock,
+    );
+
+    // Exactly 3 attempts: two failures + one success.
+    expect(databasesMock.runSql).toHaveBeenCalledTimes(3);
+    // sleep was called twice (between the 3 attempts).
+    expect(sleepMock).toHaveBeenCalledTimes(2);
+    // Each call should be the SELECT 1 probe against the right database.
+    for (const call of databasesMock.runSql.mock.calls) {
+      expect(call[2]).toBe("claude_agent_prefs");
+      expect(call[3]).toBe("SELECT 1");
+      expect(call[4]).toBe(true);
+    }
+  });
+
+  it("fails fast on non-connection errors instead of burning the full budget", async () => {
+    // A permission error is terminal — no point retrying for 60 seconds.
+    databasesMock.runSql.mockRejectedValueOnce(
+      new Error("SerenDB query failed: HTTP 403 forbidden"),
+    );
+
+    const sleepMock = vi.fn(async () => {
+      /* no-op */
+    });
+    await expect(
+      waitForDatabaseReady(
+        "proj",
+        "branch",
+        "claude_agent_prefs",
+        /* maxAttempts */ 10,
+        /* delayMs */ 10,
+        sleepMock,
+      ),
+    ).rejects.toThrow(/403/);
+
+    // Must NOT have retried on a non-connection error.
+    expect(databasesMock.runSql).toHaveBeenCalledTimes(1);
+    expect(sleepMock).not.toHaveBeenCalled();
+  });
+
+  it("gives up after maxAttempts of persistent connection failures", async () => {
+    databasesMock.runSql.mockRejectedValue(
+      new Error("Internal error: Failed to connect to target database"),
+    );
+    const sleepMock = vi.fn(async () => {
+      /* no-op */
+    });
+    await expect(
+      waitForDatabaseReady(
+        "proj",
+        "branch",
+        "claude_agent_prefs",
+        /* maxAttempts */ 3,
+        /* delayMs */ 10,
+        sleepMock,
+      ),
+    ).rejects.toThrow(/did not become ready after 3 attempts/);
+    expect(databasesMock.runSql).toHaveBeenCalledTimes(3);
   });
 });
 

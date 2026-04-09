@@ -49,6 +49,90 @@ CREATE TABLE IF NOT EXISTS claude_agent_preference_audit (
 );
 `.trim();
 
+/**
+ * How many times to poll a freshly-created database for readiness before
+ * giving up. With a 2-second delay between attempts this gives ~60 seconds
+ * total for the database's Postgres backend to finish provisioning.
+ */
+const DATABASE_READY_MAX_ATTEMPTS = 30;
+const DATABASE_READY_DELAY_MS = 2000;
+
+/**
+ * Error substrings that indicate the database exists in the metadata layer
+ * but its Postgres backend is not yet routable by the `/query` endpoint.
+ * Any of these on a `SELECT 1` means "wait and retry"; any OTHER error is
+ * a real problem and should bubble up immediately.
+ */
+const DATABASE_NOT_READY_MARKERS = [
+  "failed to connect to target database",
+  "database not ready",
+  "connection refused",
+];
+
+function isDatabaseNotReadyError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return DATABASE_NOT_READY_MARKERS.some((marker) => msg.includes(marker));
+}
+
+/**
+ * Poll a database with `SELECT 1` until it responds successfully, the
+ * error stops looking like a cold-start, or we hit the max attempt count.
+ * Returns once the database is queryable; throws on terminal errors or
+ * timeout.
+ *
+ * This is the "Engineering 101" check the initial #1510 PR was missing:
+ * a freshly-created SerenDB database is NOT immediately queryable via the
+ * `/query` endpoint. The metadata write returns fast, but the Postgres
+ * backend takes seconds (sometimes tens of seconds) to provision. The
+ * only safe pattern is: create → poll until ready → DDL.
+ */
+export async function waitForDatabaseReady(
+  projectId: string,
+  branchId: string,
+  databaseName: string,
+  maxAttempts: number = DATABASE_READY_MAX_ATTEMPTS,
+  delayMs: number = DATABASE_READY_DELAY_MS,
+  sleepFn: (ms: number) => Promise<void> = (ms) =>
+    new Promise((r) => setTimeout(r, ms)),
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await databases.runSql(
+        projectId,
+        branchId,
+        databaseName,
+        "SELECT 1",
+        /* readOnly */ true,
+      );
+      if (attempt > 1) {
+        console.info(
+          `[ClaudeMemory] database "${databaseName}" became ready after ${attempt} attempts`,
+        );
+      }
+      return;
+    } catch (err) {
+      if (!isDatabaseNotReadyError(err)) {
+        // Not a cold-start error — surface it immediately instead of
+        // burning the whole 60-second budget on a permanent failure.
+        throw err;
+      }
+      if (attempt === maxAttempts) {
+        throw new Error(
+          `SerenDB database "${databaseName}" did not become ready after ${maxAttempts} attempts (${
+            (maxAttempts * delayMs) / 1000
+          }s total). Last error: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      console.debug(
+        `[ClaudeMemory] database "${databaseName}" not ready (attempt ${attempt}/${maxAttempts}); retrying in ${delayMs}ms`,
+      );
+      await sleepFn(delayMs);
+    }
+  }
+}
+
 export interface ClaudeMemoryStatus {
   running: boolean;
   watching_root: string | null;
@@ -146,6 +230,19 @@ export async function ensureClaudeMemoryProvisioned(): Promise<ClaudeMemoryProvi
       `Failed to find or create database "${CLAUDE_MEMORY_DATABASE_NAME}" in SerenDB project "${CLAUDE_MEMORY_PROJECT_NAME}".`,
     );
   }
+
+  // Wait for the database backend to be queryable. A freshly-created
+  // SerenDB database is NOT immediately reachable via the `/query`
+  // endpoint — the metadata write returns fast, but the Postgres backend
+  // takes seconds to provision. Poll SELECT 1 until it responds.
+  console.info(
+    `[ClaudeMemory] waiting for database "${CLAUDE_MEMORY_DATABASE_NAME}" to become ready`,
+  );
+  await waitForDatabaseReady(
+    project.id,
+    branch.id,
+    CLAUDE_MEMORY_DATABASE_NAME,
+  );
 
   // Apply the table DDL. Idempotent — uses CREATE TABLE IF NOT EXISTS so
   // running on every start is harmless.
