@@ -441,6 +441,17 @@ pub async fn mcp_connect(
         cmd.env("PATH", &embedded_path);
     }
 
+    // Scrub VSCode / Cursor / Electron extension-host env vars that would
+    // otherwise make node-based MCP servers (e.g. playwright-stealth) hang
+    // in ESM bootstrap when the app is launched from a VSCode/Cursor
+    // integrated terminal. See serenorg/seren-desktop#1516.
+    //
+    // NOTE: intentionally runs BEFORE the per-server `env_vars` loop below
+    // so that servers can still explicitly re-add any of these variables
+    // if they really need them (no server currently does, but the order
+    // keeps the sanitizer from stomping on caller intent).
+    embedded_runtime::sanitize_spawn_env(&mut cmd);
+
     if let Some(env_vars) = env {
         for (key, value) in env_vars {
             cmd.env(key, value);

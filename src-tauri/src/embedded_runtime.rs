@@ -306,6 +306,162 @@ pub fn get_embedded_path() -> &'static str {
     EMBEDDED_PATH.get().map(|s| s.as_str()).unwrap_or("")
 }
 
+/// Environment variables that VSCode, Cursor, and the Claude Code extension
+/// inject into the extension host process and every subprocess spawned from
+/// the VSCode integrated terminal. When these leak into an embedded Node.js
+/// subprocess, Node tries to bootstrap as a VSCode extension host and hangs
+/// in ESM module resolution (looking for
+/// `vs/workbench/api/node/extensionHostProcess` which only exists inside the
+/// VSCode app bundle, not in our embedded-runtime tree).
+///
+/// Strip them from every `Command` that spawns the embedded node binary or a
+/// node-based child (provider runtime, local MCP servers, etc.) BEFORE calling
+/// `.spawn()`. This is a no-op outside of VSCode/Cursor integrated terminals
+/// and fixes the "Timed out waiting for provider runtime readiness" kill-loop
+/// documented in serenorg/seren-desktop#1516.
+const VSCODE_POLLUTING_ENV_VARS: &[&str] = &[
+    // The two that actually trigger the hang — Node interprets
+    // ELECTRON_RUN_AS_NODE + VSCODE_ESM_ENTRYPOINT as "boot as an
+    // extension host" and tries to load a nonexistent entry point.
+    "ELECTRON_RUN_AS_NODE",
+    "VSCODE_ESM_ENTRYPOINT",
+    // Additional VSCode/Cursor vars that are noise at best and may
+    // confuse downstream tooling — stripping them is cheap and keeps
+    // the embedded node env clean.
+    "VSCODE_NLS_CONFIG",
+    "VSCODE_PID",
+    "VSCODE_IPC_HOOK",
+    "VSCODE_CODE_CACHE_PATH",
+    "VSCODE_CWD",
+    "VSCODE_CRASH_REPORTER_PROCESS_TYPE",
+    "VSCODE_HANDLES_UNCAUGHT_ERRORS",
+    "VSCODE_L10N_BUNDLE_LOCATION",
+    "VSCODE_PROCESS_TITLE",
+];
+
+/// Trait implemented for both `std::process::Command` and
+/// `tokio::process::Command` so `sanitize_spawn_env` can work with either
+/// spawn flavor used across the codebase.
+pub trait CommandEnvSanitize {
+    fn env_remove_str(&mut self, key: &str) -> &mut Self;
+}
+
+impl CommandEnvSanitize for std::process::Command {
+    fn env_remove_str(&mut self, key: &str) -> &mut Self {
+        self.env_remove(key);
+        self
+    }
+}
+
+impl CommandEnvSanitize for tokio::process::Command {
+    fn env_remove_str(&mut self, key: &str) -> &mut Self {
+        self.env_remove(key);
+        self
+    }
+}
+
+/// Remove VSCode / Cursor / Electron-extension-host environment variables
+/// from a `Command` before spawning. Call this on every spawn of the embedded
+/// Node.js binary (and any other subprocess that might load it transitively).
+///
+/// See [`VSCODE_POLLUTING_ENV_VARS`] and serenorg/seren-desktop#1516 for the
+/// full motivation. Safe to call from any context — it's a pure env-scrub and
+/// does nothing when the variables aren't present.
+pub fn sanitize_spawn_env<C: CommandEnvSanitize>(command: &mut C) -> &mut C {
+    for var in VSCODE_POLLUTING_ENV_VARS {
+        command.env_remove_str(var);
+    }
+    command
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Critical test for serenorg/seren-desktop#1516.
+    ///
+    /// Verifies that `sanitize_spawn_env` actually removes the two VSCode
+    /// variables that cause the embedded Node.js subprocess hang
+    /// (`ELECTRON_RUN_AS_NODE` + `VSCODE_ESM_ENTRYPOINT`), even when the
+    /// parent process has them set in its own environment. Without this
+    /// test, a future refactor that accidentally drops the `env_remove`
+    /// calls would re-introduce the "no chat window" regression without
+    /// any unit-level signal.
+    ///
+    /// We assert via `get_envs()` inspection because `tokio::process::Command`
+    /// stores env overrides as explicit (key, None) entries when removed,
+    /// which is exactly the shape we need to verify the scrub happened.
+    #[test]
+    fn sanitize_spawn_env_removes_vscode_extension_host_vars() {
+        let mut cmd = tokio::process::Command::new("/bin/true");
+
+        sanitize_spawn_env(&mut cmd);
+
+        // Collect every (key, value) override that was applied to the
+        // Command. A removed env var appears as (key, None).
+        let overrides: Vec<(String, Option<String>)> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|v| v.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+
+        // The two load-bearing variables MUST be explicitly removed.
+        // If either is missing from the override list (or present with
+        // a non-None value), the embedded node subprocess will inherit
+        // the parent's VSCode env and hang during ESM bootstrap.
+        let critical_vars = ["ELECTRON_RUN_AS_NODE", "VSCODE_ESM_ENTRYPOINT"];
+        for var in critical_vars {
+            let entry = overrides
+                .iter()
+                .find(|(k, _)| k == var)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sanitize_spawn_env must env_remove \"{var}\" — without this the \
+                         provider runtime node subprocess hangs in ESM bootstrap when spawned \
+                         from a VSCode/Cursor integrated terminal (serenorg/seren-desktop#1516)"
+                    )
+                });
+            assert!(
+                entry.1.is_none(),
+                "sanitize_spawn_env must REMOVE \"{var}\", not overwrite it; got value={:?}",
+                entry.1
+            );
+        }
+    }
+
+    #[test]
+    fn sanitize_spawn_env_is_idempotent() {
+        // Calling the helper twice should produce the same effect as
+        // calling it once — no duplicate removals, no panics. This
+        // matters because the fix is applied at multiple spawn sites
+        // and helper functions may compose.
+        let mut cmd = tokio::process::Command::new("/bin/true");
+        sanitize_spawn_env(&mut cmd);
+        sanitize_spawn_env(&mut cmd);
+
+        let removed_count = cmd
+            .as_std()
+            .get_envs()
+            .filter(|(k, v)| {
+                v.is_none()
+                    && VSCODE_POLLUTING_ENV_VARS
+                        .iter()
+                        .any(|p| *p == k.to_string_lossy())
+            })
+            .count();
+        assert_eq!(
+            removed_count,
+            VSCODE_POLLUTING_ENV_VARS.len(),
+            "every VSCODE_POLLUTING_ENV_VARS entry must appear exactly once as a removal"
+        );
+    }
+}
+
 /// Tauri command to get embedded runtime information (for debugging/UI)
 #[tauri::command]
 pub fn get_embedded_runtime_info(app: AppHandle) -> Result<serde_json::Value, String> {
