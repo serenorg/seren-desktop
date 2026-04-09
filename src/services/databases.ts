@@ -23,7 +23,18 @@ import {
   type Project,
   type QueryResult,
 } from "@/api/seren-db";
-import { callSerenTool } from "@/services/mcp-gateway";
+import {
+  callSerenTool,
+  isGatewayInitialized,
+  waitForGatewayReady,
+} from "@/services/mcp-gateway";
+
+/**
+ * Maximum time to wait for the Seren MCP gateway to become ready before
+ * a SQL call gives up. The gateway typically initializes in <2s after
+ * login, but cold starts and slow networks can push it longer.
+ */
+const MCP_GATEWAY_READY_TIMEOUT_MS = 30_000;
 
 // Use DatabaseWithOwner as the Database type (list endpoint returns this)
 export type Database = DatabaseWithOwner;
@@ -298,6 +309,22 @@ export const databases = {
     query: string,
     readOnly: boolean = false,
   ): Promise<QueryResult> {
+    // The Seren MCP gateway initializes asynchronously after login. If a
+    // caller (e.g. the Claude memory interceptor's reactive boot hook)
+    // races the gateway init, `callSerenTool` would throw
+    // "MCP Gateway not connected". Wait for the gateway to be ready first
+    // — this is a no-op fast path when it's already initialized.
+    if (!isGatewayInitialized()) {
+      const ready = await waitForGatewayReady(MCP_GATEWAY_READY_TIMEOUT_MS);
+      if (!ready) {
+        throw new Error(
+          `Seren MCP gateway did not become ready within ${
+            MCP_GATEWAY_READY_TIMEOUT_MS / 1000
+          }s — cannot run SQL`,
+        );
+      }
+    }
+
     const args: Record<string, unknown> = {
       project_id: projectId,
       query,
