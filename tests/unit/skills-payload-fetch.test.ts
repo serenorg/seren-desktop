@@ -1,5 +1,6 @@
 // ABOUTME: Tests that skill payload file fetching fails loudly on network errors.
-// ABOUTME: Prevents silent fallback to stale tree cache during install/refresh (#1215).
+// ABOUTME: Prevents silent fallback to stale tree cache during install/refresh
+// ABOUTME: (#1215, #1293, #1515 — R2 as sole source of truth for tree/revision).
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,20 +28,22 @@ describe("fetchRepoSkillPayloadFiles stale cache prevention (#1215)", () => {
     vi.clearAllMocks();
   });
 
-  it("throws when tree API fetch fails instead of using stale cache", async () => {
-    // First call: SKILL.md fetch succeeds
-    // Second call: tree API fetch fails (network error)
-    // Third call: revision fetch succeeds
-    mockAppFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => "---\nname: Test Skill\n---\nContent",
-      })
-      .mockRejectedValueOnce(new Error("Network error"))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ sha: "abc123" }],
-      });
+  it("throws when R2 index fetch fails instead of using stale cache", async () => {
+    // SKILL.md fetch succeeds; R2 index fetch fails with a network error.
+    // Every other fetch is an R2 index retry that also fails, so the whole
+    // refresh aborts rather than silently succeeding with stale cached files.
+    mockAppFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/SKILL.md")) {
+        return {
+          ok: true,
+          text: async () => "---\nname: Test Skill\n---\nContent",
+        };
+      }
+      if (url.includes("/skills/index.json")) {
+        throw new Error("Network error");
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
 
     const { skills } = await import("@/services/skills");
 
@@ -82,30 +85,42 @@ describe("fetchRepoSkillPayloadFiles stale cache prevention (#1215)", () => {
     // Simulates the serendb_storage.py bug: tree has 3 files, but one
     // returns HTTP 500. The sync must abort — not silently proceed with
     // 2/3 files and wipe the missing one from the runtime directory.
-    const treeWithFiles = [
-      { path: "test/skill/agent.py", type: "blob" },
-      { path: "test/skill/config.json", type: "blob" },
-      { path: "test/skill/serendb_storage.py", type: "blob" },
-    ];
+    const testSkillSourceUrl =
+      "https://raw.githubusercontent.com/serenorg/seren-skills/main/test/skill/SKILL.md";
 
     mockAppFetch.mockImplementation(async (url: string) => {
-      // SKILL.md content
-      if (url.includes("/SKILL.md")) {
-        return { ok: true, text: async () => "---\nname: Test Skill\n---\nContent" };
-      }
-      // Tree API
-      if (url.includes("git/trees/")) {
-        return { ok: true, json: async () => ({ tree: treeWithFiles }) };
-      }
-      // Commits list API
-      if (url.includes("/commits?")) {
-        return { ok: true, json: async () => [{ sha: "abc123" }] };
-      }
-      // Commit detail API
-      if (url.includes("/commits/abc123")) {
+      // SKILL.md content (cache-busted sourceUrl)
+      if (url.startsWith(testSkillSourceUrl)) {
         return {
           ok: true,
-          json: async () => ({ commit: { committer: { date: "2026-01-01" }, message: "test" } }),
+          text: async () => "---\nname: Test Skill\n---\nContent",
+        };
+      }
+      // R2 skills index — provides tree + revision in a single payload (#1515)
+      if (url.includes("/skills/index.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2",
+            updatedAt: "2026-01-01T00:00:00Z",
+            skills: [
+              {
+                slug: "test-skill",
+                name: "Test Skill",
+                description: "desc",
+                source: "serenorg",
+                sourceUrl: testSkillSourceUrl,
+                tags: [],
+                lastModified: "2026-01-01T00:00:00Z",
+              },
+            ],
+            tree: [
+              "test/skill/SKILL.md",
+              "test/skill/agent.py",
+              "test/skill/config.json",
+              "test/skill/serendb_storage.py",
+            ],
+          }),
         };
       }
       // Raw file fetches — fail serendb_storage.py
@@ -148,20 +163,22 @@ describe("fetchRepoSkillPayloadFiles stale cache prevention (#1215)", () => {
     ).rejects.toThrow(/Failed to fetch.*payload files/);
   });
 
-  it("throws when tree API returns non-OK status", async () => {
-    mockAppFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => "---\nname: Test Skill\n---\nContent",
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 403,
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ sha: "abc123" }],
-      });
+  it("throws when R2 index returns non-OK status", async () => {
+    // SKILL.md fetches succeed; R2 index fetch returns 403 (e.g. bucket ACL
+    // misconfiguration). The refresh must abort, not silently succeed with
+    // stale cached files.
+    mockAppFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/SKILL.md")) {
+        return {
+          ok: true,
+          text: async () => "---\nname: Test Skill\n---\nContent",
+        };
+      }
+      if (url.includes("/skills/index.json")) {
+        return { ok: false, status: 403 };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
 
     const { skills } = await import("@/services/skills");
 

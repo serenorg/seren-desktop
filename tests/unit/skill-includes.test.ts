@@ -97,59 +97,53 @@ includes: [polymarket/_shared]
 ---
 # Maker Bot`;
 
-    mockAppFetch
-      // SKILL.md
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => skillMdContent,
-      })
-      // Tree API
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          tree: [
-            {
-              path: "polymarket/polymarket-maker-bot/SKILL.md",
-              type: "blob",
-            },
-            {
-              path: "polymarket/polymarket-maker-bot/scripts/run.py",
-              type: "blob",
-            },
-            { path: "polymarket/_shared/utils.py", type: "blob" },
-            { path: "polymarket/_shared/config.json", type: "blob" },
-          ],
-        }),
-      })
-      // Revision list
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ sha: "abc123" }],
-      })
-      // Revision detail
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          sha: "abc123",
-          commit: { message: "update", committer: { date: "2026-01-01" } },
-          files: [],
-        }),
-      })
-      // Payload file: scripts/run.py
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => "print('run')",
-      })
-      // Includes file: _shared/utils.py
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => "def helper(): pass",
-      })
-      // Includes file: _shared/config.json
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => '{"key": "value"}',
-      });
+    const skillSourceUrl =
+      "https://raw.githubusercontent.com/serenorg/seren-skills/main/polymarket/polymarket-maker-bot/SKILL.md";
+
+    mockAppFetch.mockImplementation(async (url: string) => {
+      // SKILL.md fetch (cache-busted sourceUrl)
+      if (url.startsWith(skillSourceUrl)) {
+        return { ok: true, text: async () => skillMdContent };
+      }
+      // R2 skills index — single source of truth for tree + revision (#1515)
+      if (url.includes("/skills/index.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2",
+            updatedAt: "2026-01-01T00:00:00Z",
+            skills: [
+              {
+                slug: "polymarket-maker-bot",
+                name: "Maker Bot",
+                description: "A bot",
+                source: "serenorg",
+                sourceUrl: skillSourceUrl,
+                tags: [],
+                lastModified: "2026-01-01T00:00:00Z",
+              },
+            ],
+            tree: [
+              "polymarket/polymarket-maker-bot/SKILL.md",
+              "polymarket/polymarket-maker-bot/scripts/run.py",
+              "polymarket/_shared/utils.py",
+              "polymarket/_shared/config.json",
+            ],
+          }),
+        };
+      }
+      // Raw file fetches (payload + includes)
+      if (url.includes("scripts/run.py")) {
+        return { ok: true, text: async () => "print('run')" };
+      }
+      if (url.includes("_shared/utils.py")) {
+        return { ok: true, text: async () => "def helper(): pass" };
+      }
+      if (url.includes("_shared/config.json")) {
+        return { ok: true, text: async () => '{"key": "value"}' };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
 
     // Mock invoke for get_seren_skills_dir + install_skill + validate_skill_payload
     mockInvoke
