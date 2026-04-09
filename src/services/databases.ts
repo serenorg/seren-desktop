@@ -23,14 +23,93 @@ import {
   type Project,
   type QueryResult,
 } from "@/api/seren-db";
-import { API_BASE } from "@/lib/config";
-import { getSerenApiKey } from "@/lib/tauri-bridge";
+import { callSerenTool } from "@/services/mcp-gateway";
 
 // Use DatabaseWithOwner as the Database type (list endpoint returns this)
 export type Database = DatabaseWithOwner;
 
 // Re-export types for backwards compatibility
 export type { Branch, Organization, Project };
+
+// ---------------------------------------------------------------------------
+// MCP response parsers for `run_sql` tool calls
+// ---------------------------------------------------------------------------
+
+interface McpTextContent {
+  type: string;
+  text?: string;
+}
+
+/**
+ * Extract the first text payload from an MCP tool result. Used for both the
+ * success case (JSON-encoded QueryResult) and the error case (plain error
+ * string).
+ */
+export function extractMcpText(content: unknown): string {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  for (const item of content as McpTextContent[]) {
+    if (
+      item &&
+      typeof item === "object" &&
+      item.type === "text" &&
+      typeof item.text === "string"
+    ) {
+      return item.text;
+    }
+  }
+  return "";
+}
+
+/**
+ * Parse a `QueryResult` out of the MCP `run_sql` tool response. The tool
+ * returns a JSON-encoded object in a text content item. We accept both the
+ * bare shape `{ columns, row_count, rows }` and a wrapped envelope
+ * `{ data: { columns, row_count, rows } }` because callers in the wild
+ * have seen both.
+ */
+export function parseQueryResultFromMcp(content: unknown): QueryResult {
+  const text = extractMcpText(content);
+  if (!text) {
+    throw new Error(
+      "SerenDB run_sql returned no text content; cannot parse result",
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw new Error(
+      `SerenDB run_sql returned non-JSON text: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  const body =
+    parsed &&
+    typeof parsed === "object" &&
+    "data" in parsed &&
+    typeof (parsed as { data: unknown }).data === "object" &&
+    (parsed as { data: unknown }).data !== null
+      ? (parsed as { data: unknown }).data
+      : parsed;
+
+  if (!body || typeof body !== "object") {
+    throw new Error(
+      `SerenDB run_sql returned an unexpected shape: ${text.slice(0, 200)}`,
+    );
+  }
+  const b = body as {
+    columns?: unknown;
+    row_count?: unknown;
+    rows?: unknown;
+  };
+  const columns = Array.isArray(b.columns) ? (b.columns as string[]) : [];
+  const rowCount = typeof b.row_count === "number" ? b.row_count : 0;
+  const rows = Array.isArray(b.rows) ? (b.rows as unknown[][]) : [];
+  return { columns, row_count: rowCount, rows };
+}
 
 /**
  * Database service for Seren API operations.
@@ -197,18 +276,20 @@ export const databases = {
   },
 
   /**
-   * Execute a SQL statement against a SerenDB database.
+   * Execute a SQL statement against a SerenDB database via the **Seren MCP
+   * gateway** (`mcp.serendb.com`).
    *
-   * **Authenticates with the user's SerenDB API key** (stored under
-   * `auth.json.seren_api_key` via `getSerenApiKey()`), NOT the OAuth bearer
-   * token used by the rest of the app. The `/query` endpoint is the data
-   * plane for SerenDB SQL and requires the API key. This is why we bypass
-   * the generated `serenDbQuery` SDK call: that path routes through
-   * `customFetch` → gateway bridge which injects the OAuth Bearer token,
-   * which is the wrong credential for the SQL endpoint.
+   * Earlier attempts used the `/publishers/seren-db/query` REST endpoint
+   * directly, first via the hey-api SDK (wrong credential — gateway bridge
+   * injects OAuth bearer, not the API key) and then via a direct `fetch()`
+   * (blocked by webview CORS with `TypeError: Load failed`). The MCP
+   * gateway is the canonical path the rest of the app already uses for
+   * SerenDB tool calls: auth is handled by the established MCP connection,
+   * there is no CORS (the HTTP MCP client lives in Rust via `rmcp`), and
+   * the `run_sql` tool is a first-class gateway tool exposed through
+   * `callSerenTool(...)`.
    *
-   * The query is executed in a read-write transaction unless `readOnly` is
-   * true.
+   * The query is executed read-write unless `readOnly` is true.
    */
   async runSql(
     projectId: string,
@@ -217,60 +298,26 @@ export const databases = {
     query: string,
     readOnly: boolean = false,
   ): Promise<QueryResult> {
-    const apiKey = await getSerenApiKey();
-    if (!apiKey) {
-      throw new Error(
-        "SerenDB API key not available — cannot run SQL (log in to Seren Desktop first)",
-      );
-    }
-
-    const url = `${API_BASE}/publishers/seren-db/query`;
-    const body: Record<string, unknown> = {
+    const args: Record<string, unknown> = {
       project_id: projectId,
       query,
       read_only: readOnly,
     };
     if (branchId) {
-      body.branch_id = branchId;
+      args.branch_id = branchId;
     }
     if (databaseName) {
-      body.database = databaseName;
+      args.database = databaseName;
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const response = await callSerenTool("run_sql", args);
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      const truncated = text.length > 500 ? `${text.slice(0, 500)}…` : text;
-      throw new Error(
-        `SerenDB query failed: HTTP ${response.status} ${truncated}`,
-      );
+    if (response.is_error) {
+      const errText = extractMcpText(response.result);
+      throw new Error(`SerenDB run_sql failed: ${errText || "unknown error"}`);
     }
 
-    const payload = (await response.json()) as {
-      data?: {
-        columns: string[];
-        row_count: number;
-        rows: unknown[][];
-      };
-    };
-    if (!payload.data) {
-      throw new Error(
-        "SerenDB query returned no data envelope — unexpected response shape",
-      );
-    }
-    return {
-      columns: payload.data.columns,
-      row_count: payload.data.row_count,
-      rows: payload.data.rows,
-    };
+    return parseQueryResultFromMcp(response.result);
   },
 
   /**
