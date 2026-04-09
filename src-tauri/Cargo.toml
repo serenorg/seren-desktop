@@ -82,6 +82,13 @@ tokio-tungstenite = { version = "0.28" }
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 tauri-plugin-deep-link = "2"
 
+# Single-instance plugin — desktop-only (does not support mobile targets).
+# Prevents a second `pnpm tauri dev` (or a second launch of the built app)
+# from spawning a parallel process tree that races the first instance's
+# ProviderRuntimeState and oauth_callback_server. Resolves #1519.
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
 [features]
 default = []
 

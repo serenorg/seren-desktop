@@ -430,7 +430,41 @@ fn os_version() -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Single-instance plugin MUST be registered BEFORE every other plugin so
+    // its callback fires as early as possible when a second launch is
+    // attempted. Resolves serenorg/seren-desktop#1519 — without this, two
+    // concurrent `pnpm tauri dev` invocations (or a fresh launch while a
+    // previous instance is still alive) produce colliding `ProviderRuntimeState`
+    // instances racing on port allocation and child process lifecycle, which
+    // manifests as the provider runtime exiting with `signal: 9 (SIGKILL)` and
+    // the chat window stuck in "Reconnecting Claude Code Thread".
+    //
+    // The callback is invoked inside the FIRST (already-running) instance when
+    // a second instance attempts to launch. We focus the existing main window
+    // and log the attempted argv for observability. The second instance exits
+    // cleanly on its own after calling the plugin.
+    //
+    // Desktop-only: the plugin does not support mobile targets, matching the
+    // Cargo.toml `cfg(any(macos, linux, windows))` gate.
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            log::info!(
+                "[single-instance] Second launch blocked; focusing existing window. args={:?} cwd={}",
+                args,
+                cwd
+            );
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder = builder
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
