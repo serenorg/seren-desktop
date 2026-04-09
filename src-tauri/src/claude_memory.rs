@@ -16,7 +16,12 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 const AUTH_STORE: &str = "auth.json";
-const AUTH_TOKEN_KEY: &str = "token";
+/// The user's SerenDB API key. This is the credential for the SerenDB SQL
+/// data plane at `api.serendb.com/publishers/seren-db/query` — NOT the
+/// OAuth bearer token in `auth.json.token`, which is the Seren Desktop
+/// session credential for Gateway API calls. They are different keys and
+/// are not interchangeable on the SQL endpoint.
+const SEREN_API_KEY_KEY: &str = "seren_api_key";
 const RENDERED_INDEX_FILENAME: &str = "MEMORY.md";
 const PROJECT_ID_FILENAME: &str = "project_id";
 const DEFAULT_PREF_TYPE: &str = "claude_preference";
@@ -473,21 +478,26 @@ pub fn render_preferences_as_markdown(rows: &[Vec<serde_json::Value>]) -> String
 // SerenDB SQL HTTP client
 // ---------------------------------------------------------------------------
 
-/// Minimal SerenDB SQL client. Holds a `reqwest::Client` plus the OAuth
-/// bearer token used to authenticate `/query` calls. We do NOT depend on
-/// `seren-memory-sdk` — that's the user-memory store, a different SerenDB
-/// surface entirely.
+/// Minimal SerenDB SQL client. Holds a `reqwest::Client` plus the user's
+/// **SerenDB API key** used to authenticate `/query` calls. This is the
+/// data plane credential — it is NOT the OAuth bearer token used for
+/// Gateway API calls. Mixing these up produces "Failed to connect to
+/// target database" errors because the SQL endpoint authenticates via API
+/// key and the OAuth token has insufficient scope for it.
+///
+/// We do NOT depend on `seren-memory-sdk` — that's the user-memory store,
+/// a different SerenDB surface entirely.
 #[derive(Debug, Clone)]
 pub struct SerenDbSqlClient {
     http: reqwest::Client,
-    token: String,
+    api_key: String,
 }
 
 impl SerenDbSqlClient {
-    pub fn new(token: String) -> Self {
+    pub fn new(api_key: String) -> Self {
         Self {
             http: reqwest::Client::new(),
-            token,
+            api_key,
         }
     }
 
@@ -511,7 +521,7 @@ impl SerenDbSqlClient {
         let resp = self
             .http
             .post(SERENDB_QUERY_URL)
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.api_key)
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -664,22 +674,30 @@ pub async fn render_memory_md_from_db(
 // Tauri-facing auth + client bootstrap
 // ---------------------------------------------------------------------------
 
-fn read_auth_token(app: &AppHandle) -> Result<String, String> {
-    let token = app
+/// Read the user's SerenDB API key from the Tauri store. This is the data
+/// plane credential for `api.serendb.com/publishers/seren-db/query` and is
+/// different from the OAuth bearer token used elsewhere in the app. If the
+/// API key is missing the user needs to log in to Seren Desktop (the login
+/// flow stores the key via `storeSerenApiKey()`).
+fn read_seren_api_key(app: &AppHandle) -> Result<String, String> {
+    let key = app
         .store(AUTH_STORE)
         .map_err(|e| e.to_string())?
-        .get(AUTH_TOKEN_KEY)
+        .get(SEREN_API_KEY_KEY)
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_default();
-    if token.is_empty() {
-        return Err("unauthorized".to_string());
+    if key.is_empty() {
+        return Err(
+            "SerenDB API key not available — log in to Seren Desktop so the key is provisioned"
+                .to_string(),
+        );
     }
-    Ok(token)
+    Ok(key)
 }
 
 fn build_sql_client(app: &AppHandle) -> Result<SerenDbSqlClient, String> {
-    let token = read_auth_token(app)?;
-    Ok(SerenDbSqlClient::new(token))
+    let api_key = read_seren_api_key(app)?;
+    Ok(SerenDbSqlClient::new(api_key))
 }
 
 // ---------------------------------------------------------------------------
