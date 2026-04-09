@@ -43,6 +43,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const [showCreateMenu, setShowCreateMenu] = createSignal(false);
   const [showCatalog, setShowCatalog] = createSignal(false);
   let launcherRef: HTMLDivElement | undefined;
+  let createMenuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
 
   const folderName = () => {
@@ -52,14 +53,21 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   };
   const primaryChatLauncherDescription = createMemo(() => "Seren models chat");
 
+  // Close any open sidebar popover when the user clicks outside its container.
+  // Handles the `+ New` launcher (z-20) and the `+ Create New Skill` dropdown
+  // (z-50) symmetrically so neither can be left orphaned behind another UI
+  // interaction. Resolves #1493 together with the mutual-exclusion toggles in
+  // `toggleLauncher` and the create-menu button's onClick: without click-outside
+  // coverage for both, the create-menu could stay pinned open and visually
+  // overlap the launcher's scroll region, hiding Codex and Gemini items.
   const handleClickOutside = (e: MouseEvent) => {
-    if (
-      showLauncher() &&
-      launcherRef &&
-      !launcherRef.contains(e.target as Node)
-    ) {
+    const target = e.target as Node;
+    if (showLauncher() && launcherRef && !launcherRef.contains(target)) {
       setShowLauncher(false);
       setLauncherQuery("");
+    }
+    if (showCreateMenu() && createMenuRef && !createMenuRef.contains(target)) {
+      setShowCreateMenu(false);
     }
   };
 
@@ -178,6 +186,12 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     const opening = !showLauncher();
     setShowLauncher(opening);
     if (opening) {
+      // Mutual exclusion with the Skills section's "+ Create New Skill"
+      // dropdown so only one sidebar popover is open at a time. Without this,
+      // the create-menu's higher z-index (z-50) renders its items on top of
+      // the launcher's (z-20) scroll region, visually hiding Codex / Gemini.
+      // Resolves #1493.
+      setShowCreateMenu(false);
       setLauncherQuery("");
       requestAnimationFrame(() => searchInputRef?.focus());
     }
@@ -620,12 +634,21 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             />
 
             {/* + Create New Skill dropdown */}
-            <div class="relative mt-2">
+            <div class="relative mt-2" ref={createMenuRef}>
               <button
                 type="button"
                 class="flex items-center justify-center gap-2 w-full py-2 px-3 bg-primary/8 border border-primary/15 rounded-md text-primary text-[13px] font-medium cursor-pointer transition-all duration-100 hover:bg-primary/15 hover:border-primary/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={!threadStore.activeThread}
-                onClick={() => setShowCreateMenu((v) => !v)}
+                onClick={() => {
+                  const opening = !showCreateMenu();
+                  setShowCreateMenu(opening);
+                  // Mutual exclusion with the `+ New` launcher dropdown.
+                  // See toggleLauncher for the symmetric side. #1493.
+                  if (opening) {
+                    setShowLauncher(false);
+                    setLauncherQuery("");
+                  }
+                }}
               >
                 <svg
                   width="14"
