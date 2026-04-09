@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::AppHandle;
 
-use crate::claude_memory::{self, SerenDbConfig};
+use crate::claude_memory::{self, QueryResult, SerenDbConfig};
 
 /// Hard upper bound on how long `claude_memory_start` is allowed to take
 /// before returning a timeout error to the caller. The watcher does an
@@ -204,6 +204,65 @@ pub async fn claude_memory_render_memory_md(
     let final_path =
         claude_memory::render_memory_md_from_db(&client, &config, &claude_project_dir).await?;
     Ok(final_path.to_string_lossy().to_string())
+}
+
+/// Execute a SQL statement against a SerenDB database from the frontend via
+/// the Rust-side `SerenDbSqlClient` (reqwest + SerenDB API key).
+///
+/// This command exists because the TypeScript `databases.runSql` path has
+/// failed through every other routing we tried:
+///
+///   1. The hey-api generated client went through the `customFetch` →
+///      Rust gateway bridge, which injects the **OAuth bearer token**. The
+///      SerenDB `/publishers/seren-db/query` endpoint authenticates with the
+///      **SerenDB API key**, so this path returned HTTP 500 "Failed to
+///      connect to target database" (#1511 diagnosis).
+///
+///   2. A direct cross-origin `fetch()` from the Tauri webview to
+///      `api.serendb.com` was blocked by webview CORS with
+///      `TypeError: Load failed` (#1512 diagnosis).
+///
+///   3. Routing through `callSerenTool("run_sql", ...)` via the Seren MCP
+///      gateway at `mcp.serendb.com` worked architecturally (Rust-side
+///      `rmcp` client has no CORS, handles its own auth) but the MCP
+///      gateway fails to connect in the user's dev environment — the
+///      `waitForGatewayReady` guard (#1513) just makes the failure
+///      explicit after 30 seconds instead of immediately.
+///
+/// So we do what the Rust watcher already does successfully: call
+/// `reqwest::Client` from Rust, which has no CORS, with the SerenDB API
+/// key read from the Tauri secure store. This bypasses both the browser
+/// origin policy AND the broken MCP gateway, and reuses the same client
+/// code path that `process_memory_file` runs on every intercepted write.
+///
+/// The only caller is `databases.runSql` in the frontend, which is itself
+/// used by the Claude memory auto-provisioning flow (`ensureClaudeMemoryProvisioned`,
+/// `waitForDatabaseReady`) — i.e. the setup that runs BEFORE the watcher
+/// starts. Once the watcher is running, SQL writes happen entirely in Rust
+/// and never touch this command.
+#[tauri::command]
+pub async fn claude_memory_run_sql(
+    app: AppHandle,
+    project_id: String,
+    branch_id: Option<String>,
+    database_name: Option<String>,
+    query: String,
+    read_only: bool,
+) -> Result<QueryResult, String> {
+    if project_id.is_empty() {
+        return Err("claude_memory_run_sql requires a non-empty projectId".to_string());
+    }
+    if query.is_empty() {
+        return Err("claude_memory_run_sql requires a non-empty query".to_string());
+    }
+
+    let client = claude_memory::build_sql_client(&app)?;
+    let config = SerenDbConfig {
+        project_id,
+        branch_id: branch_id.unwrap_or_default(),
+        database_name: database_name.unwrap_or_default(),
+    };
+    client.run_sql(&config, &query, read_only).await
 }
 
 // ============================================================================

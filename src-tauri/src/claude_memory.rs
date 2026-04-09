@@ -557,10 +557,10 @@ struct QueryEnvelope {
 
 /// Result rows from a SerenDB SQL `/query` call. Mirrors the OpenAPI
 /// `QueryResult` type so deserialization works without depending on the
-/// generated TypeScript SDK.
-#[derive(Debug, Deserialize, Clone)]
+/// generated TypeScript SDK. `Serialize` is derived so `claude_memory_run_sql`
+/// can return it directly to the frontend via Tauri IPC.
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct QueryResult {
-    #[allow(dead_code)]
     pub columns: Vec<String>,
     pub row_count: usize,
     pub rows: Vec<Vec<serde_json::Value>>,
@@ -695,7 +695,7 @@ fn read_seren_api_key(app: &AppHandle) -> Result<String, String> {
     Ok(key)
 }
 
-fn build_sql_client(app: &AppHandle) -> Result<SerenDbSqlClient, String> {
+pub(crate) fn build_sql_client(app: &AppHandle) -> Result<SerenDbSqlClient, String> {
     let api_key = read_seren_api_key(app)?;
     Ok(SerenDbSqlClient::new(api_key))
 }
