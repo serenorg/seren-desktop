@@ -29,39 +29,32 @@ const SKILLS_REPO_NAME = "seren-skills";
 const SKILLS_REPO_BRANCH = "main";
 const SKILLS_R2_INDEX_URL =
   "https://pub-714fe894394345a0a8a102fbac2b208f.r2.dev/skills/index.json";
-const SKILLS_GITHUB_INDEX_URL = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/git/trees/${SKILLS_REPO_BRANCH}?recursive=1`;
 const SKILLS_RAW_URL = `https://raw.githubusercontent.com/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/${SKILLS_REPO_BRANCH}`;
 const INDEX_CACHE_KEY = "seren:skills_index";
 const PUBLISHER_SKILLS_CACHE_KEY = "seren:publisher_skills";
 const INDEX_CACHE_DURATION = 1000 * 60 * 5; // 5 minutes
 const MAX_STALE_CACHE_AGE = 1000 * 60 * 60; // 1 hour — don't serve cache older than this on error
 
+/**
+ * Legacy tree-node shape retained so downstream helpers
+ * (`collectTreeFiles`, `fetchRawFilesFromTree`, etc.) keep their current API.
+ * R2-sourced entries are materialized with `type: "blob"` since R2 only ships
+ * paths, not per-node metadata.
+ */
 interface GitHubTreeNode {
   path?: string;
   type?: string;
 }
 
-interface GitHubTreeResponse {
-  tree?: GitHubTreeNode[];
-}
-
-interface GitHubCommitListEntry {
-  sha?: string;
-  html_url?: string;
-  commit?: {
-    message?: string;
-    committer?: {
-      date?: string;
-    };
-  };
-}
-
-interface GitHubCommitFile {
-  filename?: string;
-}
-
-interface GitHubCommitDetail extends GitHubCommitListEntry {
-  files?: GitHubCommitFile[];
+/**
+ * Shape of the R2-hosted skills index payload
+ * (`skills/index.json`, built by seren-skills/scripts/build-index.mjs).
+ */
+interface R2IndexPayload {
+  version: string;
+  updatedAt: string;
+  skills: SkillIndexEntry[];
+  tree?: string[];
 }
 
 interface ExtraFile {
@@ -84,13 +77,6 @@ export interface ProjectSkillsConfig {
   version: number;
   skills: {
     enabled: string[];
-  };
-}
-
-function githubApiHeaders(): HeadersInit {
-  return {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
   };
 }
 
@@ -138,148 +124,89 @@ function skillToIndexEntry(skill: Skill): SkillIndexEntry {
 }
 
 /**
- * Convert a repo file path to org/skill-name.
- */
-function parseRepoSkillPath(path: string): {
-  org: string;
-  skill: string;
-} | null {
-  const match = path.match(/^([^/]+)\/([^/]+)\/SKILL\.md$/);
-  if (!match) return null;
-  return { org: match[1], skill: match[2] };
-}
-
-/**
- * Fetch and parse a single remote SKILL.md from the skills repo.
- */
-async function fetchSkillFromRepo(path: string): Promise<Skill | null> {
-  const segments = path
-    .split("/")
-    .map((segment) => encodeURIComponent(segment));
-  const sourceUrl = `${SKILLS_RAW_URL}/${segments.join("/")}`;
-  const parsedPath = parseRepoSkillPath(path);
-  if (!parsedPath) return null;
-
-  const response = await appFetch(sourceUrl);
-  if (!response.ok) {
-    log.warn("[Skills] Failed to fetch repo skill", sourceUrl, response.status);
-    return null;
-  }
-
-  const content = await response.text();
-  const parsed = parseSkillMd(content);
-
-  const slug = `${parsedPath.org}-${parsedPath.skill}`.toLowerCase();
-
-  return {
-    id: `serenorg:${slug}`,
-    slug,
-    name: resolveSkillDisplayName(parsed, slug),
-    displayName: parsed.metadata.displayName,
-    description: parsed.metadata.description || "Install this skill to add it.",
-    source: "serenorg" as SkillSource,
-    sourceUrl,
-    tags: parsed.metadata.tags ?? [],
-    author: parsed.metadata.author,
-    version: parsed.metadata.version,
-  };
-}
-
-/**
- * Cached GitHub tree from the most recent index fetch.
- * Used to discover sibling files when installing a skill.
+ * Cached repo tree from the most recent R2 index fetch.
+ * Used to discover sibling files when installing or syncing a skill.
  */
 let cachedRepoTree: GitHubTreeNode[] | null = null;
 
 /**
  * Per-skill `lastModified` map from the most recent R2 v2+ index fetch,
  * keyed by canonical `sourceUrl`. Used by `fetchRemoteSkillRevision` to
- * skip the GitHub commits API call entirely when an authoritative timestamp
- * is already available locally. (#1476)
+ * derive a synthetic revision without any additional network calls once
+ * the R2 index has been fetched. (#1476, #1515)
  *
- * Cleared and repopulated on every R2 fetch. Empty when only a v1 index
- * (without per-skill timestamps) has been fetched, in which case the
- * GitHub fallback path runs as before.
+ * Cleared and repopulated on every R2 fetch so deletions and renames in
+ * the upstream repo don't leave stale entries.
  */
 const cachedLastModifiedBySourceUrl = new Map<string, string>();
 
 /**
- * Fetch all available skills from GitHub repository tree.
+ * In-flight promise for the current R2 index fetch. Deduplicates concurrent
+ * callers (e.g. `fetchFreshRepoTree` + `fetchRemoteSkillRevision` fired in
+ * parallel from `fetchUpstreamSkillBundle`) so a single sync-refresh cycle
+ * hits R2 exactly once regardless of how many skills are being refreshed.
  */
-async function fetchSkillsFromR2Index(): Promise<Skill[]> {
-  const response = await appFetch(SKILLS_R2_INDEX_URL);
-  if (!response.ok) {
-    throw new Error(`R2 skills index: ${response.status}`);
-  }
+let inflightR2IndexFetch: Promise<R2IndexPayload> | null = null;
 
-  const payload = (await response.json()) as {
-    version: string;
-    updatedAt: string;
-    skills: SkillIndexEntry[];
-    tree?: string[];
-  };
-
-  // Populate cachedRepoTree from the tree listing so install/update flows
-  // can discover sibling files without hitting the GitHub API.
-  if (payload.tree) {
-    cachedRepoTree = payload.tree.map((path) => ({ path, type: "blob" }));
-  }
-
-  // Populate the lastModified-by-sourceUrl cache from R2 v2+ entries.
-  // Replace the entire cache so deletions and renames in the upstream
-  // repo don't leave stale entries pointing at the wrong timestamp.
+/**
+ * Populate the module-level caches from a parsed R2 index payload.
+ * Factored out so both cold catalog fetches (`fetchSkillsFromR2Index`) and
+ * fresh sync-refresh fetches (`fetchFreshR2Index`) share one code path.
+ */
+function populateCachesFromR2Payload(payload: R2IndexPayload): void {
+  cachedRepoTree = (payload.tree ?? []).map((path) => ({
+    path,
+    type: "blob",
+  }));
   cachedLastModifiedBySourceUrl.clear();
   for (const entry of payload.skills) {
     if (entry.lastModified && entry.sourceUrl) {
       cachedLastModifiedBySourceUrl.set(entry.sourceUrl, entry.lastModified);
     }
   }
+}
 
+/**
+ * Fetch the R2 skills index with optional cache-bust, populate module caches,
+ * and deduplicate concurrent callers.
+ *
+ * R2 is the sole source of truth for skill discovery, tree listings, and
+ * upstream revision metadata. There is no GitHub fallback — with 10k+ users
+ * the 60 req/hr anonymous GitHub rate limit would 403 on any fallback and
+ * mask the real problem. R2 availability is monitored upstream. (#1515)
+ */
+async function fetchFreshR2Index(options?: {
+  cacheBust?: boolean;
+}): Promise<R2IndexPayload> {
+  if (inflightR2IndexFetch) {
+    return inflightR2IndexFetch;
+  }
+  inflightR2IndexFetch = (async () => {
+    try {
+      const url = options?.cacheBust
+        ? `${SKILLS_R2_INDEX_URL}?t=${Date.now()}`
+        : SKILLS_R2_INDEX_URL;
+      const response = await appFetch(url);
+      if (!response.ok) {
+        throw new Error(`R2 skills index: ${response.status}`);
+      }
+      const payload = (await response.json()) as R2IndexPayload;
+      populateCachesFromR2Payload(payload);
+      return payload;
+    } finally {
+      inflightR2IndexFetch = null;
+    }
+  })();
+  return inflightR2IndexFetch;
+}
+
+async function fetchSkillsFromR2Index(): Promise<Skill[]> {
+  const payload = await fetchFreshR2Index();
   return payload.skills.map(indexEntryToSkill);
 }
 
-async function fetchSkillsFromGitHubIndex(): Promise<Skill[]> {
-  const response = await appFetch(SKILLS_GITHUB_INDEX_URL, {
-    headers: githubApiHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`GitHub skills index: ${response.status}`);
-  }
-
-  const payload = (await response.json()) as GitHubTreeResponse;
-  cachedRepoTree = payload.tree ?? [];
-
-  const skillFiles = cachedRepoTree.filter(
-    (node) =>
-      node.type === "blob" &&
-      typeof node.path === "string" &&
-      parseRepoSkillPath(node.path),
-  );
-
-  const settled = await Promise.allSettled(
-    skillFiles.map((entry) => {
-      if (!entry.path) return Promise.resolve(null);
-      return fetchSkillFromRepo(entry.path);
-    }),
-  );
-
-  return settled
-    .map((result) => (result.status === "fulfilled" ? result.value : null))
-    .filter((skill): skill is Skill => skill !== null)
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
 async function fetchSkillsFromRepoIndex(): Promise<Skill[]> {
-  // Primary: R2 (unlimited, zero egress fees, single request)
-  try {
-    return await fetchSkillsFromR2Index();
-  } catch (r2Error) {
-    log.warn("[Skills] R2 index unavailable, falling back to GitHub:", r2Error);
-  }
-
-  // Fallback: GitHub API (rate-limited to 60 req/hr + 69 individual fetches)
-  return fetchSkillsFromGitHubIndex();
+  return fetchSkillsFromR2Index();
 }
 
 /**
@@ -294,20 +221,6 @@ function deriveRepoDirPrefix(sourceUrl: string): string | null {
   const lastSlash = relative.lastIndexOf("/");
   if (lastSlash <= 0) return null;
   return relative.slice(0, lastSlash + 1);
-}
-
-function normalizeRepoDirPath(dirPrefix: string): string {
-  return dirPrefix.endsWith("/") ? dirPrefix.slice(0, -1) : dirPrefix;
-}
-
-function trimChangedFilesToSkill(
-  changedFiles: string[],
-  dirPrefix: string,
-): string[] {
-  const normalizedPrefix = normalizeRepoDirPath(dirPrefix);
-  return changedFiles
-    .filter((path) => path.startsWith(`${normalizedPrefix}/`))
-    .map((path) => path.slice(normalizedPrefix.length + 1));
 }
 
 function buildManagedFileMap(
@@ -336,11 +249,6 @@ function localManagedStateFingerprint(
     .join("\n");
 }
 
-function remoteRevisionShortSha(sha?: string): string {
-  if (!sha) return "";
-  return sha.slice(0, 7);
-}
-
 /**
  * Build a synthetic RemoteSkillRevision from an R2 v2+ `lastModified`
  * timestamp. The ISO string IS the synthetic SHA: it changes when and only
@@ -348,8 +256,9 @@ function remoteRevisionShortSha(sha?: string): string {
  * check needs (`remoteRevision.sha !== syncedRevision`). Persisted as
  * `syncedRevision` after install — same string is used for every comparison.
  *
- * Skipping the GitHub commits API saves N+1 requests per refresh and
- * removes the anonymous-rate-limit blast radius. (#1476)
+ * R2 is the sole source of truth for revision metadata. No GitHub commits
+ * API fallback — the 60 req/hr anonymous limit would 403 at our user count
+ * and mask the real problem. (#1476, #1515)
  */
 function syntheticRevisionFromLastModified(
   lastModified: string,
@@ -367,52 +276,24 @@ function syntheticRevisionFromLastModified(
 async function fetchRemoteSkillRevision(
   sourceUrl: string,
 ): Promise<RemoteSkillRevision | null> {
-  // R2 v2+ index ships per-skill `lastModified`. Prefer it over the GitHub
-  // commits API to avoid burning anonymous rate limit on idle refreshes.
+  // Ensure the R2-backed lastModified cache is populated. This is a no-op
+  // on warm paths (catalog already loaded) because `fetchFreshR2Index`
+  // deduplicates concurrent and re-entrant calls.
+  if (cachedLastModifiedBySourceUrl.size === 0) {
+    try {
+      await fetchFreshR2Index();
+    } catch (err) {
+      log.warn(
+        "[Skills] Unable to fetch R2 index for revision lookup",
+        sourceUrl,
+        err,
+      );
+      return null;
+    }
+  }
   const cachedLastModified = cachedLastModifiedBySourceUrl.get(sourceUrl);
-  if (cachedLastModified) {
-    return syntheticRevisionFromLastModified(cachedLastModified);
-  }
-
-  const dirPrefix = deriveRepoDirPrefix(sourceUrl);
-  if (!dirPrefix) return null;
-  const path = normalizeRepoDirPath(dirPrefix);
-  const commitsUrl = `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/commits?sha=${encodeURIComponent(SKILLS_REPO_BRANCH)}&path=${encodeURIComponent(path)}&per_page=1`;
-
-  const response = await appFetch(commitsUrl, {
-    headers: githubApiHeaders(),
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch remote revision: ${response.status}`);
-  }
-
-  const commits = (await response.json()) as GitHubCommitListEntry[];
-  const latest = commits[0];
-  const sha = latest?.sha;
-  if (!sha) return null;
-
-  const detailResponse = await appFetch(
-    `https://api.github.com/repos/${SKILLS_REPO_OWNER}/${SKILLS_REPO_NAME}/commits/${encodeURIComponent(sha)}`,
-    { headers: githubApiHeaders() },
-  );
-  if (!detailResponse.ok) {
-    throw new Error(`Failed to fetch commit detail: ${detailResponse.status}`);
-  }
-
-  const detail = (await detailResponse.json()) as GitHubCommitDetail;
-  return {
-    sha,
-    shortSha: remoteRevisionShortSha(sha),
-    committedAt: detail.commit?.committer?.date,
-    message: detail.commit?.message,
-    url: detail.html_url,
-    changedFiles: trimChangedFilesToSkill(
-      (detail.files ?? [])
-        .map((file) => file.filename)
-        .filter((filename): filename is string => typeof filename === "string"),
-      dirPrefix,
-    ),
-  };
+  if (!cachedLastModified) return null;
+  return syntheticRevisionFromLastModified(cachedLastModified);
 }
 
 async function fetchUpstreamSkillBundle(skill: {
@@ -556,27 +437,25 @@ export function isPublisherManagedSkill(
 }
 
 /**
- * Fetch a fresh repo tree with cache-bust to avoid GitHub API CDN staleness.
- * On failure this throws — callers must not fall back to a stale tree
- * because recording a new syncedRevision with old file content would mask
- * an incomplete sync and prevent future retries.
+ * Fetch a fresh repo tree from the R2 skills index with cache-bust to
+ * bypass the Cloudflare edge cache. On failure this throws — callers must
+ * not fall back to a stale tree because recording a new syncedRevision
+ * with old file content would mask an incomplete sync and prevent future
+ * retries.
  */
 async function fetchFreshRepoTree(
   _sourceUrl: string,
 ): Promise<GitHubTreeNode[]> {
-  const cacheBustedTreeUrl = `${SKILLS_GITHUB_INDEX_URL}&t=${Date.now()}`;
-  const response = await appFetch(cacheBustedTreeUrl, {
-    headers: githubApiHeaders(),
-  });
-  if (!response.ok) {
+  try {
+    await fetchFreshR2Index({ cacheBust: true });
+  } catch (err) {
     throw new Error(
-      `Failed to fetch repo tree for payload files: ${response.status}`,
+      `Failed to fetch repo tree for payload files: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     );
   }
-  const payload = (await response.json()) as GitHubTreeResponse;
-  const freshTree = payload.tree ?? [];
-  cachedRepoTree = freshTree;
-  return freshTree;
+  return cachedRepoTree ?? [];
 }
 
 /**

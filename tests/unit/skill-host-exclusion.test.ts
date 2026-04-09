@@ -116,7 +116,7 @@ describe("filterHostCompatibleCatalog", () => {
     slug: "b",
     name: "CLI Only",
     description: "",
-    source: "claude" as const,
+    source: "anthropic" as const,
     tags: [],
     excludeHosts: ["seren-desktop"],
   };

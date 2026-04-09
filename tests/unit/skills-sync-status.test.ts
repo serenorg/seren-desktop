@@ -24,23 +24,36 @@ describe("skills.inspectSyncStatus", () => {
   });
 
   it("marks backfilled upstream skills as bootstrap-required when no local drift exists", async () => {
-    const commitSha = "1234567890abcdef1234567890abcdef12345678";
-    mockAppFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [{ sha: commitSha }],
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          html_url: "https://github.com/serenorg/seren-skills/commit/1234567",
-          commit: {
-            message: "Add missing runtime files",
-            committer: { date: "2026-03-18T00:00:00Z" },
-          },
-          files: [{ filename: "polymarket-maker-rebate-bot/SKILL.md" }],
-        }),
-      });
+    const skillSourceUrl =
+      "https://raw.githubusercontent.com/serenorg/seren-skills/main/polymarket-maker-rebate-bot/SKILL.md";
+    const lastModified = "2026-03-18T00:00:00Z";
+
+    // R2 is the sole source of truth for revision metadata (#1515).
+    // The synthetic revision SHA is the R2 lastModified ISO string itself.
+    mockAppFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/skills/index.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            version: "2",
+            updatedAt: lastModified,
+            skills: [
+              {
+                slug: "polymarket-maker-rebate-bot",
+                name: "Polymarket Maker Rebate Bot",
+                description: "desc",
+                source: "serenorg",
+                sourceUrl: skillSourceUrl,
+                tags: [],
+                lastModified,
+              },
+            ],
+            tree: ["polymarket-maker-rebate-bot/SKILL.md"],
+          }),
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
 
     const { skills } = await import("@/services/skills");
     vi.spyOn(skills, "readContent").mockResolvedValue("skill body");
@@ -60,16 +73,17 @@ describe("skills.inspectSyncStatus", () => {
       enabled: true,
       contentHash: "hash",
       upstreamSource: "serenorg",
-      upstreamSourceUrl:
-        "https://raw.githubusercontent.com/serenorg/seren-skills/main/polymarket-maker-rebate-bot/SKILL.md",
+      upstreamSourceUrl: skillSourceUrl,
       syncState: {
         version: 1,
         upstreamSource: "serenorg",
-        upstreamSourceUrl:
-          "https://raw.githubusercontent.com/serenorg/seren-skills/main/polymarket-maker-rebate-bot/SKILL.md",
+        upstreamSourceUrl: skillSourceUrl,
         syncedRevision: null,
         syncedAt: 1,
-        managedFiles: { "SKILL.md": "1f42523adcc9a31dd7b8ab3b36f098c6a87e7fc7e0760fb3ea7be7cb93420d0d" },
+        managedFiles: {
+          "SKILL.md":
+            "1f42523adcc9a31dd7b8ab3b36f098c6a87e7fc7e0760fb3ea7be7cb93420d0d",
+        },
       },
     });
 
@@ -79,8 +93,8 @@ describe("skills.inspectSyncStatus", () => {
       hasLocalChanges: false,
       syncedRevision: null,
       remoteRevision: {
-        sha: commitSha,
-        shortSha: commitSha.slice(0, 7),
+        sha: lastModified,
+        shortSha: lastModified.slice(0, 10),
       },
     });
   });
