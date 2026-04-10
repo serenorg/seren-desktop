@@ -1688,13 +1688,28 @@ export const agentStore = {
         ? (convo.agent_type as AgentType)
         : state.selectedAgentType;
     const convoMetadata = parseAgentConversationMetadata(convo.agent_metadata);
-    const pendingBootstrapPromptContext =
+    let pendingBootstrapPromptContext =
       convoMetadata.pendingBootstrapPromptContext;
-    const restoredMessages = Array.isArray(
-      convoMetadata.pendingBootstrapMessages,
-    )
+    let restoredMessages = Array.isArray(convoMetadata.pendingBootstrapMessages)
       ? convoMetadata.pendingBootstrapMessages
       : [];
+
+    // Metadata messages are only populated when bootstrapPromptContext is
+    // truthy (see spawnSession line ~1322). For Codex and Gemini sessions
+    // that never went through the Claude Code resume-fallback path, metadata
+    // messages are always empty even though the messages WERE persisted to
+    // SQLite via persistAgentMessage during the session. Fall back to the
+    // SQLite store so users see their conversation history when reopening a
+    // thread after a crash, kill, or compaction failure. Resolves #1533.
+    if (restoredMessages.length === 0) {
+      const persisted = await loadPersistedAgentHistory(conversationId);
+      if (persisted.messages.length > 0) {
+        restoredMessages = persisted.messages;
+        if (!pendingBootstrapPromptContext && persisted.context) {
+          pendingBootstrapPromptContext = persisted.context;
+        }
+      }
+    }
 
     const remoteSessionId = convo.agent_session_id?.trim();
     if (!remoteSessionId) {
