@@ -492,6 +492,19 @@ const CHUNK_FLUSH_MS = 50;
 const chunkBufs = new Map<string, { content: string; thinking: string }>();
 const chunkFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// Tool event accumulation buffers — plain JS, not reactive.
+// During high-velocity tool-call chains (e.g. Codex doing 20+ sequential
+// tool calls), each toolCall/toolResult event triggers multiple setState
+// calls (message append, status update, persistence). Batching these on
+// the same CHUNK_FLUSH_MS interval as streaming chunks coalesces a burst
+// of N tool events into a single SolidJS reconciliation pass. #1531.
+interface PendingToolEvent {
+  type: "toolCall" | "toolResult";
+  data: unknown;
+}
+const toolEventBufs = new Map<string, PendingToolEvent[]>();
+const toolEventFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 function flushChunkBuf(sessionId: string): void {
   const timer = chunkFlushTimers.get(sessionId);
   if (timer !== undefined) {
@@ -524,6 +537,15 @@ function clearChunkBuf(sessionId: string): void {
   chunkBufs.delete(sessionId);
 }
 
+function clearToolEventBuf(sessionId: string): void {
+  const timer = toolEventFlushTimers.get(sessionId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    toolEventFlushTimers.delete(sessionId);
+  }
+  toolEventBufs.delete(sessionId);
+}
+
 function disposeAgentStoreRuntimeBindings(): void {
   if (globalUnsubscribe) {
     globalUnsubscribe();
@@ -539,6 +561,11 @@ function disposeAgentStoreRuntimeBindings(): void {
   }
   chunkFlushTimers.clear();
   chunkBufs.clear();
+  for (const timer of toolEventFlushTimers.values()) {
+    clearTimeout(timer);
+  }
+  toolEventFlushTimers.clear();
+  toolEventBufs.clear();
 }
 
 const agentStoreHot =
@@ -2684,6 +2711,9 @@ Structured summary:`;
     );
 
     setState("sessions", sessionId, "cancelRequested", true);
+    // Drop any already-buffered tool events — no point flushing them
+    // when the user has requested cancel. #1531.
+    clearToolEventBuf(sessionId);
 
     try {
       await providerService.cancelPrompt(sessionId);
@@ -3019,17 +3049,11 @@ Structured summary:`;
         break;
 
       case "toolCall":
-        this.handleToolCall(sessionId, event.data);
-        break;
-
       case "toolResult":
-        this.handleToolResult(
-          sessionId,
-          event.data.toolCallId,
-          event.data.status,
-          event.data.result,
-          event.data.error,
-        );
+        // Buffer tool events and flush on the same interval as streaming
+        // chunks so a burst of N tool calls produces one SolidJS
+        // reconciliation pass instead of N. See #1531.
+        this.enqueueToolEvent(sessionId, event.type, event.data);
         break;
 
       case "diff":
@@ -3050,6 +3074,9 @@ Structured summary:`;
         break;
 
       case "promptComplete": {
+        // Flush any buffered tool events before finalizing the turn so all
+        // tool messages are visible in the UI before the prompt completes.
+        this.flushToolEventBuf(sessionId);
         const isHistoryReplay =
           event.data.historyReplay === true ||
           event.data.stopReason === "HistoryReplay";
@@ -3553,6 +3580,72 @@ Structured summary:`;
           flushChunkBuf(sessionId);
         }, CHUNK_FLUSH_MS),
       );
+    }
+  },
+
+  enqueueToolEvent(
+    sessionId: string,
+    type: "toolCall" | "toolResult",
+    data: unknown,
+  ) {
+    // Drop tool events for sessions where cancel has been requested.
+    // The agent process may still be finishing a tool chain after cancel
+    // was sent — processing those events just wastes render cycles and
+    // makes the UI feel unresponsive while the user is waiting for the
+    // cancel to take effect. #1531.
+    const session = state.sessions[sessionId];
+    if (session?.cancelRequested) return;
+
+    let buf = toolEventBufs.get(sessionId);
+    if (!buf) {
+      buf = [];
+      toolEventBufs.set(sessionId, buf);
+    }
+    buf.push({ type, data });
+
+    // Schedule a flush if one isn't already pending.
+    if (!toolEventFlushTimers.has(sessionId)) {
+      toolEventFlushTimers.set(
+        sessionId,
+        setTimeout(() => {
+          toolEventFlushTimers.delete(sessionId);
+          this.flushToolEventBuf(sessionId);
+        }, CHUNK_FLUSH_MS),
+      );
+    }
+  },
+
+  flushToolEventBuf(sessionId: string) {
+    const timer = toolEventFlushTimers.get(sessionId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      toolEventFlushTimers.delete(sessionId);
+    }
+    const buf = toolEventBufs.get(sessionId);
+    if (!buf || buf.length === 0) return;
+    toolEventBufs.delete(sessionId);
+
+    // Process all buffered events in order. This triggers setState calls,
+    // but SolidJS batches synchronous updates within the same microtask,
+    // so the entire flush produces a single reconciliation pass.
+    for (const event of buf) {
+      if (event.type === "toolCall") {
+        this.handleToolCall(sessionId, event.data as ToolCallEvent);
+      } else {
+        const d = event.data as {
+          toolCallId: string;
+          status: string;
+          result?: string;
+          error?: string;
+        };
+        this.handleToolResult(
+          sessionId,
+          d.toolCallId,
+          d.status,
+          d.result,
+          d.error,
+        );
+      }
     }
   },
 
