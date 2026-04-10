@@ -92,6 +92,25 @@ fn select_worker_type(
     classification: &TaskClassification,
     capabilities: &UserCapabilities,
 ) -> WorkerType {
+    // McpPublisher routing runs FIRST, before the private-chat guard below,
+    // so that seren-private threads can still reach publishers when the task
+    // requires tools and gateway tools are available. Without this ordering
+    // the early `force_private_chat → ChatModel` return would strip all
+    // publisher/MCP tool access from private chat — the root cause of #1529.
+    //
+    // Only task types in MCP_PUBLISHER_ELIGIBLE_TASK_TYPES can route here.
+    // The requires_file_system guard stays as defense-in-depth: publishers
+    // cannot satisfy local file operations regardless of task type.
+    if MCP_PUBLISHER_ELIGIBLE_TASK_TYPES.contains(&classification.task_type.as_str())
+        && classification.requires_tools
+        && !classification.requires_file_system
+        && has_any_gateway_tool(capabilities)
+    {
+        return WorkerType::McpPublisher;
+    }
+
+    // Private chat uses the organization's private model for direct chat.
+    // LocalAgent is excluded — it bypasses the private model pipeline.
     if capabilities.force_private_chat {
         return WorkerType::ChatModel;
     }
@@ -103,18 +122,6 @@ fn select_worker_type(
         && capabilities.active_agent_session_id.is_some()
     {
         return WorkerType::LocalAgent;
-    }
-
-    // Allowlisted task types + tools required + gateway tools available → McpPublisher.
-    // Only task types in MCP_PUBLISHER_ELIGIBLE_TASK_TYPES can route here.
-    // The requires_file_system guard stays as defense-in-depth: publishers
-    // cannot satisfy local file operations regardless of task type.
-    if MCP_PUBLISHER_ELIGIBLE_TASK_TYPES.contains(&classification.task_type.as_str())
-        && classification.requires_tools
-        && !classification.requires_file_system
-        && has_any_gateway_tool(capabilities)
-    {
-        return WorkerType::McpPublisher;
     }
 
     // Everything else → ChatModel

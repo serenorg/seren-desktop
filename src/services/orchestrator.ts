@@ -726,8 +726,14 @@ function buildCapabilities(threadId: string | null): UserCapabilities {
     force_private_chat: forcePrivateChat,
     private_chat_deployment_id: privateChatPolicy?.deployment_id ?? null,
     available_models: forcePrivateChat ? [] : activeModels.map((m) => m.id),
-    available_tools: forcePrivateChat ? [] : tools.map((t) => t.function.name),
-    tool_definitions: forcePrivateChat ? [] : tools,
+    // Tools are available in BOTH public and private chat. The private chat
+    // policy governs which MODEL is used (via force_private_chat +
+    // private_chat_deployment_id), not which tools are exposed. Stripping
+    // tools here was the root cause of #1529 — users in seren-private
+    // threads saw zero publisher/MCP visibility because the capabilities
+    // payload reached the orchestrator with empty tool arrays.
+    available_tools: tools.map((t) => t.function.name),
+    tool_definitions: tools,
     installed_skills: enabledSkills.map((s) => ({
       slug: s.slug,
       name: s.name,
