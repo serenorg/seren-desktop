@@ -330,13 +330,13 @@ mod tests {
         assert_eq!(json["message"], "oops");
 
         let reroute = WorkerEvent::Reroute {
-            from_model: "moonshot/kimi-k2.5".to_string(),
+            from_model: "moonshotai/kimi-k2.5".to_string(),
             to_model: "anthropic/claude-sonnet-4".to_string(),
             reason: "Rerouted to Claude Sonnet (rated helpful for research)".to_string(),
         };
         let json = serde_json::to_value(&reroute).unwrap();
         assert_eq!(json["type"], "reroute");
-        assert_eq!(json["from_model"], "moonshot/kimi-k2.5");
+        assert_eq!(json["from_model"], "moonshotai/kimi-k2.5");
         assert_eq!(json["to_model"], "anthropic/claude-sonnet-4");
         assert!(json["reason"].as_str().unwrap().contains("Claude Sonnet"));
     }
