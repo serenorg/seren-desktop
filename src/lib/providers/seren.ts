@@ -100,7 +100,7 @@ interface GatewayResponse<T> {
  */
 const DEFAULT_MODELS: ProviderModel[] = [
   // OpenAI
-  { id: "openai/gpt-5.4", name: "OpenAI GPT 5.4", contextWindow: 128000 },
+  { id: "openai/gpt-5.4", name: "OpenAI GPT 5.4", contextWindow: 1050000 },
   // Anthropic
   {
     id: "anthropic/claude-opus-4.6",
@@ -115,17 +115,17 @@ const DEFAULT_MODELS: ProviderModel[] = [
   {
     id: "anthropic/claude-sonnet-4.6",
     name: "Claude Sonnet 4.6",
-    contextWindow: 200000,
+    contextWindow: 1000000,
   },
-  // THUDM
-  { id: "thudm/glm-5.4", name: "GLM 5.4", contextWindow: 128000 },
-  // Moonshot
-  { id: "moonshot/kimi-k2.5", name: "Kimi K2.5", contextWindow: 128000 },
+  // Z.ai (formerly THUDM)
+  { id: "z-ai/glm-5.1", name: "GLM 5.1", contextWindow: 202752 },
+  // MoonshotAI
+  { id: "moonshotai/kimi-k2.5", name: "Kimi K2.5", contextWindow: 262144 },
   // Arcee AI
   {
     id: "arcee-ai/trinity-large-thinking",
     name: "Arcee-AI Trinity Large Thinking",
-    contextWindow: 128000,
+    contextWindow: 262144,
   },
 ];
 

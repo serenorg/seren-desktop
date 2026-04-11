@@ -17,8 +17,8 @@ const SIMPLE_PREFERRED_MODELS: &[&str] = &[
     "google/gemini-3-flash-preview",
     "google/gemini-2.5-flash",
     "anthropic/claude-haiku-4.5",
-    "moonshot/kimi-k2.5",
-    "thudm/glm-4.7",
+    "moonshotai/kimi-k2.5",
+    "z-ai/glm-5.1",
     "anthropic/claude-sonnet-4",
 ];
 
@@ -355,9 +355,8 @@ fn humanize_model_id(model_id: &str) -> &str {
         "google/gemini-2.5-pro" => "Gemini Pro",
         "google/gemini-2.5-flash" => "Gemini Flash",
         "google/gemini-3-flash-preview" => "Gemini 3 Flash",
-        "moonshot/kimi-k2.5" => "Kimi K2.5",
-        "thudm/glm-4.7" => "GLM-4.7",
-        "thudm/glm-4" => "GLM-4",
+        "moonshotai/kimi-k2.5" => "Kimi K2.5",
+        "z-ai/glm-5.1" => "GLM 5.1",
         "organization/private-model" => "Private Models",
         _ => model_id,
     }
@@ -1343,9 +1342,9 @@ mod tests {
         .unwrap();
 
         let classification = make_classification("general_chat", false, false);
-        let tried = vec!["moonshot/kimi-k2.5".to_string()];
+        let tried = vec!["moonshotai/kimi-k2.5".to_string()];
         let available = vec![
-            "moonshot/kimi-k2.5".to_string(),
+            "moonshotai/kimi-k2.5".to_string(),
             "anthropic/claude-haiku-4.5".to_string(),
             "anthropic/claude-sonnet-4".to_string(),
         ];
