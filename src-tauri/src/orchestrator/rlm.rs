@@ -51,33 +51,9 @@ fn model_context_limit_chars(model: &str) -> usize {
     tokens * 4
 }
 
-// =============================================================================
-// Public API
-// =============================================================================
-
-/// Returns true if the combined input (prompt + history + images decoded) exceeds
-/// the RLM threshold for the given model.
-pub fn needs_rlm(
-    prompt: &str,
-    history: &[serde_json::Value],
-    images: &[ImageAttachment],
-    model: &str,
-) -> bool {
-    let limit = model_context_limit_chars(model);
-    let threshold = (limit as f64 * RLM_THRESHOLD) as usize;
-
-    let prompt_chars = prompt.len();
-    let history_chars: usize = history
-        .iter()
-        .map(|msg| {
-            msg.get("content")
-                .and_then(|c| c.as_str())
-                .map(|s| s.len())
-                .unwrap_or(0)
-        })
-        .sum();
-    // Text-based image attachments decoded from base64: rough estimate
-    let image_chars: usize = images
+/// Estimate character count for text-based image attachments.
+fn image_chars_estimate(images: &[ImageAttachment]) -> usize {
+    images
         .iter()
         .filter(|img| {
             img.mime_type.starts_with("text/")
@@ -85,17 +61,83 @@ pub fn needs_rlm(
                 || img.mime_type.contains("javascript")
                 || img.mime_type.contains("json")
         })
-        .map(|img| {
-            // base64 → raw bytes ≈ 3/4 of base64 length; treat as chars
-            img.base64.len() * 3 / 4
-        })
-        .sum();
+        .map(|img| img.base64.len() * 3 / 4)
+        .sum()
+}
 
-    let total = prompt_chars + history_chars + image_chars;
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Returns true if the prompt content (prompt + images, excluding history)
+/// exceeds the RLM threshold for the given model. History size is handled
+/// separately via `trim_history()` — large history should be trimmed, not
+/// chunked by RLM.
+pub fn needs_rlm(
+    prompt: &str,
+    _history: &[serde_json::Value],
+    images: &[ImageAttachment],
+    model: &str,
+) -> bool {
+    let limit = model_context_limit_chars(model);
+    let threshold = (limit as f64 * RLM_THRESHOLD) as usize;
+
+    let prompt_chars = prompt.len();
+    let image_chars: usize = image_chars_estimate(images);
+
+    let content_total = prompt_chars + image_chars;
     log::debug!(
-        "[RLM] Token estimate: {total} chars vs threshold {threshold} chars (model={model})"
+        "[RLM] Content estimate: {content_total} chars vs threshold {threshold} chars (model={model})"
     );
-    total > threshold
+    content_total > threshold
+}
+
+/// Trim conversation history to fit within the model's context window alongside
+/// the prompt and images. Keeps the most recent messages. Returns the original
+/// history unchanged if it already fits.
+pub fn trim_history(
+    history: &[serde_json::Value],
+    prompt: &str,
+    images: &[ImageAttachment],
+    model: &str,
+) -> Vec<serde_json::Value> {
+    let limit = model_context_limit_chars(model);
+    // Reserve 20% for system prompt, tool descriptions, and response buffer
+    let reserve = (limit as f64 * 0.20) as usize;
+    let prompt_chars = prompt.len();
+    let image_chars: usize = image_chars_estimate(images);
+
+    let available = limit.saturating_sub(reserve + prompt_chars + image_chars);
+
+    let mut kept = Vec::new();
+    let mut used = 0usize;
+
+    // Walk from newest to oldest, keep what fits
+    for msg in history.iter().rev() {
+        let msg_chars = msg
+            .get("content")
+            .and_then(|c| c.as_str())
+            .map(|s| s.len())
+            .unwrap_or(0);
+        if used + msg_chars > available {
+            break;
+        }
+        used += msg_chars;
+        kept.push(msg.clone());
+    }
+
+    // Reverse to restore chronological order
+    kept.reverse();
+
+    if kept.len() < history.len() {
+        log::info!(
+            "[RLM] Trimmed history from {} to {} messages ({used} chars kept, {available} available)",
+            history.len(),
+            kept.len(),
+        );
+    }
+
+    kept
 }
 
 /// Process a prompt that exceeds the context window using the RLM approach.
@@ -109,6 +151,7 @@ pub async fn process(
     prompt: &str,
     history: &[serde_json::Value],
     model: &str,
+    tool_definitions: &[serde_json::Value],
     event_tx: &mpsc::Sender<WorkerEvent>,
 ) -> Result<(), String> {
     log::info!("[RLM] Starting RLM processing for model={model}");
@@ -142,10 +185,28 @@ pub async fn process(
     // 4. Process chunks
     let (final_answer, chunk_results) = match strategy {
         RlmStrategy::Synthesis => {
-            process_map_reduce(app, &question, &chunks, model, history, event_tx).await?
+            process_map_reduce(
+                app,
+                &question,
+                &chunks,
+                model,
+                history,
+                tool_definitions,
+                event_tx,
+            )
+            .await?
         }
         RlmStrategy::Sequential => {
-            process_sequential(app, &question, &chunks, model, history, event_tx).await?
+            process_sequential(
+                app,
+                &question,
+                &chunks,
+                model,
+                history,
+                tool_definitions,
+                event_tx,
+            )
+            .await?
         }
     };
 
@@ -408,8 +469,11 @@ async fn process_map_reduce(
     chunks: &[Chunk],
     model: &str,
     history: &[serde_json::Value],
+    tools: &[serde_json::Value],
     event_tx: &mpsc::Sender<WorkerEvent>,
 ) -> Result<(String, Vec<ChunkResult>), String> {
+    let tools_vec: Vec<serde_json::Value> = tools.to_vec();
+
     // Process all chunks concurrently
     let tasks: Vec<_> = chunks
         .iter()
@@ -418,11 +482,13 @@ async fn process_map_reduce(
             let question = question.to_string();
             let chunk_text = chunk.text.clone();
             let model = model.to_string();
+            let chunk_tools = tools_vec.clone();
             let idx = chunk.index;
             let total = chunk.total;
             tokio::spawn(async move {
                 let result =
-                    call_chunk(&app, &question, &chunk_text, &model, &[], idx, total).await;
+                    call_chunk(&app, &question, &chunk_text, &model, &[], &chunk_tools, idx, total)
+                        .await;
                 (idx, total, result)
             })
         })
@@ -458,7 +524,7 @@ async fn process_map_reduce(
 
     // Merge all chunk summaries into a final answer
     let merge_prompt = build_merge_prompt(question, &summaries);
-    let final_answer = call_simple(app, &merge_prompt, model, history).await?;
+    let final_answer = call_simple(app, &merge_prompt, model, history, tools).await?;
 
     Ok((final_answer, chunk_results))
 }
@@ -474,6 +540,7 @@ async fn process_sequential(
     chunks: &[Chunk],
     model: &str,
     history: &[serde_json::Value],
+    tools: &[serde_json::Value],
     event_tx: &mpsc::Sender<WorkerEvent>,
 ) -> Result<(String, Vec<ChunkResult>), String> {
     let mut chunk_results: Vec<ChunkResult> = Vec::with_capacity(chunks.len());
@@ -498,7 +565,7 @@ async fn process_sequential(
             )
         };
 
-        let answer = call_simple(app, &prompt, model, history).await?;
+        let answer = call_simple(app, &prompt, model, history, tools).await?;
 
         let _ = event_tx
             .send(WorkerEvent::RlmChunkComplete {
@@ -539,6 +606,7 @@ async fn call_chunk(
     chunk_text: &str,
     model: &str,
     history: &[serde_json::Value],
+    tools: &[serde_json::Value],
     index: usize,
     total: usize,
 ) -> Result<String, String> {
@@ -549,15 +617,21 @@ async fn call_chunk(
         index + 1,
         total
     );
-    call_simple(app, &prompt, model, history).await
+    call_simple(app, &prompt, model, history, tools).await
 }
 
 /// Make a simple non-streaming completion call and return the text response.
+///
+/// When `tools` is non-empty, includes them in the request body so the model
+/// is aware of available capabilities. If the model responds with tool_calls
+/// instead of text content, returns a diagnostic message — RLM sub-calls do
+/// not execute tools.
 async fn call_simple(
     app: &AppHandle,
     prompt: &str,
     model: &str,
     history: &[serde_json::Value],
+    tools: &[serde_json::Value],
 ) -> Result<String, String> {
     let client = build_client();
     let url = format!(
@@ -568,7 +642,9 @@ async fn call_simple(
     let mut messages: Vec<serde_json::Value> = Vec::new();
     messages.push(serde_json::json!({
         "role": "system",
-        "content": "You are a helpful AI assistant."
+        "content": "You are a helpful AI assistant. You have access to tools that you can \
+                    use to help answer the question. Use them when the provided text is \
+                    insufficient."
     }));
     for msg in history {
         messages.push(msg.clone());
@@ -578,11 +654,17 @@ async fn call_simple(
         "content": prompt
     }));
 
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "model": model,
         "messages": messages,
         "stream": false
     });
+
+    if !tools.is_empty() {
+        body["tools"] = serde_json::json!(tools);
+        body["tool_choice"] = serde_json::json!("auto");
+    }
+
     let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
 
     let response = crate::auth::authenticated_request(app, &client, |c, token| {
@@ -606,10 +688,43 @@ async fn call_simple(
     let json: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Parse RLM response: {e}"))?;
 
-    json.pointer("/choices/0/message/content")
+    // Try text content first
+    if let Some(content) = json
+        .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
-        .map(String::from)
-        .ok_or_else(|| format!("No content in RLM response: {text}"))
+    {
+        if !content.is_empty() {
+            return Ok(content.to_string());
+        }
+    }
+
+    // Model returned tool_calls but no text — tool execution is not supported
+    // in the RLM path. Log and return a diagnostic message so the user gets
+    // something useful instead of "No content in RLM response".
+    if let Some(tool_calls) = json
+        .pointer("/choices/0/message/tool_calls")
+        .and_then(|v| v.as_array())
+    {
+        if !tool_calls.is_empty() {
+            let tool_names: Vec<&str> = tool_calls
+                .iter()
+                .filter_map(|tc| tc.pointer("/function/name").and_then(|n| n.as_str()))
+                .collect();
+            log::warn!(
+                "[RLM] Model requested tool calls ({}) but RLM sub-calls cannot execute tools",
+                tool_names.join(", ")
+            );
+            return Ok(format!(
+                "This question requires using tools ({}) to retrieve external data. \
+                 The tools were available but could not be executed during document \
+                 processing. Please retry with a shorter conversation so the normal \
+                 chat path (which supports tool execution) can handle your request.",
+                tool_names.join(", ")
+            ));
+        }
+    }
+
+    Err(format!("No content in RLM response: {text}"))
 }
 
 // =============================================================================
@@ -737,5 +852,60 @@ mod tests {
         assert!(prompt.contains("Theme A"));
         assert!(prompt.contains("Theme B"));
         assert!(prompt.contains("2 sections"));
+    }
+
+    #[test]
+    fn needs_rlm_returns_false_when_history_is_large_but_prompt_is_small() {
+        // Ishan's bug: large history from failed attempts triggered RLM on a short prompt
+        let prompt = "Search the web for these speakers.";
+        let large_history: Vec<serde_json::Value> = vec![serde_json::json!({
+            "role": "assistant",
+            "content": "a".repeat(700_000)
+        })];
+        let images: Vec<ImageAttachment> = vec![];
+        assert!(
+            !needs_rlm(prompt, &large_history, &images, "anthropic/claude-sonnet-4"),
+            "Large history should NOT trigger RLM — only large prompts should"
+        );
+    }
+
+    #[test]
+    fn trim_history_keeps_recent_messages() {
+        // 10 messages, each ~50k chars. With a 400k-char context (100k-token model),
+        // 20% reserve = 320k available. Should keep the most recent ~6 messages.
+        let history: Vec<serde_json::Value> = (0..10)
+            .map(|i| {
+                serde_json::json!({
+                    "role": if i % 2 == 0 { "user" } else { "assistant" },
+                    "content": format!("msg{i}-").repeat(10_000)
+                })
+            })
+            .collect();
+        let prompt = "Short prompt";
+        let images: Vec<ImageAttachment> = vec![];
+        // "other-model" → 100k tokens → 400k chars → 320k available after reserve
+        let trimmed = trim_history(&history, prompt, &images, "other-model");
+        assert!(
+            trimmed.len() < history.len(),
+            "Should trim: got {} messages, expected fewer than {}",
+            trimmed.len(),
+            history.len()
+        );
+        // Last message must be preserved (most recent)
+        let last_original = history.last().unwrap()["content"].as_str().unwrap();
+        let last_trimmed = trimmed.last().unwrap()["content"].as_str().unwrap();
+        assert_eq!(last_original, last_trimmed, "Most recent message must be kept");
+    }
+
+    #[test]
+    fn trim_history_returns_all_when_fits() {
+        let history: Vec<serde_json::Value> = vec![
+            serde_json::json!({"role": "user", "content": "Hello"}),
+            serde_json::json!({"role": "assistant", "content": "Hi there"}),
+        ];
+        let prompt = "Short prompt";
+        let images: Vec<ImageAttachment> = vec![];
+        let trimmed = trim_history(&history, prompt, &images, "anthropic/claude-sonnet-4");
+        assert_eq!(trimmed.len(), history.len(), "No trimming needed for small history");
     }
 }
