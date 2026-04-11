@@ -142,6 +142,7 @@ pub async fn orchestrate(
         let rlm_model = model_for_limit.to_string();
         let rlm_prompt = prompt.clone();
         let rlm_history = history.clone();
+        let rlm_tools = capabilities.tool_definitions.clone();
         let rlm_app = app.clone();
         tokio::spawn(async move {
             if let Err(e) = rlm::process(
@@ -150,6 +151,7 @@ pub async fn orchestrate(
                 &rlm_prompt,
                 &rlm_history,
                 &rlm_model,
+                &rlm_tools,
                 &event_tx,
             )
             .await
@@ -170,6 +172,11 @@ pub async fn orchestrate(
 
         return Ok(());
     }
+
+    // 0b. Trim history if it exceeds the context budget. This prevents the
+    //     case where large history (e.g. from prior failed attempts) would cause
+    //     an oversized request to the model.
+    let history = rlm::trim_history(&history, &prompt, &images, model_for_limit);
 
     // 1. Classify the task
     let classification = classifier::classify(&prompt, &capabilities.installed_skills);
