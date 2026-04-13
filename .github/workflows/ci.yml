@@ -127,7 +127,7 @@ jobs:
       issues: write
     steps:
       - name: Create or skip duplicate issue
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const failedJobs = ['lint', 'test-frontend', 'test-rust', 'test-e2e']

@@ -726,7 +726,7 @@ jobs:
 
       # Step 1: Upload assets to GitHub release and publish (undraft) it
       - name: Publish release
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -870,7 +870,7 @@ jobs:
           done
 
       - name: Generate latest.json for updater (R2)
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
