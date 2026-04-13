@@ -14,7 +14,11 @@ use seren_memory_sdk::models::CachedMemory;
 use seren_memory_sdk::sync::SyncEngine;
 
 const AUTH_STORE: &str = "auth.json";
-const TOKEN_KEY: &str = "token";
+// The memory service at memory.serendb.com authenticates via SerenDB API key,
+// NOT the OAuth bearer token. Using "token" (the OAuth token) caused every
+// cloud call to return HTTP 401, silently falling back to local-only cache.
+// Same credential used by claude_memory.rs (fixed in #1511). Resolves #1540.
+const TOKEN_KEY: &str = "seren_api_key";
 
 /// Managed state for memory operations.
 pub struct MemoryState {
