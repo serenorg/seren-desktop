@@ -51,8 +51,8 @@ importers:
         specifier: ^11.11.1
         version: 11.11.1
       marked:
-        specifier: ^17.0.6
-        version: 17.0.6
+        specifier: ^18.0.0
+        version: 18.0.0
       monaco-editor:
         specifier: ^0.55.1
         version: 0.55.1
@@ -3430,8 +3430,8 @@ packages:
     engines: {node: '>= 18'}
     hasBin: true
 
-  marked@17.0.6:
-    resolution: {integrity: sha512-gB0gkNafnonOw0obSTEGZTT86IuhILt2Wfx0mWH/1Au83kybTayroZ/V6nS25mN7u8ASy+5fMhgB3XPNrOZdmA==}
+  marked@18.0.0:
+    resolution: {integrity: sha512-2e7Qiv/HJSXj8rDEpgTvGKsP8yYtI9xXHKDnrftrmnrJPaFNM7VRb2YCzWaX4BP1iCJ/XPduzDJZMFoqTCcIMA==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -5495,7 +5495,7 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
       '@types/debug': 4.1.13
-      debug: 4.3.4
+      debug: 4.4.3
       pony-cause: 2.1.11
       semver: 7.7.4
       uuid: 9.0.1
@@ -9022,7 +9022,7 @@ snapshots:
 
   marked@14.0.0: {}
 
-  marked@17.0.6: {}
+  marked@18.0.0: {}
 
   math-intrinsics@1.1.0: {}
 
