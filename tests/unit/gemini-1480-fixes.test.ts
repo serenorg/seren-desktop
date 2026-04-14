@@ -1,5 +1,5 @@
 // ABOUTME: Critical regression guards for #1480 — Gemini Agent bottom controls.
-// ABOUTME: Three load-bearing assertions only, each guarding a specific footgun.
+// ABOUTME: Two load-bearing assertions guarding specific footguns (lockedAgentName covered in gemini-agent.test.ts).
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -28,15 +28,6 @@ describe("Gemini Agent #1480 — bottom-control regression guards", () => {
     // Two distinct includes of "gemini" — one for threadType, one for sessionAgent.
     const matches = memoBlock.match(/threadType === "gemini"|sessionAgent === "gemini"/g) ?? [];
     expect(matches.length).toBe(2);
-  });
-
-  it("lockedAgentName returns 'Gemini' for the gemini agent type", () => {
-    // The previous shape was a binary ternary `codex ? "Codex" : "Claude Code"`,
-    // which silently rendered "Claude Code" for any unrecognized agent type.
-    const lockedAgentNameIdx = agentChatTsx.indexOf("const lockedAgentName");
-    expect(lockedAgentNameIdx).toBeGreaterThan(-1);
-    const fnBlock = agentChatTsx.slice(lockedAgentNameIdx, lockedAgentNameIdx + 400);
-    expect(fnBlock).toMatch(/case\s+"gemini":\s*\n\s*return\s+"Gemini"/);
   });
 
   it("gemini-runtime advertises a non-empty availableModels list", () => {

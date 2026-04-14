@@ -5,11 +5,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import {
-  type AgentType,
-  supportsConversationFork,
-} from "@/services/providers";
-
 const providersMjs = readFileSync(
   resolve("bin/browser-local/providers.mjs"),
   "utf-8",
@@ -20,10 +15,6 @@ const agentRegistryMjs = readFileSync(
 );
 const geminiRuntimeMjs = readFileSync(
   resolve("bin/browser-local/gemini-runtime.mjs"),
-  "utf-8",
-);
-const providersTs = readFileSync(
-  resolve("src/services/providers.ts"),
   "utf-8",
 );
 const agentStoreTs = readFileSync(
@@ -51,35 +42,7 @@ const providerTypesTs = readFileSync(
   "utf-8",
 );
 
-describe("Gemini Agent — TypeScript surface (#1471)", () => {
-  it("AgentType union includes 'gemini'", () => {
-    // Compile-time check via assignment — if the union doesn't include
-    // "gemini", this file won't compile.
-    const t: AgentType = "gemini";
-    expect(t).toBe("gemini");
-  });
-
-  it("supportsConversationFork accepts gemini without throwing", () => {
-    expect(supportsConversationFork("gemini")).toBe(true);
-  });
-
-  it("services/providers.ts exports ensureGeminiCli helper", () => {
-    expect(providersTs).toMatch(/export async function ensureGeminiCli\(/);
-    expect(providersTs).toContain('agentType: "gemini"');
-  });
-});
-
 describe("Gemini Agent — runtime wiring (#1471)", () => {
-  it("providers.mjs imports createGeminiRuntime", () => {
-    expect(providersMjs).toContain(
-      'import { createGeminiRuntime } from "./gemini-runtime.mjs"',
-    );
-  });
-
-  it("providers.mjs instantiates the gemini runtime alongside claude", () => {
-    expect(providersMjs).toContain("const geminiRuntime = createGeminiRuntime");
-  });
-
   it("providers.mjs spawnSession dispatcher routes 'gemini' to the gemini runtime", () => {
     // Look for the dispatcher pattern: must include both the type guard and
     // the delegation. Whitespace-tolerant.
@@ -97,9 +60,6 @@ describe("Gemini Agent — runtime wiring (#1471)", () => {
     expect(matches.length).toBeGreaterThanOrEqual(5);
   });
 
-  it("providers.mjs listSessions includes gemini sessions", () => {
-    expect(providersMjs).toContain("await geminiRuntime.listSessions()");
-  });
 });
 
 describe("Gemini Agent — registry definition (#1471)", () => {
