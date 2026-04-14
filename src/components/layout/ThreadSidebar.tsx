@@ -587,11 +587,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               </span>
             </Show>
           </div>
-          {/* Refresh skills catalog */}
+          {/* Refresh skills catalog and sync installed skills */}
           <button
             type="button"
             class="shrink-0 p-1 rounded hover:bg-surface-3 text-muted-foreground/60 hover:text-muted-foreground transition-colors duration-100"
-            title="Refresh skills catalog"
+            title="Refresh skills"
             onClick={(e) => {
               e.stopPropagation();
               void skillsStore.clearCacheAndRefresh();

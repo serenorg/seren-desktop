@@ -712,7 +712,7 @@ export const skillsStore = {
         !s.syncState &&
         state.available.some(
           (a) =>
-            a.slug === s.slug &&
+            (a.slug === s.slug || a.slug === s.dirName) &&
             (a.source === "serenorg" || a.source === "seren"),
         ),
     );
@@ -941,11 +941,11 @@ export const skillsStore = {
   },
 
   /**
-   * Clear the skills index cache and refresh.
+   * Clear the skills index cache and run a full refresh (catalog + installed sync).
    */
   async clearCacheAndRefresh(): Promise<void> {
     skills.clearCache();
-    await this.refreshAvailable();
+    await this.refresh(true);
   },
 
   hideSkill(slug: string): void {

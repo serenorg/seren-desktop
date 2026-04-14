@@ -1515,9 +1515,15 @@ export const skills = {
       // Skip skills that already have sync state
       if (skill.syncState) continue;
 
-      // Try matching to upstream repo first, then publisher catalog
-      const repoMatch = repoSkillsBySlug.get(skill.slug);
-      const publisherMatch = publisherSkillsBySlug.get(skill.slug);
+      // Try matching by slug first, then fall back to dirName (which always
+      // equals the marketplace slug even when resolveSkillSlug() derives a
+      // different slug from SKILL.md frontmatter name).
+      const repoMatch =
+        repoSkillsBySlug.get(skill.slug) ??
+        repoSkillsBySlug.get(skill.dirName);
+      const publisherMatch =
+        publisherSkillsBySlug.get(skill.slug) ??
+        publisherSkillsBySlug.get(skill.dirName);
       const match = repoMatch ?? publisherMatch;
       if (!match?.sourceUrl) {
         // Also detect publisher skills by SKILL.md metadata (publisher_slug)
