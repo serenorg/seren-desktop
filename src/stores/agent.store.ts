@@ -3701,8 +3701,11 @@ Structured summary:`;
         ...msgs,
         contentMsg,
       ]);
-      if (session.conversationId)
-        persistAgentMessage(session.conversationId, contentMsg);
+      // Do NOT persist this intermediate flush — it captures partial streaming
+      // text (often raw file contents from tool results) that would pollute
+      // the restored conversation history on restart. Only
+      // finalizeStreamingContent (called at promptComplete) should persist
+      // assistant messages.
       setState("sessions", sessionId, "streamingContent", "");
       setState("sessions", sessionId, "streamingContentTimestamp", undefined);
     }
