@@ -3,6 +3,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolApprovalRequest {
@@ -22,6 +23,8 @@ pub trait MessagingAdapter: Send + Sync {
     fn is_running(&self) -> bool;
 
     fn bot_username(&self) -> Option<String>;
+
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,78 +1,41 @@
-// ABOUTME: WhatsApp Business API adapter using reqwest for HTTP calls.
-// ABOUTME: Receives messages via webhook; sends responses via Cloud API.
+// ABOUTME: WhatsApp adapter using whatsapp-rust for QR code pairing via WhatsApp Web protocol.
+// ABOUTME: Scan a QR code from your phone to link — no Meta Business account needed.
 
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::messaging::adapter::{AdapterConfig, MessagingAdapter};
+use wacore::store::in_memory::InMemoryBackend;
+use wacore::types::events::Event;
+use whatsapp_rust::bot::Bot;
+use whatsapp_rust::transport::{TokioWebSocketTransportFactory, UreqHttpClient};
+use whatsapp_rust::TokioRuntime;
 
-const WHATSAPP_API_BASE: &str = "https://graph.facebook.com/v21.0";
+use crate::messaging::adapter::{AdapterConfig, MessagingAdapter};
 
 pub struct WhatsAppAdapter {
     running: Arc<AtomicBool>,
-    phone_number_id: Mutex<Option<String>>,
-    access_token: Mutex<Option<String>>,
+    phone_display: Arc<Mutex<Option<String>>>,
     shutdown_tx: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-    webhook_port: u16,
-    allowed_phone: Mutex<Option<String>>,
+    qr_tx: Arc<Mutex<Option<tokio::sync::watch::Sender<Option<String>>>>>,
+    qr_rx: tokio::sync::watch::Receiver<Option<String>>,
 }
 
 impl WhatsAppAdapter {
     pub fn new() -> Self {
+        let (qr_tx, qr_rx) = tokio::sync::watch::channel(None);
         Self {
             running: Arc::new(AtomicBool::new(false)),
-            phone_number_id: Mutex::new(None),
-            access_token: Mutex::new(None),
+            phone_display: Arc::new(Mutex::new(None)),
             shutdown_tx: Mutex::new(None),
-            webhook_port: 8788,
-            allowed_phone: Mutex::new(None),
+            qr_tx: Arc::new(Mutex::new(Some(qr_tx))),
+            qr_rx,
         }
     }
 
-    async fn send_text_message(
-        &self,
-        to: &str,
-        text: &str,
-    ) -> Result<(), String> {
-        let token = self
-            .access_token
-            .lock()
-            .await
-            .clone()
-            .ok_or("WhatsApp access token not set")?;
-        let phone_id = self
-            .phone_number_id
-            .lock()
-            .await
-            .clone()
-            .ok_or("WhatsApp phone number ID not set")?;
-
-        let url = format!("{WHATSAPP_API_BASE}/{phone_id}/messages");
-        let body = serde_json::json!({
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": { "body": text }
-        });
-
-        let client = reqwest::Client::new();
-        let resp = client
-            .post(&url)
-            .bearer_auth(&token)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("WhatsApp send failed: {e}"))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(format!("WhatsApp API error {status}: {text}"));
-        }
-
-        Ok(())
+    pub fn subscribe_qr(&self) -> tokio::sync::watch::Receiver<Option<String>> {
+        self.qr_rx.clone()
     }
 }
 
@@ -87,56 +50,79 @@ impl MessagingAdapter for WhatsAppAdapter {
             return Err("WhatsApp adapter is already running".into());
         }
 
-        let phone_id = config
-            .phone_number_id
-            .ok_or("WhatsApp requires phone_number_id")?;
+        // In-memory backend: sessions don't persist across restarts.
+        // TODO: implement Backend trait with rusqlite for persistence (#1566)
+        let backend = Arc::new(InMemoryBackend::new());
 
-        *self.access_token.lock().await = Some(config.token.clone());
-        *self.phone_number_id.lock().await = Some(phone_id);
-        *self.allowed_phone.lock().await = config.allowed_user_id;
+        let qr_sender = self.qr_tx.clone();
+        let running_flag = self.running.clone();
+        let phone_display = self.phone_display.clone();
 
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         *self.shutdown_tx.lock().await = Some(shutdown_tx);
         self.running.store(true, Ordering::SeqCst);
 
-        let port = self.webhook_port;
-        let running_flag = self.running.clone();
-        let verify_token = config.token[..16.min(config.token.len())].to_string();
-
         tokio::spawn(async move {
-            let server = Arc::new(
-                tiny_http::Server::http(format!("0.0.0.0:{port}"))
-                    .expect("Failed to start WhatsApp webhook server"),
-            );
+            let qr_sender_event = qr_sender.clone();
 
-            log::info!("[WhatsApp] Webhook server listening on port {port}");
-
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => {
-                        log::info!("[WhatsApp] Shutdown signal received");
-                        break;
-                    }
-                    _ = tokio::task::spawn_blocking({
-                        let server = Arc::clone(&server);
-                        move || {
-                            if let Ok(request) = server.recv_timeout(std::time::Duration::from_millis(500)) {
-                                if let Some(req) = request {
-                                    let response = tiny_http::Response::from_string("OK");
-                                    let _ = req.respond(response);
+            let bot_result = Bot::builder()
+                .with_backend(backend)
+                .with_transport_factory(TokioWebSocketTransportFactory::new())
+                .with_http_client(UreqHttpClient::new())
+                .with_runtime(TokioRuntime)
+                .on_event(move |event, _client| {
+                    let qr_tx = qr_sender_event.clone();
+                    let phone = phone_display.clone();
+                    async move {
+                        match event {
+                            Event::PairingQrCode { code, .. } => {
+                                log::info!("[WhatsApp] QR code received, waiting for scan...");
+                                if let Some(tx) = qr_tx.lock().await.as_ref() {
+                                    let _ = tx.send(Some(code));
                                 }
                             }
+                            Event::Connected(_) => {
+                                log::info!("[WhatsApp] Connected and authenticated");
+                                if let Some(tx) = qr_tx.lock().await.as_ref() {
+                                    let _ = tx.send(None);
+                                }
+                            }
+                            Event::Message(msg, info) => {
+                                let sender = format!("{}", info.source.sender);
+                                log::info!("[WhatsApp] Message from {sender}");
+                            }
+                            _ => {}
                         }
-                    }) => {}
-                }
+                    }
+                })
+                .build()
+                .await;
 
-                if !running_flag.load(Ordering::SeqCst) {
-                    break;
+            let mut bot = match bot_result {
+                Ok(b) => b,
+                Err(e) => {
+                    log::error!("[WhatsApp] Failed to build bot: {e}");
+                    running_flag.store(false, Ordering::SeqCst);
+                    return;
                 }
-            }
+            };
 
-            running_flag.store(false, Ordering::SeqCst);
-            log::info!("[WhatsApp] Adapter stopped");
+            let handle = match bot.run().await {
+                Ok(h) => h,
+                Err(e) => {
+                    log::error!("[WhatsApp] Failed to start bot: {e}");
+                    running_flag.store(false, Ordering::SeqCst);
+                    return;
+                }
+            };
+
+            log::info!("[WhatsApp] Bot running, waiting for QR scan or existing session...");
+
+            tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                log::info!("[WhatsApp] Shutdown signal received");
+                drop(handle);
+            });
         });
 
         log::info!("[WhatsApp] Adapter started");
@@ -153,8 +139,12 @@ impl MessagingAdapter for WhatsAppAdapter {
         }
 
         self.running.store(false, Ordering::SeqCst);
-        *self.access_token.lock().await = None;
-        *self.phone_number_id.lock().await = None;
+        *self.phone_display.lock().await = None;
+
+        if let Some(tx) = self.qr_tx.lock().await.as_ref() {
+            let _ = tx.send(None);
+        }
+
         log::info!("[WhatsApp] Adapter stop requested");
         Ok(())
     }
@@ -164,6 +154,10 @@ impl MessagingAdapter for WhatsAppAdapter {
     }
 
     fn bot_username(&self) -> Option<String> {
-        self.phone_number_id.try_lock().ok()?.clone()
+        self.phone_display.try_lock().ok()?.clone()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

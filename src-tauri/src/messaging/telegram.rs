@@ -148,4 +148,8 @@ impl MessagingAdapter for TelegramAdapter {
     fn bot_username(&self) -> Option<String> {
         self.bot_username.try_lock().ok()?.clone()
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

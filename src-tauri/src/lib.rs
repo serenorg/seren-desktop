@@ -836,6 +836,7 @@ pub fn run() {
             messaging::commands::messaging_stop,
             messaging::commands::messaging_status,
             messaging::commands::messaging_status_all,
+            messaging::commands::messaging_whatsapp_qr,
             // Orchestrator commands
             commands::orchestrator::orchestrate,
             commands::orchestrator::cancel_orchestration,
