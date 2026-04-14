@@ -8,7 +8,6 @@ use tokio::sync::Mutex;
 
 use teloxide::prelude::*;
 use teloxide::respond;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 
 use crate::messaging::adapter::{AdapterConfig, MessagingAdapter};
 
@@ -57,7 +56,7 @@ impl MessagingAdapter for TelegramAdapter {
             }
         }
 
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         *self.shutdown_tx.lock().await = Some(shutdown_tx);
         self.running.store(true, Ordering::SeqCst);
 
@@ -109,15 +108,15 @@ impl MessagingAdapter for TelegramAdapter {
                 .enable_ctrlc_handler()
                 .build();
 
-            let token = dispatcher.shutdown_token();
+            let shutdown_token = dispatcher.shutdown_token();
 
-            tokio::select! {
-                _ = dispatcher.dispatch() => {},
-                _ = &mut shutdown_rx => {
-                    log::info!("[Telegram] Shutdown signal received");
-                    token.shutdown().expect("Failed to signal teloxide shutdown");
-                }
-            }
+            tokio::spawn(async move {
+                let _ = shutdown_rx.await;
+                log::info!("[Telegram] Shutdown signal received");
+                let _ = shutdown_token.shutdown();
+            });
+
+            dispatcher.dispatch().await;
 
             running_flag.store(false, Ordering::SeqCst);
             log::info!("[Telegram] Bot stopped");
