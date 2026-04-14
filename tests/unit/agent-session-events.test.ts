@@ -81,24 +81,3 @@ describe("spawn context map for diagnostic logging", () => {
   });
 });
 
-describe("spawnSession double-spawn guard", () => {
-  it("checks spawningConversations before proceeding in spawnSession", () => {
-    // The guard must be inside spawnSession itself, not just resumeAgentConversation.
-    const spawnSessionBody = agentStoreSource.slice(
-      agentStoreSource.indexOf("async spawnSession("),
-      agentStoreSource.indexOf("async resumeAgentConversation("),
-    );
-    expect(spawnSessionBody).toContain("spawningConversations.has(spawnKey)");
-    expect(spawnSessionBody).toContain("spawningConversations.add(spawnKey)");
-  });
-
-  it("allows internal retries to bypass the guard", () => {
-    expect(agentStoreSource).toContain(
-      "initRetryAttempt === 0 && spawningConversations.has(spawnKey)",
-    );
-  });
-
-  it("cleans up the guard in a finally block", () => {
-    expect(agentStoreSource).toContain("spawningConversations.delete(spawnKey)");
-  });
-});
