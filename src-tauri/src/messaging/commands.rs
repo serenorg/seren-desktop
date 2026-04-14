@@ -89,3 +89,28 @@ pub async fn messaging_status_all(
 ) -> Result<Vec<PlatformStatus>, String> {
     Ok(state.status_all().await)
 }
+
+#[cfg(feature = "whatsapp")]
+#[tauri::command]
+pub async fn messaging_whatsapp_qr(
+    state: State<'_, MessagingState>,
+) -> Result<Option<String>, String> {
+    let adapter = state
+        .get("whatsapp")
+        .await
+        .ok_or("WhatsApp adapter not started")?;
+
+    let wa = adapter
+        .as_any()
+        .downcast_ref::<crate::messaging::whatsapp::WhatsAppAdapter>()
+        .ok_or("Failed to downcast WhatsApp adapter")?;
+
+    let rx = wa.subscribe_qr();
+    Ok(rx.borrow().clone())
+}
+
+#[cfg(not(feature = "whatsapp"))]
+#[tauri::command]
+pub async fn messaging_whatsapp_qr() -> Result<Option<String>, String> {
+    Err("WhatsApp feature not enabled".into())
+}
