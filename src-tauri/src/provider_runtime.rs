@@ -80,74 +80,65 @@ impl ProviderRuntimeState {
         let node_bin = resolve_node_binary(app);
         let runtime_entry = find_provider_runtime_mjs()?;
 
-        let mut command = Command::new(&node_bin);
-        command
-            .arg(&runtime_entry)
-            .arg("--host")
-            .arg(&host)
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--token")
-            .arg(&token)
-            .kill_on_drop(true)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let mut child = spawn_node_process(
+            &node_bin, &runtime_entry, &host, port, &token,
+        )?;
 
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
+        log::info!(
+            "[ProviderRuntime] Spawned node={} pid={} port={}",
+            node_bin.display(),
+            child.id().unwrap_or(0),
+            port,
+        );
 
-        let embedded_path = crate::embedded_runtime::get_embedded_path();
-        if !embedded_path.is_empty() {
-            command.env("PATH", embedded_path);
-        }
+        pipe_child_output(&mut child);
 
-        // Scrub VSCode / Cursor / Electron extension-host env vars that
-        // would otherwise make the embedded node subprocess try to bootstrap
-        // as a VSCode extension host and hang in ESM resolution when
-        // `pnpm tauri dev` is launched from a VSCode/Cursor integrated
-        // terminal. See serenorg/seren-desktop#1516.
-        crate::embedded_runtime::sanitize_spawn_env(&mut command);
+        match wait_for_provider_runtime(&config, &mut child).await {
+            Ok(()) => {}
+            Err(first_err) => {
+                log::warn!(
+                    "[ProviderRuntime] First attempt failed ({}), retrying with fresh process",
+                    first_err,
+                );
+                let _ = child.kill().await;
 
-        let mut child = command
-            .spawn()
-            .map_err(|err| format!("Failed to spawn provider runtime: {}", err))?;
+                let retry_port = find_available_port()?;
+                let retry_config = ProviderRuntimeConfig {
+                    api_base_url: format!("http://{}:{}", host, retry_port),
+                    ws_base_url: format!("ws://{}:{}", host, retry_port),
+                    host: host.clone(),
+                    port: retry_port,
+                    token: token.clone(),
+                };
 
-        if let Some(stdout) = child.stdout.take() {
-            tauri::async_runtime::spawn(async move {
-                let mut lines = BufReader::new(stdout).lines();
-                loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => log::info!("[ProviderRuntime stdout] {}", line),
-                        Ok(None) => break, // EOF
-                        Err(err) => {
-                            log::warn!("[ProviderRuntime stdout] Read error: {}", err);
-                            break;
-                        }
-                    }
+                let mut retry_child = spawn_node_process(
+                    &node_bin, &runtime_entry, &host, retry_port, &token,
+                )?;
+
+                log::info!(
+                    "[ProviderRuntime] Retry spawned pid={} port={}",
+                    retry_child.id().unwrap_or(0),
+                    retry_port,
+                );
+
+                pipe_child_output(&mut retry_child);
+                wait_for_provider_runtime(&retry_config, &mut retry_child).await?;
+
+                *guard = Some(ProviderRuntimeProcess {
+                    child: retry_child,
+                    config: retry_config.clone(),
+                });
+                drop(guard);
+
+                if let Some(old_handle) = self.monitor_handle.lock().await.take() {
+                    old_handle.abort();
                 }
-            });
-        }
+                let monitor = spawn_process_monitor(app.clone());
+                *self.monitor_handle.lock().await = Some(monitor);
 
-        if let Some(stderr) = child.stderr.take() {
-            tauri::async_runtime::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => log::warn!("[ProviderRuntime stderr] {}", line),
-                        Ok(None) => break, // EOF
-                        Err(err) => {
-                            log::warn!("[ProviderRuntime stderr] Read error: {}", err);
-                            break;
-                        }
-                    }
-                }
-            });
+                return Ok(retry_config);
+            }
         }
-
-        wait_for_provider_runtime(&config, &mut child).await?;
         *guard = Some(ProviderRuntimeProcess {
             child,
             config: config.clone(),
@@ -297,6 +288,78 @@ fn find_provider_runtime_mjs() -> Result<PathBuf, String> {
     ))
 }
 
+fn spawn_node_process(
+    node_bin: &std::path::Path,
+    runtime_entry: &std::path::Path,
+    host: &str,
+    port: u16,
+    token: &str,
+) -> Result<Child, String> {
+    let mut command = Command::new(node_bin);
+    command
+        .arg(runtime_entry)
+        .arg("--host")
+        .arg(host)
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--token")
+        .arg(token)
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let embedded_path = crate::embedded_runtime::get_embedded_path();
+    if !embedded_path.is_empty() {
+        command.env("PATH", embedded_path);
+    }
+
+    crate::embedded_runtime::sanitize_spawn_env(&mut command);
+
+    command
+        .spawn()
+        .map_err(|err| format!("Failed to spawn provider runtime: {err}"))
+}
+
+fn pipe_child_output(child: &mut Child) {
+    if let Some(stdout) = child.stdout.take() {
+        tauri::async_runtime::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => log::info!("[ProviderRuntime stdout] {}", line),
+                    Ok(None) => break,
+                    Err(err) => {
+                        log::warn!("[ProviderRuntime stdout] Read error: {}", err);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        tauri::async_runtime::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => log::warn!("[ProviderRuntime stderr] {}", line),
+                    Ok(None) => break,
+                    Err(err) => {
+                        log::warn!("[ProviderRuntime stderr] Read error: {}", err);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+}
+
 async fn wait_for_provider_runtime(
     config: &ProviderRuntimeConfig,
     child: &mut Child,
@@ -306,22 +369,20 @@ async fn wait_for_provider_runtime(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
     let health_url = format!("{}/__seren/health", config.api_base_url);
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(20);
 
     loop {
         if let Some(status) = child
             .try_wait()
-            .map_err(|err| format!("Failed checking provider runtime status: {}", err))?
+            .map_err(|err| format!("Failed checking provider runtime status: {err}"))?
         {
             return Err(format!(
-                "Provider runtime exited before becoming ready: {}",
-                status
+                "Provider runtime exited before becoming ready: {status}",
             ));
         }
 
         if let Ok(response) = client.get(&health_url).send().await {
             if response.status().is_success() {
-                // Also check that the runtime reports itself as ready
                 if let Ok(body) = response.json::<serde_json::Value>().await {
                     if body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
                         return Ok(());

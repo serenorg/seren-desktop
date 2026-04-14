@@ -363,6 +363,21 @@ const POLLUTING_PARENT_ENV_VARS: &[&str] = &[
     "VSCODE_HANDLES_UNCAUGHT_ERRORS",
     "VSCODE_L10N_BUNDLE_LOCATION",
     "VSCODE_PROCESS_TITLE",
+    // Cursor IDE vars inherited when running inside Cursor's extension host.
+    "CURSOR_WORKSPACE_LABEL",
+    "CURSOR_LAYOUT",
+    "CURSOR_SPAWN_CHAIN",
+    "CURSOR_SPAWNED_BY_EXTENSION_ID",
+    "CURSOR_EXTENSION_HOST_ROLE",
+    // Claude Code extension vars — no effect on Node but shouldn't leak
+    // into embedded subprocesses.
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDECODE",
+    "CLAUDE_AGENT_SDK_VERSION",
+    // NODE_PATH can interfere with module resolution when it contains
+    // non-module paths (e.g. binary paths like /usr/local/bin/node).
+    "NODE_PATH",
 ];
 
 /// Trait implemented for both `std::process::Command` and
@@ -454,6 +469,7 @@ mod tests {
             "VSCODE_ESM_ENTRYPOINT",
             "__CFBundleIdentifier",
             "__CF_USER_TEXT_ENCODING",
+            "NODE_PATH",
         ];
         for var in critical_vars {
             let entry = overrides
