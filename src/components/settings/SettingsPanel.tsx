@@ -33,6 +33,7 @@ import { claimDaily, walletState } from "@/stores/wallet.store";
 import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
+import { MessagingSettings } from "./MessagingSettings";
 import { ToolsetsSettings } from "./ToolsetsSettings";
 
 type SettingsSection =
@@ -43,6 +44,7 @@ type SettingsSection =
   | "toolsets"
   | "editor"
   | "wallet"
+  | "messaging"
   | "indexing"
   | "appearance"
   | "general"
@@ -192,6 +194,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "toolsets", label: "Toolsets", icon: "📦" },
     { id: "editor", label: "Editor", icon: "📝" },
     { id: "wallet", label: "Wallet", icon: "💳" },
+    { id: "messaging", label: "Messaging", icon: "💬" },
     { id: "indexing", label: "Code Indexing", icon: "🔍" },
     { id: "appearance", label: "Appearance", icon: "🎨" },
     { id: "general", label: "General", icon: "⚙️" },
@@ -1315,6 +1318,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               </div>
             </div>
           </section>
+        </Show>
+
+        <Show when={activeSection() === "messaging"}>
+          <MessagingSettings />
         </Show>
 
         <Show when={activeSection() === "indexing"}>

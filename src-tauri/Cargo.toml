@@ -75,6 +75,10 @@ dirs = "6"
 
 tokio-tungstenite = { version = "0.28" }
 
+# Messaging transport adapters (opt-in via cargo features)
+teloxide = { version = "0.14", features = ["macros"], optional = true }
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"], optional = true }
+
 
 # Platform-specific dependencies
 # Deep-link plugin excluded on Windows due to WiX bundler ICE03 registry errors
@@ -91,6 +95,10 @@ tauri-plugin-single-instance = "2"
 
 [features]
 default = []
+messaging = []
+telegram = ["messaging", "dep:teloxide"]
+discord = ["messaging", "dep:serenity"]
+whatsapp = ["messaging"]
 
 [dev-dependencies]
 tempfile = "3.27.0"
