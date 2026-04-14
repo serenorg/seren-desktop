@@ -31,6 +31,7 @@ mod claude_setup;
 mod embedded_runtime;
 mod files;
 mod mcp;
+pub mod messaging;
 mod oauth;
 mod oauth_callback_server;
 mod orchestrator;
@@ -503,6 +504,7 @@ pub fn run() {
         .manage(orchestrator::eval::EvalState::new())
         .manage(orchestrator::tool_bridge::ToolResultBridge::new())
         .manage(provider_runtime::ProviderRuntimeState::new())
+        .manage(messaging::MessagingState::new())
         .manage(std::sync::Arc::new(tokio::sync::Mutex::new(None))
             as polymarket::commands::PolymarketWsState);
 
@@ -829,6 +831,11 @@ pub fn run() {
             skills::write_skill_sync_state,
             skills::resolve_skill_path,
             skills::create_skill_folder,
+            // Messaging transport commands
+            messaging::commands::messaging_start,
+            messaging::commands::messaging_stop,
+            messaging::commands::messaging_status,
+            messaging::commands::messaging_status_all,
             // Orchestrator commands
             commands::orchestrator::orchestrate,
             commands::orchestrator::cancel_orchestration,
