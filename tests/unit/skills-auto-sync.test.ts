@@ -1,5 +1,5 @@
 // ABOUTME: Test that refresh() auto-refreshes stale upstream-managed skills.
-// ABOUTME: Verifies concurrency guard (#1289), summary tracking, and the fix for #1155.
+// ABOUTME: Verifies concurrency guard (#1289), summary tracking, #1155, and #1558.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +12,7 @@ const mockSkillsService = vi.hoisted(() => ({
   isUpstreamManagedSkill: vi.fn().mockReturnValue(false),
   isPublisherManagedSkill: vi.fn().mockReturnValue(false),
   renameSkillDir: vi.fn().mockResolvedValue("/skills/renamed/SKILL.md"),
+  clearCache: vi.fn(),
 }));
 
 vi.mock("solid-js/store", () => ({
@@ -43,6 +44,7 @@ vi.mock("@/services/skills", () => ({
     inspectSyncStatus: mockSkillsService.inspectSyncStatus,
     refreshInstalledSkill: mockSkillsService.refreshInstalledSkill,
     renameSkillDir: mockSkillsService.renameSkillDir,
+    clearCache: mockSkillsService.clearCache,
   },
   isUpstreamManagedSkill: mockSkillsService.isUpstreamManagedSkill,
   isPublisherManagedSkill: mockSkillsService.isPublisherManagedSkill,
@@ -199,5 +201,55 @@ describe("refresh() concurrency guard and summary (#1289)", () => {
 
     // Two sequential calls should each execute
     expect(mockSkillsService.fetchAllSkills).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("clearCacheAndRefresh runs full sync (#1558)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("runs installed-skill sync, not just catalog refresh", async () => {
+    mockSkillsService.fetchAllSkills.mockResolvedValue([]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([]);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.clearCacheAndRefresh();
+
+    expect(mockSkillsService.clearCache).toHaveBeenCalled();
+    expect(mockSkillsService.listAllInstalled).toHaveBeenCalled();
+  });
+});
+
+describe("backfill triggers for slug/dirName mismatch (#1558)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("triggers backfill when installed slug differs from marketplace slug but dirName matches", async () => {
+    const installedSkill = {
+      slug: "saas-short-trader",
+      dirName: "alpaca-saas-short-trader",
+      scope: "seren" as const,
+      source: "serenorg",
+      path: "/skills/alpaca-saas-short-trader/SKILL.md",
+      syncState: undefined,
+    };
+    const catalogEntry = {
+      slug: "alpaca-saas-short-trader",
+      source: "serenorg",
+      sourceUrl: "https://raw.githubusercontent.com/serenorg/seren-skills/main/alpaca/saas-short-trader/SKILL.md",
+    };
+
+    mockSkillsService.fetchAllSkills.mockResolvedValue([catalogEntry]);
+    mockSkillsService.listAllInstalled.mockResolvedValue([installedSkill]);
+    mockSkillsService.backfillSyncState.mockResolvedValue(1);
+
+    const { skillsStore } = await import("@/stores/skills.store");
+    await skillsStore.refresh();
+
+    expect(mockSkillsService.backfillSyncState).toHaveBeenCalled();
   });
 });
