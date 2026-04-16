@@ -638,9 +638,11 @@ function isRetryableClaudeInitError(message: string): boolean {
 }
 
 function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
+  const activeId = state.activeSessionId;
   return Object.entries(state.sessions)
-    .filter(([, session]) => {
+    .filter(([id, session]) => {
       if (session.info.agentType !== "claude-code") return false;
+      if (id === activeId) return false;
       if (
         excludeConversationId &&
         session.conversationId === excludeConversationId
