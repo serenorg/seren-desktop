@@ -938,6 +938,108 @@ jobs:
             --content-type "application/json"
           echo "Uploaded latest.json to R2"
 
+      # Generate a GitHub-variant latest.json whose artifact URLs point at the
+      # GitHub release assets rather than R2. This is the fallback served when
+      # R2 is unreachable (e.g. ISP-level blocking of pub-*.r2.dev in Turkey).
+      # Signatures are content-based and identical to the R2 manifest.
+      - name: Generate latest.json for updater (GitHub)
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const tag = '${{ github.ref_name }}';
+            const version = tag.replace(/^v/, '');
+            const baseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${tag}`;
+
+            const platforms = [
+              'darwin-aarch64',
+              'darwin-x86_64',
+              'windows-x86_64',
+              'linux-x86_64',
+              'linux-aarch64'
+            ];
+
+            const manifest = {
+              version,
+              notes: `Release ${tag}`,
+              pub_date: new Date().toISOString(),
+              platforms: {}
+            };
+
+            for (const platform of platforms) {
+              const dir = path.join('artifacts', `update-${platform}`);
+              if (!fs.existsSync(dir)) {
+                console.log(`No update artifact for ${platform}, skipping`);
+                continue;
+              }
+
+              const files = fs.readdirSync(dir);
+              const sigFile = files.find((f) => f.endsWith('.sig'));
+              const bundleFile = files.find((f) => !f.endsWith('.sig'));
+
+              if (!sigFile || !bundleFile) {
+                console.log(`Missing sig or bundle for ${platform}: sig=${sigFile}, bundle=${bundleFile}`);
+                continue;
+              }
+
+              const signature = fs.readFileSync(path.join(dir, sigFile), 'utf8').trim();
+
+              manifest.platforms[platform] = {
+                signature,
+                url: `${baseUrl}/${bundleFile}`
+              };
+
+              console.log(`Added platform ${platform}: ${bundleFile}`);
+            }
+
+            fs.writeFileSync('artifacts/latest-github.json', JSON.stringify(manifest, null, 2));
+            console.log('Generated latest-github.json:', JSON.stringify(manifest, null, 2));
+
+      - name: Upload latest.json to GitHub release
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tagName = '${{ github.ref_name }}';
+
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner,
+              repo,
+              tag: tagName
+            });
+
+            const existingAssets = await github.rest.repos.listReleaseAssets({
+              owner,
+              repo,
+              release_id: release.id
+            });
+
+            const stale = existingAssets.data.find((a) => a.name === 'latest.json');
+            if (stale) {
+              console.log(`Deleting stale latest.json asset ${stale.id} on release ${release.id}`);
+              await github.rest.repos.deleteReleaseAsset({
+                owner,
+                repo,
+                asset_id: stale.id
+              });
+            }
+
+            const content = fs.readFileSync('artifacts/latest-github.json');
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.id,
+              name: 'latest.json',
+              data: content
+            });
+
+            console.log(`Uploaded latest.json to GitHub release ${release.id} for tag ${tagName}`);
+
       - name: Upload installer files to R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
