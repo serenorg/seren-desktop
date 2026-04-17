@@ -729,6 +729,20 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     const conversationId = conversationStore.activeConversationId;
     if (!conversationId) return;
 
+    // Defensive auth gate: matches sendMessage()'s gate but also covers the
+    // skill-invocation branch and queue-drain path that bypass it. Without
+    // this, a session-expired state can still start an orchestrator turn
+    // with no access token and no publishers, producing silent "no file
+    // found" failures while the user believes the turn is running normally.
+    if (
+      (providerStore.activeProvider === "seren" ||
+        providerStore.activeProvider === "seren-private") &&
+      !authStore.isAuthenticated
+    ) {
+      setShowSignInPrompt(true);
+      return;
+    }
+
     const userMessage: UnifiedMessage = {
       id: crypto.randomUUID(),
       type: "user",

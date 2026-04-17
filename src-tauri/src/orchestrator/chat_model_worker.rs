@@ -355,7 +355,20 @@ impl ChatModelWorker {
         // The tool inventory ensures the model knows about ALL connected services,
         // not just the skills matched by the classifier.
         let tool_inventory = Self::build_tool_inventory(tools);
+        // Pin the current UTC date as the very first line of the system prompt
+        // so document-generation tasks (invoices, reports) stamp a correct date
+        // even when history has been trimmed by RLM. The system prompt itself
+        // is never trimmed, so this context cannot be dropped.
+        let today_utc = seren_memory_sdk::chrono::Utc::now()
+            .format("%Y-%m-%d")
+            .to_string();
         let mut system_parts = vec![
+            format!(
+                "Current date (UTC): {}. Use this date for any timestamp, \
+                 invoice date, report date, or other dated artifact unless \
+                 the user explicitly supplies a different date.",
+                today_utc
+            ),
             "You are a helpful AI assistant running inside Seren Desktop. \
              The user is already authenticated and all tool calls are pre-authenticated \
              through the Seren Gateway — you do not need API keys, tokens, or environment \
@@ -2396,6 +2409,41 @@ mod tests {
         assert!(
             system_msg.contains("SEREN_API_KEY"),
             "system prompt must explicitly mention SEREN_API_KEY so model never asks for it"
+        );
+    }
+
+    #[test]
+    fn system_prompt_pins_current_utc_date() {
+        // Regression for #1579: document-generation tasks (invoices, reports)
+        // must stamp the real current date even when RLM has trimmed history.
+        // The system prompt is never trimmed, so we pin a formatted UTC date
+        // at the top. We assert the format and today's year are present —
+        // enough to catch accidental removal without being flaky at day rollover.
+        let worker = ChatModelWorker::new();
+        let routing = RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "anthropic/claude-sonnet-4".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "General chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+            reasoning_effort: None,
+            project_root: None,
+        };
+
+        let body = worker.build_request_body("Hi", &[], &routing, "", &[], &[], None);
+        let system_msg = body["messages"][0]["content"].as_str().unwrap();
+
+        let current_year = seren_memory_sdk::chrono::Utc::now()
+            .format("%Y")
+            .to_string();
+        assert!(
+            system_msg.contains("Current date (UTC):"),
+            "system prompt must pin a current-date line"
+        );
+        assert!(
+            system_msg.contains(&current_year),
+            "system prompt must include the current year so stamped dates are fresh"
         );
     }
 }

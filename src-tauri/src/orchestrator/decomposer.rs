@@ -199,18 +199,22 @@ fn try_sequential_conjunction(prompt: &str, skills: &[SkillRef]) -> Option<Vec<S
 
 /// Detect parallel conjunctions: "Scrape A and also scrape B", "Do X and do Y".
 ///
-/// Only triggers when:
-/// - "and also" appears
-/// - "and" appears between what look like independent clauses (both sides have verbs)
+/// Both "and also" and bare "and" require the second side to look like an
+/// independent clause (starts with a clause-starter verb). Without that gate,
+/// parenthetical "and also refer to..." style continuations inside a single
+/// instruction get incorrectly split into two parallel workers, which
+/// duplicates side effects (file writes, folder creation) and doubles cost.
 fn try_parallel_conjunction(prompt: &str, skills: &[SkillRef]) -> Option<Vec<SubTask>> {
     let lower = prompt.to_lowercase();
 
-    // "and also" is a strong parallel signal
+    // "and also" is a strong parallel signal, but still require the second
+    // side to look like an imperative clause — otherwise "refer to X",
+    // "include Y", "note that Z" style continuations get wrongly split.
     if let Some(pos) = lower.find(" and also ") {
         let first = prompt[..pos].trim();
         let second = prompt[pos + " and also ".len()..].trim();
 
-        if !first.is_empty() && !second.is_empty() {
+        if !first.is_empty() && !second.is_empty() && looks_like_clause(second) {
             return Some(vec![
                 SubTask {
                     id: Uuid::new_v4().to_string(),
@@ -594,6 +598,24 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].prompt, "Research AI and ML trends");
+    }
+
+    #[test]
+    fn and_also_without_clause_does_not_split() {
+        // Regression for #1579: a single document-generation prompt containing
+        // a descriptive "and also <non-imperative>" continuation must stay one
+        // subtask. The original bug duplicated file writes and doubled cost.
+        let classification = make_classification();
+        let prompt = "Create an invoice report for my first sale. \
+                      Here are details below, and also refer to my attached Contract \
+                      for further details.";
+        let result = decompose(prompt, &classification, &[]);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "prompt with descriptive 'and also refer to...' must not split"
+        );
     }
 
     // =========================================================================

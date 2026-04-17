@@ -9,6 +9,16 @@ const MAX_OUTPUT_BYTES: usize = 50_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_TIMEOUT_SECS: u64 = 300;
 
+/// Wrap a shell command string in outer double quotes so that `cmd.exe /S /C`
+/// strips them verbatim. This keeps any inner quotes (e.g. around absolute
+/// paths with spaces) intact instead of letting cmd.exe's default /C quote
+/// rule mis-parse them as cwd-relative — the classic
+/// `python: can't open file 'C:\cwd\"C:\abs\path.py"'` failure on Windows.
+#[cfg(any(target_os = "windows", test))]
+fn wrap_for_cmd_slash_s(command: &str) -> String {
+    format!("\"{}\"", command)
+}
+
 #[derive(Debug, Serialize)]
 pub struct CommandResult {
     pub stdout: String,
@@ -31,20 +41,30 @@ pub async fn execute_shell_command(
         .min(MAX_TIMEOUT_SECS);
     let timeout = Duration::from_secs(secs);
 
-    let mut cmd = if cfg!(target_os = "windows") {
-        let mut c = Command::new("cmd");
-        c.args(["/c", &command]);
-        c
+    let mut cmd = Command::new(if cfg!(target_os = "windows") {
+        "cmd"
     } else {
-        let mut c = Command::new("/bin/sh");
-        c.args(["-c", &command]);
-        c
-    };
+        "/bin/sh"
+    });
 
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
+        // /D disables AutoRun, /S forces cmd.exe to strip exactly one pair
+        // of outer quotes from the /C string (overriding its complex default
+        // rule). We then wrap the command in those outer quotes ourselves
+        // via raw_arg so any inner quotes around absolute paths survive.
+        cmd.as_std_mut()
+            .raw_arg("/D")
+            .raw_arg("/S")
+            .raw_arg("/C")
+            .raw_arg(wrap_for_cmd_slash_s(&command));
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        cmd.args(["-c", &command]);
     }
 
     // Prepend embedded runtime to PATH so shell commands can find bundled Node/Git
@@ -182,5 +202,24 @@ fn truncate_output(s: String) -> String {
             &s[..MAX_OUTPUT_BYTES],
             s.len()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_for_cmd_slash_s_preserves_inner_quotes() {
+        // Regression for #1579: wrapping the command in an extra outer pair
+        // of quotes is what lets `cmd.exe /D /S /C` strip exactly that pair,
+        // so any inner quotes around absolute paths survive untouched. The
+        // function itself is platform-independent; we exercise it on every
+        // target so CI catches breakage without needing Windows.
+        let cmd = r#"python "C:\Users\test\script.py""#;
+        let wrapped = wrap_for_cmd_slash_s(cmd);
+        assert!(wrapped.starts_with('"'));
+        assert!(wrapped.ends_with('"'));
+        assert!(wrapped.contains(r#""C:\Users\test\script.py""#));
     }
 }
