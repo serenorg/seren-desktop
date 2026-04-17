@@ -385,6 +385,36 @@ function normalizeModelRecords(result) {
     .filter((record) => typeof record.modelId === "string");
 }
 
+// Anthropic still accepts older Opus tiers on the API, but Claude Code's
+// curated model list drops them when a new Opus ships. We expose them here
+// so users who want the lower-cost Opus tiers can pick them from the picker.
+// Each entry is prepended only if the CLI hasn't already reported the same
+// modelId, so this is a no-op the day Claude Code adds them back natively.
+const LEGACY_OPUS_RECORDS = [
+  {
+    modelId: "claude-opus-4-5",
+    name: "Opus 4.5",
+    description: "Previous Opus generation — lower cost than 4.7",
+    supportsEffort: false,
+    supportedEffortLevels: [],
+    isDefault: false,
+  },
+  {
+    modelId: "claude-opus-4-6",
+    name: "Opus 4.6",
+    description: "Opus 4.6 — mid-tier Opus",
+    supportsEffort: false,
+    supportedEffortLevels: [],
+    isDefault: false,
+  },
+];
+
+function augmentWithLegacyOpus(records) {
+  const existingIds = new Set(records.map((r) => r.modelId));
+  const extras = LEGACY_OPUS_RECORDS.filter((r) => !existingIds.has(r.modelId));
+  return [...extras, ...records];
+}
+
 function inferCurrentModelId(currentModel, records) {
   if (!currentModel || records.length === 0) {
     return records[0]?.modelId ?? null;
@@ -1406,7 +1436,11 @@ export function createClaudeRuntime({ emit }) {
       sessionId: remoteSessionId,
       resumeSessionId: resumeAgentSessionId ?? null,
       forkSession: false,
-      preferredModel: null,
+      // Default new sessions to Opus 4.5 — lowest-cost Opus tier still on the
+      // Anthropic API. Claude Code's own "Default (recommended)" rolls forward
+      // to the newest Opus (currently 4.7) which is the most expensive option.
+      // Users can switch via the picker; resumed sessions use session.currentModelId.
+      preferredModel: "claude-opus-4-5",
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
     });
     const processHandle = spawn(
@@ -1473,7 +1507,9 @@ export function createClaudeRuntime({ emit }) {
         20_000,
       );
 
-      session.availableModelRecords = normalizeModelRecords(initResult);
+      session.availableModelRecords = augmentWithLegacyOpus(
+        normalizeModelRecords(initResult),
+      );
       session.currentModelId =
         inferCurrentModelId(
           initResult?.model ?? null,
@@ -1811,7 +1847,9 @@ export function createClaudeRuntime({ emit }) {
         20_000,
       );
 
-      tempSession.availableModelRecords = normalizeModelRecords(initResult);
+      tempSession.availableModelRecords = augmentWithLegacyOpus(
+        normalizeModelRecords(initResult),
+      );
       tempSession.currentModelId =
         inferCurrentModelId(
           initResult?.model ?? null,
