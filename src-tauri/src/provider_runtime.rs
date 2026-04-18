@@ -22,6 +22,20 @@ pub struct ProviderRuntimeConfig {
 
 const MAX_RESTART_ATTEMPTS: u32 = 3;
 
+/// Per-attempt readiness deadlines for the initial spawn sequence
+/// (see GH #1587). Escalating windows absorb the worst observed cold-start
+/// path: first attempt SIGKILL'd instantly (macOS first-touch on the
+/// freshly extracted embedded-runtime node binary), then a slow second
+/// cold start under Tauri setup-hook contention, then a third attempt
+/// that finally runs on warm node. `#1568` landed 10s → 20s for the
+/// first attempt + one retry; this extends to three attempts with room
+/// for the tail.
+const STARTUP_ATTEMPT_BUDGETS: &[Duration] = &[
+    Duration::from_secs(20),
+    Duration::from_secs(30),
+    Duration::from_secs(45),
+];
+
 struct ProviderRuntimeProcess {
     child: Child,
     config: ProviderRuntimeConfig,
@@ -67,92 +81,93 @@ impl ProviderRuntimeState {
         }
 
         let host = "127.0.0.1".to_string();
-        let port = find_available_port()?;
         let token = generate_auth_token();
-        let config = ProviderRuntimeConfig {
-            api_base_url: format!("http://{}:{}", host, port),
-            ws_base_url: format!("ws://{}:{}", host, port),
-            host: host.clone(),
-            port,
-            token: token.clone(),
-        };
-
         let node_bin = resolve_node_binary(app);
         let runtime_entry = find_provider_runtime_mjs()?;
 
-        let mut child = spawn_node_process(
-            &node_bin, &runtime_entry, &host, port, &token,
-        )?;
+        // Spawn up to STARTUP_ATTEMPT_BUDGETS.len() attempts. #1568 shipped
+        // with 2 attempts at 20s each; field evidence in #1587 showed cases
+        // where first-spawn SIGKILL consumes one attempt and the second
+        // still times out under setup-hook contention. Widen the budget.
+        let mut attempt_errors: Vec<String> = Vec::with_capacity(STARTUP_ATTEMPT_BUDGETS.len());
+        for (attempt_idx, deadline) in STARTUP_ATTEMPT_BUDGETS.iter().enumerate() {
+            let attempt_num = attempt_idx + 1;
+            let port = find_available_port()?;
+            let config = ProviderRuntimeConfig {
+                api_base_url: format!("http://{}:{}", host, port),
+                ws_base_url: format!("ws://{}:{}", host, port),
+                host: host.clone(),
+                port,
+                token: token.clone(),
+            };
 
-        log::info!(
-            "[ProviderRuntime] Spawned node={} pid={} port={}",
-            node_bin.display(),
-            child.id().unwrap_or(0),
-            port,
-        );
+            let mut child = spawn_node_process(
+                &node_bin,
+                &runtime_entry,
+                &host,
+                port,
+                &token,
+            )?;
 
-        pipe_child_output(&mut child);
+            log::info!(
+                "[ProviderRuntime] Attempt {}/{} — spawned node={} pid={} port={} deadline={}s",
+                attempt_num,
+                STARTUP_ATTEMPT_BUDGETS.len(),
+                node_bin.display(),
+                child.id().unwrap_or(0),
+                port,
+                deadline.as_secs(),
+            );
 
-        match wait_for_provider_runtime(&config, &mut child).await {
-            Ok(()) => {}
-            Err(first_err) => {
-                log::warn!(
-                    "[ProviderRuntime] First attempt failed ({}), retrying with fresh process",
-                    first_err,
-                );
-                let _ = child.kill().await;
+            pipe_child_output(&mut child);
 
-                let retry_port = find_available_port()?;
-                let retry_config = ProviderRuntimeConfig {
-                    api_base_url: format!("http://{}:{}", host, retry_port),
-                    ws_base_url: format!("ws://{}:{}", host, retry_port),
-                    host: host.clone(),
-                    port: retry_port,
-                    token: token.clone(),
-                };
+            match wait_for_provider_runtime_with_deadline(&config, &mut child, *deadline).await {
+                Ok(()) => {
+                    *guard = Some(ProviderRuntimeProcess {
+                        child,
+                        config: config.clone(),
+                    });
+                    drop(guard);
 
-                let mut retry_child = spawn_node_process(
-                    &node_bin, &runtime_entry, &host, retry_port, &token,
-                )?;
+                    // Abort any previous crash monitor before starting a new one
+                    if let Some(old_handle) = self.monitor_handle.lock().await.take() {
+                        old_handle.abort();
+                    }
+                    let monitor = spawn_process_monitor(app.clone());
+                    *self.monitor_handle.lock().await = Some(monitor);
 
-                log::info!(
-                    "[ProviderRuntime] Retry spawned pid={} port={}",
-                    retry_child.id().unwrap_or(0),
-                    retry_port,
-                );
+                    // Notify the frontend that the runtime is up. The
+                    // agent store subscribes to this event and re-runs
+                    // `getAvailableAgents` — this unblocks the Codex /
+                    // Gemini buttons even when first-attempt readiness
+                    // exceeds the store's initial-query backoff budget.
+                    let _ = app.emit("provider-runtime://ready", &config);
 
-                pipe_child_output(&mut retry_child);
-                wait_for_provider_runtime(&retry_config, &mut retry_child).await?;
-
-                *guard = Some(ProviderRuntimeProcess {
-                    child: retry_child,
-                    config: retry_config.clone(),
-                });
-                drop(guard);
-
-                if let Some(old_handle) = self.monitor_handle.lock().await.take() {
-                    old_handle.abort();
+                    return Ok(config);
                 }
-                let monitor = spawn_process_monitor(app.clone());
-                *self.monitor_handle.lock().await = Some(monitor);
-
-                return Ok(retry_config);
+                Err(attempt_err) => {
+                    log::warn!(
+                        "[ProviderRuntime] Attempt {}/{} failed ({}), {}",
+                        attempt_num,
+                        STARTUP_ATTEMPT_BUDGETS.len(),
+                        attempt_err,
+                        if attempt_num < STARTUP_ATTEMPT_BUDGETS.len() {
+                            "retrying with fresh process"
+                        } else {
+                            "giving up"
+                        },
+                    );
+                    let _ = child.kill().await;
+                    attempt_errors.push(format!("attempt {}: {}", attempt_num, attempt_err));
+                }
             }
         }
-        *guard = Some(ProviderRuntimeProcess {
-            child,
-            config: config.clone(),
-        });
-        drop(guard);
 
-        // Abort any previous crash monitor before starting a new one
-        if let Some(old_handle) = self.monitor_handle.lock().await.take() {
-            old_handle.abort();
-        }
-        let monitor = spawn_process_monitor(app.clone());
-        *self.monitor_handle.lock().await = Some(monitor);
-
-        Ok(config)
+        Err(format!(
+            "Provider runtime failed to become ready after {} attempts: {}",
+            attempt_errors.len(),
+            attempt_errors.join("; ")
+        ))
     }
 }
 
@@ -360,16 +375,17 @@ fn pipe_child_output(child: &mut Child) {
     }
 }
 
-async fn wait_for_provider_runtime(
+async fn wait_for_provider_runtime_with_deadline(
     config: &ProviderRuntimeConfig,
     child: &mut Child,
+    budget: Duration,
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(500))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
     let health_url = format!("{}/__seren/health", config.api_base_url);
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + budget;
 
     loop {
         if let Some(status) = child
@@ -392,7 +408,10 @@ async fn wait_for_provider_runtime(
         }
 
         if Instant::now() >= deadline {
-            return Err("Timed out waiting for provider runtime readiness.".to_string());
+            return Err(format!(
+                "Timed out waiting for provider runtime readiness after {}s.",
+                budget.as_secs()
+            ));
         }
 
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -500,5 +519,115 @@ pub async fn provider_runtime_stop(state: State<'_, ProviderRuntimeState>) -> Re
             .kill()
             .await
             .map_err(|err| format!("Failed to stop provider runtime: {}", err)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::process::Command as TokioCommand;
+
+    /// Build a stub child process that exits instantly with the requested
+    /// code/signal so `wait_for_provider_runtime_with_deadline` can exercise
+    /// its child-exit path without a real node runtime. Used by the retry
+    /// tests below.
+    async fn spawn_exiting_child(exit_code: u8) -> Child {
+        TokioCommand::new("sh")
+            .arg("-c")
+            .arg(format!("exit {}", exit_code))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sh exit")
+    }
+
+    /// Build a child that runs for longer than the readiness deadline, so
+    /// the wait loop exits via the timeout branch. We use `sleep 10` which
+    /// outlives our 200ms test deadline without tying up system resources.
+    async fn spawn_hanging_child() -> Child {
+        TokioCommand::new("sh")
+            .arg("-c")
+            .arg("sleep 10")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sh sleep")
+    }
+
+    fn dummy_config() -> ProviderRuntimeConfig {
+        // Port that definitely won't have a server behind it — health
+        // check never succeeds, so the deadline is reached.
+        ProviderRuntimeConfig {
+            host: "127.0.0.1".to_string(),
+            port: 1,
+            token: "test".to_string(),
+            api_base_url: "http://127.0.0.1:1".to_string(),
+            ws_base_url: "ws://127.0.0.1:1".to_string(),
+        }
+    }
+
+    /// GH #1587: a child that exits (e.g. SIGKILL, signal 9) before binding
+    /// must surface as an Err that names the exit status so the retry loop
+    /// in `ensure_started` can react. Before this PR the message was the
+    /// same; what changed is that now a caller can chain three of these
+    /// together without running out of attempts.
+    #[tokio::test]
+    async fn wait_reports_exit_for_signal_exited_child() {
+        let mut child = spawn_exiting_child(1).await;
+        let config = dummy_config();
+        let err = wait_for_provider_runtime_with_deadline(
+            &config,
+            &mut child,
+            Duration::from_secs(2),
+        )
+        .await
+        .expect_err("must err on early exit");
+        assert!(
+            err.contains("exited before becoming ready"),
+            "unexpected err: {err}"
+        );
+    }
+
+    /// GH #1587: a child that runs but never serves health in time must
+    /// surface as a timeout Err naming the budget, so operators reading
+    /// logs can see which attempt's budget was exceeded.
+    #[tokio::test]
+    async fn wait_reports_timeout_with_budget_in_message() {
+        let mut child = spawn_hanging_child().await;
+        let config = dummy_config();
+        let err = wait_for_provider_runtime_with_deadline(
+            &config,
+            &mut child,
+            Duration::from_millis(300),
+        )
+        .await
+        .expect_err("must err on timeout");
+        assert!(err.contains("Timed out"), "unexpected err: {err}");
+        assert!(err.contains("0s") || err.contains("after"), "err should mention budget: {err}");
+        let _ = child.kill().await;
+    }
+
+    /// GH #1587: the attempt-budget table has three entries so the retry
+    /// loop tolerates SIGKILL-first + slow-second without exhausting
+    /// attempts. Guards against accidental future trimming of the slice.
+    #[test]
+    fn startup_budget_allows_three_attempts() {
+        assert_eq!(
+            STARTUP_ATTEMPT_BUDGETS.len(),
+            3,
+            "retry budget regression: #1587 requires at least three attempts"
+        );
+        // Budgets must be monotonically non-decreasing — second/third
+        // attempts benefit from warmer caches and eased contention.
+        let pairs: Vec<_> = STARTUP_ATTEMPT_BUDGETS
+            .windows(2)
+            .map(|w| (w[0], w[1]))
+            .collect();
+        for (prev, next) in pairs {
+            assert!(
+                next >= prev,
+                "budgets should be non-decreasing: {prev:?} -> {next:?}"
+            );
+        }
     }
 }

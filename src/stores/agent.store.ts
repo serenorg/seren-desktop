@@ -1,7 +1,7 @@
 // ABOUTME: Reactive provider-runtime state management for agent sessions.
 // ABOUTME: Stores agent sessions, message streams, tool calls, and plan state.
 
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createStore, produce } from "solid-js/store";
 import {
   isLocalProviderRuntime,
@@ -118,6 +118,46 @@ import type {
   ToolCallEvent,
 } from "@/services/providers";
 import * as providerService from "@/services/providers";
+
+/** Set once we've subscribed to `provider-runtime://ready` so repeated
+ *  initialize() calls don't stack listeners. */
+let providerRuntimeReadyListener: Promise<UnlistenFn> | null = null;
+
+/** Commit an agent list into the store + settle the selected-agent fallback.
+ *  Shared by `initialize()` and the `provider-runtime://ready` listener so
+ *  they produce identical post-conditions. See GH #1587. */
+function applyAgents(agents: providerService.AgentInfo[]): void {
+  setState("availableAgents", agents);
+  const currentAgent = agents.find(
+    (agent) => agent.type === state.selectedAgentType,
+  );
+  if (!currentAgent?.available) {
+    const fallbackAgent = agents.find((agent) => agent.available);
+    if (fallbackAgent) {
+      setState("selectedAgentType", fallbackAgent.type);
+    }
+  }
+}
+
+/** Subscribe once to `provider-runtime://ready` so late-arriving runtime
+ *  startup (>backoff budget) still populates Codex/Gemini without a user
+ *  reload. See GH #1587. */
+function subscribeToProviderRuntimeReady(): void {
+  if (providerRuntimeReadyListener) return;
+  providerRuntimeReadyListener = listen("provider-runtime://ready", async () => {
+    try {
+      const agents = await providerService.getAvailableAgents();
+      if (agents.length > 0) {
+        applyAgents(agents);
+      }
+    } catch (error) {
+      console.error(
+        "Failed to load agents on provider-runtime ready event:",
+        error,
+      );
+    }
+  });
+}
 
 // ============================================================================
 // Types
@@ -861,6 +901,14 @@ export const agentStore = {
 
   /**
    * Initialize the agent store by loading available agents.
+   *
+   * Retries `getAvailableAgents()` with exponential backoff when it throws
+   * or returns an empty list. The provider-runtime cold start can take
+   * 20+ seconds when launched from Cursor/Claude Code terminals
+   * (see GH #1568, #1587); without retry the sidebar misses Codex/Gemini
+   * permanently until app reload. Additionally subscribes to the
+   * `provider-runtime://ready` event so the agent list populates when
+   * the runtime eventually comes up beyond the backoff budget.
    */
   async initialize() {
     if (!runtimeHasCapability("agents")) {
@@ -872,21 +920,31 @@ export const agentStore = {
       return;
     }
 
-    try {
-      const agents = await providerService.getAvailableAgents();
-      setState("availableAgents", agents);
-      const currentAgent = agents.find(
-        (agent) => agent.type === state.selectedAgentType,
-      );
-      if (!currentAgent?.available) {
-        const fallbackAgent = agents.find((agent) => agent.available);
-        if (fallbackAgent) {
-          setState("selectedAgentType", fallbackAgent.type);
+    // Fire-and-forget subscription: if the runtime comes up late, we
+    // re-query the agent list then. Idempotent because repeated calls
+    // to applyAgents just overwrite availableAgents with the same data.
+    subscribeToProviderRuntimeReady();
+
+    const backoffMs = [0, 1_000, 2_000, 4_000, 8_000];
+    for (let attempt = 0; attempt < backoffMs.length; attempt++) {
+      if (backoffMs[attempt] > 0) {
+        await new Promise((r) => setTimeout(r, backoffMs[attempt]));
+      }
+      try {
+        const agents = await providerService.getAvailableAgents();
+        if (agents.length > 0) {
+          applyAgents(agents);
+          return;
+        }
+        // Empty list — runtime probably not ready yet, keep retrying.
+      } catch (error) {
+        if (attempt === backoffMs.length - 1) {
+          console.error("Failed to load available agents:", error);
         }
       }
-    } catch (error) {
-      console.error("Failed to load available agents:", error);
     }
+    // Budget exhausted. The `provider-runtime://ready` listener may still
+    // populate later; meanwhile the sidebar shows Seren Agent only.
   },
 
   /**
