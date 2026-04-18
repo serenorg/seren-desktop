@@ -269,8 +269,60 @@ impl ChatModelWorker {
             cancelled: Arc::new(Mutex::new(false)),
             publisher_slug: publisher_slug
                 .unwrap_or_else(|| DEFAULT_PUBLISHER_SLUG.to_string()),
-            tool_definitions: tools,
+            tool_definitions: Self::inject_local_tool_definitions(tools),
         }
+    }
+
+    /// Prepend tool definitions for local builtins that the frontend catalog
+    /// does not ship. Today that's just `write_pdf_from_html` (GH #1585) —
+    /// a native atomic HTML→PDF renderer that replaces the previous
+    /// "write HTML intermediate, then shell-out to convert" pattern and its
+    /// orphan-file failure mode.
+    ///
+    /// Definitions are pushed to the front so they are visible to tool-
+    /// relevance ranking even when the gateway catalog is full.
+    fn inject_local_tool_definitions(
+        existing: Vec<serde_json::Value>,
+    ) -> Vec<serde_json::Value> {
+        let write_pdf = serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "write_pdf_from_html",
+                "description": "Render the given HTML as a PDF and write it atomically to `path`. \
+Prefer this tool over `write_file` + a separate conversion step whenever the \
+user asks for PDF output — it uses one tool round, leaves no HTML intermediate \
+on disk, and fails cleanly if conversion is not possible. `path` may start \
+with `~/` to refer to the user's home directory. Parent directories are \
+created if missing.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute or ~/-relative output path ending in .pdf, e.g. '~/Downloads/invoice.pdf'."
+                        },
+                        "html": {
+                            "type": "string",
+                            "description": "Complete, self-contained HTML document (should begin with <!DOCTYPE html>). Inline all CSS; external assets are not fetched."
+                        }
+                    },
+                    "required": ["path", "html"]
+                }
+            }
+        });
+        let mut out = Vec::with_capacity(existing.len() + 1);
+        // Only inject if the catalog doesn't already define it (avoid dup).
+        let already_present = existing.iter().any(|t| {
+            t.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                == Some("write_pdf_from_html")
+        });
+        if !already_present {
+            out.push(write_pdf);
+        }
+        out.extend(existing);
+        out
     }
 
     /// Build a tool publisher inventory from the actual tools being sent.
@@ -374,6 +426,21 @@ impl ChatModelWorker {
              through the Seren Gateway — you do not need API keys, tokens, or environment \
              variables to use any of your tools. Never ask the user to configure credentials \
              or look for keys like SEREN_API_KEY. Just call the tools directly."
+                .to_string(),
+            // File output rules (GH #1583, #1585) — tell the model how to
+            // hit the user's requested path and format in one tool round.
+            "File output rules:\n\
+             • Paths starting with '~/' are expanded to the user's home directory. \
+             Pass them through as-is — do not rewrite to an absolute path.\n\
+             • When the user asks for a PDF, use the `write_pdf_from_html` tool \
+             to produce the file in one step. Do NOT write an HTML file first \
+             and then convert it — that leaves an orphan intermediate on disk \
+             and costs extra rounds. Build a complete self-contained HTML \
+             document (with inline CSS) and pass it to `write_pdf_from_html` \
+             with the exact path the user asked for.\n\
+             • Respect the exact filename and extension the user asked for. \
+             If they asked for '~/Downloads/X/Y.pdf', write to that path — not \
+             to 'invoice.pdf' or a similar auto-named file."
                 .to_string(),
         ];
         // Inject live repo context (git branch, status, recent commits)
@@ -1041,6 +1108,7 @@ impl ChatModelWorker {
             "read_file"
                 | "read_file_base64"
                 | "write_file"
+                | "write_pdf_from_html"
                 | "list_directory"
                 | "path_exists"
                 | "create_directory"
@@ -1100,6 +1168,20 @@ impl ChatModelWorker {
                 }
                 match crate::files::write_file(path.clone(), content) {
                     Ok(()) => (format!("Successfully wrote file: {}", path), false),
+                    Err(e) => (e, true),
+                }
+            }
+            "write_pdf_from_html" => {
+                let path = args["path"].as_str().unwrap_or("").to_string();
+                let html = args["html"].as_str().unwrap_or("").to_string();
+                if path.is_empty() {
+                    return ("Missing required parameter: path".to_string(), true);
+                }
+                if html.is_empty() {
+                    return ("Missing required parameter: html".to_string(), true);
+                }
+                match crate::pdf::write_pdf_from_html(&path, &html).await {
+                    Ok(msg) => (msg, false),
                     Err(e) => (e, true),
                 }
             }
@@ -2281,8 +2363,30 @@ mod tests {
             }
         })];
         let worker = ChatModelWorker::with_tools(tools.clone(), None);
-        assert_eq!(worker.tool_definitions.len(), 1);
-        assert_eq!(worker.tool_definitions[0]["function"]["name"], "read_file");
+        // `with_tools` injects `write_pdf_from_html` (GH #1585) at the front
+        // of the list, so the caller's tools follow. Assert both are present
+        // and read_file is preserved.
+        assert_eq!(worker.tool_definitions.len(), 2);
+        let names: Vec<&str> = worker
+            .tool_definitions
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap_or(""))
+            .collect();
+        assert!(names.contains(&"write_pdf_from_html"));
+        assert!(names.contains(&"read_file"));
+    }
+
+    #[test]
+    fn inject_local_tool_definitions_is_idempotent() {
+        // If the frontend catalog ever ships `write_pdf_from_html`, we must
+        // not duplicate it. (GH #1585)
+        let existing = vec![serde_json::json!({
+            "type": "function",
+            "function": {"name": "write_pdf_from_html"}
+        })];
+        let result = ChatModelWorker::inject_local_tool_definitions(existing);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["function"]["name"], "write_pdf_from_html");
     }
 
     fn make_tool(name: &str) -> serde_json::Value {

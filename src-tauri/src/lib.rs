@@ -35,6 +35,8 @@ pub mod messaging;
 mod oauth;
 mod oauth_callback_server;
 mod orchestrator;
+mod path_util;
+mod pdf;
 mod polymarket;
 mod provider_runtime;
 mod shell;
