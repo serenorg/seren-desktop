@@ -157,7 +157,24 @@ impl ProviderRuntimeState {
                             "giving up"
                         },
                     );
-                    let _ = child.kill().await;
+                    // Non-blocking kill: `Child::kill().await` is *not*
+                    // just a signal send — it sends SIGKILL *and then
+                    // awaits* the child's wait status. On a hung node
+                    // subprocess (the exact case this retry loop exists
+                    // for) that await never returns, which traps the
+                    // loop before attempt 2 can spawn.
+                    //
+                    // Observed after #1588 landed: attempt 1 timed out,
+                    // warn logged, then the process silently hung — the
+                    // "Attempt 2/3 — spawned" log line never appeared
+                    // even though STARTUP_ATTEMPT_BUDGETS has three
+                    // entries. Codex/Gemini never showed up.
+                    //
+                    // `start_kill()` sends SIGKILL synchronously without
+                    // waiting. `kill_on_drop(true)` (set at spawn) takes
+                    // care of reaping when `child` drops at end-of-scope.
+                    let _ = child.start_kill();
+                    drop(child);
                     attempt_errors.push(format!("attempt {}: {}", attempt_num, attempt_err));
                 }
             }
@@ -604,7 +621,36 @@ mod tests {
         .expect_err("must err on timeout");
         assert!(err.contains("Timed out"), "unexpected err: {err}");
         assert!(err.contains("0s") || err.contains("after"), "err should mention budget: {err}");
-        let _ = child.kill().await;
+        // Use start_kill here too — see test below for why.
+        let _ = child.start_kill();
+        drop(child);
+    }
+
+    /// Regression guard (GH #1587 post-merge field-observed hang):
+    /// `Child::kill().await` sends SIGKILL *and awaits the child's wait
+    /// status*. On a hung subprocess that await never returns, which in
+    /// the retry loop blocks attempt 2 from ever spawning.
+    ///
+    /// `start_kill()` is the non-blocking variant and is what the retry
+    /// loop uses. This test proves it completes in <100ms even on a
+    /// long-running child so the loop can advance deterministically.
+    #[tokio::test]
+    async fn start_kill_does_not_block_on_long_running_child() {
+        let mut child = spawn_hanging_child().await;
+        let t0 = std::time::Instant::now();
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            async { child.start_kill() },
+        )
+        .await
+        .expect("start_kill must not block")
+        .expect("start_kill returned err");
+        drop(child);
+        assert!(
+            t0.elapsed() < Duration::from_millis(100),
+            "start_kill should be near-instant, took {:?}",
+            t0.elapsed()
+        );
     }
 
     /// GH #1587: the attempt-budget table has three entries so the retry
