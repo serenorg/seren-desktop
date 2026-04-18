@@ -38,6 +38,7 @@ const PINNED_TOOL_NAMES: &[&str] = &[
     "read_file",
     "read_file_base64",
     "write_file",
+    "write_pdf_from_html",
     "list_directory",
     "path_exists",
     "create_directory",
@@ -760,6 +761,10 @@ mod tests {
             "Read a file and return its bytes as base64",
         ));
         tools.push(make_tool("write_file", "Write content to a file on disk"));
+        tools.push(make_tool(
+            "write_pdf_from_html",
+            "Render HTML as a PDF and write it atomically",
+        ));
         tools.push(make_tool("list_directory", "List entries in a directory"));
         tools.push(make_tool(
             "path_exists",
