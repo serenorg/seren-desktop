@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 use uuid::Uuid;
 
 use super::chat_model_worker::ChatModelWorker;
@@ -29,9 +29,19 @@ use super::worker::Worker;
 
 /// Managed state for the orchestrator, tracking active sessions for cancellation.
 pub struct OrchestratorState {
-    /// Map of conversation_id → cancellation sender.
-    /// Sending on a cancel channel signals the orchestrator to stop.
-    active_sessions: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    /// Map of conversation_id → cancellation flag sender.
+    ///
+    /// Uses a watch channel rather than a oneshot so that:
+    /// - A single `send(true)` signals all consumers (forward-loop select,
+    ///   retry-backoff sleep, per-iteration pre-worker check), surviving
+    ///   multiple retry/reroute iterations of `execute_single_task`.
+    /// - `cancel()` is idempotent: a second Stop click while the orchestrator
+    ///   is still winding down is a no-op, not a misleading
+    ///   "No active session" warning.
+    /// - Sessions are removed only in `orchestrate()` cleanup, not on the
+    ///   first cancel, so subsequent clicks during the same run find the
+    ///   session and are silently absorbed.
+    active_sessions: Mutex<HashMap<String, watch::Sender<bool>>>,
 }
 
 impl OrchestratorState {
@@ -49,6 +59,23 @@ impl Default for OrchestratorState {
 }
 
 const PRIVATE_CHAT_DEPLOYMENT_MISSING_MESSAGE: &str = "Your organization requires private chat, but no private chat deployment is configured. Please contact your organization admin.";
+
+/// Sleep for `duration`, returning early if the cancel flag flips to true.
+///
+/// Returns `true` if the sleep completed normally, `false` if cancelled.
+/// Used to keep retry backoffs responsive to Stop clicks (see GH #1581).
+async fn sleep_or_cancel(
+    duration: std::time::Duration,
+    cancel_rx: &mut watch::Receiver<bool>,
+) -> bool {
+    if *cancel_rx.borrow() {
+        return false;
+    }
+    tokio::select! {
+        _ = tokio::time::sleep(duration) => true,
+        _ = cancel_rx.changed() => !*cancel_rx.borrow(),
+    }
+}
 
 // =============================================================================
 // Model Fallback Chain
@@ -193,8 +220,11 @@ pub async fn orchestrate(
         subtasks.len()
     );
 
-    // 3. Register cancellation
-    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    // 3. Register cancellation. A watch channel lets the cancel flag be
+    //    observed by every retry iteration and every cancellable sleep; a
+    //    oneshot would be consumed by the first observer and leave later
+    //    iterations uncancellable (see GH #1581).
+    let (cancel_tx, cancel_rx) = watch::channel(false);
     {
         let mut sessions = state.active_sessions.lock().await;
         sessions.insert(conversation_id.clone(), cancel_tx);
@@ -251,7 +281,7 @@ async fn execute_single_task(
     history: &[serde_json::Value],
     capabilities: &UserCapabilities,
     images: &[ImageAttachment],
-    cancel_rx: tokio::sync::oneshot::Receiver<()>,
+    cancel_rx: watch::Receiver<bool>,
 ) -> Result<(), String> {
     // Compute Thompson sampling rankings before routing
     let mut capabilities = capabilities.clone();
@@ -316,10 +346,17 @@ async fn execute_single_task(
     const MAX_SAME_MODEL_RETRIES: usize = 1;
     let mut network_retry_count: usize = 0;
 
-    // Wrap cancel_rx in Arc<Mutex> so it survives reroute iterations
-    let cancel_rx = Arc::new(Mutex::new(Some(cancel_rx)));
-
     loop {
+        // Bail out if cancellation arrived between iterations (e.g. during
+        // the previous worker's unwind or a backoff that already exited).
+        if *cancel_rx.borrow() {
+            log::info!(
+                "[Orchestrator] Cancellation observed at top of retry loop for {}",
+                conversation_id
+            );
+            break;
+        }
+
         // Load skills
         let skill_content = load_skill_content(&routing.selected_skills)?;
 
@@ -357,67 +394,45 @@ async fn execute_single_task(
                 .await
         });
 
-        // Collect events, looking for reroutable errors
+        // Collect events, looking for reroutable errors.
+        // A fresh watch::Receiver clone per iteration keeps cancellation
+        // observable across retry/reroute rounds (the receiver is never
+        // consumed — unlike a oneshot).
         let conv_id = conversation_id.to_string();
         let app_for_events = app.clone();
-        let cancel_rx_clone = cancel_rx.clone();
+        let mut cancel_rx_forward = cancel_rx.clone();
 
-        // Collect all events, intercepting errors for reroute analysis.
         // Returns (was_cancelled, captured_error).
         let mut reroutable_error: Option<String> = None;
         let forward_handle = tokio::spawn(async move {
-            let mut taken_rx = cancel_rx_clone.lock().await.take();
             let mut captured_error: Option<String> = None;
-            let mut cancelled = false;
-            loop {
-                if let Some(ref mut rx) = taken_rx {
-                    tokio::select! {
-                        event = event_rx.recv() => {
-                            match event {
-                                Some(worker_event) => {
-                                    // Capture error messages for reroute analysis
-                                    if let WorkerEvent::Error { ref message } = worker_event {
-                                        captured_error = Some(message.clone());
-                                    }
-                                    let orchestrator_event = OrchestratorEvent {
-                                        conversation_id: conv_id.clone(),
-                                        worker_event,
-                                        subtask_id: None,
-                                    };
-                                    if let Err(e) = app_for_events.emit("orchestrator://event", &orchestrator_event) {
-                                        log::error!("[Orchestrator] Failed to emit event: {}", e);
-                                        break;
-                                    }
+            let mut cancelled = *cancel_rx_forward.borrow();
+            while !cancelled {
+                tokio::select! {
+                    event = event_rx.recv() => {
+                        match event {
+                            Some(worker_event) => {
+                                if let WorkerEvent::Error { ref message } = worker_event {
+                                    captured_error = Some(message.clone());
                                 }
-                                None => break,
+                                let orchestrator_event = OrchestratorEvent {
+                                    conversation_id: conv_id.clone(),
+                                    worker_event,
+                                    subtask_id: None,
+                                };
+                                if let Err(e) = app_for_events.emit("orchestrator://event", &orchestrator_event) {
+                                    log::error!("[Orchestrator] Failed to emit event: {}", e);
+                                    break;
+                                }
                             }
-                        }
-                        _ = rx => {
-                            log::info!("[Orchestrator] Cancellation received for conversation {}", conv_id);
-                            cancelled = true;
-                            break;
+                            None => break,
                         }
                     }
-                } else {
-                    // No cancel_rx available (already consumed), just forward events
-                    match event_rx.recv().await {
-                        Some(worker_event) => {
-                            if let WorkerEvent::Error { ref message } = worker_event {
-                                captured_error = Some(message.clone());
-                            }
-                            let orchestrator_event = OrchestratorEvent {
-                                conversation_id: conv_id.clone(),
-                                worker_event,
-                                subtask_id: None,
-                            };
-                            if let Err(e) =
-                                app_for_events.emit("orchestrator://event", &orchestrator_event)
-                            {
-                                log::error!("[Orchestrator] Failed to emit event: {}", e);
-                                break;
-                            }
+                    _ = cancel_rx_forward.changed() => {
+                        if *cancel_rx_forward.borrow() {
+                            log::info!("[Orchestrator] Cancellation received for conversation {}", conv_id);
+                            cancelled = true;
                         }
-                        None => break,
                     }
                 }
             }
@@ -495,7 +510,19 @@ async fn execute_single_task(
                     backoff_secs,
                     reroutable_error.as_deref().unwrap_or("unknown"),
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                let mut cancel_sleep = cancel_rx.clone();
+                if !sleep_or_cancel(
+                    std::time::Duration::from_secs(backoff_secs),
+                    &mut cancel_sleep,
+                )
+                .await
+                {
+                    log::info!(
+                        "[Orchestrator] Cancellation received during network backoff for {}",
+                        conversation_id
+                    );
+                    break;
+                }
                 continue;
             }
             log::error!(
@@ -549,7 +576,19 @@ async fn execute_single_task(
                 routing.model_id = fallback_model.clone();
                 tried_models.push(fallback_model);
 
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let mut cancel_sleep = cancel_rx.clone();
+                if !sleep_or_cancel(
+                    std::time::Duration::from_secs(1),
+                    &mut cancel_sleep,
+                )
+                .await
+                {
+                    log::info!(
+                        "[Orchestrator] Cancellation received during context-overflow reroute for {}",
+                        conversation_id
+                    );
+                    break;
+                }
                 continue;
             }
             // All large-context models exhausted — fall through to give up
@@ -593,7 +632,19 @@ async fn execute_single_task(
                     tried_models.push(fallback_model);
 
                     // Brief backoff before retry with new model
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let mut cancel_sleep = cancel_rx.clone();
+                    if !sleep_or_cancel(
+                        std::time::Duration::from_secs(2),
+                        &mut cancel_sleep,
+                    )
+                    .await
+                    {
+                        log::info!(
+                            "[Orchestrator] Cancellation received during timeout fallback for {}",
+                            conversation_id
+                        );
+                        break;
+                    }
                     continue;
                 }
             }
@@ -619,7 +670,19 @@ async fn execute_single_task(
             );
 
             // Brief backoff before retry
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let mut cancel_sleep = cancel_rx.clone();
+            if !sleep_or_cancel(
+                std::time::Duration::from_secs(2),
+                &mut cancel_sleep,
+            )
+            .await
+            {
+                log::info!(
+                    "[Orchestrator] Cancellation received during same-model retry backoff for {}",
+                    conversation_id
+                );
+                break;
+            }
             continue;
         }
 
@@ -720,7 +783,7 @@ async fn execute_multi_task(
     history: &[serde_json::Value],
     capabilities: &UserCapabilities,
     images: &[ImageAttachment],
-    cancel_rx: tokio::sync::oneshot::Receiver<()>,
+    cancel_watch_rx: watch::Receiver<bool>,
 ) -> Result<(), String> {
     // Persist plan to SQLite
     let plan_id = Uuid::new_v4().to_string();
@@ -784,15 +847,6 @@ async fn execute_multi_task(
         plan_id,
         subtasks.len()
     );
-
-    // Bridge the oneshot cancel_rx into a watch channel so cancellation state
-    // can be cloned across the forward task and each worker layer.
-    let (cancel_watch_tx, cancel_watch_rx) = tokio::sync::watch::channel(false);
-    let cancel_watch_tx_for_bridge = cancel_watch_tx.clone();
-    tokio::spawn(async move {
-        let _ = cancel_rx.await;
-        let _ = cancel_watch_tx_for_bridge.send(true);
-    });
 
     // Shared event channel: all workers send (subtask_id, event) through this
     let (shared_tx, mut shared_rx) = mpsc::channel::<(String, WorkerEvent)>(256);
@@ -1069,10 +1123,25 @@ async fn execute_multi_task(
 }
 
 /// Cancel an active orchestration by conversation ID.
+///
+/// Idempotent: calling twice on the same session is safe and silent (the
+/// second call sees the flag is already `true` and returns without warning).
+/// The session entry is kept in the map until `orchestrate()` cleanup so
+/// repeated Stop clicks during the unwind do not produce spurious
+/// "No active session" warnings (see GH #1581).
 pub async fn cancel(state: &OrchestratorState, conversation_id: &str) -> Result<(), String> {
-    let mut sessions = state.active_sessions.lock().await;
-    if let Some(cancel_tx) = sessions.remove(conversation_id) {
-        let _ = cancel_tx.send(());
+    let sessions = state.active_sessions.lock().await;
+    if let Some(cancel_tx) = sessions.get(conversation_id) {
+        if *cancel_tx.borrow() {
+            // Already cancelling — user clicked Stop again while the
+            // orchestrator was still winding down. That is normal.
+            log::debug!(
+                "[Orchestrator] Cancel re-requested for conversation {} (already cancelling)",
+                conversation_id
+            );
+            return Ok(());
+        }
+        let _ = cancel_tx.send(true);
         log::info!(
             "[Orchestrator] Sent cancel signal for conversation {}",
             conversation_id
@@ -1363,23 +1432,104 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_removes_session_and_sends_signal() {
+    async fn cancel_flips_flag_and_keeps_session_entry() {
+        // Contract (GH #1581): cancel() signals via the watch channel but
+        // does NOT remove the session. The entry is cleaned up by
+        // `orchestrate()` only when orchestration actually exits, so repeat
+        // Stop clicks during the unwind find the session and are silent.
         let state = OrchestratorState::new();
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-
+        let (tx, mut rx) = watch::channel(false);
         {
             let mut sessions = state.active_sessions.lock().await;
             sessions.insert("test-conv".to_string(), tx);
         }
 
-        let result = cancel(&state, "test-conv").await;
-        assert!(result.is_ok());
+        assert!(cancel(&state, "test-conv").await.is_ok());
 
-        // The receiver should have gotten the signal
-        assert!(rx.await.is_ok());
+        // Receiver observes the flag.
+        rx.changed().await.unwrap();
+        assert!(*rx.borrow());
 
-        // Session should be removed
+        // Session entry still present — removal is orchestrate()'s job.
         let sessions = state.active_sessions.lock().await;
-        assert!(!sessions.contains_key("test-conv"));
+        assert!(sessions.contains_key("test-conv"));
+    }
+
+    // =========================================================================
+    // Cancellation behaviour (GH #1581 regression tests — critical only)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn cancel_during_backoff_interrupts_sleep() {
+        // The retry backoff used to be a plain `tokio::time::sleep`, which
+        // silently swallowed Stop clicks. With `sleep_or_cancel`, a cancel
+        // signal must interrupt the sleep promptly rather than waiting the
+        // full backoff.
+        let (tx, mut rx) = watch::channel(false);
+
+        let sleep_task = tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
+            let completed = sleep_or_cancel(std::time::Duration::from_secs(30), &mut rx).await;
+            (completed, t0.elapsed())
+        });
+
+        // Let the sleep start, then fire cancel.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tx.send(true).unwrap();
+
+        let (completed, elapsed) = sleep_task.await.unwrap();
+        assert!(!completed, "sleep should report cancellation");
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "cancel should interrupt sleep, took {:?}",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_propagates_across_multiple_retry_iterations() {
+        // With a oneshot, the first iteration consumed the receiver and
+        // later iterations were uncancellable. watch::Receiver is cloneable
+        // and observable forever — a single `send(true)` propagates to
+        // every subsequent clone.
+        let (tx, rx) = watch::channel(false);
+        tx.send(true).unwrap();
+
+        // Two sequential "iterations" each take a fresh clone, as
+        // `execute_single_task` does per retry. Each fresh clone's "last
+        // seen" version is 0, so `changed()` returns immediately because
+        // the sender has already bumped to version 1 (cancel=true).
+        for iter in 0..2 {
+            let mut iter_rx = rx.clone();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                iter_rx.changed(),
+            )
+            .await;
+            assert!(result.is_ok(), "iter {} timed out waiting for cancel", iter);
+            assert!(*iter_rx.borrow(), "iter {} should observe cancel=true", iter);
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_is_idempotent_for_repeat_clicks() {
+        // A user mashing Stop three times during the retry unwind must not
+        // produce "No active session" warnings — the session stays in the
+        // map until orchestrate() exits.
+        let state = OrchestratorState::new();
+        let (tx, _rx) = watch::channel(false);
+        {
+            let mut sessions = state.active_sessions.lock().await;
+            sessions.insert("test-conv".to_string(), tx);
+        }
+
+        for _ in 0..3 {
+            assert!(cancel(&state, "test-conv").await.is_ok());
+        }
+
+        // Session is still registered (orchestrate() will clean it up).
+        let sessions = state.active_sessions.lock().await;
+        assert!(sessions.contains_key("test-conv"));
+        assert!(*sessions.get("test-conv").unwrap().borrow());
     }
 }
