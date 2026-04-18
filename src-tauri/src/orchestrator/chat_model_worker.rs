@@ -442,6 +442,28 @@ created if missing.",
              If they asked for '~/Downloads/X/Y.pdf', write to that path — not \
              to 'invoice.pdf' or a similar auto-named file."
                 .to_string(),
+            // Publisher-routing rules (GH #1592, follows from #1591) — steer the model
+            // toward specific connected publishers over generic browser automation
+            // whenever the request maps cleanly onto one. Additive and reversible:
+            // the model retains full agency; only the priority is nudged.
+            "Publisher-routing rules:\n\
+             • When the user's request maps cleanly to a connected publisher \
+             (e.g. `gateway__gmail__*` for email, inbox, drafts, threads; \
+             `gateway__github__*` for issues, PRs, repos; `gateway__slack__*` \
+             for messages; `gateway__jira__*` for tickets), prefer those \
+             publisher tools over generic `playwright_*` browser automation \
+             or `seren_web_fetch`.\n\
+             • A registered publisher is pre-authenticated and deterministic. \
+             Browser automation against the same service's web UI is typically \
+             NOT authenticated in this session and will fail with a login \
+             screen. Do not start with Playwright for Gmail, GitHub, Slack, \
+             Jira, or similar when a matching `gateway__*` publisher is in \
+             your tool list.\n\
+             • Only fall back to browser automation or `seren_web_fetch` when \
+             the user explicitly asks for it, when no dedicated publisher is \
+             available for the target service, or when the publisher's tools \
+             genuinely cannot do what is being asked."
+                .to_string(),
         ];
         // Inject live repo context (git branch, status, recent commits)
         if let Some(root) = project_root {
@@ -2487,6 +2509,48 @@ mod tests {
         assert!(system_msg.contains("gmail"), "tool inventory must be present");
         assert!(system_msg.contains("Active Skills"), "skill content must be present");
         assert!(system_msg.contains("Google Docs"), "skill details must be present");
+    }
+
+    /// GH #1592 (follows from #1591): the system prompt must tell the model
+    /// to prefer a specific `gateway__*` publisher over generic Playwright
+    /// browser automation when the request maps onto a connected publisher.
+    ///
+    /// One critical invariant — the string is present — because this change
+    /// only adds static text. Behaviour changes (if any) are observed in
+    /// live agent runs, not unit-testable without a mocked LLM.
+    #[test]
+    fn system_prompt_carries_publisher_routing_rules() {
+        let worker = ChatModelWorker::new();
+        let routing = RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "anthropic/claude-sonnet-4".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "Chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+            reasoning_effort: None,
+            project_root: None,
+        };
+
+        let body = worker.build_request_body("Hi", &[], &routing, "", &[], &[], None);
+        let system_msg = body["messages"][0]["content"].as_str().unwrap();
+
+        assert!(
+            system_msg.contains("Publisher-routing rules"),
+            "system prompt must carry the Publisher-routing rules header"
+        );
+        // At least one canonical example is surfaced — guards against the
+        // block being silently gutted to a no-op string.
+        assert!(
+            system_msg.contains("gateway__gmail__*"),
+            "system prompt must name gateway__gmail__* as the preferred route for email asks"
+        );
+        // The guard against starting with Playwright for connected
+        // publishers (the exact #1591 failure mode) must be present.
+        assert!(
+            system_msg.contains("Do not start with Playwright"),
+            "system prompt must explicitly tell the model not to start with Playwright for publisher-backed services"
+        );
     }
 
     #[test]
