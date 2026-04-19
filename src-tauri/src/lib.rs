@@ -746,8 +746,12 @@ pub fn run() {
             commands::chat::set_agent_conversation_session_id,
             commands::chat::set_agent_conversation_title,
             commands::chat::set_agent_conversation_model_id,
+            commands::chat::set_agent_conversation_permission_mode,
             commands::chat::set_agent_conversation_metadata,
             commands::chat::archive_agent_conversation,
+            // Input history commands
+            commands::chat::append_input_history,
+            commands::chat::get_input_history,
             // Message commands
             commands::chat::save_message,
             commands::chat::get_messages,
