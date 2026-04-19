@@ -38,11 +38,32 @@ let initialized = false;
 
 const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
+/** True when we must not hit the production update channel.
+ *
+ * Why: `pnpm tauri dev` builds the binary with whatever version is in
+ * `src-tauri/tauri.conf.json` (currently a placeholder). The release workflow
+ * rewrites that file from the git tag before packaging, so the shipped binary
+ * always carries the real semver, but dev builds don't. If the updater runs
+ * in dev it compares the placeholder against a real latest.json on R2 and
+ * surfaces a spurious "Update available" banner every 15 minutes. Worse,
+ * clicking Install would download + apply a production artifact on top of an
+ * in-progress dev checkout.
+ */
+function isDevRuntime(): boolean {
+  return import.meta.env.DEV === true;
+}
+
 async function initUpdater(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
   if (!isTauriRuntime()) {
+    setState({ status: "unsupported" });
+    return;
+  }
+
+  if (isDevRuntime()) {
+    console.log("[Updater] Dev build — skipping update check");
     setState({ status: "unsupported" });
     return;
   }
