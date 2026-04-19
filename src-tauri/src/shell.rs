@@ -89,6 +89,23 @@ pub async fn execute_shell_command(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
 
+    // Log the exact CWD we inherit and the command we're about to run.
+    // GH #1595: a Windows user reported tool-written files landing
+    // "nowhere on disk" — one plausible cause is a shell subprocess
+    // writing to a relative path from a CWD the user didn't expect
+    // (e.g. the app's install directory under UAC virtualisation).
+    // Surfacing the CWD in the log makes that class of failure visible
+    // instead of silent.
+    let inherited_cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|e| format!("<unknown: {e}>"));
+    log::info!(
+        "[Shell] spawning: cwd={} timeout={}s cmd={}",
+        inherited_cwd,
+        secs,
+        &command[..command.len().min(500)]
+    );
+
     let child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn command: {}", e))?;

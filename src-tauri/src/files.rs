@@ -48,11 +48,20 @@ pub fn read_file_base64(path: String) -> Result<String, String> {
 }
 
 /// Write content to a file.
+///
+/// Post-write, the on-disk state is re-stat'd via `verify_on_disk` so a
+/// report of success always reflects bytes the kernel acknowledges
+/// (see GH #1595). On Windows an independent `cmd.exe /c if exist` check
+/// also runs to defend against any per-process filesystem view that
+/// might diverge from what a user's Explorer or external shell sees.
 #[tauri::command]
 pub fn write_file(path: String, content: String) -> Result<(), String> {
     let resolved = expand_tilde(&path)?;
     reject_literal_tilde_segment(&resolved)?;
-    fs::write(&resolved, content).map_err(|e| format!("Failed to write file: {}", e))
+    let expected = content.len() as u64;
+    fs::write(&resolved, content).map_err(|e| format!("Failed to write file: {}", e))?;
+    verify_on_disk(&resolved, expected)?;
+    Ok(())
 }
 
 /// List entries in a directory.
@@ -113,7 +122,10 @@ pub fn create_file(path: String, content: Option<String>) -> Result<(), String> 
     }
 
     let content = content.unwrap_or_default();
-    fs::write(&resolved, content).map_err(|e| format!("Failed to create file: {}", e))
+    let expected = content.len() as u64;
+    fs::write(&resolved, content).map_err(|e| format!("Failed to create file: {}", e))?;
+    verify_on_disk(&resolved, expected)?;
+    Ok(())
 }
 
 /// Create a new directory.
@@ -186,6 +198,107 @@ fn reject_literal_tilde_segment(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Post-write ground-truth check (GH #1595).
+///
+/// After a file-writing tool call reports success, we must not trust the
+/// write layer's own return code — we re-stat the path and, on Windows,
+/// ask a fresh `cmd.exe /c if exist` whether the file is visible to a
+/// process outside our writer's own view. A mismatch at any stage is
+/// surfaced as a loud error so the model reports it to the user instead
+/// of pretending the write succeeded.
+///
+/// This addresses the failure mode documented in GH #1595 where a
+/// Windows user with admin access could not find a 38KB file that the
+/// tool harness had self-verified as present. If NTFS doesn't see it,
+/// neither should we.
+fn verify_on_disk(path: &Path, expected_bytes: u64) -> Result<(), String> {
+    // 1) Stat the path we just wrote to. If this fails, the write was
+    //    fabricated / the fs rejected it silently / the path resolved
+    //    somewhere we can no longer reach.
+    let meta = fs::metadata(path).map_err(|e| {
+        format!(
+            "Write to '{}' reported success but post-write stat failed: {}. \
+             The file is not readable at the path we wrote to — do not \
+             report this write as successful.",
+            path.display(),
+            e
+        )
+    })?;
+
+    // 2) Size must match what we handed to `fs::write`. A short write
+    //    usually means a cancelled write-back or a sandboxed/overlay FS
+    //    that tore down before flushing.
+    if meta.len() != expected_bytes {
+        return Err(format!(
+            "Write to '{}' reported success but on-disk size is {} bytes \
+             (expected {} bytes). The kernel did not persist the full \
+             payload. Do not report this write as successful.",
+            path.display(),
+            meta.len(),
+            expected_bytes
+        ));
+    }
+
+    // 3) Windows-only: cross-process check. A user reported in GH #1595
+    //    that every in-process check self-confirmed while Explorer and
+    //    an external cmd.exe both saw nothing. A fresh cmd.exe process
+    //    has a separate NTFS handle table and sees exactly what the user
+    //    sees — if this check disagrees with steps 1-2, we must surface
+    //    that divergence rather than silently paper over it.
+    #[cfg(windows)]
+    cross_process_exists_windows(path)?;
+
+    Ok(())
+}
+
+/// Spawn a separate `cmd.exe /c if exist ...` and check its output.
+///
+/// This is independent from the Rust writer's own filesystem view: a
+/// fresh cmd.exe inherits nothing from the writer and sees only the
+/// real on-disk state. If this process says the file is not present
+/// after a successful in-process write, something between the write and
+/// the NTFS volume is lying to us (GH #1595).
+#[cfg(windows)]
+fn cross_process_exists_windows(path: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command as StdCommand;
+
+    let display = path.display().to_string();
+    let mut cmd = StdCommand::new("cmd");
+    // /D disables AutoRun, /S strips one pair of outer quotes from /C.
+    // CREATE_NO_WINDOW keeps the probe invisible.
+    cmd.creation_flags(0x08000000)
+        .args([
+            "/D",
+            "/S",
+            "/C",
+            // Double-quote the path so spaces and special chars survive.
+            &format!("if exist \"{display}\" (echo FOUND) else (echo MISSING)"),
+        ]);
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("cross-process check for '{display}' failed to spawn cmd.exe: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.contains("FOUND") {
+        return Ok(());
+    }
+    if stdout.contains("MISSING") {
+        return Err(format!(
+            "Write to '{display}' self-verified in-process but an \
+             independent cmd.exe reports the file is MISSING from disk. \
+             This matches GH #1595: the tool-execution view has diverged \
+             from the real NTFS volume. Do not report this write as \
+             successful."
+        ));
+    }
+    Err(format!(
+        "Write to '{display}' post-verification is inconclusive: cmd.exe \
+         returned unexpected output {:?}.",
+        stdout.trim()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +350,74 @@ mod tests {
 
         // Tilde embedded inside a filename (no standalone `~` component) is fine.
         assert!(reject_literal_tilde_segment(Path::new("/tmp/~foo.txt")).is_ok());
+    }
+
+    /// GH #1595 critical contract: `verify_on_disk` must refuse to report
+    /// success when the file is missing, and must refuse when the on-disk
+    /// size disagrees with what the caller claimed to write.
+    #[test]
+    fn verify_on_disk_rejects_missing_file_and_size_mismatch() {
+        let tmp = std::env::temp_dir().join(format!(
+            "serendesktop-verify-{}.txt",
+            Uuid::new_v4().simple()
+        ));
+
+        // Missing file — must error with a message naming the path.
+        let err = verify_on_disk(&tmp, 42)
+            .expect_err("missing file must not verify as success");
+        assert!(
+            err.contains("post-write stat failed"),
+            "missing file err should mention the stat failure, got: {err}"
+        );
+
+        // Real write of 5 bytes — matching expected succeeds.
+        std::fs::write(&tmp, b"hello").expect("seed write");
+        assert!(
+            verify_on_disk(&tmp, 5).is_ok(),
+            "matching size must verify Ok"
+        );
+
+        // Same file, caller claims 1000 bytes were written. Must error.
+        let err = verify_on_disk(&tmp, 1000)
+            .expect_err("size mismatch must not verify as success");
+        assert!(
+            err.contains("on-disk size"),
+            "size-mismatch err should mention the disk size, got: {err}"
+        );
+        assert!(
+            err.contains("1000"),
+            "size-mismatch err should mention the expected size, got: {err}"
+        );
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// GH #1595 Windows contract: the cross-process `cmd.exe` probe must
+    /// agree with the Rust-side stat for a file that genuinely exists on
+    /// disk. If this ever diverges on real hardware we've reproduced the
+    /// customer's bug and should fail the write loudly. Gated to Windows
+    /// since the probe itself is Windows-only.
+    #[cfg(windows)]
+    #[test]
+    fn cross_process_exists_windows_sees_real_file() {
+        let tmp = std::env::temp_dir().join(format!(
+            "serendesktop-xproc-{}.txt",
+            Uuid::new_v4().simple()
+        ));
+        std::fs::write(&tmp, b"hello").expect("seed write");
+        cross_process_exists_windows(&tmp).expect("real file must be visible to cmd.exe");
+        let _ = std::fs::remove_file(&tmp);
+
+        // And: missing path must surface the MISSING divergence.
+        let missing = std::env::temp_dir().join(format!(
+            "serendesktop-xproc-missing-{}.txt",
+            Uuid::new_v4().simple()
+        ));
+        let err = cross_process_exists_windows(&missing)
+            .expect_err("missing file must surface MISSING divergence");
+        assert!(
+            err.contains("MISSING"),
+            "Windows xproc err should flag MISSING, got: {err}"
+        );
     }
 }
