@@ -618,6 +618,7 @@ export interface AgentConversation {
   agent_session_id: string | null;
   agent_cwd: string | null;
   agent_model_id: string | null;
+  agent_permission_mode: string | null;
   agent_metadata: string | null;
   project_id: string | null;
   project_root: string | null;
@@ -808,6 +809,47 @@ export async function setAgentConversationModelId(
     throw new Error("Conversation operations require Tauri runtime");
   }
   await invoke("set_agent_conversation_model_id", { id, agentModelId });
+}
+
+/**
+ * Update the permission mode for a persisted agent conversation.
+ */
+export async function setAgentConversationPermissionMode(
+  id: string,
+  agentPermissionMode: string,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Conversation operations require Tauri runtime");
+  }
+  await invoke("set_agent_conversation_permission_mode", {
+    id,
+    agentPermissionMode,
+  });
+}
+
+/**
+ * Append a user-entered prompt to the conversation's input-history buffer.
+ * Buffer is capped at the last 200 entries per conversation.
+ */
+export async function appendInputHistory(
+  conversationId: string,
+  content: string,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) return;
+  await invoke("append_input_history", { conversationId, content });
+}
+
+/**
+ * Load the persisted input-history buffer for a conversation, oldest first.
+ */
+export async function getInputHistory(
+  conversationId: string,
+): Promise<string[]> {
+  const invoke = await getInvoke();
+  if (!invoke) return [];
+  return (await invoke("get_input_history", { conversationId })) as string[];
 }
 
 export async function setAgentConversationMetadata(

@@ -60,6 +60,25 @@ function waitForSessionReady(sessionId: string): Promise<void> {
   ]);
 }
 
+/**
+ * Outcome of an auto-compaction attempt. Callers use this to decide whether
+ * to fall back to Seren Chat. Only `failed_catastrophic` fires the fallback;
+ * transient or "no-op" outcomes keep the user inside the agent session.
+ *
+ * - `retried`: compaction succeeded AND the user's last prompt was re-sent.
+ * - `succeeded`: compaction succeeded, no prompt to retry.
+ * - `skipped_nothing_to_compact`: message count is below `preserveCount`;
+ *   the session was already too small to compact. Usually means a single
+ *   message is gigantic — Chat fallback would not help.
+ * - `failed_catastrophic`: unrecoverable failure (spawn failed, summary API
+ *   threw after refresh, agent runtime broken). Chat fallback is correct.
+ */
+export type CompactionOutcome =
+  | "retried"
+  | "succeeded"
+  | "skipped_nothing_to_compact"
+  | "failed_catastrophic";
+
 /** Wait for a session to return to 'ready' (not 'prompting') with a timeout.
  * Used after sending the compaction seed prompt to avoid racing with the retry. */
 async function waitForSessionIdle(
@@ -97,6 +116,7 @@ import {
   saveMessage,
   setAgentConversationMetadata as setAgentConversationMetadataDb,
   setAgentConversationModelId as setAgentConversationModelIdDb,
+  setAgentConversationPermissionMode as setAgentConversationPermissionModeDb,
   setAgentConversationSessionId as setAgentConversationSessionIdDb,
   setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
@@ -268,7 +288,7 @@ export interface ActiveSession {
   compactRetryAttempted?: boolean;
   /** In-flight compactAndRetry promise — awaited by sendPrompt catch block
    *  so compaction completes before the error handler gives up. */
-  compactRetryPromise?: Promise<boolean>;
+  compactRetryPromise?: Promise<CompactionOutcome>;
   /** Transcript bootstrap injected into the first real prompt of a forked branch. */
   bootstrapPromptContext?: string;
   /** Set when the user explicitly requested a cancel — suppresses auto-retry
@@ -1057,6 +1077,8 @@ export const agentStore = {
       reclaimedIdleClaude?: boolean;
       restoredMessages?: AgentMessage[];
       bootstrapPromptContext?: string;
+      initialModelId?: string;
+      initialPermissionMode?: string;
     },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
@@ -1663,6 +1685,29 @@ export const agentStore = {
         setState("isLoading", false);
         tempUnsubscribe();
 
+        // Re-apply the user's persisted model + permission-mode choices so
+        // that resume/compaction/app-restart preserve them across threads.
+        if (opts?.initialModelId) {
+          try {
+            await this.setModel(opts.initialModelId, info.id);
+          } catch (err) {
+            console.warn(
+              "[AgentStore] Failed to re-apply persisted model on spawn:",
+              err,
+            );
+          }
+        }
+        if (opts?.initialPermissionMode) {
+          try {
+            await this.setPermissionMode(opts.initialPermissionMode, info.id);
+          } catch (err) {
+            console.warn(
+              "[AgentStore] Failed to re-apply persisted permission mode on spawn:",
+              err,
+            );
+          }
+        }
+
         return info.id;
       } catch (error) {
         console.error(
@@ -1792,6 +1837,8 @@ export const agentStore = {
         conversationTitle: convo.title,
         restoredMessages,
         bootstrapPromptContext: pendingBootstrapPromptContext,
+        initialModelId: convo.agent_model_id ?? undefined,
+        initialPermissionMode: convo.agent_permission_mode ?? undefined,
       });
       if (freshSessionId) {
         clearSpawnFailures(conversationId);
@@ -1829,6 +1876,8 @@ export const agentStore = {
       conversationTitle: convo.title,
       restoredMessages,
       bootstrapPromptContext: pendingBootstrapPromptContext,
+      initialModelId: convo.agent_model_id ?? undefined,
+      initialPermissionMode: convo.agent_permission_mode ?? undefined,
     });
 
     // Legacy Claude conversations can reference session IDs that no longer
@@ -1848,6 +1897,8 @@ export const agentStore = {
         conversationTitle: convo.title,
         restoredMessages,
         bootstrapPromptContext: pendingBootstrapPromptContext,
+        initialModelId: convo.agent_model_id ?? undefined,
+        initialPermissionMode: convo.agent_permission_mode ?? undefined,
       });
 
       // If resume-based fallback also failed, the session file is likely
@@ -1866,6 +1917,8 @@ export const agentStore = {
           restoredMessages:
             persisted.messages.length > 0 ? persisted.messages : undefined,
           bootstrapPromptContext: persisted.context || undefined,
+          initialModelId: convo.agent_model_id ?? undefined,
+          initialPermissionMode: convo.agent_permission_mode ?? undefined,
         });
       }
 
@@ -2147,14 +2200,18 @@ export const agentStore = {
   async compactAgentConversation(
     sessionId: string,
     preserveCount: number,
-  ): Promise<void> {
+  ): Promise<CompactionOutcome> {
     const session = state.sessions[sessionId];
-    if (!session || session.isCompacting) return;
+    if (!session || session.isCompacting) {
+      return "skipped_nothing_to_compact";
+    }
 
     const messages = session.messages;
     if (messages.length <= preserveCount) {
-      console.info("[AgentStore] Not enough messages to compact");
-      return;
+      console.info(
+        "[AgentStore] Not enough messages to compact (message count below preserve threshold)",
+      );
+      return "skipped_nothing_to_compact";
     }
 
     setState("sessions", sessionId, "isCompacting", true);
@@ -2227,9 +2284,11 @@ Structured summary:`;
 
       if (!newSessionId) {
         console.error(
-          "[AgentStore] Failed to spawn new session after compaction",
+          "[AgentStore] Failed to spawn new session after compaction — catastrophic",
         );
-        return;
+        throw new Error(
+          "CompactionFailure: new session spawn returned null after compaction",
+        );
       }
 
       // Store compacted summary and preserved messages on the new session.
@@ -2298,16 +2357,19 @@ Structured summary:`;
         );
         setState("sessions", newSessionId, "lastUserPrompt", pendingUserPrompt);
         await providerService.sendPrompt(newSessionId, pendingUserPrompt);
+        return "retried";
       }
+      return "succeeded";
     } catch (error) {
       console.error(
-        "[AgentStore] Failed to compact agent conversation:",
+        "[AgentStore] Failed to compact agent conversation (catastrophic):",
         error,
       );
       // If the original session still exists, clear compacting flag
       if (state.sessions[sessionId]) {
         setState("sessions", sessionId, "isCompacting", false);
       }
+      return "failed_catastrophic";
     }
   },
 
@@ -2315,10 +2377,10 @@ Structured summary:`;
    * Compact the conversation and retry the last user prompt.
    * Returns true if compaction + retry succeeded, false if we should fall back.
    */
-  async compactAndRetry(sessionId: string): Promise<boolean> {
+  async compactAndRetry(sessionId: string): Promise<CompactionOutcome> {
     const session = state.sessions[sessionId];
     if (!session || session.compactRetryAttempted || session.isCompacting) {
-      return false;
+      return "skipped_nothing_to_compact";
     }
 
     setState("sessions", sessionId, "compactRetryAttempted", true);
@@ -2329,10 +2391,22 @@ Structured summary:`;
     );
 
     try {
-      await this.compactAgentConversation(
+      const outcome = await this.compactAgentConversation(
         sessionId,
         settingsStore.settings.autoCompactPreserveMessages,
       );
+
+      // Propagate non-success outcomes directly. "skipped" means the message
+      // count was already under the preserve threshold (nothing to compact);
+      // "failed_catastrophic" means spawn or summary threw. Chat fallback is
+      // only correct for the latter; the former means a single prompt is too
+      // large and Chat would fail identically — show an error instead.
+      if (outcome === "skipped_nothing_to_compact") {
+        return outcome;
+      }
+      if (outcome === "failed_catastrophic") {
+        return outcome;
+      }
 
       // After compaction, the old session is terminated and a new one exists.
       // Find the new session by conversation ID.
@@ -2342,21 +2416,21 @@ Structured summary:`;
       );
       if (!newEntry) {
         console.warn(
-          "[AgentStore] compactAndRetry: new session not found after compaction",
+          "[AgentStore] compactAndRetry: new session not found after compaction — treating as catastrophic",
         );
-        return false;
+        return "failed_catastrophic";
       }
 
       const [newSessionId] = newEntry;
 
-      // If compaction was skipped (e.g. not enough messages to compact),
-      // the search returns the original session — retrying on the same
-      // full session would fail again and falsely signal success.
+      // If the search returned the original session, compaction never
+      // swapped it out — treat as catastrophic so the user isn't silently
+      // stuck on a full session.
       if (newSessionId === sessionId) {
         console.warn(
-          "[AgentStore] compactAndRetry: compaction was skipped, cannot retry",
+          "[AgentStore] compactAndRetry: new session matches old session id — compaction did not swap",
         );
-        return false;
+        return "failed_catastrophic";
       }
 
       // compactAgentConversation sends the seed prompt before returning, so the
@@ -2371,18 +2445,18 @@ Structured summary:`;
           `[AgentStore] Compaction complete, retrying prompt on session ${newSessionId}`,
         );
         await providerService.sendPrompt(newSessionId, lastPrompt);
-      } else {
-        console.info(
-          `[AgentStore] Compaction complete on session ${newSessionId} — no prompt to retry, session ready`,
-        );
+        return "retried";
       }
-      return true;
+      console.info(
+        `[AgentStore] Compaction complete on session ${newSessionId} — no prompt to retry, session ready`,
+      );
+      return "succeeded";
     } catch (error) {
       console.error(
-        "[AgentStore] compactAndRetry failed, falling back to Chat:",
+        "[AgentStore] compactAndRetry threw — treating as catastrophic:",
         error,
       );
-      return false;
+      return "failed_catastrophic";
     }
   },
 
@@ -2818,6 +2892,18 @@ Structured summary:`;
       // Optimistic update — the authoritative update arrives via
       // CurrentModeUpdate notification handled in handleStatusChange.
       setState("sessions", sessionId, "currentModeId", modeId);
+      const session = state.sessions[sessionId];
+      if (session) {
+        void setAgentConversationPermissionModeDb(
+          session.conversationId,
+          modeId,
+        ).catch((error) => {
+          console.warn(
+            "Failed to persist agent permission-mode selection",
+            error,
+          );
+        });
+      }
     } catch (error) {
       console.error(
         `[AgentStore] Failed to set permission mode to "${modeId}":`,
@@ -3428,21 +3514,30 @@ Structured summary:`;
             "ready" as SessionStatus,
           );
 
-          // Try compact-and-retry first; fall back to Chat only if it fails.
-          // Store the promise so sendPrompt catch block can await it.
+          // Try compact-and-retry first. Fall back to Chat only on
+          // catastrophic failure — "skipped" means the user's single prompt
+          // is too large for the context, and Chat would fail the same way.
           const compactPromise = this.compactAndRetry(sessionId).then(
-            (retried) => {
-              if (!retried) {
-                console.info(
-                  "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
+            (outcome) => {
+              if (outcome === "failed_catastrophic") {
+                console.error(
+                  "[AgentStore] Compaction failed catastrophically — falling back to Chat",
                 );
                 setState("sessions", sessionId, "promptTooLong", true);
                 this.addErrorMessage(sessionId, event.data.error);
                 this.acceptRateLimitFallback().catch((err) => {
                   console.error("[AgentStore] Auto-failover failed:", err);
                 });
+              } else if (outcome === "skipped_nothing_to_compact") {
+                console.warn(
+                  "[AgentStore] Compaction skipped (nothing to compact). Likely a single oversized prompt — surfacing error to user without Chat fallback.",
+                );
+                this.addErrorMessage(
+                  sessionId,
+                  "Your last message is too large for this agent's context window. Try shortening it, attaching files instead of pasting content, or starting a new thread.",
+                );
               }
-              return retried;
+              return outcome;
             },
           );
           setState(
@@ -4107,10 +4202,10 @@ Structured summary:`;
         );
         setState("sessions", sessionId, "promptTooLongHandled", true);
         const compactPromise = this.compactAndRetry(sessionId).then(
-          (retried) => {
-            if (!retried) {
-              console.info(
-                "[AgentStore] Compact-and-retry not possible, falling back to Chat mode",
+          (outcome) => {
+            if (outcome === "failed_catastrophic") {
+              console.error(
+                "[AgentStore] Compaction failed catastrophically from streamed content — falling back to Chat",
               );
               setState("sessions", sessionId, "promptTooLong", true);
               this.acceptRateLimitFallback().catch((err) => {
@@ -4119,8 +4214,16 @@ Structured summary:`;
                   err,
                 );
               });
+            } else if (outcome === "skipped_nothing_to_compact") {
+              console.warn(
+                "[AgentStore] Compaction skipped for streamed content — single prompt too large",
+              );
+              this.addErrorMessage(
+                sessionId,
+                "Your last message is too large for this agent's context window. Try shortening it, attaching files instead of pasting content, or starting a new thread.",
+              );
             }
-            return retried;
+            return outcome;
           },
         );
         setState("sessions", sessionId, "compactRetryPromise", compactPromise);

@@ -70,10 +70,28 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             agent_session_id TEXT,
             agent_cwd TEXT,
             agent_model_id TEXT,
+            agent_permission_mode TEXT,
             agent_metadata TEXT,
             project_id TEXT,
             project_root TEXT
         )",
+        [],
+    )?;
+
+    // Per-conversation input history buffer: persists the user's own prompts
+    // independently of session/message state so up-arrow recall survives
+    // thread switches, compaction, and app restarts.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS input_history (
+            conversation_id TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            content TEXT NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_input_history_convo_ts
+         ON input_history(conversation_id, timestamp DESC)",
         [],
     )?;
 
@@ -165,6 +183,17 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     if !has_agent_model_id {
         conn.execute(
             "ALTER TABLE conversations ADD COLUMN agent_model_id TEXT",
+            [],
+        )
+        .ok();
+    }
+
+    let has_agent_permission_mode: bool = conn
+        .prepare("SELECT agent_permission_mode FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_agent_permission_mode {
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN agent_permission_mode TEXT",
             [],
         )
         .ok();
@@ -711,6 +740,104 @@ mod tests {
         assert_eq!(events[0].1, "navigation");
         assert_eq!(events[1].0, "e2");
         assert_eq!(events[1].1, "action");
+    }
+
+    #[test]
+    fn schema_creates_agent_permission_mode_and_input_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        setup_schema(&conn).unwrap();
+
+        // agent_permission_mode column must round-trip
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type, agent_permission_mode)
+             VALUES ('c1', 'Agent', 1000, 'agent', 'claude-code', 'acceptEdits')",
+            [],
+        )
+        .unwrap();
+        let mode: Option<String> = conn
+            .query_row(
+                "SELECT agent_permission_mode FROM conversations WHERE id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mode, Some("acceptEdits".to_string()));
+
+        // input_history table exists and stores per-conversation prompts
+        conn.execute(
+            "INSERT INTO input_history (conversation_id, timestamp, content)
+             VALUES ('c1', 1000, 'first'), ('c1', 1001, 'second')",
+            [],
+        )
+        .unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT content FROM input_history WHERE conversation_id = 'c1' ORDER BY timestamp ASC",
+            )
+            .unwrap();
+        let rows: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, vec!["first".to_string(), "second".to_string()]);
+    }
+
+    #[test]
+    fn migration_adds_agent_permission_mode_to_pre_existing_db() {
+        // Simulate a DB created before the new column landed.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat',
+                agent_type TEXT,
+                agent_session_id TEXT,
+                agent_cwd TEXT,
+                agent_model_id TEXT,
+                agent_metadata TEXT,
+                project_id TEXT,
+                project_root TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                timestamp INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        // Running setup_schema should migrate the missing column.
+        setup_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type, agent_permission_mode)
+             VALUES ('a1', 'Agent', 1000, 'agent', 'claude-code', 'plan')",
+            [],
+        )
+        .unwrap();
+
+        let mode: Option<String> = conn
+            .query_row(
+                "SELECT agent_permission_mode FROM conversations WHERE id = 'a1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mode, Some("plan".to_string()));
     }
 
     #[test]

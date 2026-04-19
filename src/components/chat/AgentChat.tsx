@@ -45,6 +45,7 @@ import {
 } from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
+import { appendInputHistory, getInputHistory } from "@/lib/tauri-bridge";
 import { readDocument } from "@/services/docreader";
 import {
   type AgentType,
@@ -184,13 +185,28 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     return agentStore.getStreamingThinkingForConversation(thread.id);
   });
 
-  // Build reversed list of user prompts for Up/Down arrow navigation
-  const userMessageHistory = createMemo(() =>
-    threadMessages()
-      .filter((m) => m.type === "user")
-      .map((m) => m.content)
-      .reverse(),
-  );
+  // Persisted per-conversation input history (oldest first, capped at 200).
+  // Survives thread switches, compaction, and app restarts — decoupled from
+  // session.messages which compaction drops.
+  const [persistedInputs, setPersistedInputs] = createSignal<string[]>([]);
+
+  createEffect(() => {
+    const convId = activeAgentThread()?.id ?? null;
+    if (!convId) {
+      setPersistedInputs([]);
+      return;
+    }
+    getInputHistory(convId)
+      .then(setPersistedInputs)
+      .catch((err) => {
+        console.warn("[AgentChat] Failed to load input history:", err);
+        setPersistedInputs([]);
+      });
+  });
+
+  // Build reversed list of user prompts for Up/Down arrow navigation.
+  // Reads from persisted history so entries survive compaction + restart.
+  const userMessageHistory = createMemo(() => [...persistedInputs()].reverse());
 
   const onPickImages = () => handleAttachImages();
   const onSetChatInput = (event: Event) => {
@@ -701,6 +717,17 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         "[AgentChat] DocReader complete, prompt length:",
         promptWithDocs.length,
       );
+    }
+
+    const convId = activeAgentThread()?.id ?? null;
+    if (convId) {
+      setPersistedInputs((prev) => {
+        const next = [...prev, trimmed];
+        return next.length > 200 ? next.slice(-200) : next;
+      });
+      void appendInputHistory(convId, trimmed).catch((err) => {
+        console.warn("[AgentChat] Failed to persist input history:", err);
+      });
     }
 
     setInput("");

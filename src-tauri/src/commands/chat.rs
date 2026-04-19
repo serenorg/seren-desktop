@@ -46,6 +46,7 @@ pub struct AgentConversation {
     pub agent_session_id: Option<String>,
     pub agent_cwd: Option<String>,
     pub agent_model_id: Option<String>,
+    pub agent_permission_mode: Option<String>,
     pub agent_metadata: Option<String>,
     pub project_id: Option<String>,
     pub project_root: Option<String>,
@@ -281,6 +282,7 @@ pub async fn create_agent_conversation(
         agent_session_id: agent_session_id.clone(),
         agent_cwd: agent_cwd.clone(),
         agent_model_id: None,
+        agent_permission_mode: None,
         agent_metadata: agent_metadata.clone(),
         project_id: project_id.clone(),
         project_root: normalized_project_root.clone(),
@@ -340,7 +342,7 @@ pub async fn get_agent_conversations(
 
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, agent_metadata, project_id, project_root, is_archived
+            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, agent_permission_mode, agent_metadata, project_id, project_root, is_archived
              FROM conversations
              WHERE kind = 'agent' AND is_archived = 0
                AND ((?1 IS NULL AND ?2 IS NULL)
@@ -364,10 +366,11 @@ pub async fn get_agent_conversations(
                     agent_session_id: row.get(4)?,
                     agent_cwd: row.get(5)?,
                     agent_model_id: row.get(6)?,
-                    agent_metadata: row.get(7)?,
-                    project_id: row.get(8)?,
-                    project_root: row.get(9)?,
-                    is_archived: row.get::<_, i32>(10)? != 0,
+                    agent_permission_mode: row.get(7)?,
+                    agent_metadata: row.get(8)?,
+                    project_id: row.get(9)?,
+                    project_root: row.get(10)?,
+                    is_archived: row.get::<_, i32>(11)? != 0,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -384,7 +387,7 @@ pub async fn get_agent_conversation(
 ) -> Result<Option<AgentConversation>, String> {
     run_db(app, move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, agent_metadata, project_id, project_root, is_archived
+            "SELECT id, title, created_at, agent_type, agent_session_id, agent_cwd, agent_model_id, agent_permission_mode, agent_metadata, project_id, project_root, is_archived
              FROM conversations
              WHERE id = ?1 AND kind = 'agent'",
         )?;
@@ -399,10 +402,11 @@ pub async fn get_agent_conversation(
                     agent_session_id: row.get(4)?,
                     agent_cwd: row.get(5)?,
                     agent_model_id: row.get(6)?,
-                    agent_metadata: row.get(7)?,
-                    project_id: row.get(8)?,
-                    project_root: row.get(9)?,
-                    is_archived: row.get::<_, i32>(10)? != 0,
+                    agent_permission_mode: row.get(7)?,
+                    agent_metadata: row.get(8)?,
+                    project_id: row.get(9)?,
+                    project_root: row.get(10)?,
+                    is_archived: row.get::<_, i32>(11)? != 0,
                 })
             })
             .optional()?;
@@ -456,6 +460,79 @@ pub async fn set_agent_conversation_model_id(
             params![agent_model_id, id],
         )?;
         Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_agent_conversation_permission_mode(
+    app: AppHandle,
+    id: String,
+    agent_permission_mode: String,
+) -> Result<(), String> {
+    run_db(app, move |conn| {
+        conn.execute(
+            "UPDATE conversations SET agent_permission_mode = ?1 WHERE id = ?2 AND kind = 'agent'",
+            params![agent_permission_mode, id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+const MAX_INPUT_HISTORY_PER_CONVERSATION: i64 = 200;
+
+#[tauri::command]
+pub async fn append_input_history(
+    app: AppHandle,
+    conversation_id: String,
+    content: String,
+) -> Result<(), String> {
+    let trimmed = content.trim().to_string();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    run_db(app, move |conn| {
+        conn.execute(
+            "INSERT INTO input_history (conversation_id, timestamp, content) VALUES (?1, ?2, ?3)",
+            params![conversation_id, timestamp, trimmed],
+        )?;
+        conn.execute(
+            "DELETE FROM input_history
+             WHERE conversation_id = ?1
+               AND rowid NOT IN (
+                 SELECT rowid FROM input_history
+                 WHERE conversation_id = ?1
+                 ORDER BY timestamp DESC
+                 LIMIT ?2
+               )",
+            params![conversation_id, MAX_INPUT_HISTORY_PER_CONVERSATION],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn get_input_history(
+    app: AppHandle,
+    conversation_id: String,
+) -> Result<Vec<String>, String> {
+    run_db(app, move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT content FROM input_history
+             WHERE conversation_id = ?1
+             ORDER BY timestamp ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     })
     .await
 }

@@ -35,6 +35,7 @@ import { isPaymentError } from "@/lib/payment-errors";
 import type { Attachment } from "@/lib/providers/types";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
+import { appendInputHistory, getInputHistory } from "@/lib/tauri-bridge";
 import { catalog, type Publisher } from "@/services/catalog";
 import {
   CHAT_MAX_RETRIES,
@@ -497,13 +498,27 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     };
   });
 
-  // User message history for up/down arrow navigation
-  const userMessageHistory = createMemo(() =>
-    conversationStore.messages
-      .filter((m) => m.role === "user")
-      .map((m) => m.content)
-      .reverse(),
-  );
+  // Persisted per-conversation input history (oldest first, capped at 200).
+  // Survives thread switches, compaction, and app restarts — decoupled from
+  // conversationStore.messages which may be empty or not yet hydrated.
+  const [persistedInputs, setPersistedInputs] = createSignal<string[]>([]);
+
+  createEffect(() => {
+    const convId = conversationStore.activeConversationId;
+    if (!convId) {
+      setPersistedInputs([]);
+      return;
+    }
+    getInputHistory(convId)
+      .then(setPersistedInputs)
+      .catch((err) => {
+        console.warn("[ChatContent] Failed to load input history:", err);
+        setPersistedInputs([]);
+      });
+  });
+
+  // User message history for up/down arrow navigation (newest first).
+  const userMessageHistory = createMemo(() => [...persistedInputs()].reverse());
 
   const buildContext = (): ChatContext | undefined => {
     if (!editorStore.selectedText) return undefined;
@@ -629,6 +644,19 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     const trimmed = input().trim();
     const images = attachedImages();
     if (!trimmed && images.length === 0) return;
+
+    // Record the prompt in the persisted input-history buffer so up-arrow
+    // recall survives thread switches, compaction, and app restarts.
+    const convId = conversationStore.activeConversationId;
+    if (trimmed && convId) {
+      setPersistedInputs((prev) => {
+        const next = [...prev, trimmed];
+        return next.length > 200 ? next.slice(-200) : next;
+      });
+      void appendInputHistory(convId, trimmed).catch((err) => {
+        console.warn("[ChatContent] Failed to persist input history:", err);
+      });
+    }
 
     // Check for slash commands first
     if (trimmed.startsWith("/") && images.length === 0) {
