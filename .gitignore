@@ -67,3 +67,4 @@ yarn.lock
 
 # Claude Code local settings (per-developer)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
