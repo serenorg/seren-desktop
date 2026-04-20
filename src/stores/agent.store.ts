@@ -1369,6 +1369,11 @@ export const agentStore = {
           terminatedSessionIds.delete(localSessionId);
         }
 
+        const reasoningEffort =
+          resolvedAgentType === "claude-code"
+            ? settingsStore.settings.claudeReasoningEffort
+            : undefined;
+
         console.log("[AgentStore] Spawning agent process...");
         const info = await providerService.spawnAgent(
           resolvedAgentType,
@@ -1382,6 +1387,7 @@ export const agentStore = {
           resumeAgentSessionId,
           timeoutSecs,
           enabledMcpServers,
+          reasoningEffort,
         );
         console.log("[AgentStore] Spawn result:", info);
 
@@ -2959,6 +2965,13 @@ Structured summary:`;
           return o;
         });
       });
+      // Persist Claude Code reasoning effort so the next spawn uses the new
+      // value. Claude Code's --effort flag is spawn-time; mid-session changes
+      // don't affect the running CLI, only the next session that starts.
+      const agentType = state.sessions[sessionId]?.info.agentType;
+      if (agentType === "claude-code" && configId === "reasoning_effort") {
+        settingsStore.set("claudeReasoningEffort", valueId);
+      }
     } catch (error) {
       console.error("[AgentStore] Failed to set config option:", error);
     }

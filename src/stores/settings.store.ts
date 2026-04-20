@@ -132,6 +132,12 @@ export interface Settings {
   agentSearchEnabled: boolean;
   agentNetworkEnabled: boolean;
   agentAutoApproveReads: boolean;
+  /**
+   * Reasoning effort passed to the Claude Code CLI via --effort on next spawn.
+   * Values: "low" | "medium" | "high" | "xhigh". Changes do not affect
+   * running sessions; they apply when the next session starts.
+   */
+  claudeReasoningEffort: string;
 
   // Voice settings
   voiceAutoSubmit: boolean;
@@ -227,6 +233,7 @@ const DEFAULT_SETTINGS: Settings = {
   agentSearchEnabled: true,
   agentNetworkEnabled: true,
   agentAutoApproveReads: true,
+  claudeReasoningEffort: "medium",
   // Voice
   voiceAutoSubmit: true,
   // General

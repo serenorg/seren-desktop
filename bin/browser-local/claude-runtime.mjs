@@ -9,6 +9,12 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
+import {
+  buildEffortArgs,
+  buildEffortConfigOption,
+  normalizeEffort,
+  DEFAULT_CLAUDE_EFFORT,
+} from "./effort.mjs";
 
 /**
  * Resolve the full path to the `claude` binary.
@@ -364,6 +370,7 @@ function buildSessionStatus(session, status = session.status) {
         }
       : {}),
     modes: buildModeState(session.currentModeId),
+    configOptions: [buildEffortConfigOption(session.reasoningEffort)],
   };
 }
 
@@ -645,6 +652,7 @@ function buildClaudeArgs({
   forkSession,
   preferredModel,
   mcpConfigJson,
+  effort,
 }) {
   const args = [
     "--output-format",
@@ -660,6 +668,7 @@ function buildClaudeArgs({
     "stdio",
     // Allow switching into bypassPermissions later from the UI footer.
     "--allow-dangerously-skip-permissions",
+    ...buildEffortArgs(effort),
   ];
 
   if (mcpConfigJson) {
@@ -1367,6 +1376,7 @@ export function createClaudeRuntime({ emit }) {
     currentModeId = "default",
     mcpConfigJson = null,
     spawnEnv = {},
+    reasoningEffort = DEFAULT_CLAUDE_EFFORT,
   }) {
     return {
       id: sessionId,
@@ -1391,6 +1401,8 @@ export function createClaudeRuntime({ emit }) {
       currentModeId,
       mcpConfigJson,
       spawnEnv,
+      reasoningEffort:
+        normalizeEffort(reasoningEffort) ?? DEFAULT_CLAUDE_EFFORT,
     };
   }
 
@@ -1416,6 +1428,7 @@ export function createClaudeRuntime({ emit }) {
       mcpServers,
       approvalPolicy,
       timeoutSecs,
+      reasoningEffort,
     } = params;
 
     const sessionId = localSessionId ?? randomUUID();
@@ -1432,6 +1445,8 @@ export function createClaudeRuntime({ emit }) {
     const mcpConfig = buildProviderMcpConfig({ apiKey, mcpServers });
     const claudeBin = resolveClaudeBinary();
     const extendedPath = buildExtendedPath();
+    const effectiveEffort =
+      normalizeEffort(reasoningEffort) ?? DEFAULT_CLAUDE_EFFORT;
     const claudeArgs = buildClaudeArgs({
       sessionId: remoteSessionId,
       resumeSessionId: resumeAgentSessionId ?? null,
@@ -1442,6 +1457,7 @@ export function createClaudeRuntime({ emit }) {
       // Users can switch via the picker; resumed sessions use session.currentModelId.
       preferredModel: "claude-opus-4-5",
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
+      effort: effectiveEffort,
     });
     const processHandle = spawn(
       claudeBin,
@@ -1492,6 +1508,7 @@ export function createClaudeRuntime({ emit }) {
       currentModeId: "default",
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
       spawnEnv: mcpConfig.childEnv,
+      reasoningEffort: effectiveEffort,
     });
 
     sessions.set(sessionId, session);
@@ -1765,7 +1782,23 @@ export function createClaudeRuntime({ emit }) {
     emit("provider://session-status", buildSessionStatus(session));
   }
 
-  async function setConfigOption() {
+  async function setConfigOption({ sessionId, configId, valueId }) {
+    if (configId !== "reasoning_effort") {
+      return null;
+    }
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return null;
+    }
+    const normalized = normalizeEffort(valueId);
+    if (!normalized) {
+      throw new Error(`Unsupported reasoning effort: ${valueId}`);
+    }
+    session.reasoningEffort = normalized;
+    // Re-emit session status so AgentEffortSelector reflects the new value.
+    // The --effort flag is spawn-time; this change applies to the NEXT session
+    // spawn (resume or fork), not the current CLI process.
+    emit("provider://session-status", buildSessionStatus(session));
     return null;
   }
 
@@ -1794,6 +1827,7 @@ export function createClaudeRuntime({ emit }) {
       forkSession: true,
       preferredModel: session.currentModelId,
       mcpConfigJson: session.mcpConfigJson,
+      effort: session.reasoningEffort,
     });
     const processHandle = spawn(
       claudeBin,
@@ -1833,6 +1867,7 @@ export function createClaudeRuntime({ emit }) {
       currentModeId: session.currentModeId,
       mcpConfigJson: session.mcpConfigJson,
       spawnEnv: session.spawnEnv,
+      reasoningEffort: session.reasoningEffort,
     });
     const tempSessions = new Map([[tempSession.id, tempSession]]);
     attachProcessListeners(silentEmit, tempSessions, tempSession, new Map());
