@@ -6,7 +6,6 @@ import { promptLogin } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { providerStore } from "@/stores/provider.store";
-import { settingsStore } from "@/stores/settings.store";
 import { walletStore } from "@/stores/wallet.store";
 import type { SlashCommand } from "./types";
 
@@ -241,19 +240,6 @@ registry.register({
     window.dispatchEvent(new CustomEvent("seren:list-tools"));
     ctx.clearInput();
     ctx.showStatus("Listing available tools...");
-    return true;
-  },
-});
-
-registry.register({
-  name: "thinking",
-  description: "Toggle thinking display",
-  panels: ["chat", "agent"],
-  execute: (ctx) => {
-    const current = settingsStore.get("chatShowThinking");
-    settingsStore.set("chatShowThinking", !current);
-    ctx.showStatus(`Thinking display ${!current ? "enabled" : "disabled"}.`);
-    ctx.clearInput();
     return true;
   },
 });
