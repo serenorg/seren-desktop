@@ -37,7 +37,6 @@ export interface Settings {
   chatDefaultModel: string;
   chatMaxHistoryMessages: number;
   chatEnterToSend: boolean;
-  chatShowThinking: boolean;
   /**
    * Whether thinking blocks should default to the expanded state.
    * Controlled by the in-UI chevron toggle so the preference persists.
@@ -183,7 +182,6 @@ const DEFAULT_SETTINGS: Settings = {
   chatDefaultModel: "arcee-ai/trinity-large-thinking",
   chatMaxHistoryMessages: 50,
   chatEnterToSend: true,
-  chatShowThinking: false,
   chatThinkingExpanded: false,
   chatMaxToolIterations: 0,
   // Auto-compact

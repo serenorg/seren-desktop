@@ -73,7 +73,6 @@ import { RLMStepsBlock } from "./RLMStepsBlock";
 import { SatisfactionSignal } from "./SatisfactionSignal";
 import { SlashCommandPopup } from "./SlashCommandPopup";
 import { ThinkingStatus } from "./ThinkingStatus";
-import { ThinkingToggle } from "./ThinkingToggle";
 import { ToolCallCard } from "./ToolCallCard";
 import { ToolCallGroup } from "./ToolCallGroup";
 import { ToolsetSelector } from "./ToolsetSelector";
@@ -1017,7 +1016,6 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             </Show>
           </div>
           <div class="flex items-center gap-2">
-            <ThinkingToggle />
             <Show
               when={
                 chatStore.messages.length >
