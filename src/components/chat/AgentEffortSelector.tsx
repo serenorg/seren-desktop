@@ -1,5 +1,5 @@
 // ABOUTME: Dropdown component for selecting agent reasoning effort.
-// ABOUTME: Currently targets Codex's `reasoning_effort` session config option when available.
+// ABOUTME: Renders whenever the active session exposes a reasoning_effort select config option (Codex, Claude Code).
 
 import type { Component } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
