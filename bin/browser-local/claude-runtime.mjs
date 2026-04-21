@@ -15,6 +15,7 @@ import {
   normalizeEffort,
   DEFAULT_CLAUDE_EFFORT,
 } from "./effort.mjs";
+import { updatePeakInputTokens } from "./usage.mjs";
 
 /**
  * Resolve the full path to the `claude` binary.
@@ -704,12 +705,13 @@ function buildClaudeArgs({
   return args;
 }
 
-function buildPromptMeta(result) {
+function buildPromptMeta(result, peakInputTokens) {
   const usage = result?.usage ?? {};
-  // result.usage reports CUMULATIVE tokens across all iterations (tool
-  // call round-trips) in this prompt. For autocompact we need the
-  // approximate context window fill — the input for a single API call.
-  // Divide cumulative total by num_turns to approximate per-turn usage.
+  // Prefer per-turn peak tracked from assistant message usage events — the
+  // authoritative per-API-call input size. The final turn in a multi-turn
+  // prompt (many tool calls) is typically the largest; the averaged value
+  // that result.usage implies hides that peak and lets the gauge read
+  // comfortably while the next turn overflows. See #1611.
   const rawInput =
     typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
   const cacheCreation =
@@ -725,8 +727,15 @@ function buildPromptMeta(result) {
     typeof result?.num_turns === "number" && result.num_turns > 0
       ? result.num_turns
       : 1;
-  const inputTokens =
+  // Fallback to the old averaged math if the runtime never observed a
+  // per-turn usage event (e.g. Anthropic stops emitting usage in assistant
+  // payloads). Never regress below current behavior.
+  const averagedInput =
     cumulativeInput > 0 ? Math.round(cumulativeInput / numTurns) : undefined;
+  const inputTokens =
+    typeof peakInputTokens === "number" && peakInputTokens > 0
+      ? peakInputTokens
+      : averagedInput;
   const outputTokens =
     typeof usage.output_tokens === "number" ? usage.output_tokens : undefined;
 
@@ -1109,6 +1118,13 @@ function handleAssistantMessage(emit, session, payload) {
   const sawStreamedAssistant =
     session.currentPrompt != null && session.currentPromptHasChunks === true;
 
+  // Track the largest per-turn input across tool-call iterations. message.usage
+  // is the authoritative per-API-call count from Anthropic — see #1611.
+  session.peakInputTokens = updatePeakInputTokens(
+    session.peakInputTokens,
+    message.usage,
+  );
+
   if (typeof payload.session_id === "string") {
     session.agentSessionId = payload.session_id;
   }
@@ -1213,11 +1229,14 @@ function handleStreamEvent(emit, session, payload) {
 function handleResult(emit, session, payload) {
   session.status = "ready";
 
+  const peakInputTokens = session.peakInputTokens ?? 0;
   emit("provider://prompt-complete", {
     sessionId: session.id,
     stopReason: payload?.stop_reason ?? (payload?.is_error ? "error" : "end_turn"),
-    ...buildPromptMeta(payload),
+    ...buildPromptMeta(payload, peakInputTokens),
   });
+  // Reset for the next prompt. Peak is prompt-scoped, not session-scoped.
+  session.peakInputTokens = 0;
   emit("provider://session-status", buildSessionStatus(session, "ready"));
 
   if (payload?.is_error) {
@@ -1403,6 +1422,9 @@ export function createClaudeRuntime({ emit }) {
       spawnEnv,
       reasoningEffort:
         normalizeEffort(reasoningEffort) ?? DEFAULT_CLAUDE_EFFORT,
+      // Peak per-turn input tokens across the current prompt's tool-call
+      // iterations. Reset at handleResult. See #1611.
+      peakInputTokens: 0,
     };
   }
 
