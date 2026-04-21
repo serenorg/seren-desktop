@@ -115,28 +115,31 @@ async function loadPrivateChatPolicy(): Promise<void> {
 
 /**
  * Check authentication status on app startup.
- * If authenticated, fetches API key (if needed) and initializes MCP Gateway.
+ * Provisions the SerenDB API key before flipping `isAuthenticated` so every
+ * downstream consumer (Claude memory interceptor, private models, catalog,
+ * skills) sees a ready state atomically — see #1613.
  */
 export async function checkAuth(): Promise<void> {
   setState("isLoading", true);
   try {
     const authenticated = await isLoggedIn();
-    setState("isAuthenticated", authenticated);
 
-    if (authenticated) {
-      await loadPrivateChatPolicy();
-
-      // Ensure we have an API key for MCP (create if not stored)
-      const hasApiKey = await ensureApiKey();
-      if (!hasApiKey) {
-        console.warn(
-          "[Auth Store] Could not ensure API key - MCP may not work",
-        );
-      }
-
-      // Initialize MCP Gateway in background (non-blocking)
-      void initializeMcpInBackground();
+    if (!authenticated) {
+      setState("isAuthenticated", false);
+      return;
     }
+
+    await loadPrivateChatPolicy();
+
+    const hasApiKey = await ensureApiKey();
+    if (!hasApiKey) {
+      console.warn("[Auth Store] Could not ensure API key - MCP may not work");
+    }
+
+    setState("isAuthenticated", true);
+
+    // Initialize MCP Gateway in background (non-blocking)
+    void initializeMcpInBackground();
   } finally {
     setState("isLoading", false);
   }
@@ -144,27 +147,34 @@ export async function checkAuth(): Promise<void> {
 
 /**
  * Set user as authenticated after successful login.
- * Fetches API key and initializes the MCP Gateway.
+ * Provisions the SerenDB API key before flipping `isAuthenticated` so every
+ * downstream consumer (Claude memory interceptor, private models, catalog,
+ * skills) sees a ready state atomically — see #1613. The loading spinner
+ * covers the extra `createApiKey` round-trip so the user never sees a logged-in
+ * shell without its credentials.
  */
 export async function setAuthenticated(user: User): Promise<void> {
-  setState({
-    user,
-    isAuthenticated: true,
-    isLoading: false,
-  });
+  setState("isLoading", true);
+  try {
+    await loadPrivateChatPolicy();
 
-  await loadPrivateChatPolicy();
+    const hasApiKey = await ensureApiKey();
+    if (!hasApiKey) {
+      console.warn(
+        "[Auth Store] Could not ensure API key after login - MCP may not work",
+      );
+    }
 
-  // Ensure we have an API key for MCP authentication
-  const hasApiKey = await ensureApiKey();
-  if (!hasApiKey) {
-    console.warn(
-      "[Auth Store] Could not ensure API key after login - MCP may not work",
-    );
+    setState({
+      user,
+      isAuthenticated: true,
+    });
+
+    // Initialize MCP Gateway in background (non-blocking)
+    void initializeMcpInBackground();
+  } finally {
+    setState("isLoading", false);
   }
-
-  // Initialize MCP Gateway in background (non-blocking)
-  void initializeMcpInBackground();
 }
 
 /**
