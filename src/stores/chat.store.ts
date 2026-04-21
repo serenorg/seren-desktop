@@ -26,12 +26,25 @@ const DEFAULT_MODEL = "arcee-ai/trinity-large-thinking";
 const MAX_MESSAGES_PER_CONVERSATION = 1000;
 
 /**
+ * A pre-compaction user/assistant message preserved under the summary card so
+ * the user retains read access to their scrollback after compaction.
+ */
+export interface PreCompactionMessage {
+  id: string;
+  type: "user" | "assistant";
+  content: string;
+  timestamp: number;
+}
+
+/**
  * A compacted summary of older messages.
  */
 export interface CompactedSummary {
   content: string;
   originalMessageCount: number;
   compactedAt: number;
+  /** Original user/assistant text preserved for the expand-scrollback UI. */
+  preCompactionMessages?: PreCompactionMessage[];
 }
 
 /**
@@ -586,11 +599,21 @@ Structured summary:`;
         undefined,
       );
 
+      const preCompactionMessages: PreCompactionMessage[] = toCompact
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({
+          id: m.id,
+          type: m.role as "user" | "assistant",
+          content: m.content,
+          timestamp: m.timestamp,
+        }));
+
       // Create the compacted summary
       const compactedSummary: CompactedSummary = {
         content: summary,
         originalMessageCount: toCompact.length,
         compactedAt: Date.now(),
+        preCompactionMessages,
       };
 
       // Update conversation with compacted summary

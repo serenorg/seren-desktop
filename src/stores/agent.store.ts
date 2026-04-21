@@ -183,10 +183,21 @@ function subscribeToProviderRuntimeReady(): void {
 // Types
 // ============================================================================
 
+export interface PreCompactionMessage {
+  id: string;
+  type: "user" | "assistant";
+  content: string;
+  timestamp: number;
+}
+
 export interface AgentCompactedSummary {
   content: string;
   originalMessageCount: number;
   compactedAt: number;
+  /** Original user/assistant text shown under the summary card so the user
+   * can still read pre-compaction scrollback. Tool calls and thoughts are
+   * intentionally omitted — only text conversation is preserved. */
+  preCompactionMessages?: PreCompactionMessage[];
 }
 
 interface AgentConversationMetadata {
@@ -2266,10 +2277,23 @@ Structured summary:`;
         }
       }
 
+      const preCompactionMessages: PreCompactionMessage[] = toCompact
+        .filter(
+          (m): m is AgentMessage & { type: "user" | "assistant" } =>
+            m.type === "user" || m.type === "assistant",
+        )
+        .map((m) => ({
+          id: m.id,
+          type: m.type,
+          content: m.content,
+          timestamp: m.timestamp,
+        }));
+
       const compactedSummary: AgentCompactedSummary = {
         content: summary,
         originalMessageCount: toCompact.length,
         compactedAt: Date.now(),
+        preCompactionMessages,
       };
 
       // Capture session details and user-configured settings before termination
