@@ -72,6 +72,37 @@ jobs:
           echo "Generated release notes:"
           cat release_notes.md
 
+      - name: Sweep stale drafts for this tag
+        uses: actions/github-script@v9
+        continue-on-error: true
+        with:
+          script: |
+            const tagName = context.ref.replace('refs/tags/', '');
+            const expectedName = `Seren Desktop ${tagName}`;
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            const stale = releases.filter(r =>
+              r.draft && (r.tag_name === tagName || r.name === expectedName)
+            );
+            for (const r of stale) {
+              console.log(`Deleting stale draft id=${r.id} name=${r.name} tag=${r.tag_name}`);
+              try {
+                await github.rest.repos.deleteRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: r.id
+                });
+              } catch (e) {
+                console.log(`  failed: ${e.message}`);
+              }
+            }
+            if (stale.length === 0) {
+              console.log(`No stale drafts found for tag ${tagName}`);
+            }
+
       - name: Create or Update Release
         id: create_release
         uses: softprops/action-gh-release@v3
