@@ -657,7 +657,21 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       if (sid) {
         agentStore.enqueuePrompt(sid, trimmed);
       }
+      // Persist to input history even on the queued path — the user typed and
+      // submitted this, so up-arrow recall must see it (#1624).
+      const convId = activeAgentThread()?.id ?? null;
+      if (convId) {
+        setPersistedInputs((prev) => {
+          const next = [...prev, trimmed];
+          return next.length > 200 ? next.slice(-200) : next;
+        });
+        void appendInputHistory(convId, trimmed).catch((err) => {
+          console.warn("[AgentChat] Failed to persist input history:", err);
+        });
+      }
       setInput("");
+      setHistoryIndex(-1);
+      setSavedInput("");
       console.log("[AgentChat] Message queued:", trimmed);
       return;
     }
