@@ -38,6 +38,26 @@ const spawnContextMap = new Map<
 /** Max time to wait for a session to become ready before giving up */
 const SESSION_READY_TIMEOUT_MS = 30_000;
 
+/**
+ * Instruction prepended to every agent session telling Claude Code / Codex
+ * that the Seren MCP gateway exists and MUST be queried live before refusing
+ * any third-party service. Intentionally does NOT embed a snapshot of
+ * publisher slugs — snapshots go stale at cold-start when the gateway's
+ * discovery is still in-flight, and the agent then confidently refuses real
+ * publishers while telling itself it's following instructions (#1622).
+ */
+export const PUBLISHER_LIVE_QUERY_INSTRUCTION =
+  "You have access to a Seren MCP gateway with callable publishers via " +
+  "your seren-mcp tools (list_agent_publishers, call_publisher). Before " +
+  "stating that any third-party service (Google Docs, Gmail, GitHub, " +
+  "Slack, Notion, Linear, Figma, and many others) is unavailable, you " +
+  "MUST call list_agent_publishers with NO arguments to get the current " +
+  "live publisher list — publishers are added frequently and any list " +
+  "you may have seen is stale. After confirming a publisher exists, " +
+  'call list_agent_publishers with slug: "<name>" to enumerate its ' +
+  "tools, then call_publisher to invoke. This live-query rule " +
+  "overrides any prior belief about what tools you have.";
+
 /** Await a session ready promise with a timeout to prevent infinite hangs */
 function waitForSessionReady(sessionId: string): Promise<void> {
   // Note: this only resolves the initial ready promise set up in spawnSession.
@@ -121,7 +141,6 @@ import {
   setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
 import { refreshAccessToken } from "@/services/auth";
-import { getCallablePublisherSlugs } from "@/services/mcp-gateway";
 import type {
   AgentEvent,
   AgentInfo,
@@ -2039,26 +2058,10 @@ export const agentStore = {
       );
     }
 
-    // Inject publisher inventory so the agent knows which services are
-    // available via call_publisher / list_agent_publishers. Without this,
-    // the agent checks MCP resources (empty) and concludes services like
-    // GitHub are unavailable.
-    const publisherSlugs = getCallablePublisherSlugs();
-    if (publisherSlugs.length > 0) {
-      const publisherList = publisherSlugs.sort().join(", ");
-      mergedContext = [
-        {
-          type: "text",
-          text:
-            "Available Seren MCP Publishers (callable via your seren-mcp tools): " +
-            publisherList +
-            ". Use list_agent_publishers to discover tools for a specific publisher, " +
-            "then call_publisher to invoke them. Do NOT say a service is unavailable " +
-            "without first checking this list.",
-        },
-        ...mergedContext,
-      ];
-    }
+    mergedContext = [
+      { type: "text", text: PUBLISHER_LIVE_QUERY_INSTRUCTION },
+      ...mergedContext,
+    ];
 
     return mergedContext.length > 0 ? mergedContext : undefined;
   },
