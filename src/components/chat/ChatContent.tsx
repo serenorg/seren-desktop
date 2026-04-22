@@ -736,6 +736,18 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // If currently streaming, queue the message instead
     if (conversationStore.isLoading) {
       setMessageQueue((queue) => [...queue, trimmed]);
+      // Persist to input history even on the queued path — the user typed and
+      // submitted this, so up-arrow recall must see it (#1624).
+      const convId = conversationStore.activeConversationId;
+      if (convId) {
+        setPersistedInputs((prev) => {
+          const next = [...prev, trimmed];
+          return next.length > 200 ? next.slice(-200) : next;
+        });
+        void appendInputHistory(convId, trimmed).catch((err) => {
+          console.warn("[ChatContent] Failed to persist input history:", err);
+        });
+      }
       setInput("");
       setHistoryIndex(-1);
       setSavedInput("");
