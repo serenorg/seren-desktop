@@ -141,6 +141,10 @@ import {
   setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
 import { refreshAccessToken } from "@/services/auth";
+import {
+  bootstrapMemoryContext,
+  storeAssistantResponse,
+} from "@/services/memory";
 import type {
   AgentEvent,
   AgentInfo,
@@ -1151,6 +1155,28 @@ export const agentStore = {
         resumeAgentSessionId,
       });
 
+      // Bootstrap Seren memory context so the agent starts with relevant
+      // recall from past sessions — agent transcripts (written via
+      // storeAssistantResponse below) accumulate into memory, and this
+      // pulls them back on every fresh spawn including post-compaction
+      // spawns. Best-effort; a failure here must not block the spawn (#1625).
+      let memoryContext: string | undefined;
+      if (settingsStore.settings.memoryEnabled) {
+        try {
+          const bootstrapped = await bootstrapMemoryContext();
+          if (bootstrapped && bootstrapped.trim().length > 0) {
+            memoryContext = bootstrapped;
+          }
+        } catch (err) {
+          console.warn("[AgentStore] memory bootstrap failed (non-fatal):", err);
+        }
+      }
+      const finalBootstrapContext = memoryContext
+        ? opts?.bootstrapPromptContext
+          ? `${memoryContext}\n\n${opts.bootstrapPromptContext}`
+          : memoryContext
+        : opts?.bootstrapPromptContext;
+
       // Preemptively terminate idle Claude sessions for other conversations
       // before spawning. Claude CLI cannot reliably initialize a second
       // instance while another is alive (see isRetryableClaudeInitError).
@@ -1474,7 +1500,7 @@ export const agentStore = {
               : resolvedAgentType === "gemini"
                 ? 1_000_000
                 : 200_000,
-          bootstrapPromptContext: opts?.bootstrapPromptContext,
+          bootstrapPromptContext: finalBootstrapContext,
           pendingPrompts: [],
         };
 
@@ -3320,7 +3346,7 @@ Structured summary:`;
           setState("sessions", sessionId, "skipHistoryReplay", undefined);
         }
         this.flushPendingUserMessage(sessionId);
-        this.finalizeStreamingContent(sessionId);
+        this.finalizeStreamingContent(sessionId, { isReplay: isHistoryReplay });
         // Each promptComplete ends a turn; the next turn may have real content.
         setState("sessions", sessionId, "isSkippingSkillContext", undefined);
         if (!isHistoryReplay) {
@@ -4198,7 +4224,8 @@ Structured summary:`;
     }
   },
 
-  finalizeStreamingContent(sessionId: string) {
+  finalizeStreamingContent(sessionId: string, opts?: { isReplay?: boolean }) {
+    const isReplay = opts?.isReplay ?? false;
     // Flush any buffered chunks before reading store state
     flushChunkBuf(sessionId);
 
@@ -4270,6 +4297,24 @@ Structured summary:`;
       setState("sessions", sessionId, "messages", (msgs) => [...msgs, message]);
       if (session.conversationId)
         persistAgentMessage(session.conversationId, message);
+
+      // Persist the assistant turn to Seren memory so future sessions (agent
+      // or chat) can recall this conversation via memory_bootstrap. Gated by
+      // memoryEnabled setting, guarded against empty / replay / error turns,
+      // and best-effort — a failure must not affect the session (#1625).
+      if (
+        !isReplay &&
+        settingsStore.settings.memoryEnabled &&
+        session.streamingContent.trim().length > 0 &&
+        !isLikelyAuthError(session.streamingContent)
+      ) {
+        storeAssistantResponse(session.streamingContent, {
+          model: `agent:${session.info.agentType}`,
+          userQuery: session.lastUserPrompt,
+        }).catch((err) => {
+          console.warn("[AgentStore] storeAssistantResponse failed:", err);
+        });
+      }
 
       // If the agent streamed a short auth error as text, surface it as a session error
       // so the error banner with the Login button appears. Long messages are skipped
