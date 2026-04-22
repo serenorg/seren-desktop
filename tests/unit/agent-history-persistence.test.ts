@@ -47,7 +47,7 @@ describe("agent message persistence guards", () => {
 
   it("finalizeStreamingContent DOES persist assistant messages", () => {
     const finalizeHandler = agentStoreSource.slice(
-      agentStoreSource.indexOf("finalizeStreamingContent(sessionId: string)"),
+      agentStoreSource.indexOf("finalizeStreamingContent(sessionId: string"),
     );
     const finalizeBody = finalizeHandler.slice(
       0,
