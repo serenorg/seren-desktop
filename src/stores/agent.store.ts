@@ -2220,6 +2220,15 @@ export const agentStore = {
   async compactAgentConversation(
     sessionId: string,
     preserveCount: number,
+    /**
+     * Optional prompt to retry on the new session after compaction. Callers
+     * pass this when a send failed mid-flight (e.g. `compactAndRetry`). The
+     * auto-compact-from-promptComplete path passes `undefined` because the
+     * previous prompt already completed successfully — retrying it would
+     * duplicate. Queued prompts are handled separately via the pendingPrompts
+     * transfer below — see #1623.
+     */
+    pendingUserPrompt?: string,
   ): Promise<CompactionOutcome> {
     const session = state.sessions[sessionId];
     if (!session || session.isCompacting) {
@@ -2303,10 +2312,13 @@ Structured summary:`;
       const cwd = session.cwd;
       const agentType = session.info.agentType;
       const conversationId = session.conversationId;
-      // Preserve the last user prompt so we can retry it after compaction.
-      // Without this, the user's message is lost when the old session is
-      // terminated and the new session starts with lastUserPrompt = undefined.
-      const pendingUserPrompt = session.lastUserPrompt;
+      // Transfer the queue of user-typed-but-not-yet-sent prompts to the new
+      // session. In the race where the user types while the agent is mid-turn
+      // and the in-flight turn triggers compaction, those prompts must survive
+      // — previously they were overwritten by compaction's stale `toPreserve`
+      // snapshot (#1623). Seeding + promptComplete on the new session will
+      // drain this queue naturally.
+      const queuedPrompts = session.pendingPrompts ?? [];
       // Terminate the old agent session
       await this.terminateSession(sessionId);
 
@@ -2346,6 +2358,10 @@ Structured summary:`;
         "restoredMessageCount",
         toPreserve.length + 1, // +1 for the compaction notice
       );
+      // Hand the queue to the new session so promptComplete will drain it.
+      if (queuedPrompts.length > 0) {
+        setState("sessions", newSessionId, "pendingPrompts", queuedPrompts);
+      }
 
       // Seed the new agent with the summary so it has context
       console.info(
@@ -2424,9 +2440,12 @@ Structured summary:`;
     );
 
     try {
+      // Retry the last prompt that failed — this entry point is called from
+      // sendPrompt's error handler when the CLI rejected for context overflow.
       const outcome = await this.compactAgentConversation(
         sessionId,
         settingsStore.settings.autoCompactPreserveMessages,
+        lastPrompt,
       );
 
       // Propagate non-success outcomes directly. "skipped" means the message
@@ -2534,6 +2553,21 @@ Structured summary:`;
     }
 
     const session = state.sessions[sessionId];
+
+    // Defensive: if a caller races compaction (e.g. a stray setTimeout the
+    // drain block scheduled before the auto-compact block set isCompacting),
+    // re-enqueue rather than send. The session is about to be terminated
+    // and re-spawned; compaction will transfer the queue to the new session
+    // and its first promptComplete will drain it (#1623).
+    if (session?.isCompacting) {
+      console.info(
+        "[AgentStore] sendPrompt: session is compacting, re-enqueuing",
+        { sessionId, prompt: prompt.slice(0, 50) },
+      );
+      this.enqueuePrompt(sessionId, prompt);
+      return;
+    }
+
     if (!session || session.info.status === "error") {
       // Set session-specific error if session exists
       if (session) {
@@ -3353,31 +3387,15 @@ Structured summary:`;
           "ready" as SessionStatus,
         );
 
-        // Drain the prompt queue for this session. This runs in the store
-        // regardless of which thread the UI is showing, so background threads
-        // don't stall. Guard against compaction — the session will be
-        // terminated and re-spawned, so sendPrompt would fail.
-        if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
-          const queue = state.sessions[sessionId]?.pendingPrompts ?? [];
-          if (queue.length > 0) {
-            const [nextPrompt, ...remaining] = queue;
-            setState("sessions", sessionId, "pendingPrompts", remaining);
-            console.log(
-              "[AgentStore] Draining queued prompt for session",
-              sessionId,
-              "remaining:",
-              remaining.length,
-            );
-            // Dispatch asynchronously so the promptComplete handler finishes
-            // before the next sendPrompt begins.
-            setTimeout(() => {
-              void this.sendPrompt(nextPrompt, undefined, undefined, sessionId);
-            }, 100);
-          }
-        }
-
-        // Auto-compact check: trigger compaction at 85% of context window,
-        // or at 200 messages for agents that don't report token usage at all.
+        // Auto-compact check runs BEFORE drain (#1623). The drain block below
+        // schedules a setTimeout to send the next queued prompt — if we drained
+        // first and compaction then kicked in, the queued sendPrompt would
+        // race the session teardown, add a user message to the old session's
+        // messages array, and then be overwritten by compaction's stale
+        // `toPreserve` snapshot. Triggering compaction first sets isCompacting
+        // synchronously (before the first await in compactAgentConversation),
+        // so the drain block's existing guard will skip. The queue is then
+        // transferred to the new session inside compactAgentConversation.
         if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
           const sess = state.sessions[sessionId];
           if (settingsStore.settings.autoCompactEnabled && sess) {
@@ -3410,13 +3428,44 @@ Structured summary:`;
             }
 
             if (shouldCompact) {
+              // Explicit undefined for pendingUserPrompt: the prompt that
+              // just produced this promptComplete already succeeded, so we
+              // do NOT retry it — retrying would duplicate the turn. Queued
+              // prompts handled via pendingPrompts transfer inside compaction.
               this.compactAgentConversation(
                 sessionId,
                 settingsStore.settings.autoCompactPreserveMessages,
+                undefined,
               );
             }
           }
         }
+
+        // Drain the prompt queue for this session. This runs in the store
+        // regardless of which thread the UI is showing, so background threads
+        // don't stall. Guard against compaction — if the auto-compact block
+        // above fired, `isCompacting` is already true, the session will be
+        // terminated and re-spawned, and the queue will be transferred to
+        // the new session by compactAgentConversation (#1623).
+        if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
+          const queue = state.sessions[sessionId]?.pendingPrompts ?? [];
+          if (queue.length > 0) {
+            const [nextPrompt, ...remaining] = queue;
+            setState("sessions", sessionId, "pendingPrompts", remaining);
+            console.log(
+              "[AgentStore] Draining queued prompt for session",
+              sessionId,
+              "remaining:",
+              remaining.length,
+            );
+            // Dispatch asynchronously so the promptComplete handler finishes
+            // before the next sendPrompt begins.
+            setTimeout(() => {
+              void this.sendPrompt(nextPrompt, undefined, undefined, sessionId);
+            }, 100);
+          }
+        }
+
         break;
       }
 
