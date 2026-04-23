@@ -111,6 +111,30 @@ describe("#1631 PR-1632 fix — cold-start cancel is honored", () => {
   });
 });
 
+describe("#1631 hotfix — warm-path submit sets turnInFlight before late-cancel guard", () => {
+  const agentChatSource = readFileSync(
+    resolve("src/components/chat/AgentChat.tsx"),
+    "utf-8",
+  );
+
+  it("sendMessage flips turnInFlight true on the warm path before the late-cancel guard runs", () => {
+    // Regression guard for the prod bug where the late-cancel guard fired
+    // on every warm-path send — turnInFlight was never set to true before
+    // the guard (sendPrompt sets it AFTER). The fix sets it true after the
+    // isPrompting queue check and before any async awaits.
+    const flipIdx = agentChatSource.indexOf(
+      "ensures the warm path also flips it",
+    );
+    expect(flipIdx, "setTurnInFlight warm-path guard must exist").toBeGreaterThan(0);
+    const guardIdx = agentChatSource.indexOf(
+      "cancel detected before dispatch",
+    );
+    expect(guardIdx, "late-cancel guard must still exist").toBeGreaterThan(0);
+    // The flip must appear BEFORE the late-cancel guard in source order.
+    expect(flipIdx).toBeLessThan(guardIdx);
+  });
+});
+
 describe("#1631 PR-1632 fix — predictive standby does not leak DB rows", () => {
   it("spawnSession skips createAgentConversation when opts.role === 'standby'", () => {
     // Without this gate, every warm-standby spawn wrote a conversation row
