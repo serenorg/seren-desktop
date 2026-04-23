@@ -749,6 +749,8 @@ pub fn run() {
             commands::chat::set_agent_conversation_permission_mode,
             commands::chat::set_agent_conversation_metadata,
             commands::chat::archive_agent_conversation,
+            commands::chat::get_thread_draft,
+            commands::chat::set_thread_draft,
             // Input history commands
             commands::chat::append_input_history,
             commands::chat::get_input_history,

@@ -17,7 +17,6 @@ import {
 import { createStore } from "solid-js/store";
 import { AgentPermissionDialog } from "@/components/agent/AgentPermissionDialog";
 import { DiffProposalDialog } from "@/components/agent/DiffProposalDialog";
-import { CompactedMessage } from "@/components/chat/CompactedMessage";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { isAuthError, isLikelyAuthError } from "@/lib/auth-errors";
@@ -45,7 +44,12 @@ import {
 } from "@/lib/rate-limit-fallback";
 import { escapeHtmlWithLinks } from "@/lib/render-markdown";
 import { saveToSerenNotes } from "@/lib/save-to-notes";
-import { appendInputHistory, getInputHistory } from "@/lib/tauri-bridge";
+import {
+  appendInputHistory,
+  getInputHistory,
+  getThreadDraft,
+  setThreadDraft,
+} from "@/lib/tauri-bridge";
 import { readDocument } from "@/services/docreader";
 import {
   type AgentType,
@@ -55,11 +59,7 @@ import {
   type ToolCallEvent,
 } from "@/services/providers";
 import { skills } from "@/services/skills";
-import {
-  type AgentCompactedSummary,
-  type AgentMessage,
-  agentStore,
-} from "@/stores/agent.store";
+import { type AgentMessage, agentStore } from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { settingsStore } from "@/stores/settings.store";
 import { threadStore } from "@/stores/thread.store";
@@ -80,8 +80,9 @@ interface AgentChatProps {
   onViewDiff?: (diff: DiffEvent) => void;
 }
 
-// Per-thread input drafts so switching threads doesn't leak text between them.
-const agentDrafts = new Map<string, string>();
+// Draft persistence is through SQLite (`get_thread_draft` / `set_thread_draft`) —
+// survives hard crashes, force-quit, and relaunch. Per #1631.
+const DRAFT_DEBOUNCE_MS = 500;
 
 // threadQueues removed — prompt queue now lives in agentStore.sessions[id].pendingPrompts
 // so background threads drain automatically on promptComplete.
@@ -132,23 +133,59 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     return thread;
   });
 
-  // Save/restore per-thread input drafts and message queues when switching
-  // Save/restore per-thread input drafts when switching threads.
-  // Queue persistence is no longer needed — it lives in the store.
+  // Per-thread composer draft (#1631) — persisted to SQLite so an app crash
+  // before submit doesn't lose the user's typed text. Write is debounced to
+  // 500ms so we don't hammer the DB on every keystroke.
+  let draftWriteTimer: ReturnType<typeof setTimeout> | null = null;
+  const schedulePersistDraft = (threadId: string, text: string) => {
+    if (draftWriteTimer) clearTimeout(draftWriteTimer);
+    draftWriteTimer = setTimeout(() => {
+      void setThreadDraft(threadId, text);
+      draftWriteTimer = null;
+    }, DRAFT_DEBOUNCE_MS);
+  };
+  const flushDraft = async (threadId: string, text: string) => {
+    if (draftWriteTimer) {
+      clearTimeout(draftWriteTimer);
+      draftWriteTimer = null;
+    }
+    await setThreadDraft(threadId, text);
+  };
+
   createEffect(() => {
     const currentId = activeAgentThread()?.id ?? null;
     if (currentId !== prevThreadId) {
       if (prevThreadId) {
         const currentInput = untrack(input);
-        if (currentInput) {
-          agentDrafts.set(prevThreadId, currentInput);
-        } else {
-          agentDrafts.delete(prevThreadId);
-        }
+        // Flush pending debounce so nothing is lost across thread switches.
+        void flushDraft(prevThreadId, currentInput);
       }
-      setInput(currentId ? (agentDrafts.get(currentId) ?? "") : "");
+      // Read the persisted draft for the newly-selected thread.
+      if (currentId) {
+        setInput(""); // placeholder while async load resolves
+        void getThreadDraft(currentId).then((draft) => {
+          // Only hydrate if the thread is still the active one — racing
+          // thread switches must not overwrite the user's live edits.
+          if (activeAgentThread()?.id === currentId) setInput(draft);
+        });
+      } else {
+        setInput("");
+      }
       prevThreadId = currentId;
     }
+  });
+
+  // Debounced write on every input change while the thread stays active.
+  createEffect(() => {
+    const id = activeAgentThread()?.id;
+    const text = input();
+    if (id && id === prevThreadId) {
+      schedulePersistDraft(id, text);
+    }
+  });
+
+  onCleanup(() => {
+    if (draftWriteTimer) clearTimeout(draftWriteTimer);
   });
 
   // Get messages for THIS thread's conversation ID, not the active session
@@ -318,8 +355,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     return fileTreeState.rootPath || null;
   };
 
-  const hasFolderOpen = () => Boolean(fileTreeState.rootPath);
-
   // Refresh project-scoped remote sessions (agent source-of-truth) and focus
   // any live session tied to the selected folder.
   // Skip refresh if a prompt is active to avoid backend rejection.
@@ -390,12 +425,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
     } catch (error) {
       console.error("[AgentChat] Failed to start session:", error);
     }
-  };
-
-  const retrySessionConnection = () => {
-    const thread = activeAgentThread();
-    if (!thread) return;
-    threadStore.selectThread(thread.id, "agent");
   };
 
   const handleAttachImages = async () => {
@@ -582,9 +611,47 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       isPrompting: isPrompting(),
     });
 
+    // Cold-start path (#1631): if the thread has no live session yet,
+    // turn on the thinking indicator and spawn synchronously so the user
+    // bubble + dots appear before the first stream chunk arrives.
+    const thread = activeAgentThread();
     if (!hasSession()) {
-      console.warn("[AgentChat] sendMessage aborted: no active session");
-      return;
+      if (!trimmed) {
+        console.warn(
+          "[AgentChat] sendMessage aborted: empty input (no session)",
+        );
+        return;
+      }
+      if (!thread) {
+        console.warn("[AgentChat] sendMessage aborted: no active agent thread");
+        return;
+      }
+      if (!fileTreeState.rootPath) {
+        console.warn("[AgentChat] sendMessage aborted: no open folder");
+        return;
+      }
+      agentStore.setTurnInFlight(thread.id, true);
+      agentStore.armRestartTimer(thread.id, 60_000, "spawn_failed");
+      try {
+        const sid = await agentStore.spawnSession(
+          fileTreeState.rootPath,
+          lockedAgentType(),
+          { localSessionId: thread.id },
+        );
+        if (!sid) {
+          console.warn("[AgentChat] cold-start spawn failed");
+          agentStore.setTurnError(thread.id, "spawn_failed");
+          return;
+        }
+      } catch (err) {
+        console.error("[AgentChat] cold-start spawn threw:", err);
+        agentStore.setTurnError(
+          thread.id,
+          "spawn_failed",
+          err instanceof Error ? err.message : String(err),
+        );
+        return;
+      }
     }
 
     // Require text content even when images are attached
@@ -782,6 +849,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // No component-level drain logic needed.
 
   const handleCancel = async () => {
+    // abortTurn covers every restart-dependent path: it cancels any warming
+    // standby, clears the queue, cancels the live turn, and flips turnInFlight
+    // off — no error-bubble side-effect because this is a user cancel. #1631.
+    const tid = activeAgentThread()?.id;
+    if (tid) {
+      await agentStore.abortTurn(tid);
+      return;
+    }
     const sid = threadSessionId();
     if (sid) agentStore.clearPromptQueue(sid);
     await agentStore.cancelPrompt(sid ?? undefined);
@@ -969,9 +1044,20 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const renderMessage = (message: AgentMessage, isLastMessage = false) => {
     switch (message.type) {
-      case "user":
+      case "user": {
+        // Inline terminal-error state (#1631): a 2px red left-border + "Couldn't
+        // send. Retry" link on the most-recent user bubble when the turn fails
+        // beyond the invisibility budget. Scope is the turn, not the app.
+        const tid = activeAgentThread()?.id;
+        const showTurnError = () => {
+          if (!isLastMessage || !tid) return false;
+          return agentStore.getTurnError(tid) !== null;
+        };
         return (
-          <article class="group/msg relative px-5 py-4 bg-surface-1 border-b border-surface-2 [contain:layout]">
+          <article
+            class="group/msg relative px-5 py-4 bg-surface-1 border-b border-surface-2 [contain:layout]"
+            classList={{ "border-l-2 border-l-destructive": showTurnError() }}
+          >
             <Show when={message.docNames?.length}>
               <div class="flex flex-wrap gap-1.5 mb-2">
                 <For each={message.docNames}>
@@ -1017,8 +1103,36 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 Fork
               </button>
             </Show>
+            <Show when={showTurnError()}>
+              <div class="mt-2 text-xs text-destructive">
+                Couldn't send.{" "}
+                <button
+                  type="button"
+                  class="underline bg-transparent border-none text-destructive cursor-pointer p-0 hover:brightness-125"
+                  onClick={() => {
+                    const id = activeAgentThread()?.id;
+                    if (!id) return;
+                    const ts = agentStore.getThreadState(id);
+                    const text = ts.lastPromptText ?? message.content;
+                    agentStore.clearTurnError(id);
+                    void agentStore.sendPrompt(
+                      text,
+                      ts.lastPromptContext,
+                      {
+                        displayContent: ts.lastPromptDisplay,
+                        docNames: ts.lastPromptDocNames,
+                      },
+                      threadSessionId() ?? undefined,
+                    );
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            </Show>
           </article>
         );
+      }
 
       case "assistant":
         return (
@@ -1325,173 +1439,70 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           }
         }}
       >
+        {/* Session Messages */}
         <Show
-          when={hasSession()}
+          when={threadMessages().length > 0 || threadStreamingContent()}
           fallback={
-            <div class="flex-1 flex flex-col items-center justify-center p-10 text-muted-foreground">
-              <div class="max-w-[320px] text-center">
-                <svg
-                  class="w-12 h-12 mx-auto mb-4 text-surface-3"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  role="img"
-                  aria-label="Computer"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.5"
-                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                  />
-                </svg>
-                <h3 class="m-0 mb-2 text-base font-medium text-foreground">
-                  Reconnecting {lockedAgentName()} Thread
-                </h3>
-                <p class="m-0 mb-4 text-sm">
-                  This conversation is locked to {lockedAgentName()}. Seren is
-                  reattaching the session for this thread.
-                </p>
-                <div class="flex flex-col items-center gap-3 w-full max-w-md">
-                  <Show when={lockedAgentType() === "claude-code"}>
-                    <div class="w-full px-3 py-2 bg-primary/10 border border-primary/30 rounded-md text-xs text-primary">
-                      <div class="flex items-start gap-2">
-                        <svg
-                          class="w-4 h-4 mt-0.5 flex-shrink-0"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                          role="img"
-                          aria-label="Info"
-                        >
-                          <path
-                            fill-rule="evenodd"
-                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                            clip-rule="evenodd"
-                          />
-                        </svg>
-                        <span>
-                          <strong>Claude Code Required:</strong> Make sure
-                          Claude Code CLI is installed and run{" "}
-                          <code>claude login</code> to authenticate.
-                        </span>
-                      </div>
-                    </div>
-                  </Show>
-                  <Show when={!hasFolderOpen()}>
-                    <div class="w-full px-3 py-2 bg-destructive/10 border border-destructive/30 rounded-md text-xs text-destructive">
-                      Open a folder first to set the agent's working directory.
-                    </div>
-                  </Show>
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-2 px-4 py-2 bg-success text-white rounded-md text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={retrySessionConnection}
-                    disabled={agentStore.isLoading || !hasFolderOpen()}
-                  >
-                    <Show when={agentStore.isLoading}>
-                      <svg
-                        class="animate-spin w-4 h-4 shrink-0"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        aria-hidden="true"
-                      >
-                        <circle
-                          class="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          stroke-width="4"
-                        />
-                        <path
-                          class="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                        />
-                      </svg>
-                    </Show>
-                    {agentStore.isLoading
-                      ? "Reconnecting..."
-                      : "Retry Connection"}
-                  </button>
-                </div>
-              </div>
+            <div class="flex flex-col items-center justify-center p-10 text-muted-foreground">
+              <h3 class="m-0 mb-2 text-base font-medium text-foreground">
+                Agent Ready
+              </h3>
+              <p class="m-0 text-sm text-center max-w-[280px]">
+                Describe what you'd like the agent to do. It can read files,
+                make edits, run commands, and more.
+              </p>
             </div>
           }
         >
-          {/* Session Messages */}
+          <For each={groupConsecutiveToolCalls()}>
+            {(item, index) => {
+              const isLast = () =>
+                index() === groupConsecutiveToolCalls().length - 1;
+              if (item.type === "tool_group") {
+                return (
+                  <ToolCallGroup toolCalls={item.toolCalls} isComplete={true} />
+                );
+              }
+              return renderMessage(item.message, isLast());
+            }}
+          </For>
+
+          {/* Loading placeholder while waiting for first chunk.
+              Thinking dots follow `turnInFlight` — continuous across session
+              boundaries (predictive promotion, reactive retry, crash re-dispatch)
+              so the user never sees the indicator flicker off mid-restart. #1631. */}
           <Show
-            when={threadMessages().length > 0 || threadStreamingContent()}
-            fallback={
-              <div class="flex flex-col items-center justify-center p-10 text-muted-foreground">
-                <h3 class="m-0 mb-2 text-base font-medium text-foreground">
-                  Agent Ready
-                </h3>
-                <p class="m-0 text-sm text-center max-w-[280px]">
-                  Describe what you'd like the agent to do. It can read files,
-                  make edits, run commands, and more.
-                </p>
-              </div>
+            when={
+              activeAgentThread() &&
+              agentStore.isTurnInFlight(activeAgentThread()!.id) &&
+              !threadStreamingContent() &&
+              !threadStreamingThinking()
             }
           >
-            {/* Compacted summary from previous messages */}
-            <Show when={agentStore.activeSession?.compactedSummary}>
-              {(summary) => (
-                <CompactedMessage
-                  summary={summary() as AgentCompactedSummary}
-                />
-              )}
-            </Show>
+            <article class="px-5 py-4 border-b border-surface-2">
+              <ThinkingStatus startTime={promptStartTime} />
+            </article>
+          </Show>
 
-            <For each={groupConsecutiveToolCalls()}>
-              {(item, index) => {
-                const isLast = () =>
-                  index() === groupConsecutiveToolCalls().length - 1;
-                if (item.type === "tool_group") {
-                  return (
-                    <ToolCallGroup
-                      toolCalls={item.toolCalls}
-                      isComplete={true}
-                    />
-                  );
-                }
-                return renderMessage(item.message, isLast());
-              }}
-            </For>
+          {/* Streaming Thinking */}
+          <Show when={threadStreamingThinking()}>
+            <article class="px-5 py-3 border-b border-surface-2">
+              <ThinkingBlock
+                thinking={threadStreamingThinking()}
+                isStreaming={true}
+              />
+            </article>
+          </Show>
 
-            {/* Loading placeholder while waiting for first chunk */}
-            <Show
-              when={
-                isPrompting() &&
-                !threadStreamingContent() &&
-                !threadStreamingThinking()
-              }
-            >
-              <article class="px-5 py-4 border-b border-surface-2">
-                <ThinkingStatus startTime={promptStartTime} />
-              </article>
-            </Show>
-
-            {/* Streaming Thinking */}
-            <Show when={threadStreamingThinking()}>
-              <article class="px-5 py-3 border-b border-surface-2">
-                <ThinkingBlock
-                  thinking={threadStreamingThinking()}
-                  isStreaming={true}
-                />
-              </article>
-            </Show>
-
-            {/* Streaming Content */}
-            <Show when={threadStreamingContent()}>
-              <article class="px-5 py-4 border-b border-surface-2">
-                <div
-                  class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
-                  textContent={threadStreamingContent()}
-                />
-                <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
-              </article>
-            </Show>
+          {/* Streaming Content */}
+          <Show when={threadStreamingContent()}>
+            <article class="px-5 py-4 border-b border-surface-2">
+              <div
+                class="text-sm leading-relaxed text-foreground break-words [&_p]:m-0 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_code]:bg-surface-2 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[13px] [&_pre]:bg-surface-1 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-normal [&_ul]:my-2 [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:pl-6 [&_li]:my-1 [&_blockquote]:border-l-[3px] [&_blockquote]:border-border [&_blockquote]:my-3 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline"
+                textContent={threadStreamingContent()}
+              />
+              <span class="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" />
+            </article>
           </Show>
         </Show>
       </div>
