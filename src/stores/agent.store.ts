@@ -1790,23 +1790,32 @@ export const agentStore = {
         terminatedSessionIds.delete(info.id);
 
         // Persist an agent conversation record (safe to call repeatedly via INSERT OR IGNORE).
-        try {
-          await createAgentConversation(
-            info.id,
-            conversationTitle,
-            resolvedAgentType,
-            cwd,
-            cwd,
-            resumeAgentSessionId ?? undefined,
-            serializeAgentConversationMetadata({
-              pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
-              pendingBootstrapMessages: opts?.bootstrapPromptContext
-                ? opts?.restoredMessages
-                : undefined,
-            }) ?? undefined,
-          );
-        } catch (error) {
-          console.warn("Failed to persist agent conversation", error);
+        //
+        // Warm-standby spawns (#1631) must NOT write a DB row — the standby
+        // is ephemeral. On promotion, the promoted session inherits the
+        // serving session's conversationId (which already has a row); on
+        // abort/cancel the standby is terminated and nothing is persisted.
+        // Without this guard, every warm-up left an orphaned thread row that
+        // re-surfaced as an idle agent thread in the sidebar after restart.
+        if (opts?.role !== "standby") {
+          try {
+            await createAgentConversation(
+              info.id,
+              conversationTitle,
+              resolvedAgentType,
+              cwd,
+              cwd,
+              resumeAgentSessionId ?? undefined,
+              serializeAgentConversationMetadata({
+                pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
+                pendingBootstrapMessages: opts?.bootstrapPromptContext
+                  ? opts?.restoredMessages
+                  : undefined,
+              }) ?? undefined,
+            );
+          } catch (error) {
+            console.warn("Failed to persist agent conversation", error);
+          }
         }
 
         // Create session state

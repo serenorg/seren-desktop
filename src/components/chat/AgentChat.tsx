@@ -638,6 +638,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           lockedAgentType(),
           { localSessionId: thread.id },
         );
+        // User pressed Stop mid-spawn — abortTurn flipped turnInFlight off.
+        // Honor the cancel: terminate the spawn we just created (if any) and
+        // bail before dispatching the prompt. Without this, the async spawn
+        // resolves after Cancel and the user's prompt sneaks through.
+        if (!agentStore.isTurnInFlight(thread.id)) {
+          console.info("[AgentChat] cold-start cancelled during spawn");
+          if (sid) await agentStore.terminateSession(sid);
+          return;
+        }
         if (!sid) {
           console.warn("[AgentChat] cold-start spawn failed");
           agentStore.setTurnError(thread.id, "spawn_failed");
@@ -645,6 +654,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         }
       } catch (err) {
         console.error("[AgentChat] cold-start spawn threw:", err);
+        // If the user cancelled, don't overwrite their cancel with an error.
+        if (!agentStore.isTurnInFlight(thread.id)) return;
         agentStore.setTurnError(
           thread.id,
           "spawn_failed",
@@ -825,6 +836,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             mimeType: img.mimeType,
           }))
         : undefined;
+
+    // Late-cancel guard (#1631): Stop may fire between the cold-start spawn
+    // and the sendPrompt dispatch, or during an awaited skill/doc load.
+    // Honor the cancel before dispatching so the prompt never leaks through.
+    if (thread && !agentStore.isTurnInFlight(thread.id)) {
+      console.info(
+        "[AgentChat] sendMessage: cancel detected before dispatch — skipping sendPrompt",
+      );
+      return;
+    }
 
     console.log(
       "[AgentChat] Sending prompt to agent runtime, context blocks:",

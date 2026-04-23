@@ -80,3 +80,49 @@ describe("#1631 — abortTurn wired for user cancel", () => {
     expect(chat).toContain("agentStore.abortTurn(");
   });
 });
+
+describe("#1631 PR-1632 fix — cold-start cancel is honored", () => {
+  const agentChatSource = readFileSync(
+    resolve("src/components/chat/AgentChat.tsx"),
+    "utf-8",
+  );
+
+  it("sendMessage re-checks turnInFlight after the spawn await and terminates the freshly-spawned session on cancel", () => {
+    // After await spawnSession(...) resolves, if the user clicked Stop
+    // mid-spawn, abortTurn flipped turnInFlight off. sendMessage must honor
+    // it and tear down the half-spawned session so the prompt never sneaks
+    // through. Guard against a regression to the pre-fix behavior where the
+    // spawn result was dispatched regardless.
+    const idx = agentChatSource.indexOf("cold-start cancelled during spawn");
+    expect(idx).toBeGreaterThan(0);
+    const region = agentChatSource.slice(idx - 400, idx + 400);
+    expect(region).toContain("agentStore.isTurnInFlight(thread.id)");
+    expect(region).toContain("agentStore.terminateSession(sid)");
+  });
+
+  it("sendMessage re-checks turnInFlight immediately before the final sendPrompt dispatch", () => {
+    // Skill / doc-attachment loads add awaits between cold-start spawn and
+    // the dispatch site. A late cancel during any of those awaits must
+    // still prevent sendPrompt from firing.
+    const idx = agentChatSource.indexOf("cancel detected before dispatch");
+    expect(idx).toBeGreaterThan(0);
+    const region = agentChatSource.slice(idx - 400, idx + 400);
+    expect(region).toContain("agentStore.isTurnInFlight(thread.id)");
+  });
+});
+
+describe("#1631 PR-1632 fix — predictive standby does not leak DB rows", () => {
+  it("spawnSession skips createAgentConversation when opts.role === 'standby'", () => {
+    // Without this gate, every warm-standby spawn wrote a conversation row
+    // keyed on the standby session id. Promotion only rewrites the in-memory
+    // conversationId, so the orphaned row re-surfaced as an idle thread in
+    // the sidebar after restart. Guard against regression.
+    const idx = agentStoreSource.indexOf(
+      "Warm-standby spawns (#1631) must NOT write a DB row",
+    );
+    expect(idx).toBeGreaterThan(0);
+    const region = agentStoreSource.slice(idx, idx + 800);
+    expect(region).toContain('opts?.role !== "standby"');
+    expect(region).toContain("createAgentConversation(");
+  });
+});
