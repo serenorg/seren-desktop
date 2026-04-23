@@ -754,6 +754,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
 
+    // Mark the turn in-flight now so the late-cancel guard below distinguishes
+    // "user actively submitting" from "user pressed Stop mid-awaits." Cold-start
+    // already set this true inside the !hasSession() block; this is a no-op
+    // there but ensures the warm path also flips it. Without this, the guard
+    // aborted every warm-path send because turnInFlight stayed false. #1631 hotfix.
+    if (thread) {
+      agentStore.setTurnInFlight(thread.id, true);
+    }
+
     // Split attachments: images go as agent context blocks; docreader files get extracted to text
     const imageAttachments = images.filter((a) => !isDocreaderMime(a.mimeType));
     const docAttachments = images.filter((a) => isDocreaderMime(a.mimeType));
