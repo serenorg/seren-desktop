@@ -1507,7 +1507,17 @@ export const agentStore = {
       // instance while another is alive (see isRetryableClaudeInitError).
       // Without this, the new session times out 3x (60s) before the existing
       // post-failure idle-reclaim logic kicks in.
-      if (resolvedAgentType === "claude-code" && initRetryAttempt === 0) {
+      //
+      // Warm-standby spawns (#1631) are additive — they must NOT terminate
+      // any other session. If Claude CLI fails to init while the serving
+      // session is alive, the predictive path aborts silently and serving
+      // stays intact. Killing serving here would catastrophically replace
+      // the live session mid-turn.
+      if (
+        resolvedAgentType === "claude-code" &&
+        initRetryAttempt === 0 &&
+        opts?.role !== "standby"
+      ) {
         const idleSessions = getIdleClaudeSessionIds(localSessionId);
         for (const idleId of idleSessions) {
           console.log(
