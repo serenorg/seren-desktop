@@ -226,6 +226,16 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             .ok();
     }
 
+    // Per-thread composer draft (#1631). Persisted on 500ms debounce so the
+    // user's unsent text survives crash, force-quit, and relaunch.
+    let has_draft: bool = conn
+        .prepare("SELECT draft FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_draft {
+        conn.execute("ALTER TABLE conversations ADD COLUMN draft TEXT", [])
+            .ok();
+    }
+
     // Backfill project context for existing agent conversations.
     conn.execute(
         "UPDATE conversations

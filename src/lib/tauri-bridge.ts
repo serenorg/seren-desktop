@@ -852,6 +852,38 @@ export async function getInputHistory(
   return (await invoke("get_input_history", { conversationId })) as string[];
 }
 
+/**
+ * Read the persisted composer draft for a thread. Returns `""` when the
+ * thread has no draft or when the Tauri bridge is unavailable (web/preview). #1631.
+ */
+export async function getThreadDraft(threadId: string): Promise<string> {
+  const invoke = await getInvoke();
+  if (!invoke) return "";
+  try {
+    return (await invoke("get_thread_draft", { threadId })) as string;
+  } catch (err) {
+    console.warn("[tauri-bridge] getThreadDraft failed:", err);
+    return "";
+  }
+}
+
+/**
+ * Persist the composer draft for a thread. Survives hard crashes. Called
+ * on a 500ms input debounce and on thread switch. #1631.
+ */
+export async function setThreadDraft(
+  threadId: string,
+  draft: string,
+): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) return;
+  try {
+    await invoke("set_thread_draft", { threadId, draft });
+  } catch (err) {
+    console.warn("[tauri-bridge] setThreadDraft failed:", err);
+  }
+}
+
 export async function setAgentConversationMetadata(
   id: string,
   agentMetadata?: string | null,

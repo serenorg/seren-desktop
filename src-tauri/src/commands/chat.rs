@@ -480,6 +480,45 @@ pub async fn set_agent_conversation_permission_mode(
     .await
 }
 
+/// Fetch the persisted composer draft for a thread (#1631).
+/// Survives force-quit so the user never loses unsent text.
+#[tauri::command]
+pub async fn get_thread_draft(
+    app: AppHandle,
+    thread_id: String,
+) -> Result<String, String> {
+    run_db(app, move |conn| {
+        let draft: Option<String> = conn
+            .query_row(
+                "SELECT draft FROM conversations WHERE id = ?1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(draft.unwrap_or_default())
+    })
+    .await
+}
+
+/// Write the composer draft for a thread (#1631).
+/// Called on 500ms input debounce; cleared after submit by the frontend.
+#[tauri::command]
+pub async fn set_thread_draft(
+    app: AppHandle,
+    thread_id: String,
+    draft: String,
+) -> Result<(), String> {
+    run_db(app, move |conn| {
+        conn.execute(
+            "UPDATE conversations SET draft = ?1 WHERE id = ?2",
+            params![draft, thread_id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
 const MAX_INPUT_HISTORY_PER_CONVERSATION: i64 = 200;
 
 #[tauri::command]

@@ -39,6 +39,30 @@ const spawnContextMap = new Map<
 const SESSION_READY_TIMEOUT_MS = 30_000;
 
 /**
+ * Predictive-compaction trigger: fire when input tokens hit this fraction
+ * of the agent's context window. Hard-coded — not exposed as a setting. #1631.
+ */
+export const PREDICTIVE_COMPACT_THRESHOLD = 0.7;
+
+/**
+ * Global cap = 1 simultaneous predictive compaction across the whole app.
+ * Prevents 3x Sonnet 4 calls and 3x Node subprocesses when multiple threads
+ * cross the threshold in the same promptComplete tick. #1631.
+ */
+let predictiveCompactBusy = false;
+
+/**
+ * Per-thread restart-timer handles. Cleared when the turn produces its
+ * first stream chunk or when a terminal error flips the bubble. #1631.
+ */
+const restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Invisibility-budget constants per restart-dependent scenario (#1631). */
+export const BUDGET_COLD_START_MS = 60_000;
+export const BUDGET_REACTIVE_COMPACT_MS = 90_000;
+export const BUDGET_CRASH_MS = 60_000;
+
+/**
  * Instruction prepended to every agent session telling Claude Code / Codex
  * that the Seren MCP gateway exists and MUST be queried live before refusing
  * any third-party service. Intentionally does NOT embed a snapshot of
@@ -166,6 +190,10 @@ import * as providerService from "@/services/providers";
  *  initialize() calls don't stack listeners. */
 let providerRuntimeReadyListener: Promise<UnlistenFn> | null = null;
 
+/** Set once we've subscribed to `provider-runtime://restarted` so repeated
+ *  initialize() calls don't stack listeners. #1631. */
+let providerRuntimeRestartedListener: Promise<UnlistenFn> | null = null;
+
 /** Commit an agent list into the store + settle the selected-agent fallback.
  *  Shared by `initialize()` and the `provider-runtime://ready` listener so
  *  they produce identical post-conditions. See GH #1587. */
@@ -187,40 +215,107 @@ function applyAgents(agents: providerService.AgentInfo[]): void {
  *  reload. See GH #1587. */
 function subscribeToProviderRuntimeReady(): void {
   if (providerRuntimeReadyListener) return;
-  providerRuntimeReadyListener = listen("provider-runtime://ready", async () => {
-    try {
-      const agents = await providerService.getAvailableAgents();
-      if (agents.length > 0) {
-        applyAgents(agents);
+  providerRuntimeReadyListener = listen(
+    "provider-runtime://ready",
+    async () => {
+      try {
+        const agents = await providerService.getAvailableAgents();
+        if (agents.length > 0) {
+          applyAgents(agents);
+        }
+      } catch (error) {
+        console.error(
+          "Failed to load agents on provider-runtime ready event:",
+          error,
+        );
       }
-    } catch (error) {
-      console.error(
-        "Failed to load agents on provider-runtime ready event:",
-        error,
+    },
+  );
+}
+
+/**
+ * Subscribe once to `provider-runtime://restarted`. The Rust monitor emits
+ * this after the Node provider-runtime subprocess auto-restarts. We drop
+ * every live session (all IDs belong to the dead process) and, for threads
+ * with an in-flight turn, silently re-dispatch the last prompt on a fresh
+ * spawn. Threads with no in-flight turn wait for the next user submit. #1631.
+ */
+function subscribeToProviderRuntimeRestarted(): void {
+  if (providerRuntimeRestartedListener) return;
+  providerRuntimeRestartedListener = listen(
+    "provider-runtime://restarted",
+    () => {
+      console.info(
+        "[AgentStore] provider-runtime://restarted — invalidating serving pointers",
       );
-    }
-  });
+      const snapshot = Object.entries(state.sessions).map(([id, s]) => ({
+        id,
+        conversationId: s.conversationId,
+        cwd: s.cwd,
+        agentType: s.info.agentType,
+        messages: s.messages,
+      }));
+      for (const { id } of snapshot) terminatedSessionIds.add(id);
+      setState(
+        produce((draft) => {
+          for (const { id } of snapshot) delete draft.sessions[id];
+        }),
+      );
+      setState("activeSessionId", null);
+
+      for (const snap of snapshot) {
+        const ts = state.threadStates[snap.conversationId];
+        if (!ts?.turnInFlight || !ts.lastPromptText) continue;
+        void (async () => {
+          agentStore.armRestartTimer(
+            snap.conversationId,
+            BUDGET_CRASH_MS,
+            "crash_ceiling",
+          );
+          const newId = await agentStore.spawnSession(
+            snap.cwd,
+            snap.agentType,
+            {
+              localSessionId: snap.conversationId,
+              restoredMessages: snap.messages,
+            },
+          );
+          if (!newId) {
+            agentStore.setTurnError(snap.conversationId, "crash_ceiling");
+            return;
+          }
+          try {
+            await agentStore.sendPrompt(
+              ts.lastPromptText as string,
+              ts.lastPromptContext,
+              {
+                displayContent: ts.lastPromptDisplay,
+                docNames: ts.lastPromptDocNames,
+              },
+              newId,
+            );
+          } catch (err) {
+            console.error("[AgentStore] crash re-dispatch failed:", err);
+            agentStore.setTurnError(
+              snap.conversationId,
+              "crash_ceiling",
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+        })();
+      }
+    },
+  );
 }
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export interface PreCompactionMessage {
-  id: string;
-  type: "user" | "assistant";
-  content: string;
-  timestamp: number;
-}
-
 export interface AgentCompactedSummary {
   content: string;
   originalMessageCount: number;
   compactedAt: number;
-  /** Original user/assistant text shown under the summary card so the user
-   * can still read pre-compaction scrollback. Tool calls and thoughts are
-   * intentionally omitted — only text conversation is preserved. */
-  preCompactionMessages?: PreCompactionMessage[];
 }
 
 interface AgentConversationMetadata {
@@ -340,6 +435,23 @@ export interface ActiveSession {
   /** Queued prompts awaiting dispatch when the session returns to ready.
    *  Lives in the store (not the component) so background threads still drain. */
   pendingPrompts: string[];
+  /**
+   * Serving = the session the user is talking to. Standby = a warm
+   * replacement session being seeded via predictive compaction — invisible
+   * to the UI, not dispatch-eligible until promoted. #1631.
+   */
+  role: "serving" | "standby";
+  /**
+   * True once the standby session finished its compaction seed prompt and
+   * is eligible for `promoteStandbyAndDispatch`. Always false for serving
+   * sessions. #1631.
+   */
+  seedCompleted?: boolean;
+  /** In-flight predictive compaction flag — prevents double-kicking the
+   *  same serving session into another warm-up. #1631. */
+  predictiveCompactInFlight?: boolean;
+  /** Sibling standby session id while predictive compaction is warming. */
+  standbySessionId?: string | null;
 }
 
 // ============================================================================
@@ -524,11 +636,52 @@ function clearLegacyAgentTranscript(conversationId: string): void {
 // State
 // ============================================================================
 
+/**
+ * Terminal error classification for the inline-per-bubble error state.
+ * Closed union — callers must map any new failure into one of these. #1631.
+ */
+export type ErrorKind =
+  | "restart_timeout"
+  | "spawn_failed"
+  | "auth_expired"
+  | "binary_missing"
+  | "crash_ceiling"
+  | "summary_call_failed"
+  | "seed_failed";
+
+export interface TurnError {
+  kind: ErrorKind;
+  retryable: boolean;
+  message?: string;
+}
+
+/**
+ * Per-thread state that survives session swaps (predictive promotion,
+ * reactive compact-and-retry, crash re-dispatch). Keyed by conversationId
+ * so compaction — which mints a new sessionId but keeps conversationId —
+ * preserves the in-flight signal and terminal-error state. #1631.
+ */
+export interface ThreadRuntimeState {
+  turnInFlight: boolean;
+  turnError: TurnError | null;
+  /** Absolute ms epoch when the current restart-dependent turn must have
+   *  produced a streaming chunk by. `null` outside restart-dependent paths. */
+  restartTimerExpiresAt: number | null;
+  /** Text + context of the last submitted user prompt so retry-link and
+   *  crash re-dispatch can resend without relying on stale session state. */
+  lastPromptText?: string;
+  lastPromptContext?: Array<Record<string, string>>;
+  lastPromptDisplay?: string;
+  lastPromptDocNames?: string[];
+}
+
 interface AgentState {
   /** Available agents and their status */
   availableAgents: AgentInfo[];
   /** Active sessions keyed by session ID */
   sessions: Record<string, ActiveSession>;
+  /** Per-thread runtime state keyed by conversationId (#1631). */
+  threadStates: Record<string, ThreadRuntimeState>;
   /** Currently focused session ID */
   activeSessionId: string | null;
   /** Selected agent type for new sessions */
@@ -557,6 +710,7 @@ interface AgentState {
 const [state, setState] = createStore<AgentState>({
   availableAgents: [],
   sessions: {},
+  threadStates: {},
   activeSessionId: null,
   selectedAgentType: "claude-code",
   recentAgentConversations: [],
@@ -737,6 +891,10 @@ function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
     .filter(([id, session]) => {
       if (session.info.agentType !== "claude-code") return false;
       if (id === activeId) return false;
+      // Warm standby sessions must NOT be reclaimed — they are the whole
+      // point of predictive compaction. Killing one mid-warm-up defeats
+      // the invisibility budget for the next user submit. #1631.
+      if (session.role === "standby") return false;
       if (
         excludeConversationId &&
         session.conversationId === excludeConversationId
@@ -906,6 +1064,166 @@ export const agentStore = {
     setState("sessions", sessionId, "pendingPrompts", (q) => [...q, prompt]);
   },
 
+  // ============================================================================
+  // Per-thread runtime state (turnInFlight / turnError / last-prompt) — #1631
+  // ============================================================================
+
+  getThreadState(threadId: string): ThreadRuntimeState {
+    return (
+      state.threadStates[threadId] ?? {
+        turnInFlight: false,
+        turnError: null,
+        restartTimerExpiresAt: null,
+      }
+    );
+  },
+
+  isTurnInFlight(threadId: string): boolean {
+    return state.threadStates[threadId]?.turnInFlight === true;
+  },
+
+  getTurnError(threadId: string): TurnError | null {
+    return state.threadStates[threadId]?.turnError ?? null;
+  },
+
+  _ensureThreadState(threadId: string): void {
+    if (!state.threadStates[threadId]) {
+      setState("threadStates", threadId, {
+        turnInFlight: false,
+        turnError: null,
+        restartTimerExpiresAt: null,
+      });
+    }
+  },
+
+  setTurnInFlight(threadId: string, value: boolean): void {
+    this._ensureThreadState(threadId);
+    setState("threadStates", threadId, "turnInFlight", value);
+    if (!value) this.clearRestartTimer(threadId);
+  },
+
+  /** Record the last-submitted prompt so retry-link and crash re-dispatch
+   *  can resend with the same text + attachments. */
+  setLastPrompt(
+    threadId: string,
+    prompt: string,
+    context?: Array<Record<string, string>>,
+    display?: string,
+    docNames?: string[],
+  ): void {
+    this._ensureThreadState(threadId);
+    setState("threadStates", threadId, "lastPromptText", prompt);
+    setState("threadStates", threadId, "lastPromptContext", context);
+    setState("threadStates", threadId, "lastPromptDisplay", display);
+    setState("threadStates", threadId, "lastPromptDocNames", docNames);
+  },
+
+  /**
+   * Arm a per-turn invisibility budget. When it expires and the turn is
+   * still in-flight and no stream chunk has landed, the bubble flips to
+   * a terminal error — see #1631 failure-mode section.
+   */
+  armRestartTimer(threadId: string, budgetMs: number, reason: ErrorKind): void {
+    this._ensureThreadState(threadId);
+    this.clearRestartTimer(threadId);
+    setState(
+      "threadStates",
+      threadId,
+      "restartTimerExpiresAt",
+      Date.now() + budgetMs,
+    );
+    const timer = setTimeout(() => {
+      restartTimers.delete(threadId);
+      const ts = state.threadStates[threadId];
+      if (!ts || !ts.turnInFlight) return;
+      const session = Object.values(state.sessions).find(
+        (s) => s.conversationId === threadId,
+      );
+      const streamingNow =
+        !!session && (session.streamingContent || session.streamingThinking);
+      if (streamingNow) {
+        // A response started — drop the timer silently; the turn will
+        // finalize normally.
+        setState("threadStates", threadId, "restartTimerExpiresAt", null);
+        return;
+      }
+      this.setTurnError(threadId, reason, `invisibility budget exceeded`);
+    }, budgetMs);
+    restartTimers.set(threadId, timer);
+  },
+
+  clearRestartTimer(threadId: string): void {
+    const t = restartTimers.get(threadId);
+    if (t) {
+      clearTimeout(t);
+      restartTimers.delete(threadId);
+    }
+    if (state.threadStates[threadId]) {
+      setState("threadStates", threadId, "restartTimerExpiresAt", null);
+    }
+  },
+
+  setTurnError(threadId: string, kind: ErrorKind, message?: string): void {
+    this._ensureThreadState(threadId);
+    const retryable = kind !== "auth_expired" && kind !== "binary_missing";
+    setState("threadStates", threadId, "turnError", {
+      kind,
+      retryable,
+      message,
+    });
+    // Surface the inline error — the thinking dots stop, the bubble turns red.
+    setState("threadStates", threadId, "turnInFlight", false);
+    this.clearRestartTimer(threadId);
+    // Fire-and-forget auto-report through #1630's pipeline. If that
+    // ticket is not yet merged, the invoke will throw and be swallowed.
+    this._submitTurnErrorReport(threadId, kind, message);
+  },
+
+  clearTurnError(threadId: string): void {
+    if (!state.threadStates[threadId]) return;
+    setState("threadStates", threadId, "turnError", null);
+  },
+
+  _submitTurnErrorReport(
+    threadId: string,
+    kind: ErrorKind,
+    message: string | undefined,
+  ): void {
+    try {
+      const session = Object.values(state.sessions).find(
+        (s) => s.conversationId === threadId,
+      );
+      const bundle = {
+        error_kind: kind,
+        stack: message ?? "",
+        agent_type: session?.info.agentType ?? "unknown",
+        session_age_ms: session?.info.createdAt
+          ? Date.now() - Date.parse(session.info.createdAt)
+          : 0,
+        message_count: session?.messages.length ?? 0,
+        token_usage: session?.lastInputTokens ?? 0,
+        token_ratio:
+          session && session.contextWindowSize
+            ? (session.lastInputTokens ?? 0) / session.contextWindowSize
+            : 0,
+        restart_attempt: 0,
+        path: "reactive",
+      };
+      // TODO(#1630): When the support-pipeline ticket lands, this becomes
+      // the canonical auto-report callsite. Until then the invoke rejects
+      // silently (no backend command registered) and we only log.
+      console.warn(
+        "[AgentStore] Terminal turn error — submit_support_report:",
+        bundle,
+      );
+    } catch (err) {
+      console.warn(
+        "[AgentStore] _submitTurnErrorReport failed (ignored):",
+        err,
+      );
+    }
+  },
+
   /** Get the pending prompt queue for a session (reactive). */
   getPendingPrompts(sessionId: string): string[] {
     return state.sessions[sessionId]?.pendingPrompts ?? [];
@@ -978,6 +1296,7 @@ export const agentStore = {
     // re-query the agent list then. Idempotent because repeated calls
     // to applyAgents just overwrite availableAgents with the same data.
     subscribeToProviderRuntimeReady();
+    subscribeToProviderRuntimeRestarted();
 
     const backoffMs = [0, 1_000, 2_000, 4_000, 8_000];
     for (let attempt = 0; attempt < backoffMs.length; attempt++) {
@@ -1113,6 +1432,9 @@ export const agentStore = {
       bootstrapPromptContext?: string;
       initialModelId?: string;
       initialPermissionMode?: string;
+      /** Warm-standby spawns are invisible to the UI — no session-selector
+       *  entry, events buffered not rendered, does not steal active focus. */
+      role?: "serving" | "standby";
     },
   ): Promise<string | null> {
     const resolvedAgentType = agentType ?? state.selectedAgentType;
@@ -1168,7 +1490,10 @@ export const agentStore = {
             memoryContext = bootstrapped;
           }
         } catch (err) {
-          console.warn("[AgentStore] memory bootstrap failed (non-fatal):", err);
+          console.warn(
+            "[AgentStore] memory bootstrap failed (non-fatal):",
+            err,
+          );
         }
       }
       const finalBootstrapContext = memoryContext
@@ -1182,7 +1507,17 @@ export const agentStore = {
       // instance while another is alive (see isRetryableClaudeInitError).
       // Without this, the new session times out 3x (60s) before the existing
       // post-failure idle-reclaim logic kicks in.
-      if (resolvedAgentType === "claude-code" && initRetryAttempt === 0) {
+      //
+      // Warm-standby spawns (#1631) are additive — they must NOT terminate
+      // any other session. If Claude CLI fails to init while the serving
+      // session is alive, the predictive path aborts silently and serving
+      // stays intact. Killing serving here would catastrophically replace
+      // the live session mid-turn.
+      if (
+        resolvedAgentType === "claude-code" &&
+        initRetryAttempt === 0 &&
+        opts?.role !== "standby"
+      ) {
         const idleSessions = getIdleClaudeSessionIds(localSessionId);
         for (const idleId of idleSessions) {
           console.log(
@@ -1455,23 +1790,32 @@ export const agentStore = {
         terminatedSessionIds.delete(info.id);
 
         // Persist an agent conversation record (safe to call repeatedly via INSERT OR IGNORE).
-        try {
-          await createAgentConversation(
-            info.id,
-            conversationTitle,
-            resolvedAgentType,
-            cwd,
-            cwd,
-            resumeAgentSessionId ?? undefined,
-            serializeAgentConversationMetadata({
-              pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
-              pendingBootstrapMessages: opts?.bootstrapPromptContext
-                ? opts?.restoredMessages
-                : undefined,
-            }) ?? undefined,
-          );
-        } catch (error) {
-          console.warn("Failed to persist agent conversation", error);
+        //
+        // Warm-standby spawns (#1631) must NOT write a DB row — the standby
+        // is ephemeral. On promotion, the promoted session inherits the
+        // serving session's conversationId (which already has a row); on
+        // abort/cancel the standby is terminated and nothing is persisted.
+        // Without this guard, every warm-up left an orphaned thread row that
+        // re-surfaced as an idle agent thread in the sidebar after restart.
+        if (opts?.role !== "standby") {
+          try {
+            await createAgentConversation(
+              info.id,
+              conversationTitle,
+              resolvedAgentType,
+              cwd,
+              cwd,
+              resumeAgentSessionId ?? undefined,
+              serializeAgentConversationMetadata({
+                pendingBootstrapPromptContext: opts?.bootstrapPromptContext,
+                pendingBootstrapMessages: opts?.bootstrapPromptContext
+                  ? opts?.restoredMessages
+                  : undefined,
+              }) ?? undefined,
+            );
+          } catch (error) {
+            console.warn("Failed to persist agent conversation", error);
+          }
         }
 
         // Create session state
@@ -1502,6 +1846,7 @@ export const agentStore = {
                 : 200_000,
           bootstrapPromptContext: finalBootstrapContext,
           pendingPrompts: [],
+          role: opts?.role ?? "serving",
         };
 
         setState("sessions", info.id, session);
@@ -2168,6 +2513,29 @@ export const agentStore = {
     // subscriber immediately starts dropping late-arriving events.
     terminatedSessionIds.add(sessionId);
 
+    // Dismiss any pending ActionConfirmation dialogs whose owning session is
+    // going away — the user must not approve a tool call against a dead
+    // session. If the promoted/new session still wants the tool, it will
+    // emit a fresh permissionRequest. #1631.
+    const hasPermissions = state.pendingPermissions.some(
+      (p) => p.sessionId === sessionId,
+    );
+    const hasDiffs = state.pendingDiffProposals.some(
+      (p) => p.sessionId === sessionId,
+    );
+    if (hasPermissions) {
+      setState(
+        "pendingPermissions",
+        state.pendingPermissions.filter((p) => p.sessionId !== sessionId),
+      );
+    }
+    if (hasDiffs) {
+      setState(
+        "pendingDiffProposals",
+        state.pendingDiffProposals.filter((p) => p.sessionId !== sessionId),
+      );
+    }
+
     try {
       await providerService.terminateSession(sessionId);
     } catch (error) {
@@ -2255,7 +2623,15 @@ export const agentStore = {
      * transfer below — see #1623.
      */
     pendingUserPrompt?: string,
+    /**
+     * Predictive mode spawns a warm standby (role="standby") WITHOUT
+     * terminating the old serving session. The new session is visible to
+     * events but invisible to the UI until `promoteStandbyAndDispatch`
+     * promotes it on the next user submit. #1631.
+     */
+    opts?: { mode?: "reactive" | "predictive" },
   ): Promise<CompactionOutcome> {
+    const mode = opts?.mode ?? "reactive";
     const session = state.sessions[sessionId];
     if (!session || session.isCompacting) {
       return "skipped_nothing_to_compact";
@@ -2315,40 +2691,63 @@ Structured summary:`;
         }
       }
 
-      const preCompactionMessages: PreCompactionMessage[] = toCompact
-        .filter(
-          (m): m is AgentMessage & { type: "user" | "assistant" } =>
-            m.type === "user" || m.type === "assistant",
-        )
-        .map((m) => ({
-          id: m.id,
-          type: m.type,
-          content: m.content,
-          timestamp: m.timestamp,
-        }));
-
       const compactedSummary: AgentCompactedSummary = {
         content: summary,
         originalMessageCount: toCompact.length,
         compactedAt: Date.now(),
-        preCompactionMessages,
       };
 
       // Capture session details and user-configured settings before termination
       const cwd = session.cwd;
       const agentType = session.info.agentType;
       const conversationId = session.conversationId;
-      // Transfer the queue of user-typed-but-not-yet-sent prompts to the new
-      // session. In the race where the user types while the agent is mid-turn
-      // and the in-flight turn triggers compaction, those prompts must survive
-      // — previously they were overwritten by compaction's stale `toPreserve`
-      // snapshot (#1623). Seeding + promptComplete on the new session will
-      // drain this queue naturally.
       const queuedPrompts = session.pendingPrompts ?? [];
-      // Terminate the old agent session
+
+      // Build the structured seed prompt up-front — shared by both modes.
+      const MAX_MSG_CHARS = 2000;
+      const preservedContext = toPreserve
+        .filter((m) => m.type === "user" || m.type === "assistant")
+        .map((m) => {
+          const content =
+            m.content.length > MAX_MSG_CHARS
+              ? `${m.content.slice(0, MAX_MSG_CHARS)}... [truncated]`
+              : m.content;
+          return `${m.type.toUpperCase()}: ${content}`;
+        })
+        .join("\n\n");
+      const seedPrompt = preservedContext
+        ? `Context restored after automatic compaction.\n\nPrior work summary:\n${summary}\n\nRecent messages:\n${preservedContext}\n\nConfirm you have this context in one sentence, then wait for the user's next message. Do not use any tools.`
+        : `Context restored after automatic compaction.\n\nPrior work summary:\n${summary}\n\nConfirm you have this context in one sentence, then wait for the user's next message. Do not use any tools.`;
+
+      if (mode === "predictive") {
+        // Predictive path: spawn a STANDBY session alongside the live one.
+        // No teardown, no UI side-effects — the next user submit promotes it.
+        const standbyId = await this.spawnSession(cwd, agentType, {
+          role: "standby",
+        });
+        if (!standbyId) {
+          setState("sessions", sessionId, "isCompacting", false);
+          throw new Error(
+            "CompactionFailure: predictive standby spawn returned null",
+          );
+        }
+        setState("sessions", standbyId, "compactedSummary", compactedSummary);
+        setState("sessions", sessionId, "standbySessionId", standbyId);
+        await waitForSessionReady(standbyId);
+        await this.restoreSessionSettings(session, standbyId);
+        await providerService.sendPrompt(standbyId, seedPrompt);
+        // promptComplete handler detects role==="standby" and sets
+        // seedCompleted + releases predictiveCompactBusy.
+        setState("sessions", sessionId, "isCompacting", false);
+        console.info(
+          `[AgentStore] Predictive compaction: standby ${standbyId} seeding for serving ${sessionId}`,
+        );
+        return "succeeded";
+      }
+
+      // Reactive path: terminate old, spawn fresh serving, seed, retry.
       await this.terminateSession(sessionId);
 
-      // Spawn a new agent session with the same conversation
       const newSessionId = await this.spawnSession(cwd, agentType, {
         localSessionId: conversationId,
       });
@@ -2362,69 +2761,34 @@ Structured summary:`;
         );
       }
 
-      // Store compacted summary and preserved messages on the new session.
-      // Mark them as restored so the message-count threshold ignores them.
       setState("sessions", newSessionId, "compactedSummary", compactedSummary);
 
-      // Prepend a visible notice so the user knows compaction occurred and
-      // understands why earlier messages are no longer visible.
-      const compactionNotice: AgentMessage = {
-        id: crypto.randomUUID(),
-        type: "assistant",
-        content: `Context compacted: ${toCompact.length} earlier messages summarized to keep the session active. The ${toPreserve.length} most recent messages are shown below.`,
-        timestamp: Date.now(),
-      };
-      setState("sessions", newSessionId, "messages", [
-        compactionNotice,
-        ...toPreserve,
-      ]);
+      // UI history is decoupled from model context (#1631). The new session
+      // inherits the full transcript so users still see every earlier turn
+      // on scroll-up — the model's context is the structured summary + the
+      // preserved tail, seeded via the seed prompt below, not the transcript.
+      const fullTranscript = [...session.messages];
+      setState("sessions", newSessionId, "messages", fullTranscript);
       setState(
         "sessions",
         newSessionId,
         "restoredMessageCount",
-        toPreserve.length + 1, // +1 for the compaction notice
+        fullTranscript.length,
       );
-      // Hand the queue to the new session so promptComplete will drain it.
       if (queuedPrompts.length > 0) {
         setState("sessions", newSessionId, "pendingPrompts", queuedPrompts);
       }
 
-      // Seed the new agent with the summary so it has context
       console.info(
         `[AgentStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}. Seeding new session.`,
       );
 
-      // Build a condensed representation of preserved messages so the agent
-      // retains awareness of recent work, not just the high-level summary.
-      const MAX_MSG_CHARS = 2000;
-      const preservedContext = toPreserve
-        .filter((m) => m.type === "user" || m.type === "assistant")
-        .map((m) => {
-          const content =
-            m.content.length > MAX_MSG_CHARS
-              ? `${m.content.slice(0, MAX_MSG_CHARS)}... [truncated]`
-              : m.content;
-          return `${m.type.toUpperCase()}: ${content}`;
-        })
-        .join("\n\n");
-
-      const seedPrompt = preservedContext
-        ? `Context restored after automatic compaction.\n\nPrior work summary:\n${summary}\n\nRecent messages:\n${preservedContext}\n\nConfirm you have this context in one sentence, then wait for the user's next message. Do not use any tools.`
-        : `Context restored after automatic compaction.\n\nPrior work summary:\n${summary}\n\nConfirm you have this context in one sentence, then wait for the user's next message. Do not use any tools.`;
-
       // Wait for the new session to be ready, then restore settings and seed
       await waitForSessionReady(newSessionId);
-
-      // Restore user-configured settings from the prior session
       await this.restoreSessionSettings(session, newSessionId);
-
       await providerService.sendPrompt(newSessionId, seedPrompt);
-
-      // Wait for the seed prompt to finish before retrying the user's message.
       await waitForSessionIdle(newSessionId);
 
-      // Retry the user's last prompt if one was in-flight when compaction
-      // triggered. This prevents the message from being silently dropped.
       if (pendingUserPrompt) {
         console.info(
           "[AgentStore] Retrying user prompt after auto-compaction:",
@@ -2539,6 +2903,116 @@ Structured summary:`;
   },
 
   /**
+   * Warm a standby session in the background. Serving session keeps running;
+   * the standby is seeded with the compaction summary so the next submit can
+   * swap invisibly. Idempotent per-session and globally bounded via
+   * `predictiveCompactBusy`. #1631.
+   */
+  async kickPredictiveCompact(sessionId: string): Promise<void> {
+    if (predictiveCompactBusy) return;
+    const session = state.sessions[sessionId];
+    if (!session || session.predictiveCompactInFlight) return;
+
+    predictiveCompactBusy = true;
+    setState("sessions", sessionId, "predictiveCompactInFlight", true);
+    try {
+      const outcome = await this.compactAgentConversation(
+        sessionId,
+        settingsStore.settings.autoCompactPreserveMessages,
+        undefined,
+        { mode: "predictive" },
+      );
+      if (outcome !== "succeeded") {
+        // Silent abort — serving session is still healthy.
+        console.warn(
+          "[AgentStore] kickPredictiveCompact: non-success outcome",
+          outcome,
+        );
+        predictiveCompactBusy = false;
+        setState("sessions", sessionId, "predictiveCompactInFlight", false);
+      }
+      // On success, the standby's promptComplete handler clears both flags.
+    } catch (err) {
+      console.warn(
+        "[AgentStore] kickPredictiveCompact failed (non-fatal):",
+        err,
+      );
+      predictiveCompactBusy = false;
+      setState("sessions", sessionId, "predictiveCompactInFlight", false);
+    }
+  },
+
+  /**
+   * Promote the warm standby to serving and dispatch the user's new prompt
+   * on it. Called from the send path at turn boundary. Old serving session
+   * is terminated; UI transcript is transferred atomically to the promoted
+   * session so the user sees no discontinuity. #1631.
+   */
+  async promoteStandbyAndDispatch(
+    servingSessionId: string,
+    prompt: string,
+    context?: Array<Record<string, string>>,
+    options?: { displayContent?: string; docNames?: string[] },
+  ): Promise<void> {
+    const serving = state.sessions[servingSessionId];
+    const standbyId = serving?.standbySessionId;
+    const standby = standbyId ? state.sessions[standbyId] : undefined;
+    if (!serving || !standby) {
+      // Fall through — caller will dispatch to serving.
+      return;
+    }
+    const conversationId = serving.conversationId;
+
+    // Transfer the UI transcript to the promoted session so scroll-up is
+    // preserved across the swap. The standby session was invisible until now.
+    const fullTranscript = [...serving.messages];
+    setState("sessions", standbyId!, "messages", fullTranscript);
+    setState(
+      "sessions",
+      standbyId!,
+      "restoredMessageCount",
+      fullTranscript.length,
+    );
+    // Inherit persisted conversationId so SQLite keeps a single thread.
+    setState("sessions", standbyId!, "conversationId", conversationId);
+    setState("sessions", standbyId!, "role", "serving");
+    setState("sessions", standbyId!, "seedCompleted", undefined);
+
+    // Clear the serving pointer before terminating so late events from the
+    // old session are fully dropped.
+    await this.terminateSession(servingSessionId);
+
+    // Dispatch on the promoted session.
+    await this.sendPrompt(prompt, context, options, standbyId!);
+  },
+
+  /**
+   * User-initiated cancel of the current turn across any restart-dependent
+   * path. Cancels any warming standby, clears the prompt queue, drops the
+   * in-flight turn, and leaves the composer enabled. Does NOT set turnError
+   * — a user cancel is not a failure. #1631.
+   */
+  async abortTurn(threadId: string): Promise<void> {
+    const session = Object.values(state.sessions).find(
+      (s) => s.conversationId === threadId && s.role === "serving",
+    );
+    if (session?.standbySessionId) {
+      await this.terminateSession(session.standbySessionId).catch(() => {});
+      setState("sessions", session.info.id, "standbySessionId", null);
+    }
+    if (session) {
+      setState("sessions", session.info.id, "pendingPrompts", []);
+      try {
+        await providerService.cancelPrompt(session.info.id);
+      } catch (err) {
+        console.warn("[AgentStore] abortTurn cancelPrompt failed:", err);
+      }
+    }
+    this.setTurnInFlight(threadId, false);
+    this.clearTurnError(threadId);
+  },
+
+  /**
    * Focus an already-running session that belongs to the given project cwd.
    * Returns true when a matching session is found.
    */
@@ -2573,12 +3047,54 @@ Structured summary:`;
       sessionId,
       prompt: prompt.slice(0, 50),
     });
-    if (!sessionId) {
-      setState("error", "No active session");
-      return;
+
+    const session = sessionId ? state.sessions[sessionId] : undefined;
+
+    // Derive the thread id early so turnInFlight / turnError operate on the
+    // right key across cold-start, promotion, and crash-recovery paths. #1631.
+    const threadId = session?.conversationId;
+
+    if (threadId) {
+      this.setTurnInFlight(threadId, true);
+      this.setLastPrompt(
+        threadId,
+        prompt,
+        context,
+        options?.displayContent,
+        options?.docNames,
+      );
+      this.clearTurnError(threadId);
     }
 
-    const session = state.sessions[sessionId];
+    // Predictive swap: if a warm standby is ready, promote it at this turn
+    // boundary before dispatching. The old serving session is terminated
+    // inside promoteStandbyAndDispatch; transcript + conversationId transfer
+    // so the user sees no break. #1631.
+    if (session && session.role === "serving" && session.standbySessionId) {
+      const standby = state.sessions[session.standbySessionId];
+      if (standby && standby.seedCompleted === true) {
+        console.info(
+          `[AgentStore] Promoting standby ${session.standbySessionId} for serving ${sessionId}`,
+        );
+        await this.promoteStandbyAndDispatch(
+          sessionId!,
+          prompt,
+          context,
+          options,
+        );
+        return;
+      }
+      if (standby) {
+        // Standby not ready yet — cancel it; old serving handles this prompt.
+        console.info(
+          "[AgentStore] Standby not ready at submit; cancelling warm-up",
+        );
+        await this.terminateSession(session.standbySessionId).catch(() => {});
+        setState("sessions", sessionId!, "standbySessionId", null);
+        predictiveCompactBusy = false;
+        setState("sessions", sessionId!, "predictiveCompactInFlight", false);
+      }
+    }
 
     // Defensive: if a caller races compaction (e.g. a stray setTimeout the
     // drain block scheduled before the auto-compact block set isCompacting),
@@ -2588,9 +3104,17 @@ Structured summary:`;
     if (session?.isCompacting) {
       console.info(
         "[AgentStore] sendPrompt: session is compacting, re-enqueuing",
-        { sessionId, prompt: prompt.slice(0, 50) },
+        { sessionId: sessionId ?? "?", prompt: prompt.slice(0, 50) },
       );
-      this.enqueuePrompt(sessionId, prompt);
+      if (sessionId) this.enqueuePrompt(sessionId, prompt);
+      return;
+    }
+
+    if (!sessionId || !session) {
+      console.warn(
+        "[AgentStore] sendPrompt: no session — caller must spawn first",
+      );
+      if (threadId) this.setTurnInFlight(threadId, false);
       return;
     }
 
@@ -2817,47 +3341,19 @@ Structured summary:`;
             }
 
             if (wasUserCancel) {
-              // The user explicitly cancelled — don't retry. Just show a
-              // neutral message so they know the session was restarted.
               console.info(
                 "[AgentStore] Agent unresponsive after cancel — spawned fresh session, skipping retry",
               );
-              const cancelMsg: AgentMessage = {
-                id: crypto.randomUUID(),
-                type: "assistant",
-                content: "Session restarted after cancellation.",
-                timestamp: Date.now(),
-              };
-              setState("sessions", newSessionId, "messages", (msgs) => [
-                ...msgs,
-                cancelMsg,
-              ]);
-              const newConvoId = state.sessions[newSessionId]?.conversationId;
-              if (newConvoId) {
-                persistAgentMessage(newConvoId, cancelMsg);
-              }
             } else {
-              // Show recovery indicator so the user knows what happened
-              const recoveryMsg: AgentMessage = {
-                id: crypto.randomUUID(),
-                type: "assistant",
-                content:
-                  "Agent session restarted due to inactivity timeout. Retrying your message...",
-                timestamp: Date.now(),
-              };
               setState("sessions", newSessionId, "messages", (msgs) => [
                 ...msgs,
-                recoveryMsg,
                 userMessage,
               ]);
               const newConvoId = state.sessions[newSessionId]?.conversationId;
               if (newConvoId) {
-                persistAgentMessage(newConvoId, recoveryMsg);
                 persistAgentMessage(newConvoId, userMessage);
               }
 
-              // Retry the prompt on the new session, rebuilding skills context
-              // so skill invocations work on the fresh session.
               console.info(
                 `[AgentStore] Retrying prompt on new session ${newSessionId}`,
               );
@@ -2875,13 +3371,12 @@ Structured summary:`;
                 console.log("[AgentStore] Retry succeeded on new session");
               } catch (retryError) {
                 console.error("[AgentStore] Retry failed:", retryError);
-                const retryMessage =
+                this.setTurnError(
+                  session.conversationId,
+                  "restart_timeout",
                   retryError instanceof Error
                     ? retryError.message
-                    : String(retryError);
-                this.addErrorMessage(
-                  newSessionId,
-                  `Recovery failed: ${retryMessage}. Please try sending your message again.`,
+                    : String(retryError),
                 );
               }
             }
@@ -3293,6 +3788,19 @@ Structured summary:`;
   // ============================================================================
 
   handleSessionEvent(sessionId: string, event: AgentEvent) {
+    // Warm-standby sessions must stay invisible until they are promoted.
+    // Only session-status / promptComplete / error events affect lifecycle;
+    // every other event would otherwise leak the seed prompt into the UI. #1631.
+    const session = state.sessions[sessionId];
+    if (
+      session?.role === "standby" &&
+      event.type !== "sessionStatus" &&
+      event.type !== "promptComplete" &&
+      event.type !== "error"
+    ) {
+      return;
+    }
+
     // User replay messages can arrive as multiple chunks; flush buffered user
     // text when the stream transitions to a non-user event.
     if (event.type !== "userMessage") {
@@ -3335,6 +3843,33 @@ Structured summary:`;
         break;
 
       case "promptComplete": {
+        // Standby sessions exist only to seed their context. First promptComplete
+        // marks the seed done and releases the predictive mutex — no UI effects,
+        // no drain, no compaction re-trigger. #1631.
+        if (state.sessions[sessionId]?.role === "standby") {
+          setState("sessions", sessionId, "seedCompleted", true);
+          setState(
+            "sessions",
+            sessionId,
+            "info",
+            "status",
+            "ready" as SessionStatus,
+          );
+          predictiveCompactBusy = false;
+          const owner = state.sessions[sessionId];
+          if (owner?.conversationId) {
+            for (const [sid, s] of Object.entries(state.sessions)) {
+              if (
+                s.conversationId === owner.conversationId &&
+                s.role === "serving"
+              ) {
+                setState("sessions", sid, "predictiveCompactInFlight", false);
+              }
+            }
+          }
+          break;
+        }
+
         // Flush any buffered tool events before finalizing the turn so all
         // tool messages are visible in the UI before the prompt completes.
         this.flushToolEventBuf(sessionId);
@@ -3347,6 +3882,16 @@ Structured summary:`;
         }
         this.flushPendingUserMessage(sessionId);
         this.finalizeStreamingContent(sessionId, { isReplay: isHistoryReplay });
+
+        // Turn finalized successfully → clear the thread's in-flight signal,
+        // the inline error state (if any), and the restart timer. #1631.
+        if (!isHistoryReplay) {
+          const convoId = state.sessions[sessionId]?.conversationId;
+          if (convoId) {
+            this.setTurnInFlight(convoId, false);
+            this.clearTurnError(convoId);
+          }
+        }
         // Each promptComplete ends a turn; the next turn may have real content.
         setState("sessions", sessionId, "isSkippingSkillContext", undefined);
         if (!isHistoryReplay) {
@@ -3464,6 +4009,27 @@ Structured summary:`;
                 undefined,
               );
             }
+          }
+        }
+
+        // Predictive compaction — warm a replacement session in the background
+        // when the serving session crosses 70% of its context window, so the
+        // next user submit swaps invisibly instead of hitting prompt-too-long. #1631.
+        if (!isHistoryReplay) {
+          const sess = state.sessions[sessionId];
+          if (
+            sess &&
+            sess.role === "serving" &&
+            !sess.standbySessionId &&
+            !sess.isCompacting &&
+            !sess.predictiveCompactInFlight &&
+            sess.info.status !== "prompting" &&
+            sess.lastInputTokens != null &&
+            sess.contextWindowSize > 0 &&
+            sess.lastInputTokens / sess.contextWindowSize >=
+              PREDICTIVE_COMPACT_THRESHOLD
+          ) {
+            void this.kickPredictiveCompact(sessionId);
           }
         }
 
