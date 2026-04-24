@@ -4,7 +4,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import readline from "node:readline";
-import { createBrowserLocalAgentRegistry } from "./agent-registry.mjs";
+import {
+  createBrowserLocalAgentRegistry,
+  resolveInstalledCodexBinary,
+} from "./agent-registry.mjs";
 import { createClaudeRuntime } from "./claude-runtime.mjs";
 import { createGeminiRuntime } from "./gemini-runtime.mjs";
 import { buildProviderMcpConfig } from "./mcp-config.mjs";
@@ -121,7 +124,11 @@ function spawnCodexProcess(cwd, { apiKey, mcpServers } = {}) {
     args.push("-c", mcpConfig.codexMcpConfigOverride);
   }
 
-  return spawn("codex", args, {
+  // Use the absolute-path resolver instead of bare `"codex"` so GUI-launched
+  // instances don't depend on shell PATH — addresses the same class of
+  // Windows regressions we hit for Claude (#876, #928, #1297, #1409).
+  const codexBinary = resolveInstalledCodexBinary();
+  return spawn(codexBinary, args, {
     cwd,
     env: {
       ...process.env,
