@@ -64,7 +64,7 @@ describe("#1623 — compactAgentConversation transfers pendingPrompts to new ses
     // The prompt that produced this promptComplete already succeeded — we
     // MUST NOT retry it or the user sees a duplicate turn.
     expect(agentStoreSource).toContain(
-      "settingsStore.settings.autoCompactPreserveMessages,\n                undefined,",
+      "settingsStore.settings.autoCompactPreserveMessages,\n                  undefined,",
     );
   });
 
