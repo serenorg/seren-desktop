@@ -6,6 +6,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tokio::sync::mpsc;
 
+use super::gateway_envelope::{publisher_status, unwrap_publisher_body};
 use super::types::{ImageAttachment, WorkerEvent};
 
 // =============================================================================
@@ -302,7 +303,16 @@ async fn classify_task(
     let json: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Parse classify response: {e}"))?;
 
-    let answer = json
+    let payload = unwrap_publisher_body(&json);
+    if let Some(status) = publisher_status(&json).filter(|status| *status >= 400) {
+        let error_msg = payload
+            .pointer("/error/message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Gateway API error");
+        return Err(format!("Classify upstream HTTP {status}: {error_msg}"));
+    }
+
+    let answer = payload
         .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -688,8 +698,17 @@ async fn call_simple(
     let json: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Parse RLM response: {e}"))?;
 
+    let payload = unwrap_publisher_body(&json);
+    if let Some(status) = publisher_status(&json).filter(|status| *status >= 400) {
+        let error_msg = payload
+            .pointer("/error/message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Gateway API error");
+        return Err(format!("RLM upstream HTTP {status}: {error_msg}"));
+    }
+
     // Try text content first
-    if let Some(content) = json
+    if let Some(content) = payload
         .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
     {
@@ -701,7 +720,7 @@ async fn call_simple(
     // Model returned tool_calls but no text — tool execution is not supported
     // in the RLM path. Log and return a diagnostic message so the user gets
     // something useful instead of "No content in RLM response".
-    if let Some(tool_calls) = json
+    if let Some(tool_calls) = payload
         .pointer("/choices/0/message/tool_calls")
         .and_then(|v| v.as_array())
     {

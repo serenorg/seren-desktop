@@ -12,6 +12,9 @@ use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tokio::sync::{Mutex, mpsc};
 
+use super::gateway_envelope::{
+    publisher_cost, publisher_status, unwrap_data_response, unwrap_publisher_body,
+};
 use super::tool_bridge::ToolResultBridge;
 use super::tool_relevance;
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
@@ -636,17 +639,13 @@ created if missing.",
             &data[..data.floor_char_boundary(300)]
         );
 
-        // Extract cost from Gateway wrapper (present at top level)
-        result.cost = parsed.get("cost").and_then(|v| {
-            v.as_str()
-                .and_then(|s| s.parse::<f64>().ok())
-                .or_else(|| v.as_f64())
-        });
+        result.cost = publisher_cost(&parsed);
 
         // Check for wrapped error status from Gateway
-        if let Some(status) = parsed.get("status").and_then(|s| s.as_u64()) {
+        if let Some(status) = publisher_status(&parsed) {
             if status >= 400 {
-                let error_msg = parsed
+                let envelope = unwrap_data_response(&parsed);
+                let error_msg = envelope
                     .pointer("/body/error/message")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Gateway API error");
@@ -657,12 +656,7 @@ created if missing.",
             }
         }
 
-        // If Gateway wraps the SSE event in {status, body, cost}, unwrap body
-        let effective = if parsed.get("body").is_some() && parsed.get("status").is_some() {
-            parsed.pointer("/body").unwrap_or(&parsed)
-        } else {
-            &parsed
-        };
+        let effective = unwrap_publisher_body(&parsed);
 
         // Extract content delta (handles string, array-of-parts, or object with "text")
         let content_value = effective
@@ -972,27 +966,25 @@ created if missing.",
         // In this case the buffer has no real newlines (SSE newlines are JSON escapes).
         if !buffer.is_empty() && accumulated_content.is_empty() && last_finish_reason.is_none() {
             if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                let envelope = unwrap_data_response(&wrapper);
+
                 // Extract cost from the non-streaming wrapper
-                if let Some(wrapper_cost) = wrapper.get("cost").and_then(|v| {
-                    v.as_str()
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .or_else(|| v.as_f64())
-                }) {
+                if let Some(wrapper_cost) = publisher_cost(&wrapper) {
                     log::info!("[ChatModelWorker] Gateway reported cost: {}", wrapper_cost);
                     accumulated_cost += wrapper_cost;
                 }
 
                 // Check wrapper status for errors before processing body
-                if let Some(status) = wrapper.get("status").and_then(|s| s.as_u64()) {
+                if let Some(status) = publisher_status(&wrapper) {
                     if status >= 400 {
-                        let error_msg = wrapper
+                        let error_msg = envelope
                             .pointer("/body/error/message")
                             .and_then(|v| v.as_str())
                             .unwrap_or("Gateway API error");
                         // Include raw provider error when available so the
                         // orchestrator can detect context-overflow and reroute
                         // to a large-context model.
-                        let raw_detail = wrapper
+                        let raw_detail = envelope
                             .pointer("/body/error/metadata/raw")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
@@ -1021,7 +1013,7 @@ created if missing.",
                     }
                 }
 
-                if let Some(body_str) = wrapper.get("body").and_then(|b| b.as_str()) {
+                if let Some(body_str) = envelope.get("body").and_then(|b| b.as_str()) {
                     log::info!(
                         "[ChatModelWorker] Gateway returned non-streaming wrapper, extracting embedded SSE ({} bytes)",
                         body_str.len()
@@ -1057,7 +1049,7 @@ created if missing.",
                         )
                         .await?;
                     }
-                } else if let Some(body_obj) = wrapper.get("body") {
+                } else if let Some(body_obj) = envelope.get("body") {
                     // body is a JSON object (non-streaming response), extract content directly
                     if body_obj.is_object() {
                         log::info!("[ChatModelWorker] Gateway returned non-streaming JSON body");
@@ -2163,6 +2155,18 @@ mod tests {
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Wrapped hello"),
+            _ => panic!("Expected Content event, got {:?}", result.events[0]),
+        }
+        assert_eq!(result.cost, Some(0.001));
+    }
+
+    #[test]
+    fn parses_data_response_gateway_wrapped_content() {
+        let data = r#"{"data":{"status":200,"body":{"choices":[{"delta":{"content":"Data wrapped hello"},"finish_reason":null}]},"cost":"0.001"}}"#;
+        let result = ChatModelWorker::parse_sse_data(data);
+        assert_eq!(result.events.len(), 1);
+        match &result.events[0] {
+            WorkerEvent::Content { text } => assert_eq!(text, "Data wrapped hello"),
             _ => panic!("Expected Content event, got {:?}", result.events[0]),
         }
         assert_eq!(result.cost, Some(0.001));

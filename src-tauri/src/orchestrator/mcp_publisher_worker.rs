@@ -8,6 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 
+use super::gateway_envelope::{
+    publisher_cost, publisher_status, unwrap_data_response, unwrap_publisher_body,
+};
 use super::types::{ImageAttachment, RoutingDecision, WorkerEvent};
 use super::worker::Worker;
 
@@ -82,17 +85,13 @@ impl McpPublisherWorker {
 
         let mut events = Vec::new();
 
-        // Extract cost from Gateway wrapper
-        let chunk_cost = parsed.get("cost").and_then(|v| {
-            v.as_str()
-                .and_then(|s| s.parse::<f64>().ok())
-                .or_else(|| v.as_f64())
-        });
+        let chunk_cost = publisher_cost(&parsed);
 
         // Check for wrapped error status from Gateway
-        if let Some(status) = parsed.get("status").and_then(|s| s.as_u64()) {
+        if let Some(status) = publisher_status(&parsed) {
             if status >= 400 {
-                let error_msg = parsed
+                let envelope = unwrap_data_response(&parsed);
+                let error_msg = envelope
                     .pointer("/body/error/message")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Publisher API error");
@@ -103,12 +102,7 @@ impl McpPublisherWorker {
             }
         }
 
-        // If Gateway wraps the SSE event in {status, body, cost}, unwrap body
-        let effective = if parsed.get("body").is_some() && parsed.get("status").is_some() {
-            parsed.pointer("/body").unwrap_or(&parsed)
-        } else {
-            &parsed
-        };
+        let effective = unwrap_publisher_body(&parsed);
 
         // Extract content delta
         let content = effective
@@ -424,6 +418,18 @@ mod tests {
             WorkerEvent::Content { text } => assert_eq!(text, "Result"),
             _ => panic!("Expected Content event"),
         }
+    }
+
+    #[test]
+    fn parses_data_response_gateway_wrapped_content() {
+        let data = r#"{"data":{"status":200,"body":{"choices":[{"delta":{"content":"Wrapped result"},"finish_reason":null}]},"cost":"0.001"}}"#;
+        let (events, cost) = McpPublisherWorker::parse_sse_data(data);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            WorkerEvent::Content { text } => assert_eq!(text, "Wrapped result"),
+            _ => panic!("Expected Content event"),
+        }
+        assert_eq!(cost, Some(0.001));
     }
 
     #[test]

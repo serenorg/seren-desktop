@@ -6,6 +6,7 @@ pub mod classifier;
 pub mod cloud_agent_worker;
 pub mod decomposer;
 pub mod eval;
+pub mod gateway_envelope;
 pub mod mcp_publisher_worker;
 pub mod provider_worker;
 pub mod rlm;
