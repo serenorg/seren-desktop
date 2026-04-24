@@ -6,6 +6,8 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { backgroundUpdateCli } from "./cli-updater.mjs";
+
 function launchLoginCommand(command) {
   const loginCommand = `${command} login`;
 
@@ -339,7 +341,7 @@ function resolveInstalledGeminiBinary() {
  * GUI apps don't inherit shell PATH updates made by installers, so check
  * well-known install locations before falling back to bare command name.
  */
-function resolveInstalledClaudeBinary() {
+export function resolveInstalledClaudeBinary() {
   if (process.platform === "win32") {
     const home = os.homedir();
     const appData = process.env.APPDATA ?? "";
@@ -379,6 +381,48 @@ function resolveInstalledClaudeBinary() {
     }
   }
   return "claude";
+}
+
+/**
+ * Resolve the absolute path of the installed Codex CLI binary.
+ *
+ * Mirrors `resolveInstalledClaudeBinary()`. Seren previously resolved Codex
+ * by bare command name, which burned us on Windows (#876, #928) when GUI
+ * apps don't inherit shell PATH and `.cmd` wrappers race with npm symlinks.
+ * Prefer known install locations; fall back to bare "codex" only when
+ * nothing resolves. Returning an absolute path lets the updater run the
+ * binary directly without trusting PATH.
+ */
+export function resolveInstalledCodexBinary() {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? "";
+    const nodeDir = path.dirname(process.execPath);
+    const candidates = [
+      ...(appData ? [path.join(appData, "npm", "codex.cmd")] : []),
+      ...(appData ? [path.join(appData, "npm", "codex.ps1")] : []),
+      path.join(nodeDir, "codex.cmd"),
+      path.join(nodeDir, "codex"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  } else {
+    const home = os.homedir();
+    const nodeDir = path.dirname(process.execPath);
+    const prefix = path.dirname(nodeDir);
+    const candidates = [
+      path.join(prefix, "bin", "codex"),
+      path.join(home, ".local", "bin", "codex"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return "codex";
 }
 
 export function createBrowserLocalAgentRegistry({ emit }) {
@@ -511,6 +555,30 @@ export function createBrowserLocalAgentRegistry({ emit }) {
     }
     return definition;
   }
+
+  // Fire-and-forget background update checks for bundled CLIs (#1637).
+  // TTL-gated to 24h inside backgroundUpdateCli, same-channel only, silent
+  // on failure. Do not await — registry init must not block on npm.
+  const npmCliScript = resolveNpmCliScript();
+  const onUpdated = ({ label, from, to }) => {
+    emit?.("provider://cli-updated", { label, from, to });
+  };
+  void backgroundUpdateCli({
+    label: "Codex",
+    bareCommand: "codex",
+    resolvedPath: resolveInstalledCodexBinary(),
+    packageName: "@openai/codex",
+    npmCliScript,
+    onUpdated,
+  });
+  void backgroundUpdateCli({
+    label: "Claude Code",
+    bareCommand: "claude",
+    resolvedPath: resolveInstalledClaudeBinary(),
+    packageName: "@anthropic-ai/claude-code",
+    npmCliScript,
+    onUpdated,
+  });
 
   return {
     async getAvailableAgents() {
