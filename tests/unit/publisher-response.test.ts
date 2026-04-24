@@ -44,4 +44,26 @@ describe("publisher response helpers", () => {
       choices: [{ message: { content: "hello" } }],
     });
   });
+
+  it("does not strip objects that carry `body` without a publisher `status`", () => {
+    const toolResult = {
+      name: "web_search",
+      body: { query: "news" },
+    };
+
+    expect(unwrapPublisherBody(toolResult)).toEqual(toolResult);
+  });
+
+  it("unwraps a legacy raw publisher envelope without DataResponse", () => {
+    const legacy = {
+      status: 200,
+      body: { choices: [{ message: { content: "legacy" } }] },
+      cost: "0.000002",
+    };
+
+    expect(publisherStatus(legacy)).toBe(200);
+    expect(unwrapPublisherBody(legacy)).toEqual({
+      choices: [{ message: { content: "legacy" } }],
+    });
+  });
 });

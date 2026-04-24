@@ -85,6 +85,16 @@ mod tests {
     }
 
     #[test]
+    fn unwrap_data_response_preserves_data_null_payloads() {
+        let wrapped = serde_json::json!({
+            "data": null
+        });
+
+        let unwrapped = unwrap_data_response(&wrapped);
+        assert_eq!(unwrapped, &Value::Null);
+    }
+
+    #[test]
     fn publisher_status_and_cost_read_through_data_response() {
         let wrapped = serde_json::json!({
             "data": {

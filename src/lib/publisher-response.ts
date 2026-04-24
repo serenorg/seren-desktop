@@ -35,7 +35,10 @@ export function unwrapPublisherEnvelope<T = unknown>(
 
 export function unwrapPublisherBody<T = unknown>(value: unknown): T | unknown {
   const envelope = unwrapPublisherEnvelope<T>(value);
-  if (isRecord(envelope) && "body" in envelope) {
+  // Require both `status` and `body` to recognise the publisher-proxy envelope.
+  // Matching on `body` alone would wrongly strip unrelated objects that happen
+  // to carry a `body` field (e.g. tool-call result payloads).
+  if (isRecord(envelope) && "status" in envelope && "body" in envelope) {
     return envelope.body as T;
   }
   return envelope;
