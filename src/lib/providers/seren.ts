@@ -3,6 +3,10 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import {
+  unwrapPublisherBody,
+  unwrapPublisherEnvelope,
+} from "@/lib/publisher-response";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 import { updateBalanceFromError } from "@/stores/wallet.store";
@@ -88,7 +92,7 @@ interface ChatCompletionRequest {
   tool_choice?: ToolChoice;
 }
 
-/** Wrapped response from the /publishers endpoint */
+/** Inner publisher response returned inside Seren's DataResponse envelope. */
 interface GatewayResponse<T> {
   status: number;
   body: T;
@@ -155,13 +159,12 @@ function extractContent(data: unknown): string {
     return "";
   }
 
-  const payload = data as Record<string, unknown>;
-  // Unwrap body if response is wrapped (e.g., { status: 200, body: { choices: [...] } })
-  const body = payload.body as Record<string, unknown> | undefined;
-  const responseData = body || payload;
-  const choices = responseData.choices as
-    | Array<Record<string, unknown>>
-    | undefined;
+  const responseData = unwrapPublisherBody(data);
+  if (!responseData || typeof responseData !== "object") {
+    return String(responseData ?? "");
+  }
+  const payload = responseData as Record<string, unknown>;
+  const choices = payload.choices as Array<Record<string, unknown>> | undefined;
   if (choices && choices.length > 0) {
     const first = choices[0];
     const message = first.message as Record<string, unknown> | undefined;
@@ -194,13 +197,12 @@ function extractChatResponse(data: unknown): ChatResponse {
     return { content: "", finish_reason: "stop" };
   }
 
-  const payload = data as Record<string, unknown>;
-  // Unwrap body if response is wrapped (e.g., { status: 200, body: { choices: [...] } })
-  const body = payload.body as Record<string, unknown> | undefined;
-  const responseData = body || payload;
-  const choices = responseData.choices as
-    | Array<Record<string, unknown>>
-    | undefined;
+  const responseData = unwrapPublisherBody(data);
+  if (!responseData || typeof responseData !== "object") {
+    return { content: "", finish_reason: "stop" };
+  }
+  const payload = responseData as Record<string, unknown>;
+  const choices = payload.choices as Array<Record<string, unknown>> | undefined;
 
   if (!choices || choices.length === 0) {
     return { content: null, finish_reason: "stop" };
@@ -251,14 +253,21 @@ function extractChatResponse(data: unknown): ChatResponse {
 
 function parseDelta(data: string): string | null {
   try {
-    const parsed = JSON.parse(data);
+    const parsed = unwrapPublisherBody(JSON.parse(data)) as Record<
+      string,
+      unknown
+    >;
 
-    if (parsed.delta?.content) {
-      return normalizeContent(parsed.delta.content);
+    const delta = parsed.delta as Record<string, unknown> | undefined;
+    if (delta?.content) {
+      return normalizeContent(delta.content);
     }
 
-    if (parsed.choices?.[0]?.delta?.content) {
-      return normalizeContent(parsed.choices[0].delta.content);
+    const choices = parsed.choices as
+      | Array<{ delta?: { content?: unknown } }>
+      | undefined;
+    if (choices?.[0]?.delta?.content) {
+      return normalizeContent(choices[0].delta.content);
     }
 
     return null;
@@ -325,11 +334,14 @@ export const serenProvider: ProviderAdapter = {
       throw new Error(`Seren request failed: ${response.status} ${errorText}`);
     }
 
-    const data = (await response.json()) as GatewayResponse<unknown>;
+    const data = await response.json();
+    const envelope = unwrapPublisherEnvelope<unknown>(
+      data,
+    ) as GatewayResponse<unknown>;
 
     // Check for wrapped error responses (HTTP 200 but error in body)
-    if (data.status && data.status >= 400) {
-      const body = data.body as Record<string, unknown> | undefined;
+    if (envelope.status && envelope.status >= 400) {
+      const body = envelope.body as Record<string, unknown> | undefined;
       const error = body?.error as Record<string, unknown> | undefined;
       if (error) {
         const metadata = (error.metadata as Record<string, unknown>) || {};
@@ -338,14 +350,16 @@ export const serenProvider: ProviderAdapter = {
         );
 
         // Show user-friendly message for credits/payment issues
-        if (isCreditsError(data.status, rawError)) {
+        if (isCreditsError(envelope.status, rawError)) {
           throw new Error(CREDITS_ERROR_MESSAGE);
         }
 
         const providerName = metadata.provider_name || "Provider";
-        throw new Error(`${providerName} error (${data.status}): ${rawError}`);
+        throw new Error(
+          `${providerName} error (${envelope.status}): ${rawError}`,
+        );
       }
-      throw new Error(`Seren upstream error: ${data.status}`);
+      throw new Error(`Seren upstream error: ${envelope.status}`);
     }
 
     return extractContent(data);
@@ -441,12 +455,10 @@ export const serenProvider: ProviderAdapter = {
         return DEFAULT_MODELS;
       }
 
-      const result = (await response.json()) as GatewayResponse<{
+      const result = await response.json();
+      const data = unwrapPublisherBody<{
         data?: Array<{ id: string; name?: string; context_length?: number }>;
-      }>;
-
-      // Unwrap gateway response
-      const data = result.body || result;
+      }>(result);
       if (Array.isArray((data as { data?: unknown[] }).data)) {
         return (
           data as {
@@ -506,29 +518,34 @@ export async function sendMessageWithTools(
     throw new Error(`Seren request failed: ${response.status} ${errorText}`);
   }
 
-  const data = (await response.json()) as GatewayResponse<unknown>;
+  const data = await response.json();
   console.log(
     "[sendMessageWithTools] Raw API response:",
     JSON.stringify(data, null, 2),
   );
+  const envelope = unwrapPublisherEnvelope<unknown>(
+    data,
+  ) as GatewayResponse<unknown>;
 
   // Check for wrapped error responses (HTTP 200 but error in body)
-  if (data.status && data.status >= 400) {
-    const body = data.body as Record<string, unknown> | undefined;
+  if (envelope.status && envelope.status >= 400) {
+    const body = envelope.body as Record<string, unknown> | undefined;
     const error = body?.error as Record<string, unknown> | undefined;
     if (error) {
       const metadata = (error.metadata as Record<string, unknown>) || {};
       const rawError = String(metadata.raw || error.message || "Unknown error");
 
       // Show user-friendly message for credits/payment issues
-      if (isCreditsError(data.status, rawError)) {
+      if (isCreditsError(envelope.status, rawError)) {
         throw new Error(CREDITS_ERROR_MESSAGE);
       }
 
       const providerName = metadata.provider_name || "Provider";
-      throw new Error(`${providerName} error (${data.status}): ${rawError}`);
+      throw new Error(
+        `${providerName} error (${envelope.status}): ${rawError}`,
+      );
     }
-    throw new Error(`Seren upstream error: ${data.status}`);
+    throw new Error(`Seren upstream error: ${envelope.status}`);
   }
 
   const parsed = extractChatResponse(data);

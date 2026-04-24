@@ -67,8 +67,9 @@ export const privateModelsService = {
       );
     }
 
+    const modelCatalog = data?.data;
     const models =
-      data?.data.map((model) => ({
+      modelCatalog?.data.map((model) => ({
         id: model.id,
         name: model.display_name?.trim() || model.id,
         contextWindow: 0,

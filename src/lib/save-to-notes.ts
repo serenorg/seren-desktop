@@ -4,6 +4,7 @@
 import { API_BASE } from "@/lib/config";
 import { openExternalLink } from "@/lib/external-link";
 import { appFetch } from "@/lib/fetch";
+import { unwrapPublisherBody } from "@/lib/publisher-response";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
@@ -43,7 +44,10 @@ export async function saveToSerenNotes(
     }
 
     const result = await response.json();
-    const noteId = result?.body?.data?.id ?? result?.data?.id;
+    const payload = unwrapPublisherBody(result) as
+      | { data?: { id?: string }; id?: string }
+      | undefined;
+    const noteId = payload?.data?.id ?? payload?.id;
     if (!noteId) throw new Error("Note created but ID missing from response");
 
     openExternalLink(`https://notes.serendb.com/notes/${noteId}`);

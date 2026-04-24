@@ -3592,6 +3592,143 @@ export type SerenCloudDeploymentAuditResponses = {
 
 export type SerenCloudDeploymentAuditResponse = SerenCloudDeploymentAuditResponses[keyof SerenCloudDeploymentAuditResponses];
 
+export type SerenCloudDeploymentFsData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: {
+        /**
+         * Namespace root to inspect: artifacts or state (default: artifacts)
+         */
+        namespace?: string;
+        /**
+         * Relative path under the selected namespace root
+         */
+        path?: string;
+        /**
+         * Max directory entries to return (default: 200, max: 1000)
+         */
+        limit?: number;
+    };
+    url: '/deployments/{id}/fs';
+};
+
+export type SerenCloudDeploymentFsErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeploymentFsResponses = {
+    /**
+     * Filesystem entry or directory listing
+     */
+    200: unknown;
+};
+
+export type SerenCloudDeploymentFsReadBytesData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query: {
+        /**
+         * Namespace root to inspect: artifacts or state (default: artifacts)
+         */
+        namespace?: string;
+        /**
+         * Relative file path under the selected namespace root
+         */
+        path: string;
+        /**
+         * Starting byte offset
+         */
+        offset?: number;
+        /**
+         * Max bytes to read (default: 65536, max: 1048576)
+         */
+        length?: number;
+    };
+    url: '/deployments/{id}/fs/read_bytes';
+};
+
+export type SerenCloudDeploymentFsReadBytesErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Not found
+     */
+    404: unknown;
+};
+
+export type SerenCloudDeploymentFsReadBytesResponses = {
+    /**
+     * Base64-encoded file bytes
+     */
+    200: unknown;
+};
+
+export type SerenCloudDeploymentFsReadTextData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query: {
+        /**
+         * Namespace root to inspect: artifacts or state (default: artifacts)
+         */
+        namespace?: string;
+        /**
+         * Relative file path under the selected namespace root
+         */
+        path: string;
+        /**
+         * Max bytes to read (default: 65536, max: 1048576)
+         */
+        max_bytes?: number;
+    };
+    url: '/deployments/{id}/fs/read_text';
+};
+
+export type SerenCloudDeploymentFsReadTextErrors = {
+    /**
+     * Bad request
+     */
+    400: unknown;
+    /**
+     * Not found
+     */
+    404: unknown;
+    /**
+     * File is not valid UTF-8
+     */
+    422: unknown;
+};
+
+export type SerenCloudDeploymentFsReadTextResponses = {
+    /**
+     * Text file contents
+     */
+    200: unknown;
+};
+
 export type SerenCloudLogsData = {
     body?: never;
     path: {

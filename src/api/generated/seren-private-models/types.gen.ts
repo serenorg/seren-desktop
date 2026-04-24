@@ -4,6 +4,271 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}/publishers/seren-private-models` | (string & {});
 };
 
+/**
+ * API result response
+ */
+export type ApiResultResponse = {
+    /**
+     * Asset symbol (e.g., USDC, USDT)
+     */
+    asset_symbol: string;
+    /**
+     * Response body (JSON if available, otherwise raw text)
+     */
+    body: unknown;
+    /**
+     * Actual cost charged in configured asset
+     */
+    cost: string;
+    cost_breakdown?: null | CostBreakdown;
+    /**
+     * Execution time in milliseconds
+     */
+    execution_time_ms: number;
+    /**
+     * Payment source used
+     */
+    payment_source: string;
+    /**
+     * Size of the publisher response body in bytes (raw, before JSON parsing).
+     */
+    response_bytes: number;
+    /**
+     * HTTP status from publisher
+     */
+    status: number;
+};
+
+/**
+ * Cost breakdown when a service fee is charged (e.g., pre-authorization or geo-proxy routing).
+ */
+export type CostBreakdown = {
+    /**
+     * Service fee charged
+     */
+    service_fee: string;
+    /**
+     * Cost charged for the target API
+     */
+    target: string;
+    /**
+     * Total cost (target + service_fee)
+     */
+    total: string;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseApiResultResponse = {
+    /**
+     * API result response
+     */
+    data: {
+        /**
+         * Asset symbol (e.g., USDC, USDT)
+         */
+        asset_symbol: string;
+        /**
+         * Response body (JSON if available, otherwise raw text)
+         */
+        body: unknown;
+        /**
+         * Actual cost charged in configured asset
+         */
+        cost: string;
+        cost_breakdown?: null | CostBreakdown;
+        /**
+         * Execution time in milliseconds
+         */
+        execution_time_ms: number;
+        /**
+         * Payment source used
+         */
+        payment_source: string;
+        /**
+         * Size of the publisher response body in bytes (raw, before JSON parsing).
+         */
+        response_bytes: number;
+        /**
+         * HTTP status from publisher
+         */
+        status: number;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponsePrivateModelsListResponse = {
+    data: {
+        data: Array<PrivateModelsModelInfo>;
+        object: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Pagination metadata included in responses.
+ */
+export type PaginationMeta = {
+    /**
+     * Number of items in this response
+     */
+    count: number;
+    /**
+     * Whether there are more items after this page
+     */
+    has_more: boolean;
+    /**
+     * Maximum items per page
+     */
+    limit: number;
+    /**
+     * Offset from start
+     */
+    offset: number;
+    /**
+     * Total number of items across all pages
+     */
+    total: number;
+};
+
 export type PrivateModelsChatCompletionsRequest = {
     max_tokens?: number | null;
     messages: Array<{
@@ -60,10 +325,12 @@ export type PostChatCompletionsErrors = {
 
 export type PostChatCompletionsResponses = {
     /**
-     * OpenAI-compatible chat completion response
+     * Publisher chat completion response
      */
-    200: unknown;
+    200: DataResponseApiResultResponse;
 };
+
+export type PostChatCompletionsResponse = PostChatCompletionsResponses[keyof PostChatCompletionsResponses];
 
 export type GetPrivateModelsData = {
     body?: never;
@@ -91,7 +358,7 @@ export type GetPrivateModelsResponses = {
     /**
      * Available private models
      */
-    200: PrivateModelsListResponse;
+    200: DataResponsePrivateModelsListResponse;
 };
 
 export type GetPrivateModelsResponse = GetPrivateModelsResponses[keyof GetPrivateModelsResponses];

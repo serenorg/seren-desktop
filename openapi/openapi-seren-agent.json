@@ -438,15 +438,6 @@
         "operationId": "seren_agent_private_models",
         "parameters": [
           {
-            "name": "private_provider",
-            "in": "query",
-            "description": "Optional internal private model provider selector. Defaults to aws_bedrock.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "region",
             "in": "query",
             "description": "Optional private model region for live discovery. Defaults to us-east-1.",
@@ -1089,6 +1080,17 @@
             },
             "description": "Declared requirements validated at deploy time."
           },
+          "runtime_adapter": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ManagedAgentRuntimeAdapter",
+                "description": "Runtime adapter used by the managed deployment. Defaults to `adk`."
+              }
+            ]
+          },
           "secrets": {
             "description": "JSON secrets object."
           },
@@ -1415,6 +1417,7 @@
               "resolved_tools",
               "approval_policy",
               "model_policy",
+              "runtime_adapter",
               "private_output_policy",
               "secret_keys",
               "requirements",
@@ -1590,6 +1593,9 @@
               },
               "routing_reason": {
                 "type": "string"
+              },
+              "runtime_adapter": {
+                "$ref": "#/components/schemas/ManagedAgentRuntimeAdapter"
               },
               "runtime_kind": {
                 "$ref": "#/components/schemas/CloudDeploymentRuntimeKind"
@@ -2198,6 +2204,7 @@
           "resolved_tools",
           "approval_policy",
           "model_policy",
+          "runtime_adapter",
           "private_output_policy",
           "secret_keys",
           "requirements",
@@ -2373,6 +2380,9 @@
           },
           "routing_reason": {
             "type": "string"
+          },
+          "runtime_adapter": {
+            "$ref": "#/components/schemas/ManagedAgentRuntimeAdapter"
           },
           "runtime_kind": {
             "$ref": "#/components/schemas/CloudDeploymentRuntimeKind"
@@ -2591,68 +2601,14 @@
           {
             "type": "object",
             "required": [
-              "private_provider",
               "provider"
             ],
             "properties": {
-              "access_token_secret_key": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Optional secret key whose value is a bearer token for Microsoft Entra auth."
-              },
-              "api_key_secret_key": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Optional secret key whose value is the API key for the endpoint."
-              },
-              "base_url_secret_key": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Secret key whose value is the base URL for the Azure private-model endpoint."
-              },
-              "deployment_name": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Optional Azure deployment name used as the model identifier for the v1 API."
-              },
-              "endpoint_url": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Optional custom Bedrock runtime endpoint URL, for example a PrivateLink endpoint."
-              },
-              "private_provider": {
-                "$ref": "#/components/schemas/ManagedPrivateModelProvider",
-                "description": "Private model backend routed through seren-private-models."
-              },
               "provider": {
                 "type": "string",
                 "enum": [
                   "seren_private_models"
                 ]
-              },
-              "provider_name": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Optional provider label shown in logs and errors."
-              },
-              "region": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "AWS region for Bedrock runtime calls."
               }
             }
           }
@@ -2679,6 +2635,12 @@
           "create",
           "update",
           "rollback"
+        ]
+      },
+      "ManagedAgentRuntimeAdapter": {
+        "type": "string",
+        "enum": [
+          "adk"
         ]
       },
       "ManagedAgentSessionDatabase": {
@@ -2804,13 +2766,6 @@
           "live_data",
           "publisher_actions",
           "database"
-        ]
-      },
-      "ManagedPrivateModelProvider": {
-        "type": "string",
-        "enum": [
-          "aws_bedrock",
-          "azure_open_ai"
         ]
       },
       "OrchestrationMode": {
@@ -3264,6 +3219,17 @@
               "$ref": "#/components/schemas/RequirementSpec"
             },
             "description": "Updated deploy-time requirements."
+          },
+          "runtime_adapter": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ManagedAgentRuntimeAdapter",
+                "description": "Updated runtime adapter."
+              }
+            ]
           },
           "secrets": {
             "description": "Updated JSON secrets object."

@@ -3,6 +3,7 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { publisherStatus, unwrapPublisherBody } from "@/lib/publisher-response";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
@@ -92,20 +93,28 @@ export async function transcribeAudio(
   const result = await response.json();
   console.log("[Whisper] Raw API response:", JSON.stringify(result));
 
-  // Gateway wraps upstream errors in a 200 response with a status field
-  if (result.status && result.status !== 200) {
+  // Seren wraps publisher responses in DataResponse, with upstream status inside.
+  const status = publisherStatus(result);
+  if (status && status !== 200) {
+    const body = unwrapPublisherBody(result) as Record<string, unknown>;
+    const error = body?.error as Record<string, unknown> | undefined;
     const msg =
-      result.body?.error?.message || `Upstream error: ${result.status}`;
+      typeof error?.message === "string"
+        ? error.message
+        : `Upstream error: ${status}`;
     console.error("[Whisper] Gateway upstream error:", msg);
     throw new Error(msg);
   }
 
-  // Gateway wraps the upstream response in {status, body: {text: "..."}}
-  const text = result.body?.text ?? result.text;
+  const responsePayload = unwrapPublisherBody(result) as Record<
+    string,
+    unknown
+  >;
+  const text = responsePayload.text;
   if (!text) {
     console.error("[Whisper] No text in response:", JSON.stringify(result));
     throw new Error("No transcription returned from Whisper API");
   }
 
-  return text;
+  return String(text);
 }

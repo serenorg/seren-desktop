@@ -3,6 +3,7 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { unwrapPublisherBody } from "@/lib/publisher-response";
 import type { Attachment } from "@/lib/providers/types";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
@@ -12,12 +13,6 @@ interface DocReaderResponseBody {
   text?: string;
   content?: unknown;
   pages?: Array<{ text?: string; content?: unknown }>;
-}
-
-interface DocReaderResponse extends DocReaderResponseBody {
-  status?: number;
-  body?: DocReaderResponseBody;
-  cost?: string;
 }
 
 /** Safely extract a string from a field that may be a string, object, or array. */
@@ -130,10 +125,11 @@ export async function readDocument(attachment: Attachment): Promise<string> {
     throw new Error(`DocReader error ${response.status}: ${errorText}`);
   }
 
-  const data = (await response.json()) as DocReaderResponse;
+  const data = await response.json();
   console.log("[DocReader] Response payload keys:", Object.keys(data));
-  // Seren gateway wraps upstream responses in { status, body, cost }
-  const payload: DocReaderResponseBody = data.body ?? data;
+  const payload = unwrapPublisherBody<DocReaderResponseBody>(
+    data,
+  ) as DocReaderResponseBody;
   console.log(
     "[DocReader] Payload shape:",
     "text:",

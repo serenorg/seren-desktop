@@ -3,6 +3,7 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
+import { publisherStatus, unwrapPublisherBody } from "@/lib/publisher-response";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
@@ -33,13 +34,6 @@ interface EmbeddingResponse {
     prompt_tokens: number;
     total_tokens: number;
   };
-}
-
-/** Wrapped response from the /publishers endpoint */
-interface GatewayResponse {
-  status: number;
-  body: EmbeddingResponse;
-  cost: string;
 }
 
 /**
@@ -90,14 +84,14 @@ export async function embedTexts(
     throw new Error(`SerenEmbed API error: ${response.status} - ${errorText}`);
   }
 
-  const result = (await response.json()) as GatewayResponse;
+  const result = await response.json();
 
-  // Gateway wraps upstream errors in a 200 response with a status field
-  if (result.status && result.status !== 200) {
-    throw new Error(`SerenEmbed upstream error: ${result.status}`);
+  const status = publisherStatus(result);
+  if (status && status !== 200) {
+    throw new Error(`SerenEmbed upstream error: ${status}`);
   }
 
-  return result.body;
+  return unwrapPublisherBody<EmbeddingResponse>(result) as EmbeddingResponse;
 }
 
 /**
