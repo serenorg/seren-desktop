@@ -16,6 +16,7 @@ import {
   DEFAULT_CLAUDE_EFFORT,
 } from "./effort.mjs";
 import { updatePeakInputTokens } from "./usage.mjs";
+import { chooseUpdatedModelId, inferCurrentModelId } from "./model-resolution.mjs";
 
 /**
  * Resolve the full path to the `claude` binary.
@@ -421,45 +422,6 @@ function augmentWithLegacyOpus(records) {
   const existingIds = new Set(records.map((r) => r.modelId));
   const extras = LEGACY_OPUS_RECORDS.filter((r) => !existingIds.has(r.modelId));
   return [...extras, ...records];
-}
-
-function inferCurrentModelId(currentModel, records) {
-  if (!currentModel || records.length === 0) {
-    return records[0]?.modelId ?? null;
-  }
-
-  const exact = records.find((record) => record.modelId === currentModel);
-  if (exact) {
-    return exact.modelId;
-  }
-
-  const lower = String(currentModel).toLowerCase();
-  if (lower.includes("opus")) {
-    return (
-      records.find((record) => record.modelId === "default")?.modelId ??
-      records.find((record) => record.modelId.startsWith("opus"))?.modelId ??
-      records[0]?.modelId ??
-      null
-    );
-  }
-
-  if (lower.includes("sonnet")) {
-    return (
-      records.find((record) => record.modelId.startsWith("sonnet"))?.modelId ??
-      records[0]?.modelId ??
-      null
-    );
-  }
-
-  if (lower.includes("haiku")) {
-    return (
-      records.find((record) => record.modelId.startsWith("haiku"))?.modelId ??
-      records[0]?.modelId ??
-      null
-    );
-  }
-
-  return records[0]?.modelId ?? null;
 }
 
 function combinePrompt(prompt, context) {
@@ -1128,11 +1090,19 @@ function handleAssistantMessage(emit, session, payload) {
   if (typeof payload.session_id === "string") {
     session.agentSessionId = payload.session_id;
   }
-  if (typeof session.currentModelId !== "string") {
-    session.currentModelId = inferCurrentModelId(
-      message.model,
-      session.availableModelRecords,
-    );
+  // Always refresh from Anthropic's per-message model. The picker is a
+  // request; message.model is ground truth. Without this, a successful
+  // set_model control request that the CLI ignores (or that falls back to
+  // a different model upstream) leaves the UI showing a model the session
+  // isn't actually running. See #1635.
+  const nextModelId = chooseUpdatedModelId(
+    session.currentModelId,
+    message.model,
+    session.availableModelRecords,
+  );
+  if (nextModelId != null && nextModelId !== session.currentModelId) {
+    session.currentModelId = nextModelId;
+    emit("provider://session-status", buildSessionStatus(session));
   }
 
   for (const block of blocks) {
@@ -1451,6 +1421,7 @@ export function createClaudeRuntime({ emit }) {
       approvalPolicy,
       timeoutSecs,
       reasoningEffort,
+      initialModelId,
     } = params;
 
     const sessionId = localSessionId ?? randomUUID();
@@ -1469,15 +1440,22 @@ export function createClaudeRuntime({ emit }) {
     const extendedPath = buildExtendedPath();
     const effectiveEffort =
       normalizeEffort(reasoningEffort) ?? DEFAULT_CLAUDE_EFFORT;
+    // Prefer the user's persisted choice (agent_model_id from the conversation
+    // row) so a resumed thread spawns on the model the user actually picked.
+    // Falls back to Opus 4.5 for fresh threads with no prior selection — still
+    // the cheapest current Opus on the API. When the CLI adds/changes models,
+    // the picker stays authoritative; the assistant message handler below then
+    // corrects session.currentModelId from Anthropic's message.model ground
+    // truth on the first response. See #1635.
+    const preferredModel =
+      typeof initialModelId === "string" && initialModelId.length > 0
+        ? initialModelId
+        : "claude-opus-4-5";
     const claudeArgs = buildClaudeArgs({
       sessionId: remoteSessionId,
       resumeSessionId: resumeAgentSessionId ?? null,
       forkSession: false,
-      // Default new sessions to Opus 4.5 — lowest-cost Opus tier still on the
-      // Anthropic API. Claude Code's own "Default (recommended)" rolls forward
-      // to the newest Opus (currently 4.7) which is the most expensive option.
-      // Users can switch via the picker; resumed sessions use session.currentModelId.
-      preferredModel: "claude-opus-4-5",
+      preferredModel,
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
       effort: effectiveEffort,
     });
@@ -1527,6 +1505,10 @@ export function createClaudeRuntime({ emit }) {
       processHandle,
       timeoutSecs,
       agentSessionId: remoteSessionId,
+      // Seed currentModelId with what we spawned on so the first session-status
+      // event reflects reality; assistant messages then refresh it from
+      // message.model on every turn (#1635).
+      currentModelId: preferredModel,
       currentModeId: "default",
       mcpConfigJson: mcpConfig.claudeMcpConfigJson,
       spawnEnv: mcpConfig.childEnv,

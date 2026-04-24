@@ -295,6 +295,7 @@ export async function spawnAgent(
   timeoutSecs?: number,
   mcpServers?: McpServerConfig[],
   reasoningEffort?: string,
+  initialModelId?: string,
 ): Promise<AgentSessionInfo> {
   return invokeProvider<AgentSessionInfo>(
     "provider_spawn",
@@ -311,6 +312,7 @@ export async function spawnAgent(
       timeoutSecs: timeoutSecs ?? null,
       mcpServers: mcpServers ?? null,
       reasoningEffort: reasoningEffort ?? null,
+      initialModelId: initialModelId ?? null,
     },
     { timeoutMs: 120_000 },
   );

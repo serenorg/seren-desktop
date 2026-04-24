@@ -1779,6 +1779,11 @@ export const agentStore = {
           timeoutSecs,
           enabledMcpServers,
           reasoningEffort,
+          // Pass the persisted model through at spawn time so the CLI starts
+          // on the user's selected model (vs. the runtime's hardcoded default).
+          // The post-spawn setModel below remains a safety net for mid-session
+          // picker changes. See #1635.
+          opts?.initialModelId,
         );
         console.log("[AgentStore] Spawn result:", info);
 
