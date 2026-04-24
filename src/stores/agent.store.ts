@@ -142,6 +142,7 @@ async function waitForSessionIdle(
 }
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
+import { authStore, promptLogin } from "@/stores/auth.store";
 import { buildChatRequest, sendProviderMessage } from "@/lib/providers";
 import {
   isPromptTooLongError,
@@ -2647,6 +2648,13 @@ export const agentStore = {
 
     setState("sessions", sessionId, "isCompacting", true);
 
+    // Hoisted for catch-handler access — the reactive path terminates the
+    // old session, so recovery needs these if anything downstream throws. #1639.
+    const fullTranscript = [...session.messages];
+    const cwd = session.cwd;
+    const agentType = session.info.agentType;
+    const conversationId = session.conversationId;
+
     try {
       // Split messages into those to summarize and those to keep
       const toCompact = messages.slice(0, messages.length - preserveCount);
@@ -2697,10 +2705,6 @@ Structured summary:`;
         compactedAt: Date.now(),
       };
 
-      // Capture session details and user-configured settings before termination
-      const cwd = session.cwd;
-      const agentType = session.info.agentType;
-      const conversationId = session.conversationId;
       const queuedPrompts = session.pendingPrompts ?? [];
 
       // Build the structured seed prompt up-front — shared by both modes.
@@ -2767,7 +2771,6 @@ Structured summary:`;
       // inherits the full transcript so users still see every earlier turn
       // on scroll-up — the model's context is the structured summary + the
       // preserved tail, seeded via the seed prompt below, not the transcript.
-      const fullTranscript = [...session.messages];
       setState("sessions", newSessionId, "messages", fullTranscript);
       setState(
         "sessions",
@@ -2804,9 +2807,34 @@ Structured summary:`;
         "[AgentStore] Failed to compact agent conversation (catastrophic):",
         error,
       );
-      // If the original session still exists, clear compacting flag
       if (state.sessions[sessionId]) {
         setState("sessions", sessionId, "isCompacting", false);
+      } else if (fullTranscript && fullTranscript.length > 0) {
+        // The old session was terminated but the new one failed. Respawn a
+        // recovery session with the saved transcript so the user doesn't
+        // lose their conversation. #1639.
+        console.warn(
+          `[AgentStore] Attempting recovery — restoring ${fullTranscript.length} messages to new session`,
+        );
+        try {
+          const recoveryId = await this.spawnSession(cwd, agentType, {
+            localSessionId: conversationId,
+          });
+          if (recoveryId) {
+            setState("sessions", recoveryId, "messages", fullTranscript);
+            setState(
+              "sessions",
+              recoveryId,
+              "restoredMessageCount",
+              fullTranscript.length,
+            );
+          }
+        } catch (recoveryErr) {
+          console.error(
+            "[AgentStore] Recovery spawn also failed:",
+            recoveryErr,
+          );
+        }
       }
       return "failed_catastrophic";
     }
@@ -3999,15 +4027,22 @@ Structured summary:`;
             }
 
             if (shouldCompact) {
-              // Explicit undefined for pendingUserPrompt: the prompt that
-              // just produced this promptComplete already succeeded, so we
-              // do NOT retry it — retrying would duplicate the turn. Queued
-              // prompts handled via pendingPrompts transfer inside compaction.
-              this.compactAgentConversation(
-                sessionId,
-                settingsStore.settings.autoCompactPreserveMessages,
-                undefined,
-              );
+              if (!authStore.isAuthenticated) {
+                console.warn(
+                  "[AgentStore] Skipping auto-compaction — user is not authenticated",
+                );
+                promptLogin();
+              } else {
+                // Explicit undefined for pendingUserPrompt: the prompt that
+                // just produced this promptComplete already succeeded, so we
+                // do NOT retry it — retrying would duplicate the turn. Queued
+                // prompts handled via pendingPrompts transfer inside compaction.
+                this.compactAgentConversation(
+                  sessionId,
+                  settingsStore.settings.autoCompactPreserveMessages,
+                  undefined,
+                );
+              }
             }
           }
         }
@@ -4015,7 +4050,7 @@ Structured summary:`;
         // Predictive compaction — warm a replacement session in the background
         // when the serving session crosses 70% of its context window, so the
         // next user submit swaps invisibly instead of hitting prompt-too-long. #1631.
-        if (!isHistoryReplay) {
+        if (!isHistoryReplay && authStore.isAuthenticated) {
           const sess = state.sessions[sessionId];
           if (
             sess &&
