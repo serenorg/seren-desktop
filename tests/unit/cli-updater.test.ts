@@ -214,6 +214,25 @@ describe("atomic state writes (#1644)", () => {
     writeFileSync(stateFile, "{ corrupt", "utf8");
     expect(loadState()).toEqual({});
   });
+
+  // Regression for #1655. Two backgroundUpdateCli calls (Codex + Claude) run
+  // concurrently from agent-registry; each does loadState → mutate → saveState.
+  // Before the merge-on-write fix the second save clobbered the first save's
+  // per-CLI key (last-write-wins), which is what stranded one user's
+  // lastUpdateCheck:codex on disk and made the TTL gate misfire.
+  it("merges with on-disk keys on save so a partial write does not drop sibling keys (#1655)", () => {
+    saveState({
+      "lastUpdateCheck:codex": 100,
+      "lastUpdateCheck:claude": 200,
+    });
+    // Simulate the Claude arm saving a snapshot it loaded BEFORE the Codex
+    // arm's :codex write landed — i.e. the in-memory object only has :claude.
+    saveState({ "lastUpdateCheck:claude": 999 });
+    expect(loadState()).toEqual({
+      "lastUpdateCheck:codex": 100,
+      "lastUpdateCheck:claude": 999,
+    });
+  });
 });
 
 describe("failure paths (#1645)", () => {

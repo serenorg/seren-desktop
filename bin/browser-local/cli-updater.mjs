@@ -67,11 +67,20 @@ export function saveState(state) {
   // tolerates the parse error by returning {}, but TTL timestamps are lost
   // and the updater re-checks every launch until network recovers — turning
   // a transient registry blip into a launch-amplified hammer. See #1644.
+  //
+  // Merge with the latest on-disk snapshot before writing. Two concurrent
+  // backgroundUpdateCli arms (Codex + Claude) each load → mutate → save
+  // independently; without merging, the second saver clobbers the first
+  // saver's per-CLI key. All callers in this file are additive (no key
+  // deletion), so a merge-on-write is semantically safe and narrows the
+  // race window from the full update lifecycle (seconds, including npm
+  // round-trip) to a load+rename pair (sub-millisecond). See #1655.
   const target = statePath();
   const tmp = `${target}.tmp`;
   try {
     mkdirSync(serenDataDir(), { recursive: true });
-    writeFileSync(tmp, JSON.stringify(state), "utf8");
+    const merged = { ...loadState(), ...state };
+    writeFileSync(tmp, JSON.stringify(merged), "utf8");
     renameSync(tmp, target);
   } catch {
     // Best-effort tmp cleanup so a previous failed write doesn't leak.
