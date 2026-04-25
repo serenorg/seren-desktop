@@ -352,6 +352,25 @@ export async function getClaudeProjectIdentity(
 }
 
 /**
+ * Returns true when Claude CLI's session JSONL file exists on disk for the
+ * given project cwd + session id. Used by `resumeAgentConversation` to skip
+ * `--resume` when the stored session ID points at a missing file (CLI
+ * cleaned up old sessions, app reinstall, cross-machine sync) — without this
+ * pre-flight, the spawn fails with `code=1: No conversation found with
+ * session ID: <id>` and surfaces a "Claude Code request failed" error event.
+ * Browser runtime: returns false (no CLI sessions to check). See #1657.
+ */
+export async function claudeSessionExists(
+  projectCwd: string,
+  sessionId: string,
+): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+  return invoke<boolean>("claude_session_exists", { projectCwd, sessionId });
+}
+
+/**
  * Render `~/.claude/projects/<encoded(projectCwd)>/MEMORY.md` from the
  * `claude_agent_preferences` SerenDB table, so Claude Code reads fresh
  * content at the start of its next session.
