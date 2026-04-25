@@ -15,7 +15,7 @@ import {
   storeToken,
 } from "@/lib/tauri-bridge";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
-import { promptLogin } from "@/stores/auth.store";
+import { clearAuthState, requestSignInModal } from "@/stores/auth.store";
 
 export interface LoginResponse {
   data: {
@@ -138,7 +138,8 @@ export async function logout(): Promise<void> {
 export async function refreshAccessToken(): Promise<boolean> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) {
-    promptLogin();
+    clearAuthState();
+    requestSignInModal();
     return false;
   }
 
@@ -157,7 +158,8 @@ export async function refreshAccessToken(): Promise<boolean> {
       if (response.status === 401) {
         await clearToken();
         await clearRefreshToken();
-        promptLogin();
+        clearAuthState();
+        requestSignInModal();
       }
       return false;
     }

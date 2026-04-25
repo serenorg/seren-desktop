@@ -186,7 +186,7 @@ import type {
   ToolCallEvent,
 } from "@/services/providers";
 import * as providerService from "@/services/providers";
-import { authStore, promptLogin } from "@/stores/auth.store";
+import { authStore, requestSignInModal } from "@/stores/auth.store";
 
 /** Set once we've subscribed to `provider-runtime://ready` so repeated
  *  initialize() calls don't stack listeners. */
@@ -4132,7 +4132,12 @@ Structured summary:`;
                 console.warn(
                   "[AgentStore] Skipping auto-compaction — user is not authenticated",
                 );
-                promptLogin();
+                // State is already false (the guard above proved it). The
+                // pre-#1661 code called promptLogin() here, which was a
+                // no-op state flip. The user needs visible escalation —
+                // their context is already approaching the model limit and
+                // we just declined to compact. Show the modal.
+                requestSignInModal();
               } else {
                 // Explicit undefined for pendingUserPrompt: the prompt that
                 // just produced this promptComplete already succeeded, so we

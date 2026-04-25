@@ -16,9 +16,9 @@ const authServiceSource = readFileSync(
 );
 
 describe("#1639 — auto-compact auth gate", () => {
-  it("imports authStore and promptLogin from auth.store", () => {
+  it("imports authStore and the modal-trigger from auth.store (#1661 renamed promptLogin)", () => {
     expect(agentStoreSource).toContain(
-      'import { authStore, promptLogin } from "@/stores/auth.store"',
+      'import { authStore, requestSignInModal } from "@/stores/auth.store"',
     );
   });
 
@@ -49,14 +49,14 @@ describe("#1639 — auto-compact auth gate", () => {
     ).toBeLessThan(compactCallAfterAnchor);
   });
 
-  it("calls promptLogin() when auth check fails in auto-compact path", () => {
+  it("calls requestSignInModal() when auth check fails in auto-compact path (#1661 — was promptLogin, now real modal)", () => {
     const autoCompactAnchor = "Auto-compact check runs BEFORE drain (#1623)";
     const drainAnchor = "Drain the prompt queue for this session";
     const autoCompactIdx = agentStoreSource.indexOf(autoCompactAnchor);
     const drainIdx = agentStoreSource.indexOf(drainAnchor);
 
     const authBlock = agentStoreSource.slice(autoCompactIdx, drainIdx);
-    expect(authBlock).toContain("promptLogin()");
+    expect(authBlock).toContain("requestSignInModal()");
   });
 
   it("logs a warning when skipping compaction due to auth", () => {
@@ -81,42 +81,43 @@ describe("#1639 — predictive-compact auth gate", () => {
   });
 });
 
-describe("#1639 — refreshAccessToken calls promptLogin on terminal failure", () => {
-  it("imports promptLogin from auth.store", () => {
+describe("#1639 — refreshAccessToken pairs clearAuthState + requestSignInModal on terminal failure (#1661 rename)", () => {
+  it("imports clearAuthState and requestSignInModal from auth.store", () => {
     expect(authServiceSource).toContain(
-      'import { promptLogin } from "@/stores/auth.store"',
+      'import { clearAuthState, requestSignInModal } from "@/stores/auth.store"',
     );
   });
 
-  it("calls promptLogin when no refresh token is available", () => {
-    // Find the "if (!refreshToken)" block and verify promptLogin is called
+  it("clears auth state AND requests the sign-in modal when no refresh token is available", () => {
     const noTokenIdx = authServiceSource.indexOf("if (!refreshToken)");
     expect(noTokenIdx).toBeGreaterThan(0);
-    const blockAfter = authServiceSource.slice(noTokenIdx, noTokenIdx + 100);
-    expect(blockAfter).toContain("promptLogin()");
+    const blockAfter = authServiceSource.slice(noTokenIdx, noTokenIdx + 200);
+    expect(blockAfter).toContain("clearAuthState()");
+    expect(blockAfter).toContain("requestSignInModal()");
   });
 
-  it("calls promptLogin on 401 from refresh endpoint", () => {
-    // Find the 401 handling block inside refreshAccessToken
+  it("clears auth state AND requests the sign-in modal on 401 from refresh endpoint", () => {
     const refreshFnIdx = authServiceSource.indexOf(
       "async function refreshAccessToken",
     );
-    const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 1200);
+    const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 1400);
     const clear401Block = fnBody.indexOf("response.status === 401");
     expect(clear401Block).toBeGreaterThan(0);
-    const afterClear = fnBody.slice(clear401Block, clear401Block + 200);
-    expect(afterClear).toContain("promptLogin()");
+    const afterClear = fnBody.slice(clear401Block, clear401Block + 300);
+    expect(afterClear).toContain("clearAuthState()");
+    expect(afterClear).toContain("requestSignInModal()");
   });
 
-  it("does NOT call promptLogin on network errors (user may be offline)", () => {
+  it("does NOT trigger the modal on network errors (user may be offline)", () => {
     const refreshFnIdx = authServiceSource.indexOf(
       "async function refreshAccessToken",
     );
-    const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 1200);
+    const fnBody = authServiceSource.slice(refreshFnIdx, refreshFnIdx + 1400);
     const catchBlock = fnBody.indexOf("} catch {");
     expect(catchBlock).toBeGreaterThan(0);
-    const afterCatch = fnBody.slice(catchBlock, catchBlock + 150);
-    expect(afterCatch).not.toContain("promptLogin");
+    const afterCatch = fnBody.slice(catchBlock, catchBlock + 200);
+    expect(afterCatch).not.toContain("requestSignInModal");
+    expect(afterCatch).not.toContain("clearAuthState");
   });
 });
 

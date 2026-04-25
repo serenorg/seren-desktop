@@ -9,6 +9,7 @@ import {
   onMount,
   Switch,
 } from "solid-js";
+import { SessionExpiredModal } from "@/components/auth/SessionExpiredModal";
 import { SignIn } from "@/components/auth/SignIn";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
@@ -163,6 +164,12 @@ export const AppShell: Component<AppShellProps> = (props) => {
       </div>
 
       <StatusBar />
+
+      {/* Layout-level blocking sign-in modal — fires on mid-session expiry,
+          refresh-token failure, and the /login slash command. Distinct from
+          the passive titlebar Sign In button (always-on when unauthenticated)
+          and from ChatContent's local pre-send gate. See #1661. */}
+      <SessionExpiredModal />
     </div>
   );
 };
