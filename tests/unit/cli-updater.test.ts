@@ -1,7 +1,16 @@
 // ABOUTME: Critical tests for #1637 — background CLI updater pure logic.
 // ABOUTME: Guards TTL gate, semver compare, and same-channel classification.
 
-import { describe, expect, it } from "vitest";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const modulePath = new URL(
   "../../bin/browser-local/cli-updater.mjs",
@@ -12,6 +21,8 @@ const {
   isNewer,
   classifyInstallChannel,
   backgroundUpdateCli,
+  loadState,
+  saveState,
 } = await import(/* @vite-ignore */ modulePath);
 
 describe("isNewer", () => {
@@ -110,5 +121,53 @@ describe("backgroundUpdateCli TTL gate", () => {
       now: Date.now(),
     });
     expect(result).toEqual({ skipped: "unresolved" });
+  });
+});
+
+describe("atomic state writes (#1644)", () => {
+  let tempDir: string;
+  let stateFile: string;
+  let originalEnv: string | undefined;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(path.join(tmpdir(), "seren-cli-updater-test-"));
+    stateFile = path.join(tempDir, "cli-update-state.json");
+    originalEnv = process.env.SEREN_CLI_UPDATER_STATE_PATH;
+    process.env.SEREN_CLI_UPDATER_STATE_PATH = stateFile;
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.SEREN_CLI_UPDATER_STATE_PATH;
+    } else {
+      process.env.SEREN_CLI_UPDATER_STATE_PATH = originalEnv;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("round-trips state across save+load — basic correctness", () => {
+    const written = { "lastUpdateCheck:codex": 1234567890 };
+    saveState(written);
+    expect(loadState()).toEqual(written);
+  });
+
+  it("does not leave a .tmp file behind on a successful save — temp rename completed", () => {
+    saveState({ ok: 1 });
+    expect(existsSync(`${stateFile}.tmp`)).toBe(false);
+    expect(existsSync(stateFile)).toBe(true);
+  });
+
+  it("preserves the prior known-good state when a partial .tmp from a prior crash exists — the rename is atomic, the tmp from the failed run does not corrupt loadState", () => {
+    saveState({ "lastUpdateCheck:codex": 100 });
+    // Simulate a prior crash mid-write: a stale .tmp exists with garbage,
+    // and the real state file is untouched. loadState must still read the
+    // good file, not the .tmp.
+    writeFileSync(`${stateFile}.tmp`, "{ this is not valid json", "utf8");
+    expect(loadState()).toEqual({ "lastUpdateCheck:codex": 100 });
+  });
+
+  it("returns {} on a corrupted state file rather than throwing — silent recovery", () => {
+    writeFileSync(stateFile, "{ corrupt", "utf8");
+    expect(loadState()).toEqual({});
   });
 });
