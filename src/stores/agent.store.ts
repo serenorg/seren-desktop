@@ -2380,45 +2380,26 @@ export const agentStore = {
 
     // Legacy Claude conversations can reference session IDs that no longer
     // exist on disk. In that case, fall back to a fresh session for the same
-    // persisted conversation instead of failing hard.
+    // persisted conversation instead of failing hard. (#1656: previously this
+    // path retried with the SAME bad resumeAgentSessionId before giving up,
+    // producing a wasted 2nd `--resume` attempt + a duplicate "Claude Code
+    // request failed" error event. Drop --resume immediately.)
     if (!sessionId && agentType === "claude-code") {
       console.warn(
-        "[AgentStore] Claude resume failed, starting a fresh session for conversation",
+        "[AgentStore] Claude resume failed, spawning fresh session for conversation",
         conversationId,
         state.error,
       );
-      // Try resuming the remote session (preserves history). If the session
-      // file is corrupted, this will also fail — fall through to fresh.
-      let fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
+      const persisted = await loadPersistedAgentHistory(conversationId);
+      const fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
         localSessionId: conversationId,
-        resumeAgentSessionId: remoteSessionId,
         conversationTitle: convo.title,
-        restoredMessages,
-        bootstrapPromptContext: pendingBootstrapPromptContext,
+        restoredMessages:
+          persisted.messages.length > 0 ? persisted.messages : undefined,
+        bootstrapPromptContext: persisted.context || undefined,
         initialModelId: convo.agent_model_id ?? undefined,
         initialPermissionMode: convo.agent_permission_mode ?? undefined,
       });
-
-      // If resume-based fallback also failed, the session file is likely
-      // corrupted (Claude CLI exits code=1 with no stderr). Start a
-      // completely fresh session without --resume. Load persisted messages
-      // from SQLite so the user sees their history and the agent gets context.
-      if (!fallbackSessionId) {
-        console.warn(
-          "[AgentStore] Resume fallback also failed — spawning without --resume for",
-          conversationId,
-        );
-        const persisted = await loadPersistedAgentHistory(conversationId);
-        fallbackSessionId = await this.spawnSession(resumeCwd, agentType, {
-          localSessionId: conversationId,
-          conversationTitle: convo.title,
-          restoredMessages:
-            persisted.messages.length > 0 ? persisted.messages : undefined,
-          bootstrapPromptContext: persisted.context || undefined,
-          initialModelId: convo.agent_model_id ?? undefined,
-          initialPermissionMode: convo.agent_permission_mode ?? undefined,
-        });
-      }
 
       if (fallbackSessionId) {
         // Clear error state and remove stale error messages left by the
