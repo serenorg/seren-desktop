@@ -52,3 +52,23 @@ export function isLikelyAuthError(msg: string | null | undefined): boolean {
   if (msg.length > AUTH_ERROR_MAX_LENGTH) return false;
   return AUTH_ERROR_PATTERNS.some((pattern) => pattern.test(msg));
 }
+
+/** Patterns that indicate a context-window overflow from the provider. */
+const CONTEXT_OVERFLOW_PATTERNS = [
+  /prompt is too long/i,
+  /context (length|window).*exceed/i,
+];
+
+/**
+ * Check if an error message indicates the provider rejected the prompt
+ * because the conversation exceeded its context window. When the user is
+ * also unauthenticated this is a hidden auth failure — auto-compaction
+ * is gated on auth (#1641), so the overflow is the symptom, not the cause.
+ * See #1652.
+ */
+export function isContextOverflowError(
+  msg: string | null | undefined,
+): boolean {
+  if (!msg) return false;
+  return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(msg));
+}
