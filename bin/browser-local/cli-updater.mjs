@@ -2,7 +2,14 @@
 // ABOUTME: Fire-and-forget at startup, TTL-gated, same-channel only, silent on failure.
 
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -29,6 +36,13 @@ function serenDataDir() {
 }
 
 function statePath() {
+  // Test-only override so tests can exercise saveState/loadState atomicity
+  // without touching the user's real ~/.seren/cli-update-state.json. Not a
+  // user-facing knob — undocumented on purpose.
+  const override = process.env.SEREN_CLI_UPDATER_STATE_PATH;
+  if (typeof override === "string" && override.length > 0) {
+    return override;
+  }
   return path.join(serenDataDir(), "cli-update-state.json");
 }
 
@@ -43,11 +57,26 @@ export function loadState() {
 }
 
 export function saveState(state) {
+  // Atomic write: serialize to a temp sibling, then rename. rename(2) is
+  // atomic on POSIX and on Windows NTFS for same-volume same-directory
+  // renames, which we satisfy by keeping the .tmp next to the target.
+  // Without this, a crash mid-write corrupts cli-update-state.json; loadState
+  // tolerates the parse error by returning {}, but TTL timestamps are lost
+  // and the updater re-checks every launch until network recovers — turning
+  // a transient registry blip into a launch-amplified hammer. See #1644.
+  const target = statePath();
+  const tmp = `${target}.tmp`;
   try {
     mkdirSync(serenDataDir(), { recursive: true });
-    writeFileSync(statePath(), JSON.stringify(state), "utf8");
+    writeFileSync(tmp, JSON.stringify(state), "utf8");
+    renameSync(tmp, target);
   } catch {
-    // Silent — missing persistence just means we re-check next launch.
+    // Best-effort tmp cleanup so a previous failed write doesn't leak.
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // Nothing to clean up — silent.
+    }
   }
 }
 
