@@ -2,7 +2,7 @@
 // ABOUTME: Commands are organized by tier and registered at module load.
 
 import { agentStore } from "@/stores/agent.store";
-import { promptLogin } from "@/stores/auth.store";
+import { requestSignInModal } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { providerStore } from "@/stores/provider.store";
@@ -161,7 +161,10 @@ registry.register({
   description: "Sign in to Seren",
   panels: ["chat", "agent"],
   execute: (ctx) => {
-    promptLogin();
+    // /login is an explicit user action — do not invalidate their session
+    // if they are already authenticated. The modal lets them switch
+    // accounts or re-auth without dropping their current state. See #1661.
+    requestSignInModal();
     ctx.clearInput();
     ctx.showStatus("Opening sign in...");
     return true;

@@ -34,6 +34,16 @@ interface AuthState {
   /** Whether MCP Gateway is connected */
   mcpConnected: boolean;
   privateChatPolicy: OrganizationPrivateChatPolicy | null;
+  /**
+   * Set true when something asks for the user-visible sign-in modal —
+   * mid-session expiry, a `/login` slash command, refresh-token failure.
+   * The layout-level <SessionExpiredModal /> subscribes to this signal and
+   * shows the blocking modal. Distinct from `isAuthenticated` so we can
+   * tell "user is signed out" (passive titlebar button) apart from
+   * "user needs to know they're signed out RIGHT NOW" (modal).
+   * See #1661.
+   */
+  signInModalRequested: boolean;
 }
 
 const [state, setState] = createStore<AuthState>({
@@ -42,6 +52,7 @@ const [state, setState] = createStore<AuthState>({
   isAuthenticated: false,
   mcpConnected: false,
   privateChatPolicy: null,
+  signInModalRequested: false,
 });
 
 let authBindingsInitialized = false;
@@ -206,10 +217,16 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * Show the sign-in prompt by clearing authentication state.
- * Used by the /login slash command and session-expired events.
+ * Pure state mutation: clear the user, isAuthenticated, and privateChatPolicy
+ * fields. Does NOT show any UI. Use this when you've decided the auth state
+ * is no longer valid (refresh failed, IPC told us tokens died, /login slash
+ * command). If you also want the user to know they need to sign in right now,
+ * call `requestSignInModal()` separately.
+ *
+ * Renamed from `promptLogin` (which lied — it never prompted anything;
+ * see #1661).
  */
-export function promptLogin(): void {
+export function clearAuthState(): void {
   setState({
     isAuthenticated: false,
     user: null,
@@ -217,8 +234,28 @@ export function promptLogin(): void {
   });
 }
 
-// Listen for session-expired events from the desktop runtime (e.g. both tokens dead).
-// Sets isAuthenticated = false so the UI shows the sign-in prompt.
+/**
+ * Ask the layout-level <SessionExpiredModal /> to show. Pure UI signal —
+ * does NOT touch auth state. Pair with `clearAuthState()` when you also
+ * need to invalidate the session. See #1661.
+ */
+export function requestSignInModal(): void {
+  setState("signInModalRequested", true);
+}
+
+/**
+ * Hide the session-expired modal. Called when the user successfully signs
+ * in (or explicitly dismisses).
+ */
+export function dismissSignInModal(): void {
+  setState("signInModalRequested", false);
+}
+
+// Listen for session-expired events from the desktop runtime (both tokens
+// dead, or backend explicitly told us to re-auth). The Rust side already
+// cleared its own state; we mirror that into the frontend store AND raise
+// the modal so the user gets visible escalation instead of just a passive
+// titlebar button. See #1661.
 export async function initAuthRuntimeBindings(): Promise<void> {
   if (authBindingsInitialized || !isTauriRuntime()) {
     return;
@@ -228,7 +265,8 @@ export async function initAuthRuntimeBindings(): Promise<void> {
   const { listen } = await import("@tauri-apps/api/event");
   await listen("auth:session-expired", () => {
     console.warn("[Auth Store] Session expired event from backend");
-    promptLogin();
+    clearAuthState();
+    requestSignInModal();
   });
 }
 
