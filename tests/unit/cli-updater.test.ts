@@ -215,3 +215,212 @@ describe("atomic state writes (#1644)", () => {
     expect(loadState()).toEqual({});
   });
 });
+
+describe("failure paths (#1645)", () => {
+  let tempDir: string;
+  let stateFile: string;
+  let originalEnv: string | undefined;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(path.join(tmpdir(), "seren-failpath-test-"));
+    stateFile = path.join(tempDir, "cli-update-state.json");
+    originalEnv = process.env.SEREN_CLI_UPDATER_STATE_PATH;
+    process.env.SEREN_CLI_UPDATER_STATE_PATH = stateFile;
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.SEREN_CLI_UPDATER_STATE_PATH;
+    } else {
+      process.env.SEREN_CLI_UPDATER_STATE_PATH = originalEnv;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  // Fresh state per test — spreading baseInvocation otherwise leaks the
+  // mutated state object between tests (TTL gets seeded by run #1 and
+  // every subsequent run short-circuits on TTL).
+  function freshInvocation() {
+    return {
+      label: "Codex",
+      bareCommand: "codex",
+      resolvedPath: "/usr/local/bin/codex",
+      packageName: "@openai/codex",
+      state: {} as Record<string, unknown>,
+      now: Date.now(),
+    };
+  }
+
+  it("registry unreachable returns skipped:network distinct from up_to_date — operator can tell the registry is down", async () => {
+    const result = await backgroundUpdateCli({
+      ...freshInvocation(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "1.5.0",
+        runNpmView: async () => null, // network/timeout/registry error
+      },
+    });
+    expect(result).toMatchObject({
+      outcome: "skipped:network",
+      installed: "1.5.0",
+    });
+  });
+
+  it("malformed npm view response (non-semver string) does not crash — graceful skip", async () => {
+    const result = await backgroundUpdateCli({
+      ...freshInvocation(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "1.5.0",
+        runNpmView: async () => "not-a-version",
+      },
+    });
+    // isNewer returns false on non-semver strings, so we land in up_to_date.
+    // Crucially: no throw, no scan attempt, nothing installed.
+    expect(result.outcome).toBe("skipped:up_to_date");
+  });
+
+  it("missing CLI binary on disk does not trigger an install — no installed version means we cannot compare safely", async () => {
+    const result = await backgroundUpdateCli({
+      ...freshInvocation(),
+      resolvedPath: "/this/path/definitely/does/not/exist",
+      _versionOverrides: {
+        // Production runInstalledVersion returns null when the path is absent;
+        // the override mirrors that behavior explicitly.
+        runInstalledVersion: async () => null,
+        runNpmView: async () => "1.5.3",
+      },
+    });
+    // No install path was taken because we never resolved an installed
+    // version to diff against. up_to_date is the safe outcome here.
+    expect(result.outcome).toBe("skipped:up_to_date");
+  });
+
+  it("install_failed when the install subprocess throws — bookkeeping persisted, not silent", async () => {
+    const result = await backgroundUpdateCli({
+      ...freshInvocation(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "1.5.0",
+        runNpmView: async () => "1.5.3",
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/fake.tgz",
+        scanTarball: async () => ({
+          verdict: "pass",
+          flags: [],
+          candidate: {
+            version: "1.5.3",
+            tarballSha512: "abc",
+            installScripts: {},
+            declaredDependencies: [],
+            files: [],
+            fileHashes: {},
+          },
+        }),
+        runNpmInstallFromTarball: async () => {
+          throw new Error("network error");
+        },
+      },
+    });
+    expect(result).toMatchObject({
+      outcome: "skipped:install_failed",
+      from: "1.5.0",
+      to: "1.5.3",
+    });
+  });
+
+  it("scan_rejected with the actual flag list propagates — the user-facing log will say WHY", async () => {
+    const flags = ["new_install_script:postinstall", "new_dependency:plain-crypto-js"];
+    const result = await backgroundUpdateCli({
+      ...freshInvocation(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "1.5.3",
+        runNpmView: async () => "1.5.4",
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/fake.tgz",
+        scanTarball: async () => ({ verdict: "reject", flags, candidate: null }),
+        runNpmInstallFromTarball: async () => {
+          throw new Error("must NOT install when scan rejects");
+        },
+      },
+    });
+    expect(result).toMatchObject({
+      outcome: "skipped:scan_rejected",
+      from: "1.5.3",
+      to: "1.5.4",
+      flags,
+    });
+  });
+
+  it("scan_error fails closed when the scanner itself throws — never installs on scanner crash", async () => {
+    let installCalled = false;
+    const result = await backgroundUpdateCli({
+      ...freshInvocation(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "1.5.0",
+        runNpmView: async () => "1.5.3",
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/fake.tgz",
+        scanTarball: async () => {
+          throw new Error("scanner exploded");
+        },
+        runNpmInstallFromTarball: async () => {
+          installCalled = true;
+        },
+      },
+    });
+    expect(installCalled).toBe(false);
+    expect(result.outcome).toBe("skipped:scan_error");
+  });
+
+  it("first install (no_baseline) proceeds with the install but seeds the baseline — subsequent updates ARE scanned", async () => {
+    const candidate = {
+      version: "1.5.3",
+      tarballSha512: "abc",
+      installScripts: {},
+      declaredDependencies: ["foo"],
+      files: ["package.json"],
+      fileHashes: { "package.json": "h" },
+    };
+    let installCalled = false;
+    const result = await backgroundUpdateCli({
+      ...freshInvocation(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "1.5.0",
+        runNpmView: async () => "1.5.3",
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/fake.tgz",
+        scanTarball: async () => ({
+          verdict: "no_baseline",
+          flags: [],
+          candidate,
+        }),
+        runNpmInstallFromTarball: async () => {
+          installCalled = true;
+        },
+      },
+    });
+    expect(installCalled).toBe(true);
+    expect(result).toMatchObject({
+      outcome: "success",
+      firstInstall: true,
+      tarballSha512: "abc",
+    });
+  });
+
+  it("loadState returns {} on a missing file — first launch never throws", () => {
+    // No state file exists yet (beforeEach made an empty tempDir).
+    expect(loadState()).toEqual({});
+  });
+
+  it("saveState swallows write errors when the parent directory is read-only — we will retry next launch, not crash now", () => {
+    // Simulate a write failure by pointing the env var at a path whose
+    // parent is a regular file. mkdir -p will fail; saveState catches.
+    const blockedFile = path.join(tempDir, "blocker");
+    writeFileSync(blockedFile, "x", "utf8");
+    process.env.SEREN_CLI_UPDATER_STATE_PATH = path.join(blockedFile, "child.json");
+    // Should not throw.
+    expect(() => saveState({ a: 1 })).not.toThrow();
+  });
+});

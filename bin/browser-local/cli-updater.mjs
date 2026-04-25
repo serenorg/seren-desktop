@@ -368,13 +368,17 @@ export async function backgroundUpdateCli({
   onScanRejected,
   logger,
   // Test seams — production callers leave these undefined and the real
-  // scanner runs against npm.
+  // scanner + version commands run against npm/disk.
   _scannerOverrides,
+  _versionOverrides,
 }) {
   const packFn = _scannerOverrides?.npmPackToDirectory ?? npmPackToDirectory;
   const scanFn = _scannerOverrides?.scanTarball ?? scanTarball;
   const installFromTarballFn =
     _scannerOverrides?.runNpmInstallFromTarball ?? runNpmInstallFromTarball;
+  const installedVersionFn =
+    _versionOverrides?.runInstalledVersion ?? runInstalledVersion;
+  const npmViewFn = _versionOverrides?.runNpmView ?? runNpmView;
 
   // Compatibility: production runs may not pass `state` (callers were
   // written before the test seam). When state is omitted we manage
@@ -413,8 +417,8 @@ export async function backgroundUpdateCli({
     }
 
     const [installed, latest] = await Promise.all([
-      runInstalledVersion(resolvedPath, bareCommand),
-      runNpmView(packageName, { npmCliScript }),
+      installedVersionFn(resolvedPath, bareCommand),
+      npmViewFn(packageName, { npmCliScript }),
     ]);
 
     // Record the check timestamp even when we couldn't compare — offline
