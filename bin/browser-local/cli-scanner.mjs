@@ -39,13 +39,77 @@ const BASE64_LITERAL_RE = /["'`]([A-Za-z0-9+/=]{2730,}|[A-Za-z0-9+/=]{2048,}={0,
 const EVAL_INVOCATION_RE = /\beval\s*\(/g;
 const NEW_FUNCTION_RE = /\bnew\s+Function\s*\(/g;
 const DYNAMIC_REQUIRE_RE = /\brequire\s*\(\s*[^"'`)\s][^)]*\)/g;
-const HOSTNAME_RE = /(https?:\/\/|[a-z0-9.-]+\.[a-z]{2,})/gi;
+// URL-only host extractor. The previous bare-TLD form matched normal
+// filenames (`index.js`, `cli.cjs`, `foo.mjs`) because `js`/`mjs`/`cjs`
+// are 2+ letters — every ESM package permanently failed into
+// scan_rejected. Require an explicit http(s):// prefix so we only flag
+// outbound URLs. Bare domain references (rare in practice) are now a
+// false negative; that's the right side to err on.
+const URL_HOST_RE = /https?:\/\/([A-Za-z0-9.-]+\.[A-Za-z]{2,})/gi;
 
 export function computeSha512(absPath) {
   const hash = createHash("sha512");
   hash.update(readFileSync(absPath));
   return hash.digest("hex");
 }
+
+/**
+ * Locate the directory of a globally-installed npm package. Used to seed
+ * a baseline from the currently-installed bits BEFORE the first scanned
+ * update — without this, every existing user's first published-tarball
+ * update runs unscanned (the no_baseline path), which is the exact
+ * malicious-update window #1647 exists to close.
+ *
+ * Returns the absolute path on success or null when the package isn't
+ * installed or npm root -g cannot be reached.
+ */
+export async function findGlobalPackageDirectory({
+  packageName,
+  npmCliScript,
+}) {
+  let npmRoot;
+  try {
+    if (npmCliScript) {
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [npmCliScript, "root", "-g"],
+        { timeout: NPM_VIEW_TIMEOUT_MS },
+      );
+      npmRoot = stdout.trim();
+    } else {
+      const exec = process.platform === "win32" ? "npm.cmd" : "npm";
+      const { stdout } = await execFileAsync(exec, ["root", "-g"], {
+        timeout: NPM_VIEW_TIMEOUT_MS,
+      });
+      npmRoot = stdout.trim();
+    }
+  } catch {
+    return null;
+  }
+  if (!npmRoot) return null;
+  const candidate = path.join(npmRoot, packageName);
+  if (!existsSync(path.join(candidate, "package.json"))) {
+    return null;
+  }
+  return candidate;
+}
+
+/** Snapshot the currently-installed package as a baseline seed. Returns
+ *  null if the package can't be located on disk. */
+export async function buildBaselineFromInstalled({
+  packageName,
+  npmCliScript,
+}) {
+  const dir = await findGlobalPackageDirectory({ packageName, npmCliScript });
+  if (!dir) return null;
+  try {
+    return buildPackageSnapshot(dir);
+  } catch {
+    return null;
+  }
+}
+
+const NPM_VIEW_TIMEOUT_MS = 15_000;
 
 /**
  * Run `npm pack <pkg>@<version> --pack-destination=<dir>`. Returns the
@@ -333,20 +397,27 @@ export function runStaticChecks(
       flags.push(`high_entropy:${rel}:${entropy.toFixed(2)}`);
     }
 
-    // Hostname allowlist: if a non-allowlisted hostname appears in a file
-    // that's growing, flag it. Per-CLI allowlists are passed in.
+    // Hostname allowlist: only flag NEWLY introduced outbound hosts. We
+    // do this by skipping files whose content hash matches the baseline
+    // — anything in those files was already accepted on the prior install.
+    // Without this, a one-time false positive would lock the package into
+    // permanent scan_rejected state (we'd flag the same host every run).
     if (allowed.size > 0) {
-      const hostnames = new Set();
-      let m;
-      HOSTNAME_RE.lastIndex = 0;
-      while ((m = HOSTNAME_RE.exec(content)) !== null) {
-        const raw = m[0].toLowerCase();
-        const host = raw.replace(/^https?:\/\//, "").split("/")[0];
-        if (host.length > 0) hostnames.add(host);
-      }
-      for (const host of hostnames) {
-        if (!allowed.has(host) && !isHostAllowed(host, allowed)) {
-          flags.push(`unallowed_host:${rel}:${host}`);
+      const baselineHash = baseline?.fileHashes?.[rel];
+      const candidateHash = computeSha512(abs);
+      const fileChanged = !baselineHash || baselineHash !== candidateHash;
+      if (fileChanged) {
+        const hostnames = new Set();
+        let m;
+        URL_HOST_RE.lastIndex = 0;
+        while ((m = URL_HOST_RE.exec(content)) !== null) {
+          const host = m[1].toLowerCase();
+          if (host.length > 0) hostnames.add(host);
+        }
+        for (const host of hostnames) {
+          if (!isHostAllowed(host, allowed)) {
+            flags.push(`unallowed_host:${rel}:${host}`);
+          }
         }
       }
     }

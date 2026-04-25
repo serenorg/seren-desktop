@@ -15,7 +15,11 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { npmPackToDirectory, scanTarball } from "./cli-scanner.mjs";
+import {
+  buildBaselineFromInstalled,
+  npmPackToDirectory,
+  scanTarball,
+} from "./cli-scanner.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -375,6 +379,8 @@ export async function backgroundUpdateCli({
   const scanFn = _scannerOverrides?.scanTarball ?? scanTarball;
   const installFromTarballFn =
     _scannerOverrides?.runNpmInstallFromTarball ?? runNpmInstallFromTarball;
+  const buildBaselineFn =
+    _scannerOverrides?.buildBaselineFromInstalled ?? buildBaselineFromInstalled;
 
   // Compatibility: production runs may not pass `state` (callers were
   // written before the test seam). When state is omitted we manage
@@ -472,13 +478,43 @@ export async function backgroundUpdateCli({
         // Silent.
       }
       try {
+        // First-install baseline seeding (#1647 P0 from review). When no
+        // baseline exists in state but the package IS installed on disk,
+        // snapshot the on-disk install and use it as the baseline. Without
+        // this, the no_baseline path would let every existing user execute
+        // their first published-tarball update completely unscanned, then
+        // cement that potentially-malicious version as the trusted seed.
+        // If seeding fails (package dir not found, snapshot error), refuse
+        // to update — fail closed beats fail open for a security gate.
+        let baseline = persisted[`baseline:${packageName}`];
+        if (!baseline) {
+          const seeded = await buildBaselineFn({ packageName, npmCliScript });
+          if (seeded) {
+            baseline = seeded;
+            persisted[`baseline:${packageName}`] = seeded;
+            saveState(persisted);
+          } else {
+            // Cannot derive a baseline — the only safe thing to do is
+            // refuse this update. Subsequent launches will retry; if the
+            // user reinstalls or repairs the install, baseline seeding
+            // will succeed and updates resume.
+            try {
+              rmSync(stagingDir, { recursive: true, force: true });
+            } catch {
+              // Silent.
+            }
+            return report("skipped:scan_error", {
+              reason: "no_baseline_seed",
+            });
+          }
+        }
+
         const tarballPath = await packFn({
           packageName,
           version: latest,
           destinationDir: stagingDir,
           npmCliScript,
         });
-        const baseline = persisted[`baseline:${packageName}`];
         const scan = await scanFn({
           tarballPath,
           baseline,
@@ -535,10 +571,23 @@ export async function backgroundUpdateCli({
           });
         }
 
-        // verdict is "pass" or "no_baseline" — install. First install of a
-        // CLI is unguarded by design (no baseline to diff against); the
-        // candidate snapshot becomes the seed baseline so subsequent
-        // updates ARE scanned.
+        // Defense-in-depth: by here the seeding step above guaranteed a
+        // baseline so the scanner never returns no_baseline in production.
+        // If we somehow still see it (test override, race), refuse rather
+        // than fall through to install — fail closed.
+        if (scan.verdict === "no_baseline") {
+          try {
+            rmSync(stagingDir, { recursive: true, force: true });
+          } catch {
+            // Silent.
+          }
+          return report("skipped:scan_error", {
+            reason: "no_baseline_after_seed",
+          });
+        }
+
+        // verdict is "pass" — install. The candidate snapshot becomes the
+        // new baseline so subsequent updates diff against it.
         try {
           await installFromTarballFn(tarballPath, { npmCliScript });
         } catch {
@@ -582,7 +631,6 @@ export async function backgroundUpdateCli({
           to: latest,
           channel,
           tarballSha512: scan.candidate.tarballSha512,
-          firstInstall: scan.verdict === "no_baseline",
         });
       } catch {
         // Pack/scan failure — fail closed. Don't update.
