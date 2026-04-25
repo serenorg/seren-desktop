@@ -863,6 +863,7 @@ pub fn run() {
             commands::claude_memory::claude_memory_get_project_identity,
             commands::claude_memory::claude_memory_render_memory_md,
             commands::claude_memory::claude_memory_run_sql,
+            commands::claude_memory::claude_session_exists,
             // Runtime session commands
             commands::session::create_runtime_session,
             commands::session::get_runtime_session,

@@ -128,6 +128,16 @@ pub fn claude_projects_root() -> Result<PathBuf, String> {
     Ok(home.join(".claude").join("projects"))
 }
 
+/// Build the path Claude CLI uses for a session transcript:
+/// `<root>/<encoded(cwd)>/sessions/<session_id>.jsonl`.
+/// Pure path construction — caller decides whether to stat or read.
+pub fn session_jsonl_path(root: &Path, project_cwd: &Path, session_id: &str) -> PathBuf {
+    let encoded = encode_project_dir(project_cwd);
+    root.join(&encoded)
+        .join("sessions")
+        .join(format!("{session_id}.jsonl"))
+}
+
 /// Encode an absolute project directory the same way Claude Code does:
 /// `/Users/a/b` → `-Users-a-b`.
 pub fn encode_project_dir(cwd: &Path) -> String {
@@ -986,6 +996,40 @@ mod tests {
         assert_eq!(
             normalize_git_remote("https://user:token@GitHub.com/serenorg/seren-desktop/"),
             "github.com/serenorg/seren-desktop"
+        );
+    }
+
+    #[test]
+    fn session_jsonl_path_constructs_expected_layout_and_detects_presence() {
+        // Mirrors Claude CLI's on-disk layout:
+        //   <root>/<encoded(cwd)>/sessions/<session_id>.jsonl
+        // Test that (a) the path is constructed correctly and (b) is_file()
+        // returns true only when a real file exists at that path. Both legs
+        // are required for #1657 — frontend depends on the file-presence
+        // signal to decide whether to skip --resume.
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path();
+        let cwd = tmp.path().join("Projects").join("seren-desktop");
+        fs::create_dir_all(&cwd).expect("create fake cwd");
+        let session_id = "6b43ee5e-5699-486b-98c5-bbf42f703a19";
+
+        let path_before = session_jsonl_path(root, &cwd, session_id);
+        assert!(
+            !path_before.is_file(),
+            "missing session must NOT be reported as present (this is the stale-session case the fix addresses)",
+        );
+
+        // Materialize the file the way Claude CLI would. Path layout assertion:
+        // /<root>/<encoded>/sessions/<id>.jsonl
+        let session_dir = path_before
+            .parent()
+            .expect("session jsonl must have a parent dir");
+        assert!(session_dir.ends_with("sessions"), "second-to-last segment must be 'sessions'");
+        fs::create_dir_all(session_dir).expect("create sessions dir");
+        fs::write(&path_before, b"{\"stub\":true}\n").expect("write stub session");
+        assert!(
+            path_before.is_file(),
+            "present session file MUST be reported as present so --resume is allowed",
         );
     }
 

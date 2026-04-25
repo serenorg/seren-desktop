@@ -165,6 +165,7 @@ import {
   setAgentConversationTitle as setAgentConversationTitleDb,
 } from "@/lib/tauri-bridge";
 import { refreshAccessToken } from "@/services/auth";
+import { claudeSessionExists } from "@/services/claudeMemory";
 import {
   bootstrapMemoryContext,
   storeAssistantResponse,
@@ -2368,9 +2369,38 @@ export const agentStore = {
       return null;
     }
 
+    // Pre-flight: skip --resume entirely when Claude CLI's session JSONL is
+    // missing. The CLI cleans up old session files, app reinstalls drop the
+    // ~/.claude dir, and cross-machine sync doesn't carry CLI session files —
+    // so a stored remoteSessionId can routinely point at nothing. Without this
+    // check, the spawn fails with `code=1: No conversation found with session
+    // ID: <id>` and surfaces a "Claude Code request failed" error event before
+    // the resume-fallback path takes over (#1657). Best-effort: if the IPC
+    // check itself fails, fall through to the existing spawn-and-recover path
+    // so we never regress.
+    let effectiveResumeId: string | undefined = remoteSessionId;
+    if (agentType === "claude-code") {
+      try {
+        const exists = await claudeSessionExists(resumeCwd, remoteSessionId);
+        if (!exists) {
+          console.info(
+            "[AgentStore] Claude session file missing for",
+            remoteSessionId,
+            "— skipping --resume, spawning fresh",
+          );
+          effectiveResumeId = undefined;
+        }
+      } catch (err) {
+        console.warn(
+          "[AgentStore] claudeSessionExists check failed; spawning with --resume:",
+          err,
+        );
+      }
+    }
+
     const sessionId = await this.spawnSession(resumeCwd, agentType, {
       localSessionId: conversationId,
-      resumeAgentSessionId: remoteSessionId,
+      resumeAgentSessionId: effectiveResumeId,
       conversationTitle: convo.title,
       restoredMessages,
       bootstrapPromptContext: pendingBootstrapPromptContext,

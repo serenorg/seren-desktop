@@ -152,6 +152,22 @@ pub async fn claude_memory_migrate_existing(
 }
 
 /// Resolve a stable project identifier for `project_cwd` (git remote or UUID).
+/// Check whether Claude CLI's session JSONL file exists on disk for the given
+/// project cwd + session id. Used by the frontend to skip `--resume` when the
+/// stored session ID points at a missing file (CLI cleaned up its sessions
+/// dir, app reinstall, cross-machine sync). Without this pre-flight, the
+/// resume attempt fails with `code=1: No conversation found with session ID:
+/// <id>` and surfaces a "Claude Code request failed" error event before the
+/// recovery fallback kicks in (#1657).
+#[tauri::command]
+pub fn claude_session_exists(
+    project_cwd: String,
+    session_id: String,
+) -> Result<bool, String> {
+    let root = claude_memory::claude_projects_root()?;
+    Ok(claude_memory::session_jsonl_path(&root, Path::new(&project_cwd), &session_id).is_file())
+}
+
 #[tauri::command]
 pub fn claude_memory_get_project_identity(
     project_cwd: String,
