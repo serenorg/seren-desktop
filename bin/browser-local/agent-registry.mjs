@@ -563,6 +563,19 @@ export function createBrowserLocalAgentRegistry({ emit }) {
   const onUpdated = ({ label, from, to }) => {
     emit?.("provider://cli-updated", { label, from, to });
   };
+  // Default-on UI surface for scan rejections per #1646. The TS layer
+  // subscribes and shows a system notification + records the rejection
+  // in agent.store for the diagnostics panel. Silent rejection is worse
+  // UX than no scanner at all.
+  const onScanRejected = ({ label, packageName, from, to, flags }) => {
+    emit?.("provider://cli-scan-rejected", {
+      label,
+      packageName,
+      from,
+      to,
+      flags,
+    });
+  };
   void backgroundUpdateCli({
     label: "Codex",
     bareCommand: "codex",
@@ -570,6 +583,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
     packageName: "@openai/codex",
     npmCliScript,
     onUpdated,
+    onScanRejected,
   });
   void backgroundUpdateCli({
     label: "Claude Code",
@@ -578,6 +592,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
     packageName: "@anthropic-ai/claude-code",
     npmCliScript,
     onUpdated,
+    onScanRejected,
   });
 
   return {
