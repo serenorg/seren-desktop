@@ -19,7 +19,7 @@ import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
 import { DepositModal } from "@/components/wallet/DepositModal";
-import { isAuthError } from "@/lib/auth-errors";
+import { isAuthError, isContextOverflowError } from "@/lib/auth-errors";
 import {
   getCompletions,
   matchSkillCommand,
@@ -701,12 +701,11 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       }
     }
 
-    // If using Seren provider and not authenticated, prompt sign-in
-    if (
-      (providerStore.activeProvider === "seren" ||
-        providerStore.activeProvider === "seren-private") &&
-      !authStore.isAuthenticated
-    ) {
+    // If not authenticated, prompt sign-in — every provider eventually depends
+    // on Seren auth for auto-compaction (#1641), so scoping this to Seren
+    // providers hid the real failure as a "Prompt is too long" dead-end on
+    // Claude Code and other agents (#1652).
+    if (!authStore.isAuthenticated) {
       if (!opts?.skipAuthGate) {
         setShowSignInPrompt(true);
       }
@@ -773,11 +772,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // this, a session-expired state can still start an orchestrator turn
     // with no access token and no publishers, producing silent "no file
     // found" failures while the user believes the turn is running normally.
-    if (
-      (providerStore.activeProvider === "seren" ||
-        providerStore.activeProvider === "seren-private") &&
-      !authStore.isAuthenticated
-    ) {
+    // Not provider-scoped: compaction depends on Seren auth regardless of
+    // which provider is active (#1652).
+    if (!authStore.isAuthenticated) {
       setShowSignInPrompt(true);
       return;
     }
@@ -1273,7 +1270,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                         >
                           <div class="mt-2 px-2 py-1.5 bg-destructive/10 border border-destructive/40 rounded flex items-center gap-2 text-xs text-destructive">
                             <Show
-                              when={!isAuthError(message.error)}
+                              when={
+                                !isAuthError(message.error) &&
+                                !(
+                                  isContextOverflowError(message.error) &&
+                                  !authStore.isAuthenticated
+                                )
+                              }
                               fallback={
                                 <>
                                   <span>
