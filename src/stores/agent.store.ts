@@ -142,7 +142,6 @@ async function waitForSessionIdle(
 }
 
 import { isLikelyAuthError } from "@/lib/auth-errors";
-import { authStore, promptLogin } from "@/stores/auth.store";
 import { buildChatRequest, sendProviderMessage } from "@/lib/providers";
 import {
   isPromptTooLongError,
@@ -186,6 +185,7 @@ import type {
   ToolCallEvent,
 } from "@/services/providers";
 import * as providerService from "@/services/providers";
+import { authStore, promptLogin } from "@/stores/auth.store";
 
 /** Set once we've subscribed to `provider-runtime://ready` so repeated
  *  initialize() calls don't stack listeners. */
@@ -194,6 +194,10 @@ let providerRuntimeReadyListener: Promise<UnlistenFn> | null = null;
 /** Set once we've subscribed to `provider-runtime://restarted` so repeated
  *  initialize() calls don't stack listeners. #1631. */
 let providerRuntimeRestartedListener: Promise<UnlistenFn> | null = null;
+
+/** Set once we've subscribed to `provider://cli-scan-rejected` so repeated
+ *  initialize() calls don't stack listeners. #1646. */
+let cliScanRejectedUnsub: (() => void) | null = null;
 
 /** Commit an agent list into the store + settle the selected-agent fallback.
  *  Shared by `initialize()` and the `provider-runtime://ready` listener so
@@ -304,6 +308,67 @@ function subscribeToProviderRuntimeRestarted(): void {
             );
           }
         })();
+      }
+    },
+  );
+}
+
+/**
+ * Subscribe once to provider://cli-scan-rejected so the CLI auto-updater's
+ * security gate (#1647) is never silent. The user stays on their previous
+ * known-good version; we record the rejection in store state for any
+ * diagnostics panel and fire a system notification per #1646.
+ *
+ * The subscription is idempotent — subscribeToCliScanRejections is safe to
+ * call from initialize() across repeated runtime restarts.
+ */
+function subscribeToCliScanRejections(): void {
+  if (cliScanRejectedUnsub) return;
+  cliScanRejectedUnsub = onRuntimeEvent(
+    "provider://cli-scan-rejected",
+    (payload) => {
+      const event = payload as {
+        label?: string;
+        packageName?: string;
+        from?: string | null;
+        to?: string;
+        flags?: string[];
+      };
+      if (!event.packageName || !event.to) return;
+      const rejection = {
+        label: event.label ?? event.packageName,
+        packageName: event.packageName,
+        from: event.from ?? null,
+        to: event.to,
+        flags: Array.isArray(event.flags) ? event.flags : [],
+        at: Date.now(),
+      };
+      setState("cliScanRejection", rejection);
+      // Default-on local log line so the rejection lands in the user-
+      // facing app log file even if the UI surface gets dismissed.
+      console.warn(
+        `[cli-updater] scan rejected for ${rejection.packageName} v${rejection.to}; flags=${rejection.flags.join(",")}`,
+      );
+      // System notification — minimum surface required by #1646. Falls
+      // back silently when the platform denies permission.
+      try {
+        if (typeof Notification !== "undefined") {
+          if (Notification.permission === "granted") {
+            new Notification("Seren blocked a CLI update", {
+              body: `${rejection.label} ${rejection.to} was rejected by the local supply-chain scanner. You stay on your previous version.`,
+            });
+          } else if (Notification.permission !== "denied") {
+            void Notification.requestPermission().then((perm) => {
+              if (perm === "granted") {
+                new Notification("Seren blocked a CLI update", {
+                  body: `${rejection.label} ${rejection.to} was rejected by the local supply-chain scanner. You stay on your previous version.`,
+                });
+              }
+            });
+          }
+        }
+      } catch {
+        // Silent — best-effort surface, never fail the subscriber.
       }
     },
   );
@@ -700,6 +765,20 @@ interface AgentState {
   error: string | null;
   /** CLI install progress message */
   installStatus: string | null;
+  /**
+   * Most recent CLI auto-updater scan rejection (#1646). Null when no
+   * rejection has been recorded this session. Set by
+   * subscribeToCliScanRejections from a provider runtime event; the user
+   * stays on their previous known-good version until cleared.
+   */
+  cliScanRejection: {
+    label: string;
+    packageName: string;
+    from: string | null;
+    to: string;
+    flags: string[];
+    at: number;
+  } | null;
   /** Pending permission requests awaiting user response */
   pendingPermissions: PermissionRequestEvent[];
   /** Pending diff proposals awaiting user accept/reject */
@@ -722,6 +801,7 @@ const [state, setState] = createStore<AgentState>({
   isLoading: false,
   error: null,
   installStatus: null,
+  cliScanRejection: null,
   pendingPermissions: [],
   pendingDiffProposals: [],
   agentModeEnabled: false,
@@ -1298,6 +1378,11 @@ export const agentStore = {
     // to applyAgents just overwrite availableAgents with the same data.
     subscribeToProviderRuntimeReady();
     subscribeToProviderRuntimeRestarted();
+    // Surface CLI-updater scan rejections per #1646. Default-on, runs once
+    // at app init, idempotent (the runtime emits the event at most once
+    // per launch per CLI). System notification + state record so the user
+    // can review what was rejected and why.
+    subscribeToCliScanRejections();
 
     const backoffMs = [0, 1_000, 2_000, 4_000, 8_000];
     for (let attempt = 0; attempt < backoffMs.length; attempt++) {

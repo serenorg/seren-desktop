@@ -301,9 +301,60 @@ async function tryCliSelfUpdate(resolvedPath) {
 }
 
 /**
+ * Format a single structured log line for an outcome. Default-on logging
+ * per #1646 — every updater run produces exactly one of these, no flag,
+ * no env var, no opt-in. Visible in the app log users include in support
+ * bundles. Never print package contents or PII; only enum + version
+ * transition + flag list (where applicable).
+ */
+function formatOutcomeLog({ packageName, outcome, details = {} }) {
+  const parts = [
+    `cli=${packageName}`,
+    `outcome=${outcome}`,
+  ];
+  for (const key of ["from", "to", "tarballSha512", "version"]) {
+    if (details[key] != null && details[key] !== "") {
+      parts.push(`${key}=${details[key]}`);
+    }
+  }
+  if (Array.isArray(details.flags) && details.flags.length > 0) {
+    parts.push(`flags=${details.flags.join(",")}`);
+  }
+  return `[cli-updater] ${parts.join(" ")}`;
+}
+
+function emitOutcomeLog({ packageName, outcome, details, logger }) {
+  const line = formatOutcomeLog({ packageName, outcome, details });
+  // scan_rejected and scan_error are security/operational signals — warn
+  // level so they stand out in the user-facing log. install_failed and
+  // network are also worth attention. Other outcomes are info.
+  const level =
+    outcome === "skipped:scan_rejected" ||
+    outcome === "skipped:scan_error" ||
+    outcome === "skipped:install_failed"
+      ? "warn"
+      : "info";
+  if (logger?.[level]) {
+    logger[level](line);
+    return;
+  }
+  // Fallback: plain console. Tauri's plugin-log webview target forwards
+  // these to the same log file users share when filing bugs.
+  if (level === "warn") {
+    console.warn(line);
+  } else {
+    console.info(line);
+  }
+}
+
+/**
  * Fire-and-forget update check for a single CLI. TTL-gated; same-channel
  * only; silent on failure. Called once per app launch — two launches within
  * 24h make zero additional npm calls for this CLI.
+ *
+ * Returns a normalized outcome object: `{ outcome, packageName, ...details }`.
+ * Every invocation emits exactly one log line + (for success or scan_rejected)
+ * exactly one provider event. See #1646.
  */
 export async function backgroundUpdateCli({
   label,
@@ -314,6 +365,8 @@ export async function backgroundUpdateCli({
   now = Date.now(),
   state,
   onUpdated,
+  onScanRejected,
+  logger,
   // Test seams — production callers leave these undefined and the real
   // scanner runs against npm.
   _scannerOverrides,
@@ -322,19 +375,41 @@ export async function backgroundUpdateCli({
   const scanFn = _scannerOverrides?.scanTarball ?? scanTarball;
   const installFromTarballFn =
     _scannerOverrides?.runNpmInstallFromTarball ?? runNpmInstallFromTarball;
+
+  // Compatibility: production runs may not pass `state` (callers were
+  // written before the test seam). When state is omitted we manage
+  // persistence ourselves via load/save inside this function.
+  const ownsPersistence = state === undefined;
+
+  function report(outcome, details = {}) {
+    emitOutcomeLog({ packageName, outcome, details, logger });
+    return {
+      outcome,
+      packageName,
+      bareCommand,
+      label,
+      ...details,
+      // Backwards-compat field shapes — pre-#1646 callers and tests check
+      // `skipped`, `updated`, `from`, `to`, etc. Keep those alongside the
+      // new `outcome` until callers migrate.
+      ...(outcome === "success"
+        ? { updated: true }
+        : { skipped: outcome.replace(/^skipped:/, "") }),
+    };
+  }
   try {
     const persisted = state ?? loadState();
     const key = `lastUpdateCheck:${bareCommand}`;
     const lastCheck = persisted[key];
     if (typeof lastCheck === "number" && now - lastCheck < UPDATE_CHECK_TTL_MS) {
-      return { skipped: "ttl" };
+      return report("skipped:ttl");
     }
 
     const channel = classifyInstallChannel(resolvedPath, bareCommand);
     if (channel === "unresolved") {
       // Don't write state — we want to re-check next launch in case the
       // install completes between now and then.
-      return { skipped: "unresolved" };
+      return report("skipped:unresolved");
     }
 
     const [installed, latest] = await Promise.all([
@@ -345,6 +420,14 @@ export async function backgroundUpdateCli({
     // Record the check timestamp even when we couldn't compare — offline
     // and rate-limited cases should not retry every launch.
     persisted[key] = now;
+
+    // Network outcome: we have a working installed binary but registry
+    // lookup failed. Distinct from up_to_date so #1646 callers can tell
+    // "registry unreachable" apart from "no update needed."
+    if (!latest) {
+      if (ownsPersistence) saveState(persisted);
+      return report("skipped:network", { installed });
+    }
 
     if (installed && latest && isNewer(installed, latest)) {
       // Native installs are gated by the upstream's signed installer + their
@@ -364,10 +447,14 @@ export async function backgroundUpdateCli({
             to: latest,
             channel,
           });
-          return { updated: true, from: installed, to: latest, channel };
+          return report("success", { from: installed, to: latest, channel });
         } catch {
           saveState(persisted);
-          return { skipped: "install_failed" };
+          return report("skipped:install_failed", {
+            from: installed,
+            to: latest,
+            channel,
+          });
         }
       }
 
@@ -430,12 +517,22 @@ export async function backgroundUpdateCli({
           } catch {
             // Silent.
           }
-          return {
-            skipped: "scan_rejected",
+          // UI surfacing: notify the registry / TS layer so a banner or
+          // notification can fire. Default-on per #1646 — silent scan
+          // rejections are worse UX than no scanner at all.
+          onScanRejected?.({
+            label,
+            bareCommand,
+            packageName,
             from: installed,
             to: latest,
             flags: scan.flags,
-          };
+          });
+          return report("skipped:scan_rejected", {
+            from: installed,
+            to: latest,
+            flags: scan.flags,
+          });
         }
 
         // verdict is "pass" or "no_baseline" — install. First install of a
@@ -451,7 +548,11 @@ export async function backgroundUpdateCli({
           } catch {
             // Silent.
           }
-          return { skipped: "install_failed" };
+          return report("skipped:install_failed", {
+            from: installed,
+            to: latest,
+            channel,
+          });
         }
 
         persisted[`baseline:${packageName}`] = {
@@ -476,14 +577,13 @@ export async function backgroundUpdateCli({
         } catch {
           // Silent.
         }
-        return {
-          updated: true,
+        return report("success", {
           from: installed,
           to: latest,
           channel,
           tarballSha512: scan.candidate.tarballSha512,
           firstInstall: scan.verdict === "no_baseline",
-        };
+        });
       } catch {
         // Pack/scan failure — fail closed. Don't update.
         saveState(persisted);
@@ -492,15 +592,17 @@ export async function backgroundUpdateCli({
         } catch {
           // Silent.
         }
-        return { skipped: "scan_error" };
+        return report("skipped:scan_error", { from: installed, to: latest });
       }
     }
 
     saveState(persisted);
-    return { skipped: "up_to_date", installed, latest };
+    return report("skipped:up_to_date", { installed, latest });
   } catch {
     // Outermost catch-all — never allow the updater to throw into the
     // registry init path.
-    return { skipped: "error" };
+    return report("skipped:error");
   }
 }
+
+export { formatOutcomeLog as _formatOutcomeLog };
