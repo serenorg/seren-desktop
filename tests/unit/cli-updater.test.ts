@@ -23,6 +23,7 @@ const {
   backgroundUpdateCli,
   loadState,
   saveState,
+  _formatOutcomeLog,
 } = await import(/* @vite-ignore */ modulePath);
 
 describe("isNewer", () => {
@@ -89,7 +90,7 @@ describe("backgroundUpdateCli TTL gate", () => {
       state,
       now: Date.now(),
     });
-    expect(result).toEqual({ skipped: "ttl" });
+    expect(result).toMatchObject({ outcome: "skipped:ttl", skipped: "ttl" });
   });
 
   it("proceeds past TTL when last check is older than 24h", async () => {
@@ -120,7 +121,50 @@ describe("backgroundUpdateCli TTL gate", () => {
       state: {},
       now: Date.now(),
     });
-    expect(result).toEqual({ skipped: "unresolved" });
+    expect(result).toMatchObject({
+      outcome: "skipped:unresolved",
+      skipped: "unresolved",
+    });
+  });
+});
+
+describe("outcome logging (#1646)", () => {
+  it("formats one structured line per outcome with cli + outcome + transition + flags", () => {
+    expect(
+      _formatOutcomeLog({
+        packageName: "@anthropic-ai/claude-code",
+        outcome: "success",
+        details: { from: "1.5.2", to: "1.5.3", tarballSha512: "abc" },
+      }),
+    ).toBe(
+      "[cli-updater] cli=@anthropic-ai/claude-code outcome=success from=1.5.2 to=1.5.3 tarballSha512=abc",
+    );
+  });
+
+  it("includes the flag list on scan_rejected so the user-facing log says WHY", () => {
+    const line = _formatOutcomeLog({
+      packageName: "@anthropic-ai/claude-code",
+      outcome: "skipped:scan_rejected",
+      details: {
+        version: "1.5.4",
+        flags: ["new_install_script:postinstall", "new_dependency:plain-crypto-js"],
+      },
+    });
+    expect(line).toContain("outcome=skipped:scan_rejected");
+    expect(line).toContain("version=1.5.4");
+    expect(line).toContain(
+      "flags=new_install_script:postinstall,new_dependency:plain-crypto-js",
+    );
+  });
+
+  it("emits a single line for the cheapest outcomes — no version, no flags, just the enum", () => {
+    expect(
+      _formatOutcomeLog({
+        packageName: "@openai/codex",
+        outcome: "skipped:ttl",
+        details: {},
+      }),
+    ).toBe("[cli-updater] cli=@openai/codex outcome=skipped:ttl");
   });
 });
 
