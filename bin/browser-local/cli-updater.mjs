@@ -7,12 +7,15 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+
+import { npmPackToDirectory, scanTarball } from "./cli-scanner.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -205,6 +208,53 @@ async function runNpmInstallLatest(packageName, { npmCliScript } = {}) {
 }
 
 /**
+ * Install from an already-downloaded local tarball. Used after the scanner
+ * passes — we install the exact bytes we scanned, not whatever the registry
+ * serves at install time. Eliminates the post-scan/pre-install TOCTOU window.
+ */
+async function runNpmInstallFromTarball(tarballPath, { npmCliScript } = {}) {
+  if (npmCliScript) {
+    await execFileAsync(
+      process.execPath,
+      [npmCliScript, "install", "-g", tarballPath],
+      { timeout: NPM_INSTALL_TIMEOUT_MS },
+    );
+    return;
+  }
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  await execFileAsync(
+    npmCommand,
+    ["install", "-g", tarballPath],
+    { timeout: NPM_INSTALL_TIMEOUT_MS },
+  );
+}
+
+/**
+ * Per-CLI hostname allowlists for the static-check scanner. Strings the
+ * upstream's published code is expected to contain; anything outside this
+ * set in a flagged file gets a `unallowed_host` flag (#1647).
+ *
+ * Use parent domains — suffix matching in the scanner accepts subdomains.
+ */
+const HOSTNAME_ALLOWLIST = {
+  "@anthropic-ai/claude-code": [
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "github.com",
+    "githubusercontent.com",
+    "googleapis.com",
+    "amazonaws.com",
+  ],
+  "@openai/codex": [
+    "openai.com",
+    "oaistatic.com",
+    "github.com",
+    "githubusercontent.com",
+  ],
+};
+
+/**
  * Run the Claude Code native installer script. Matches the original install
  * path in agent-registry.mjs so we stay on the same channel rather than
  * silently writing a parallel npm install.
@@ -264,7 +314,14 @@ export async function backgroundUpdateCli({
   now = Date.now(),
   state,
   onUpdated,
+  // Test seams — production callers leave these undefined and the real
+  // scanner runs against npm.
+  _scannerOverrides,
 }) {
+  const packFn = _scannerOverrides?.npmPackToDirectory ?? npmPackToDirectory;
+  const scanFn = _scannerOverrides?.scanTarball ?? scanTarball;
+  const installFromTarballFn =
+    _scannerOverrides?.runNpmInstallFromTarball ?? runNpmInstallFromTarball;
   try {
     const persisted = state ?? loadState();
     const key = `lastUpdateCheck:${bareCommand}`;
@@ -290,23 +347,152 @@ export async function backgroundUpdateCli({
     persisted[key] = now;
 
     if (installed && latest && isNewer(installed, latest)) {
-      try {
-        if (channel === "native") {
+      // Native installs are gated by the upstream's signed installer + their
+      // own self-update mechanism; we don't have a tarball to scan. Keep
+      // existing flow. npm channel updates are scanned per #1647.
+      if (channel === "native") {
+        try {
           const selfOk = await tryCliSelfUpdate(resolvedPath);
           if (!selfOk) {
             await runClaudeNativeInstaller();
           }
-        } else {
-          await runNpmInstallLatest(packageName, { npmCliScript });
+          saveState(persisted);
+          onUpdated?.({
+            label,
+            bareCommand,
+            from: installed,
+            to: latest,
+            channel,
+          });
+          return { updated: true, from: installed, to: latest, channel };
+        } catch {
+          saveState(persisted);
+          return { skipped: "install_failed" };
         }
-        saveState(persisted);
-        onUpdated?.({ label, bareCommand, from: installed, to: latest, channel });
-        return { updated: true, from: installed, to: latest, channel };
+      }
+
+      // npm channel: pack-extract-scan-install-baseline.
+      const stagingDir = path.join(
+        serenDataDir(),
+        "scan-staging",
+        bareCommand,
+        latest,
+      );
+      // Best-effort cleanup of any leftover staging from a prior crashed run.
+      try {
+        rmSync(stagingDir, { recursive: true, force: true });
       } catch {
-        // Install failed — persist the check timestamp so we back off for
-        // 24h rather than spamming the registry every launch.
+        // Silent.
+      }
+      try {
+        const tarballPath = await packFn({
+          packageName,
+          version: latest,
+          destinationDir: stagingDir,
+          npmCliScript,
+        });
+        const baseline = persisted[`baseline:${packageName}`];
+        const scan = await scanFn({
+          tarballPath,
+          baseline,
+          workDir: path.join(stagingDir, "extracted"),
+          hostnameAllowlist: HOSTNAME_ALLOWLIST[packageName] ?? [],
+        });
+
+        if (scan.verdict === "reject") {
+          // Quarantine: leave the rejected tarball + flag list on disk under
+          // ~/.seren/scan-rejected/<cli>/<version>/ for later inspection.
+          const quarantine = path.join(
+            serenDataDir(),
+            "scan-rejected",
+            bareCommand,
+            latest,
+          );
+          try {
+            mkdirSync(quarantine, { recursive: true });
+            writeFileSync(
+              path.join(quarantine, "flags.json"),
+              JSON.stringify({ flags: scan.flags, version: latest }, null, 2),
+              "utf8",
+            );
+          } catch {
+            // Best-effort — never fail the update path on quarantine I/O.
+          }
+          persisted[`lastScanReject:${packageName}`] = {
+            version: latest,
+            flags: scan.flags,
+            at: now,
+          };
+          saveState(persisted);
+          // Cleanup staging now that we've recorded the rejection.
+          try {
+            rmSync(stagingDir, { recursive: true, force: true });
+          } catch {
+            // Silent.
+          }
+          return {
+            skipped: "scan_rejected",
+            from: installed,
+            to: latest,
+            flags: scan.flags,
+          };
+        }
+
+        // verdict is "pass" or "no_baseline" — install. First install of a
+        // CLI is unguarded by design (no baseline to diff against); the
+        // candidate snapshot becomes the seed baseline so subsequent
+        // updates ARE scanned.
+        try {
+          await installFromTarballFn(tarballPath, { npmCliScript });
+        } catch {
+          saveState(persisted);
+          try {
+            rmSync(stagingDir, { recursive: true, force: true });
+          } catch {
+            // Silent.
+          }
+          return { skipped: "install_failed" };
+        }
+
+        persisted[`baseline:${packageName}`] = {
+          version: latest,
+          tarballSha512: scan.candidate.tarballSha512,
+          installScripts: scan.candidate.installScripts,
+          declaredDependencies: scan.candidate.declaredDependencies,
+          files: scan.candidate.files,
+          fileHashes: scan.candidate.fileHashes,
+        };
         saveState(persisted);
-        return { skipped: "install_failed" };
+        onUpdated?.({
+          label,
+          bareCommand,
+          from: installed,
+          to: latest,
+          channel,
+          tarballSha512: scan.candidate.tarballSha512,
+        });
+        try {
+          rmSync(stagingDir, { recursive: true, force: true });
+        } catch {
+          // Silent.
+        }
+        return {
+          updated: true,
+          from: installed,
+          to: latest,
+          channel,
+          tarballSha512: scan.candidate.tarballSha512,
+          firstInstall: scan.verdict === "no_baseline",
+        };
+      } catch {
+        // Pack/scan failure — fail closed. Don't update.
+        saveState(persisted);
+        try {
+          rmSync(stagingDir, { recursive: true, force: true });
+        } catch {
+          // Silent.
+        }
+        return { skipped: "scan_error" };
       }
     }
 
