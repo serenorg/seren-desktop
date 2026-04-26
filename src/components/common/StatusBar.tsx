@@ -2,7 +2,7 @@
 // ABOUTME: Displays status messages, MCP state, autocomplete status, and connection state.
 
 import { type Component, createMemo } from "solid-js";
-import { agentStore } from "@/stores/agent.store";
+import { agentDisplayName, agentStore } from "@/stores/agent.store";
 import { autocompleteStore } from "@/stores/autocomplete.store";
 import { AutocompleteStatus } from "./AutocompleteStatus";
 import { McpStatusIndicator } from "./McpStatusIndicator";
@@ -24,7 +24,11 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
           ),
       )
       .at(-1);
-    return running ? `Codex: ${running.content}` : "Working...";
+    if (!running) return "Working...";
+    // Use the active agent's display name — pre-#1669 this was hardcoded
+    // "Codex:" regardless of agent, which surfaced as "Codex: <bash command>"
+    // in Claude Code and Gemini threads too.
+    return `${agentDisplayName(session.info.agentType)}: ${running.content}`;
   });
 
   return (

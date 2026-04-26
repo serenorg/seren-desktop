@@ -527,7 +527,7 @@ export interface ActiveSession {
 
 const FORK_BOOTSTRAP_MAX_MSG_CHARS = 2_000;
 
-function agentDisplayName(agentType?: string): string {
+export function agentDisplayName(agentType?: string): string {
   switch (agentType) {
     case "codex":
       return "Codex";
