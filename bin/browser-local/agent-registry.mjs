@@ -298,13 +298,32 @@ async function ensureClaudeCodeViaNativeInstaller(emit) {
  * can trigger ensureCli() to install via the embedded runtime's npm.
  */
 function resolveInstalledGeminiBinary() {
+  // IMPORTANT: Gemini intentionally does NOT include /usr/local/bin,
+  // /opt/homebrew/bin, /usr/bin (Unix), or C:\Program Files\nodejs\
+  // (Windows MSI) in its candidate list — even though Codex and Claude
+  // do post-#1665. The Homebrew gemini-cli formula (and other system
+  // installs that don't run npm scripts) skip the keytar postinstall, so
+  // a system-installed gemini binary cannot read its own keychain when
+  // spawned from a GUI app and fails first-run auth with a misleading
+  // "GEMINI_API_KEY environment variable" message (#1476).
+  //
+  // Mirroring the deliberate exclusion in `resolveGeminiBinary` at
+  // bin/browser-local/gemini-runtime.mjs:30. If install-detection here
+  // discovered a system Gemini, ensureCli() would return "available" and
+  // skip the bundled-runtime install where keytar IS run correctly. The
+  // spawn path (which intentionally still excludes the same locations)
+  // would then fall through to bare "gemini", PATH would resolve the
+  // broken system install, and auth would silently fail. Keep the
+  // bundled+user-local-only restriction here too.
+  //
+  // The auto-updater (#1637) returning skipped:unresolved for Gemini in
+  // this configuration is the intended outcome — we do not want to
+  // auto-update a binary we can't safely spawn. See #1665 PR for the
+  // full audit.
   if (process.platform === "win32") {
     const home = os.homedir();
     const appData = process.env.APPDATA ?? "";
     const nodeDir = path.dirname(process.execPath);
-    const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
-    const programFilesX86 =
-      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
     const candidates = [
       // npm global install via embedded runtime's npm (prefix = node dir on Windows)
       path.join(nodeDir, "gemini.cmd"),
@@ -313,11 +332,6 @@ function resolveInstalledGeminiBinary() {
       ...(appData ? [path.join(appData, "npm", "gemini.cmd")] : []),
       // Generic install fallbacks
       path.join(home, ".local", "bin", "gemini.exe"),
-      // System-wide Node MSI install (default before npm prefix moved to APPDATA). #1665
-      path.join(programFiles, "nodejs", "gemini.cmd"),
-      path.join(programFilesX86, "nodejs", "gemini.cmd"),
-      // Explicit user prefix (`.npmrc` prefix=$HOME/.npm-global). #1665
-      path.join(home, ".npm-global", "gemini.cmd"),
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
@@ -334,12 +348,6 @@ function resolveInstalledGeminiBinary() {
       path.join(prefix, "bin", "gemini"),
       // Generic user-local install fallbacks
       path.join(home, ".local", "bin", "gemini"),
-      // System npm prefix /usr/local (default on Intel macOS + most Linux distros). #1665
-      "/usr/local/bin/gemini",
-      // Homebrew on Apple Silicon. #1665
-      "/opt/homebrew/bin/gemini",
-      // Distro package managers (apt, dnf). Rare for npm globals; last. #1665
-      "/usr/bin/gemini",
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
