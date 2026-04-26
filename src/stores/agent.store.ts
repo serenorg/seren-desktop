@@ -690,15 +690,6 @@ async function loadPersistedAgentHistory(
   }
 }
 
-function clearLegacyAgentTranscript(conversationId: string): void {
-  clearConversationHistory(conversationId).catch((error) =>
-    console.warn(
-      "[AgentStore] Failed to clear legacy provider transcript:",
-      error,
-    ),
-  );
-}
-
 // ============================================================================
 // State
 // ============================================================================
@@ -2449,9 +2440,12 @@ export const agentStore = {
     }
 
     if (sessionId) {
-      if (!pendingBootstrapPromptContext) {
-        clearLegacyAgentTranscript(conversationId);
-      }
+      // NOTE (#1663): pre-fix code called clearLegacyAgentTranscript here on
+      // every successful resume without a bootstrap context. That deleted
+      // every row in the messages table for this conversation_id, wiping
+      // the persisted user/assistant history that loadPersistedAgentHistory
+      // had just loaded. Removed: persistAgentMessage is the source of
+      // truth for thread history; nothing in the resume path should clear it.
       clearSpawnFailures(conversationId);
       void this.refreshRecentAgentConversations(200).catch(() => {});
     } else {
@@ -2571,11 +2565,16 @@ export const agentStore = {
   },
 
   clearBootstrapPromptContext(sessionId: string) {
+    // NOTE (#1663): pre-fix code also called clearLegacyAgentTranscript on
+    // the conversationId here, which fired after every successful sendPrompt
+    // and wiped the messages table for the conversation. The clear was a
+    // vestige of the pre-#1562 storage model where the metadata-bootstrap
+    // path was the primary persistence and per-message rows were "legacy."
+    // After #1562 made persistAgentMessage primary, this clear became
+    // actively destructive. We keep the bootstrap-context clear (the
+    // session has consumed its seed); we do NOT touch user/assistant
+    // history.
     this.setBootstrapPromptContext(sessionId, undefined);
-    const conversationId = state.sessions[sessionId]?.conversationId;
-    if (conversationId) {
-      clearLegacyAgentTranscript(conversationId);
-    }
   },
 
   async restoreSessionSettings(
