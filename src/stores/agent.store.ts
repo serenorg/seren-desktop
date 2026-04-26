@@ -446,6 +446,12 @@ export interface ActiveSession {
   promptStartTime?: number;
   /** Currently selected model ID (if agent supports model selection) */
   currentModelId?: string;
+  /**
+   * Model ID of an in-flight setModel call, used to ignore stale
+   * sessionStatus frames whose models.currentModelId reflects pre-switch
+   * runtime state. Cleared once an event acknowledges the new value.
+   */
+  pendingModelId?: string;
   /** Available models reported by the agent */
   availableModels?: AgentModelInfo[];
   /** Currently selected mode ID (if agent supports mode selection) */
@@ -3635,9 +3641,10 @@ Structured summary:`;
     const sessionId = forSessionId ?? state.activeSessionId;
     if (!sessionId) return;
 
+    setState("sessions", sessionId, "pendingModelId", modelId);
+    setState("sessions", sessionId, "currentModelId", modelId);
     try {
       await providerService.setModel(sessionId, modelId);
-      setState("sessions", sessionId, "currentModelId", modelId);
       const session = state.sessions[sessionId];
       if (session) {
         void setAgentConversationModelIdDb(
@@ -4874,13 +4881,29 @@ Structured summary:`;
       }
     }
 
-    // Extract model state from session status events (e.g. ready with models)
+    // Extract model state from session status events (e.g. ready with models).
+    // Stale frames in flight at the moment of a user-initiated setModel still
+    // carry the pre-switch currentModelId — they must NOT clobber the new
+    // selection. While a pendingModelId is set, only accept events whose
+    // currentModelId matches the pending value (the runtime ack); otherwise
+    // hold. availableModels is always safe to update.
     if (data?.models) {
       const models = data.models as {
         currentModelId: string;
         availableModels: AgentModelInfo[];
       };
-      setState("sessions", sessionId, "currentModelId", models.currentModelId);
+      const pending = state.sessions[sessionId]?.pendingModelId;
+      if (!pending || pending === models.currentModelId) {
+        setState(
+          "sessions",
+          sessionId,
+          "currentModelId",
+          models.currentModelId,
+        );
+        if (pending) {
+          setState("sessions", sessionId, "pendingModelId", undefined);
+        }
+      }
       setState(
         "sessions",
         sessionId,
