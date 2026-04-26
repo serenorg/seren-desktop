@@ -60,3 +60,46 @@ describe("agent message persistence guards", () => {
     expect(finalizeBody).toContain("persistAgentMessage(");
   });
 });
+
+describe("#1663 — agent thread history must not be wiped on resume or send", () => {
+  it("clearLegacyAgentTranscript no longer exists — the function that wiped history every send and every resume is gone", () => {
+    // Match the function definition itself, not historical NOTE comments.
+    expect(agentStoreSource).not.toContain(
+      "function clearLegacyAgentTranscript",
+    );
+  });
+
+  it("resumeAgentConversation does not invoke any clear-history call on successful resume (#1663)", () => {
+    const fnIdx = agentStoreSource.indexOf("async resumeAgentConversation");
+    expect(fnIdx).toBeGreaterThan(0);
+    const nextFn = agentStoreSource.indexOf("\n  async ", fnIdx + 30);
+    const slice = agentStoreSource.slice(
+      fnIdx,
+      nextFn > fnIdx ? nextFn : fnIdx + 12000,
+    );
+    // Strip line comments so historical NOTEs documenting the fix don't
+    // count as live calls.
+    const code = slice.replace(/\/\/.*$/gm, "");
+    expect(code).not.toMatch(/clearLegacyAgentTranscript\s*\(/);
+  });
+
+  it("clearBootstrapPromptContext does not invoke any clear-history call (#1663)", () => {
+    const fnIdx = agentStoreSource.indexOf(
+      "clearBootstrapPromptContext(sessionId",
+    );
+    expect(fnIdx).toBeGreaterThan(0);
+    const slice = agentStoreSource.slice(fnIdx, fnIdx + 1200);
+    const code = slice.replace(/\/\/.*$/gm, "");
+    expect(code).not.toMatch(/clearLegacyAgentTranscript\s*\(/);
+    expect(code).not.toMatch(/clearConversationHistory\s*\(/);
+  });
+
+  it("clearSessionMessages still clears persisted history — the user-initiated 'Clear messages' button must keep working", () => {
+    const fnIdx = agentStoreSource.indexOf("clearSessionMessages(sessionId");
+    expect(fnIdx).toBeGreaterThan(0);
+    const slice = agentStoreSource.slice(fnIdx, fnIdx + 800);
+    expect(slice).toContain(
+      "clearConversationHistory(session.conversationId)",
+    );
+  });
+});
