@@ -2752,7 +2752,18 @@ export const agentStore = {
       return "skipped_nothing_to_compact";
     }
 
-    setState("sessions", sessionId, "isCompacting", true);
+    // isCompacting signals "this serving session is being torn down and
+    // re-spawned" — it gates `sendPrompt` and the promptComplete drain so
+    // a queued prompt is not dispatched onto a dying session. Predictive
+    // mode warms a standby alongside a still-running serving session
+    // (#1631); flipping isCompacting on the serving session there makes
+    // the drain block at the bottom of promptComplete skip indefinitely
+    // and queued prompts get stuck (#1673). Predictive mode has its own
+    // gates (`predictiveCompactInFlight` per-session, `predictiveCompactBusy`
+    // module-level) — only the reactive branch should set isCompacting.
+    if (mode === "reactive") {
+      setState("sessions", sessionId, "isCompacting", true);
+    }
 
     // Hoisted for catch-handler access — the reactive path terminates the
     // old session, so recovery needs these if anything downstream throws. #1639.
@@ -2832,11 +2843,13 @@ Structured summary:`;
       if (mode === "predictive") {
         // Predictive path: spawn a STANDBY session alongside the live one.
         // No teardown, no UI side-effects — the next user submit promotes it.
+        // isCompacting is intentionally NOT set on the serving session here
+        // (#1673); concurrency is gated by `predictiveCompactInFlight` and
+        // the module-level `predictiveCompactBusy` mutex.
         const standbyId = await this.spawnSession(cwd, agentType, {
           role: "standby",
         });
         if (!standbyId) {
-          setState("sessions", sessionId, "isCompacting", false);
           throw new Error(
             "CompactionFailure: predictive standby spawn returned null",
           );
@@ -2848,7 +2861,6 @@ Structured summary:`;
         await providerService.sendPrompt(standbyId, seedPrompt);
         // promptComplete handler detects role==="standby" and sets
         // seedCompleted + releases predictiveCompactBusy.
-        setState("sessions", sessionId, "isCompacting", false);
         console.info(
           `[AgentStore] Predictive compaction: standby ${standbyId} seeding for serving ${sessionId}`,
         );
@@ -4182,10 +4194,15 @@ Structured summary:`;
 
         // Drain the prompt queue for this session. This runs in the store
         // regardless of which thread the UI is showing, so background threads
-        // don't stall. Guard against compaction — if the auto-compact block
-        // above fired, `isCompacting` is already true, the session will be
-        // terminated and re-spawned, and the queue will be transferred to
-        // the new session by compactAgentConversation (#1623).
+        // don't stall. Guard against reactive compaction only — if the
+        // auto-compact block above fired in reactive mode, `isCompacting`
+        // was set synchronously (before the first await in
+        // compactAgentConversation), the session is about to be terminated,
+        // and the queue will be transferred to the new session inside
+        // compactAgentConversation (#1623). Predictive compaction (#1631)
+        // does NOT set isCompacting on the serving session (#1673), so the
+        // guard correctly lets the drain proceed onto the still-running
+        // serving session.
         if (!isHistoryReplay && !state.sessions[sessionId]?.isCompacting) {
           const queue = state.sessions[sessionId]?.pendingPrompts ?? [];
           if (queue.length > 0) {
