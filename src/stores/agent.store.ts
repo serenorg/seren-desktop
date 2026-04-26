@@ -171,6 +171,7 @@ import {
   isTimeoutError,
   performAgentFallback,
 } from "@/lib/rate-limit-fallback";
+import { captureSupportError } from "@/lib/support/hook";
 import {
   clearConversationHistory,
   createAgentConversation,
@@ -1294,29 +1295,25 @@ export const agentStore = {
       const session = Object.values(state.sessions).find(
         (s) => s.conversationId === threadId,
       );
-      const bundle = {
-        error_kind: kind,
-        stack: message ?? "",
-        agent_type: session?.info.agentType ?? "unknown",
-        session_age_ms: session?.info.createdAt
-          ? Date.now() - Date.parse(session.info.createdAt)
-          : 0,
-        message_count: session?.messages.length ?? 0,
-        token_usage: session?.lastInputTokens ?? 0,
-        token_ratio:
-          session && session.contextWindowSize
-            ? (session.lastInputTokens ?? 0) / session.contextWindowSize
-            : 0,
-        restart_attempt: 0,
-        path: "reactive",
-      };
-      // TODO(#1630): When the support-pipeline ticket lands, this becomes
-      // the canonical auto-report callsite. Until then the invoke rejects
-      // silently (no backend command registered) and we only log.
-      console.warn(
-        "[AgentStore] Terminal turn error — submit_support_report:",
-        bundle,
-      );
+      const toolCalls =
+        session?.messages
+          .filter((msg) => msg.toolCall)
+          .slice(-20)
+          .map((msg) => ({
+            name: msg.toolCall?.kind || msg.toolCall?.title || "tool",
+            id: msg.toolCallId || msg.toolCall?.toolCallId || "unknown",
+          })) ?? [];
+
+      void captureSupportError({
+        kind: `agent.${kind}`,
+        message: message ?? kind,
+        stack: [],
+        agentContext: {
+          model: session?.currentModelId,
+          provider: session?.info.agentType,
+          tool_calls: toolCalls,
+        },
+      });
     } catch (err) {
       console.warn(
         "[AgentStore] _submitTurnErrorReport failed (ignored):",

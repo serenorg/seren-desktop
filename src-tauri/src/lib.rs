@@ -41,6 +41,7 @@ mod polymarket;
 mod provider_runtime;
 mod shell;
 mod skills;
+mod support;
 mod sync;
 mod wallet;
 
@@ -619,6 +620,9 @@ pub fn run() {
             // Configure Claude Code environment (adds cargo to PATH if needed)
             claude_setup::configure_claude_code_environment();
 
+            // Install panic sidecar capture for desktop support reports.
+            support::init(app.handle());
+
             // Start OAuth callback server in dev mode
             // Provides localhost:8787 redirect for OAuth without deep links
             if let Some(handle) =
@@ -802,6 +806,10 @@ pub fn run() {
             get_oauth_callback_port,
             // Build info
             get_build_info,
+            // Desktop support reporting
+            support::get_support_report_ids,
+            support::submit_support_report,
+            support::sweep_support_crash_reports,
             // Semantic indexing commands
             commands::indexing::init_project_index,
             commands::indexing::get_index_status,

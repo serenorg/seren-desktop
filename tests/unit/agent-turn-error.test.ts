@@ -54,10 +54,9 @@ describe("#1631 — setTurnError wires the auto-report pipeline (#1630)", () => 
     expect(union).toContain("seed_failed");
   });
 
-  it("submit_support_report is referenced as the pipeline target (#1630 TODO)", () => {
-    // The auto-report callsite names the backend command verbatim, even
-    // while the ticket stubs until #1630 ships.
-    expect(agentStoreSource).toContain("submit_support_report");
+  it("captureSupportError is the pipeline target (#1630)", () => {
+    expect(agentStoreSource).toContain("captureSupportError({");
+    expect(agentStoreSource).toContain("agentContext:");
   });
 });
 
