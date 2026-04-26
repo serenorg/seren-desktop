@@ -141,6 +141,28 @@ async function waitForSessionIdle(
   }
 }
 
+/** Maximum time sendPrompt waits for a predictive standby's seed prompt to
+ * complete when the serving session is at critical context usage (#1675). */
+const STANDBY_SEED_WAIT_MS = 5_000;
+
+/** Wait for a standby session's seed prompt to complete (seedCompleted=true).
+ * Returns true if the seed finished within the timeout, false otherwise.
+ * Returns false immediately if the standby was removed (e.g. terminated).
+ * #1675. */
+async function waitForStandbySeed(
+  standbyId: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const standby = state.sessions[standbyId];
+    if (!standby) return false;
+    if (standby.seedCompleted === true) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return state.sessions[standbyId]?.seedCompleted === true;
+}
+
 import { isLikelyAuthError } from "@/lib/auth-errors";
 import { buildChatRequest, sendProviderMessage } from "@/lib/providers";
 import {
@@ -3231,7 +3253,46 @@ Structured summary:`;
         return;
       }
       if (standby) {
-        // Standby not ready yet — cancel it; old serving handles this prompt.
+        // Standby not ready yet. When the serving session is at or above the
+        // auto-compact threshold (#1675), the next prompt is likely to overflow
+        // the model context — falling through to dispatch on the overloaded
+        // serving session would trigger compactAndRetry → reactive teardown →
+        // chatbox flash. Wait briefly for the seed to complete instead, then
+        // promote-and-dispatch on the standby. Below the threshold, retain the
+        // original "cancel and dispatch on serving" behaviour so a fast user
+        // is not held up unnecessarily.
+        const usagePct =
+          session.lastInputTokens && session.contextWindowSize
+            ? session.lastInputTokens / session.contextWindowSize
+            : 0;
+        const criticalThreshold =
+          settingsStore.settings.autoCompactThreshold / 100;
+        if (usagePct >= criticalThreshold) {
+          console.info(
+            `[AgentStore] Standby not ready at submit but context critical (${Math.round(
+              usagePct * 100,
+            )}%) — awaiting seed`,
+          );
+          const seeded = await waitForStandbySeed(
+            session.standbySessionId,
+            STANDBY_SEED_WAIT_MS,
+          );
+          if (seeded) {
+            console.info(
+              `[AgentStore] Promoting just-seeded standby ${session.standbySessionId}`,
+            );
+            await this.promoteStandbyAndDispatch(
+              sessionId!,
+              prompt,
+              context,
+              options,
+            );
+            return;
+          }
+          console.info(
+            `[AgentStore] Standby did not seed within ${STANDBY_SEED_WAIT_MS}ms — falling through to serving`,
+          );
+        }
         console.info(
           "[AgentStore] Standby not ready at submit; cancelling warm-up",
         );
@@ -4161,10 +4222,17 @@ Structured summary:`;
                 // just produced this promptComplete already succeeded, so we
                 // do NOT retry it — retrying would duplicate the turn. Queued
                 // prompts handled via pendingPrompts transfer inside compaction.
+                // Predictive mode (#1675): spawn a standby alongside the live
+                // serving session instead of tearing it down. The next user
+                // submit promotes the standby; the chatbox stays mounted so
+                // there is no flash. The standby-not-ready fallback in
+                // sendPrompt handles the race when the user submits before
+                // the seed completes.
                 this.compactAgentConversation(
                   sessionId,
                   settingsStore.settings.autoCompactPreserveMessages,
                   undefined,
+                  { mode: "predictive" },
                 );
               }
             }
