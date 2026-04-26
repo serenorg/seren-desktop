@@ -1766,11 +1766,20 @@ export function createClaudeRuntime({ emit }) {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
+    // #1677 ground-truth principle (symmetric with chooseUpdatedModelId):
+    // the catalog (`initialize.models[]`) is advisory. The CLI's actual
+    // `set_model` response and the next `message.model` are authoritative.
+    // Pass through non-catalog ids — most importantly, ids that #1635 wrote
+    // to currentModelId from a prior `message.model` (e.g. an Opus tier the
+    // CLI runs but does not list as a switchable picker target). Throwing
+    // here breaks predictive-standby restoreSessionSettings on long threads.
     const targetModel =
       session.availableModelRecords.find((record) => record.modelId === modelId) ??
       null;
     if (!targetModel) {
-      throw new Error(`Unknown Claude model: ${modelId}`);
+      console.warn(
+        `[browser-local][claude] setModel: ${modelId} not in catalog (size=${session.availableModelRecords.length}); passing through to CLI`,
+      );
     }
 
     await sendControlRequest(
@@ -1782,7 +1791,7 @@ export function createClaudeRuntime({ emit }) {
       10_000,
     );
 
-    session.currentModelId = targetModel.modelId;
+    session.currentModelId = targetModel?.modelId ?? modelId;
     emit("provider://session-status", buildSessionStatus(session));
   }
 
