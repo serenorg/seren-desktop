@@ -302,6 +302,9 @@ function resolveInstalledGeminiBinary() {
     const home = os.homedir();
     const appData = process.env.APPDATA ?? "";
     const nodeDir = path.dirname(process.execPath);
+    const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
+    const programFilesX86 =
+      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
     const candidates = [
       // npm global install via embedded runtime's npm (prefix = node dir on Windows)
       path.join(nodeDir, "gemini.cmd"),
@@ -310,6 +313,11 @@ function resolveInstalledGeminiBinary() {
       ...(appData ? [path.join(appData, "npm", "gemini.cmd")] : []),
       // Generic install fallbacks
       path.join(home, ".local", "bin", "gemini.exe"),
+      // System-wide Node MSI install (default before npm prefix moved to APPDATA). #1665
+      path.join(programFiles, "nodejs", "gemini.cmd"),
+      path.join(programFilesX86, "nodejs", "gemini.cmd"),
+      // Explicit user prefix (`.npmrc` prefix=$HOME/.npm-global). #1665
+      path.join(home, ".npm-global", "gemini.cmd"),
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
@@ -326,6 +334,12 @@ function resolveInstalledGeminiBinary() {
       path.join(prefix, "bin", "gemini"),
       // Generic user-local install fallbacks
       path.join(home, ".local", "bin", "gemini"),
+      // System npm prefix /usr/local (default on Intel macOS + most Linux distros). #1665
+      "/usr/local/bin/gemini",
+      // Homebrew on Apple Silicon. #1665
+      "/opt/homebrew/bin/gemini",
+      // Distro package managers (apt, dnf). Rare for npm globals; last. #1665
+      "/usr/bin/gemini",
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
@@ -346,6 +360,9 @@ export function resolveInstalledClaudeBinary() {
     const home = os.homedir();
     const appData = process.env.APPDATA ?? "";
     const nodeDir = path.dirname(process.execPath);
+    const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
+    const programFilesX86 =
+      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
     const candidates = [
       // Native installer location (install.ps1 puts it here)
       path.join(home, ".local", "bin", "claude.exe"),
@@ -358,6 +375,11 @@ export function resolveInstalledClaudeBinary() {
       // npm global install via embedded runtime's npm (prefix = node dir on Windows)
       path.join(nodeDir, "claude.cmd"),
       path.join(nodeDir, "claude"),
+      // System-wide Node MSI install (default before npm prefix moved to APPDATA). #1665
+      path.join(programFiles, "nodejs", "claude.cmd"),
+      path.join(programFilesX86, "nodejs", "claude.cmd"),
+      // Explicit user prefix. #1665
+      path.join(home, ".npm-global", "claude.cmd"),
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
@@ -373,6 +395,12 @@ export function resolveInstalledClaudeBinary() {
       path.join(home, ".local", "bin", "claude"),
       // npm global install via embedded runtime's npm
       path.join(prefix, "bin", "claude"),
+      // System npm prefix /usr/local. #1665
+      "/usr/local/bin/claude",
+      // Homebrew on Apple Silicon. #1665
+      "/opt/homebrew/bin/claude",
+      // Distro package managers. #1665
+      "/usr/bin/claude",
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
@@ -395,13 +423,22 @@ export function resolveInstalledClaudeBinary() {
  */
 export function resolveInstalledCodexBinary() {
   if (process.platform === "win32") {
+    const home = os.homedir();
     const appData = process.env.APPDATA ?? "";
     const nodeDir = path.dirname(process.execPath);
+    const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
+    const programFilesX86 =
+      process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
     const candidates = [
       ...(appData ? [path.join(appData, "npm", "codex.cmd")] : []),
       ...(appData ? [path.join(appData, "npm", "codex.ps1")] : []),
       path.join(nodeDir, "codex.cmd"),
       path.join(nodeDir, "codex"),
+      // System-wide Node MSI install. #1665
+      path.join(programFiles, "nodejs", "codex.cmd"),
+      path.join(programFilesX86, "nodejs", "codex.cmd"),
+      // Explicit user prefix. #1665
+      path.join(home, ".npm-global", "codex.cmd"),
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
@@ -415,6 +452,13 @@ export function resolveInstalledCodexBinary() {
     const candidates = [
       path.join(prefix, "bin", "codex"),
       path.join(home, ".local", "bin", "codex"),
+      // System npm prefix /usr/local — Intel macOS + most Linux distros. The
+      // verified miss in #1665 (taariq's codex was here, resolver failed).
+      "/usr/local/bin/codex",
+      // Homebrew on Apple Silicon. #1665
+      "/opt/homebrew/bin/codex",
+      // Distro package managers. #1665
+      "/usr/bin/codex",
     ];
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
