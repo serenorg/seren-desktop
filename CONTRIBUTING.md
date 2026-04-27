@@ -98,6 +98,16 @@ Examples:
 - `fix: handle SSE connection timeout`
 - `docs: update API authentication section`
 
+### Optional: enable the local commit-msg hook
+
+The repo ships a commit-msg hook at `.githooks/commit-msg` that validates messages against the format above before they reach `main`. Opt in once after cloning:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Bypass with `--no-verify` for emergencies. The hook is local-only — there is no automatic install — so your git config is never silently mutated.
+
 ## Pull Request Process
 
 1. Update documentation if needed
