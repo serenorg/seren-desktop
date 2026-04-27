@@ -479,6 +479,23 @@ export interface ActiveSession {
    * runtime state. Cleared once an event acknowledges the new value.
    */
   pendingModelId?: string;
+  /**
+   * Last model id the user explicitly clicked in the picker (#1678 Option B).
+   * Persists past `pendingModelId`'s clear-on-ack so we can keep comparing
+   * the user's intent against `message.model` ground truth (#1635). When the
+   * runtime reports a `currentModelId` that diverges from this, the CLI is
+   * silently falling back — surface the gap to the picker via
+   * `modelFallbackNotice` rather than letting the picker visibly snap back.
+   */
+  userSelectedModelId?: string;
+  /**
+   * Set when `models.currentModelId` from the runtime disagrees with
+   * `userSelectedModelId`. The picker reads this to render an inline warning
+   * ("requested X, CLI is running Y") so users on legacy Opus tiers
+   * understand why their selection didn't take. Cleared when the two line
+   * up again. #1678.
+   */
+  modelFallbackNotice?: { requested: string; actual: string } | null;
   /** Available models reported by the agent */
   availableModels?: AgentModelInfo[];
   /** Currently selected mode ID (if agent supports mode selection) */
@@ -3834,6 +3851,11 @@ Structured summary:`;
     if (!sessionId) return;
 
     setState("sessions", sessionId, "pendingModelId", modelId);
+    setState("sessions", sessionId, "userSelectedModelId", modelId);
+    // The user just made a fresh selection — clear any stale fallback
+    // notice from a previous selection so the picker doesn't carry an
+    // out-of-date warning forward. #1678.
+    setState("sessions", sessionId, "modelFallbackNotice", null);
     setState("sessions", sessionId, "currentModelId", modelId);
     try {
       await providerService.setModel(sessionId, modelId);
@@ -5138,6 +5160,25 @@ Structured summary:`;
         "availableModels",
         models.availableModels,
       );
+
+      // CLI silent-fallback detection (#1678 Option B). Once the setModel
+      // ack has cleared `pendingModelId`, the next `message.model` from the
+      // CLI is ground truth via #1635 and lands here as
+      // `models.currentModelId`. If that disagrees with the user's last
+      // explicit selection, the CLI accepted the request but is running
+      // something else — record the gap so the picker can surface it
+      // instead of letting `currentModelId` silently snap back.
+      const userSelected = state.sessions[sessionId]?.userSelectedModelId;
+      if (!pending && userSelected) {
+        if (userSelected !== models.currentModelId) {
+          setState("sessions", sessionId, "modelFallbackNotice", {
+            requested: userSelected,
+            actual: models.currentModelId,
+          });
+        } else {
+          setState("sessions", sessionId, "modelFallbackNotice", null);
+        }
+      }
     }
 
     // Extract mode state from session status events (e.g. ready with modes,
