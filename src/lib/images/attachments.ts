@@ -241,7 +241,9 @@ export async function pickFiles(): Promise<string[]> {
   try {
     // Ensure the dialog module is available
     if (typeof open !== "function") {
-      console.error("[attachments] Dialog 'open' function not available");
+      console.error(
+        new Error("[attachments] Dialog 'open' function not available"),
+      );
       throw new Error(
         "File dialog not available - dialog plugin may not be initialized",
       );
