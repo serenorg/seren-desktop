@@ -281,7 +281,9 @@ function createX402Service() {
 
     // If no valid payment options, fail
     if (!hasPrepaid && !hasCrypto) {
-      console.error("No valid payment options in requirements");
+      console.error(
+        new Error("[x402] No valid payment options in requirements"),
+      );
       return null;
     }
 

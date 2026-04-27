@@ -44,7 +44,7 @@ export async function fetchBalance() {
   }
 
   if (!data?.data) {
-    console.error("[Wallet] No balance data in response");
+    console.error(new Error("[Wallet] No balance data in response"));
     throw new Error("No balance data returned");
   }
 

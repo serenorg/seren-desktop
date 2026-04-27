@@ -3,8 +3,8 @@
 
 import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
-import { unwrapPublisherBody } from "@/lib/publisher-response";
 import type { Attachment } from "@/lib/providers/types";
+import { unwrapPublisherBody } from "@/lib/publisher-response";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 import { updateBalanceFromError } from "@/stores/wallet.store";
@@ -72,7 +72,7 @@ export async function readDocument(attachment: Attachment): Promise<string> {
   if (!shouldUseRustGatewayAuth(url)) {
     const token = await getToken();
     if (!token) {
-      console.error("[DocReader] No auth token available");
+      console.error(new Error("[DocReader] No auth token available"));
       throw new Error(
         "Document processing requires a Seren account. Sign in to continue.",
       );

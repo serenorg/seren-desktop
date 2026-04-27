@@ -140,7 +140,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         const marketplaceSkill = skill as Skill;
         const content = await skillsService.fetchContent(marketplaceSkill);
         if (!content) {
-          console.error("[ThreadSidebar] Failed to fetch skill content");
+          console.error(
+            new Error("[ThreadSidebar] Failed to fetch skill content"),
+          );
           return;
         }
         await skillsStore.install(marketplaceSkill, content, "seren");
@@ -156,7 +158,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
             s.dirName === marketplaceSkill.slug,
         );
         if (!found) {
-          console.error("[ThreadSidebar] Skill installed but not found");
+          console.error(
+            new Error("[ThreadSidebar] Skill installed but not found"),
+          );
           return;
         }
         installedSkill = found;

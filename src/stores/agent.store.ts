@@ -5206,7 +5206,9 @@ Structured summary:`;
     // the two diverge — fork must resolve via the conversationId field. #1682.
     const session = this.getSessionForConversation(conversationId);
     if (!session) {
-      console.error("[AgentStore] forkConversation: session not found");
+      console.error(
+        new Error("[AgentStore] forkConversation: session not found"),
+      );
       return null;
     }
 
@@ -5217,7 +5219,9 @@ Structured summary:`;
     const allMessages = session.messages;
     const forkIndex = allMessages.findIndex((m) => m.id === fromMessageId);
     if (forkIndex === -1) {
-      console.error("[AgentStore] forkConversation: message not found");
+      console.error(
+        new Error("[AgentStore] forkConversation: message not found"),
+      );
       return null;
     }
     const forkedMessages = allMessages.slice(0, forkIndex + 1);
@@ -5282,7 +5286,7 @@ Structured summary:`;
     });
 
     if (!newSessionId) {
-      console.error("[AgentStore] forkConversation: spawn failed");
+      console.error(new Error("[AgentStore] forkConversation: spawn failed"));
       return null;
     }
 
