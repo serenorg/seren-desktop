@@ -620,6 +620,24 @@ function publisherToSkill(publisher: Publisher): Skill {
   };
 }
 
+function skillMergeKey(skill: Skill, publisherSlugs: Set<string>): string {
+  if (skill.source === "seren") {
+    return skill.slug;
+  }
+
+  if (skill.source === "serenorg" && skill.slug.startsWith("seren-")) {
+    const publisherSlug = skill.slug.slice("seren-".length);
+    if (publisherSlugs.has(publisherSlug)) {
+      // seren-skills indexes publisher wrappers as category-prefixed slugs
+      // (e.g. seren/seren-bounty -> seren-seren-bounty). Prefer the live
+      // publisher record when that stable upstream slug is present.
+      return publisherSlug;
+    }
+  }
+
+  return skill.slug;
+}
+
 /**
  * Skills service for Seren Desktop.
  */
@@ -752,15 +770,16 @@ export const skills = {
 
     // Merge skills, with publisher skills taking precedence for duplicates
     const skillMap = new Map<string, Skill>();
+    const publisherSlugs = new Set(publisherSkills.map((skill) => skill.slug));
 
     // Add index skills first
     for (const skill of indexSkills) {
-      skillMap.set(skill.slug, skill);
+      skillMap.set(skillMergeKey(skill, publisherSlugs), skill);
     }
 
     // Publisher skills override index skills (they're more up-to-date)
     for (const skill of publisherSkills) {
-      skillMap.set(skill.slug, skill);
+      skillMap.set(skillMergeKey(skill, publisherSlugs), skill);
     }
 
     return Array.from(skillMap.values());
@@ -1519,8 +1538,7 @@ export const skills = {
       // equals the marketplace slug even when resolveSkillSlug() derives a
       // different slug from SKILL.md frontmatter name).
       const repoMatch =
-        repoSkillsBySlug.get(skill.slug) ??
-        repoSkillsBySlug.get(skill.dirName);
+        repoSkillsBySlug.get(skill.slug) ?? repoSkillsBySlug.get(skill.dirName);
       const publisherMatch =
         publisherSkillsBySlug.get(skill.slug) ??
         publisherSkillsBySlug.get(skill.dirName);
