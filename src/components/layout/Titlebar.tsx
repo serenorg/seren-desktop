@@ -51,10 +51,6 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
     await openFolder();
   };
 
-  const handleSupportClick = () => {
-    window.open("https://docs.serendb.com", "_blank");
-  };
-
   return (
     <div
       class="flex items-center justify-between h-[var(--titlebar-height,40px)] px-3 pl-[78px] bg-surface-1 border-b border-border shrink-0 select-none"
@@ -178,31 +174,6 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
         <Show when={authStore.isAuthenticated}>
           <BalanceDisplay />
         </Show>
-
-        <button
-          type="button"
-          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
-          onClick={handleSupportClick}
-          title="Support"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            role="img"
-            aria-label="Support"
-          >
-            <path d="M4 14a8 8 0 1 1 16 0" />
-            <path d="M18 14v4a2 2 0 0 1-2 2h-1v-6h3z" />
-            <path d="M6 14v6H5a2 2 0 0 1-2-2v-4h3z" />
-            <path d="M9 20h6" />
-          </svg>
-        </button>
 
         <button
           type="button"

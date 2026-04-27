@@ -1,10 +1,18 @@
 // ABOUTME: Main application component with project-centric thread-based layout.
 // ABOUTME: Initializes auth, settings, wallet, and renders AppShell with global modals.
 
-import { createEffect, onCleanup, onMount, Show, untrack } from "solid-js";
+import {
+  createEffect,
+  ErrorBoundary,
+  onCleanup,
+  onMount,
+  Show,
+  untrack,
+} from "solid-js";
 import { AboutDialog } from "@/components/common/AboutDialog";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { OrganizationOtpModal } from "@/components/common/OrganizationOtpModal";
+import { SupportToast } from "@/components/common/SupportToast";
 import { GatewayToolApproval } from "@/components/gateway/GatewayToolApproval";
 import { AppShell } from "@/components/layout/AppShell";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
@@ -17,6 +25,7 @@ import {
 } from "@/lib/browser-local-runtime";
 import { getRuntimeConfig } from "@/lib/runtime";
 import { shortcuts } from "@/lib/shortcuts";
+import { captureUnknownError } from "@/lib/support/hook";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
 import { syncMemories } from "@/services/memory";
@@ -305,9 +314,24 @@ function App() {
           </div>
         }
       >
-        <AppShell onLoginSuccess={handleLoginSuccess} onLogout={handleLogout} />
+        <ErrorBoundary
+          fallback={(error) => {
+            captureUnknownError("solid_error_boundary", error);
+            return (
+              <div class="flex h-screen items-center justify-center text-sm text-destructive">
+                Something went wrong. Seren is recovering.
+              </div>
+            );
+          }}
+        >
+          <AppShell
+            onLoginSuccess={handleLoginSuccess}
+            onLogout={handleLogout}
+          />
+        </ErrorBoundary>
         <LowBalanceModal />
         <DailyClaimPopup />
+        <SupportToast />
         <X402PaymentApproval />
         <Show when={runtime.capabilities.localMcp}>
           <GatewayToolApproval />

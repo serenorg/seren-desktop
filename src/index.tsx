@@ -1,6 +1,7 @@
 /* @refresh reload */
 import { render } from "solid-js/web";
 import { installExternalLinkInterceptor } from "@/lib/external-link";
+import { installSupportReporting } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import App from "./App";
 
@@ -19,5 +20,6 @@ if (isTauriRuntime()) {
 
 // Prevent external URLs from navigating the webview
 installExternalLinkInterceptor();
+installSupportReporting();
 
 render(() => <App />, document.getElementById("root") as HTMLElement);

@@ -74,6 +74,16 @@ export async function appFetch(
       }
     }
 
+    if (
+      response.status >= 400 &&
+      request.url.includes("api.serendb.com") &&
+      !request.url.includes("/support/report")
+    ) {
+      void import("@/lib/support/hook")
+        .then(({ captureHttpFailure }) => captureHttpFailure(request, response))
+        .catch(() => {});
+    }
+
     return response;
   }
 }

@@ -391,7 +391,15 @@ export const conversationStore = {
       }
     } catch (error) {
       console.warn("Unable to load history", error);
-      await this.createConversation();
+      // First-launch UX: only seed a default conversation when there are
+      // none in the in-memory store. Without this guard, every loadHistory
+      // failure (e.g. browser-fallback / `pnpm browser:local` where the
+      // SQLite-backed DB throws "Conversation operations require Tauri
+      // runtime") spawns yet another "New Chat" on every ChatContent
+      // re-mount — see #1630 follow-up.
+      if (state.conversations.length === 0) {
+        await this.createConversation();
+      }
     }
   },
 

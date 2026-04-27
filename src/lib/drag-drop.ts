@@ -1,10 +1,10 @@
 // ABOUTME: SolidJS hook for Tauri window-level file drag-and-drop attachment.
 // ABOUTME: Returns isDragging signal and processes dropped files into Attachment objects.
 
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { createSignal, onCleanup } from "solid-js";
 import { ALL_EXTENSIONS, readAttachment } from "@/lib/images/attachments";
 import type { Attachment } from "@/lib/providers/types";
+import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 function getExtension(path: string): string {
   const parts = path.split(".");
@@ -23,36 +23,51 @@ export function createDragDrop(onFiles: (attachments: Attachment[]) => void): {
 } {
   const [isDragging, setIsDragging] = createSignal(false);
 
-  const unlistenPromise = getCurrentWebview().onDragDropEvent(async (event) => {
-    const { type } = event.payload;
+  // The Tauri webview API reads `__TAURI_INTERNALS__.metadata` and throws when
+  // it isn't present (browser-fallback / production-bundle e2e / `pnpm browser:local`).
+  // Without this gate the throw bubbles to the App ErrorBoundary and unmounts
+  // the whole shell — see #1630 follow-up. Drag-and-drop is a Tauri-only
+  // capability anyway; the no-op return matches the rest of the runtime.
+  if (!isTauriRuntime()) {
+    return { isDragging };
+  }
 
-    if (type === "enter") {
-      setIsDragging(true);
-    } else if (type === "leave") {
-      setIsDragging(false);
-    } else if (type === "drop") {
-      setIsDragging(false);
-      const paths = event.payload.paths.filter((p) =>
-        ALL_EXTENSIONS.includes(getExtension(p)),
-      );
-      if (paths.length === 0) return;
+  // Imported lazily so the Tauri webview module is not pulled into the
+  // browser-fallback graph at module load (where its top-level access can
+  // also probe the missing internals).
+  const unlistenPromise = import("@tauri-apps/api/webview").then(
+    ({ getCurrentWebview }) =>
+      getCurrentWebview().onDragDropEvent(async (event) => {
+        const { type } = event.payload;
 
-      const attachments: Attachment[] = [];
-      for (const path of paths) {
-        try {
-          attachments.push(await readAttachment(path));
-        } catch (error) {
-          console.warn("[DragDrop] Failed to read file:", path, error);
+        if (type === "enter") {
+          setIsDragging(true);
+        } else if (type === "leave") {
+          setIsDragging(false);
+        } else if (type === "drop") {
+          setIsDragging(false);
+          const paths = event.payload.paths.filter((p) =>
+            ALL_EXTENSIONS.includes(getExtension(p)),
+          );
+          if (paths.length === 0) return;
+
+          const attachments: Attachment[] = [];
+          for (const path of paths) {
+            try {
+              attachments.push(await readAttachment(path));
+            } catch (error) {
+              console.warn("[DragDrop] Failed to read file:", path, error);
+            }
+          }
+          if (attachments.length > 0) {
+            onFiles(attachments);
+          }
         }
-      }
-      if (attachments.length > 0) {
-        onFiles(attachments);
-      }
-    }
-  });
+      }),
+  );
 
   onCleanup(() => {
-    unlistenPromise.then((unlisten) => unlisten());
+    void unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
   });
 
   return { isDragging };

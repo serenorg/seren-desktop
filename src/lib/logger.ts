@@ -1,6 +1,7 @@
 // ABOUTME: Frontend logging bridge that writes to the Tauri log file.
 // ABOUTME: Falls back to console when running outside Tauri (browser dev).
 
+import { appendSupportLog } from "@/lib/support/hook";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 type LogFn = (message: string) => Promise<void>;
@@ -46,6 +47,7 @@ export const log = {
   async error(...args: unknown[]): Promise<void> {
     const msg = stringify(args);
     console.error(...args);
+    appendSupportLog("ERROR", "logger", msg);
     await init();
     if (tauriError) await tauriError(msg).catch(() => {});
   },
@@ -53,6 +55,7 @@ export const log = {
   async warn(...args: unknown[]): Promise<void> {
     const msg = stringify(args);
     console.warn(...args);
+    appendSupportLog("WARN", "logger", msg);
     await init();
     if (tauriWarn) await tauriWarn(msg).catch(() => {});
   },
@@ -60,6 +63,7 @@ export const log = {
   async info(...args: unknown[]): Promise<void> {
     const msg = stringify(args);
     console.info(...args);
+    appendSupportLog("INFO", "logger", msg);
     await init();
     if (tauriInfo) await tauriInfo(msg).catch(() => {});
   },
@@ -67,6 +71,7 @@ export const log = {
   async debug(...args: unknown[]): Promise<void> {
     const msg = stringify(args);
     console.debug(...args);
+    appendSupportLog("DEBUG", "logger", msg);
     await init();
     if (tauriDebug) await tauriDebug(msg).catch(() => {});
   },
