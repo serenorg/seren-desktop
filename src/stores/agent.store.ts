@@ -2943,6 +2943,65 @@ Structured summary:`;
         // isCompacting is intentionally NOT set on the serving session here
         // (#1673); concurrency is gated by `predictiveCompactInFlight` and
         // the module-level `predictiveCompactBusy` mutex.
+
+        // #1713: synthetic-transcript pre-warm. When enabled, build a
+        // synthetic JSONL on disk that splices the structured summary in
+        // front of the parent's preserved tail and resume the standby
+        // against THAT, so the standby's prior assistant turn is the real
+        // prior assistant turn (no seed-ack misinterpretation).
+        if (
+          settingsStore.settings.compactSyntheticTranscript &&
+          agentType === "claude-code"
+        ) {
+          try {
+            const userTurnCount = Math.max(1, Math.ceil(toPreserve.length / 2));
+            const syntheticAgentSessionId =
+              await providerService.buildSyntheticTranscript(
+                sessionId,
+                summary,
+                userTurnCount,
+              );
+            const syntheticStandbyId = await this.spawnSession(cwd, agentType, {
+              role: "standby",
+              resumeAgentSessionId: syntheticAgentSessionId,
+            });
+            if (syntheticStandbyId == null) {
+              throw new Error("synthetic standby spawn returned null");
+            }
+            setState(
+              "sessions",
+              syntheticStandbyId,
+              "compactedSummary",
+              compactedSummary,
+            );
+            setState(
+              "sessions",
+              sessionId,
+              "standbySessionId",
+              syntheticStandbyId,
+            );
+            await waitForSessionReady(syntheticStandbyId);
+            await this.restoreSessionSettings(session, syntheticStandbyId);
+            // The synthetic JSONL already contains the real prior turn pair.
+            // Mark seed-complete immediately so promotion does not stall on
+            // a non-existent seed prompt.
+            setState("sessions", syntheticStandbyId, "seedCompleted", true);
+            predictiveCompactBusy = false;
+            setState("sessions", sessionId, "predictiveCompactInFlight", false);
+            console.info(
+              `[compact.synthetic.success] standby ${syntheticStandbyId} resumed synthetic transcript ${syntheticAgentSessionId} for serving ${sessionId}`,
+            );
+            return "succeeded";
+          } catch (err) {
+            // Defensive fallback: any failure (CLI rejects file, parent
+            // JSONL unreadable, write fails) drops through to today's
+            // seed-prompt path. The serving session is still alive.
+            console.warn(
+              `[compact.synthetic.fallback] ${err instanceof Error ? err.message : String(err)} — falling back to seed-prompt path`,
+            );
+          }
+        }
+
         const standbyId = await this.spawnSession(cwd, agentType, {
           role: "standby",
         });

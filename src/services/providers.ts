@@ -356,6 +356,24 @@ export async function nativeForkSession(sessionId: string): Promise<string> {
 }
 
 /**
+ * Build a synthetic Claude transcript on disk that splices a structured
+ * compaction summary in front of the parent session's preserved tail (#1713).
+ * Returns the synthetic remote agent session ID, ready to be passed as
+ * `resumeAgentSessionId` to a fresh standby spawn.
+ */
+export async function buildSyntheticTranscript(
+  sessionId: string,
+  summaryText: string,
+  preserveCount: number,
+): Promise<string> {
+  return invokeProvider<string>("provider_build_synthetic_transcript", {
+    sessionId,
+    summaryText,
+    preserveCount,
+  });
+}
+
+/**
  * List all active agent runtime sessions.
  */
 export async function listSessions(): Promise<AgentSessionInfo[]> {

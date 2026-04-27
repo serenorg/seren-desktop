@@ -612,8 +612,36 @@ export function createBrowserLocalAgentRegistry({ emit }) {
   // TTL-gated to 24h inside backgroundUpdateCli, same-channel only, silent
   // on failure. Do not await — registry init must not block on npm.
   const npmCliScript = resolveNpmCliScript();
-  const onUpdated = ({ label, from, to }) => {
+  const onUpdated = async ({ label, from, to }) => {
     emit?.("provider://cli-updated", { label, from, to });
+    // #1713 §4.7 schema-drift gate: after a Claude CLI auto-update, run
+    // the synthetic-transcript builder against a known-good fixture and
+    // emit a drift event if the splice invariants no longer hold. The
+    // event is read by the TS layer which forces compactSyntheticTranscript
+    // off until the schema is reconciled.
+    if (label === "Claude Code") {
+      try {
+        const { runSyntheticTranscriptSelfCheck } = await import(
+          "./synthetic-transcript.mjs"
+        );
+        const result = runSyntheticTranscriptSelfCheck();
+        if (!result.ok) {
+          emit?.("provider://synthetic-transcript-schema-drift", {
+            label,
+            from,
+            to,
+            reason: result.reason,
+          });
+          console.warn(
+            `[compact.synthetic.schema_drift] Claude CLI ${from} → ${to}: ${result.reason}`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[compact.synthetic.schema_drift] self-check threw: ${err?.message ?? String(err)}`,
+        );
+      }
+    }
   };
   // Default-on UI surface for scan rejections per #1646. The TS layer
   // subscribes and shows a system notification + records the rejection
