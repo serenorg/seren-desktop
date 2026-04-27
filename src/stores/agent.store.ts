@@ -2902,9 +2902,15 @@ Structured summary:`;
           role: "standby",
         });
         if (!standbyId) {
-          throw new Error(
-            "CompactionFailure: predictive standby spawn returned null",
+          // Predictive warm-up is best-effort — the serving session is still
+          // alive and the user can keep working. Throwing here would route
+          // through the catastrophic catch and surface as a captured support
+          // report; downgrade to a warn so the support pipeline ignores it
+          // and let kickPredictiveCompact's normal flag-reset path run. #152.
+          console.warn(
+            "[AgentStore] Predictive standby spawn returned null — keeping serving session, will retry next turn",
           );
+          return "failed_catastrophic";
         }
         setState("sessions", standbyId, "compactedSummary", compactedSummary);
         setState("sessions", sessionId, "standbySessionId", standbyId);
@@ -2973,6 +2979,24 @@ Structured summary:`;
       }
       return "succeeded";
     } catch (error) {
+      // Predictive warm-up failures are not catastrophic — the serving
+      // session is still alive and the user can keep working. Downgrade the
+      // log so the support pipeline doesn't capture every standby-spawn race
+      // as a public bug report. The reactive path stays catastrophic. #152.
+      if (mode === "predictive") {
+        console.warn(
+          "[AgentStore] Predictive standby compaction failed (non-fatal):",
+          error instanceof Error ? error.message : String(error),
+        );
+        // Clear standbySessionId pointer if it was wired up before the throw
+        // so the next sendPrompt doesn't try to promote a dead standby. The
+        // serving session itself is untouched (isCompacting was never set in
+        // predictive mode, #1673).
+        if (state.sessions[sessionId]?.standbySessionId) {
+          setState("sessions", sessionId, "standbySessionId", null);
+        }
+        return "failed_catastrophic";
+      }
       console.error(
         "[AgentStore] Failed to compact agent conversation (catastrophic):",
         error,
