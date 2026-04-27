@@ -2941,6 +2941,21 @@ Structured summary:`;
         );
       }
 
+      // The new session entry can disappear between spawn return and the
+      // first setState if `provider-runtime://restarted` fires (which drops
+      // every session) or another path calls terminateSession on the same
+      // id. Without this guard the next setState traverses
+      // `state.sessions[newSessionId].compactedSummary` and throws an
+      // unhelpful TypeError "undefined is not an object (evaluating 'e[r]')"
+      // from inside the SolidJS store reconciler — captured as a public
+      // support report. Throw a clean error so the catch block runs the
+      // recovery path with a meaningful message. #150.
+      if (!state.sessions[newSessionId]) {
+        throw new Error(
+          "CompactionFailure: new session was removed before settings could be restored",
+        );
+      }
+
       setState("sessions", newSessionId, "compactedSummary", compactedSummary);
 
       // UI history is decoupled from model context (#1631). The new session
