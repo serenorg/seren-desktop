@@ -104,7 +104,7 @@ interface GatewayResponse<T> {
  */
 const DEFAULT_MODELS: ProviderModel[] = [
   // OpenAI
-  { id: "openai/gpt-5.4", name: "OpenAI GPT 5.4", contextWindow: 1050000 },
+  { id: "openai/gpt-5.5", name: "OpenAI GPT 5.5", contextWindow: 1050000 },
   // Anthropic
   {
     id: "anthropic/claude-opus-4.6",
