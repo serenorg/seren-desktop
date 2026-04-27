@@ -443,6 +443,20 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     )
     .ok();
 
+    // Persisted context-window observations keyed by (provider, model_id).
+    // Populated from CLI prompt-completion metadata so the catalog does not
+    // need to be edited every time a new model ships.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS model_context_cache (
+            provider TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            context_window INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (provider, model_id)
+        )",
+        [],
+    )?;
+
     // Migration: Create default conversation for orphan messages
     migrate_orphan_messages(conn)?;
 

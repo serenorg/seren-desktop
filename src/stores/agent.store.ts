@@ -193,6 +193,10 @@ import {
   bootstrapMemoryContext,
   storeAssistantResponse,
 } from "@/services/memory";
+import {
+  getCachedModelContextWindow,
+  recordModelContextWindow,
+} from "@/services/modelContextCache";
 import type {
   AgentEvent,
   AgentInfo,
@@ -1929,6 +1933,16 @@ export const agentStore = {
         // Create session state
         const hasRestoredMessages =
           opts?.restoredMessages && opts.restoredMessages.length > 0;
+        // Prefer the per-model context window we previously learned from CLI
+        // metadata; fall back to the agent-type default. The first session of a
+        // brand-new model still hits the default for one prompt, then the
+        // promptComplete capture below upserts the real value for next time.
+        const cachedContextWindow = opts?.initialModelId
+          ? await getCachedModelContextWindow(
+              resolvedAgentType,
+              opts.initialModelId,
+            )
+          : null;
         const session: ActiveSession = {
           info,
           messages: opts?.restoredMessages ?? [],
@@ -1947,11 +1961,12 @@ export const agentStore = {
             ? opts?.restoredMessages?.length
             : undefined,
           contextWindowSize:
-            resolvedAgentType === "codex"
+            cachedContextWindow ??
+            (resolvedAgentType === "codex"
               ? 400_000
               : resolvedAgentType === "gemini"
                 ? 1_000_000
-                : 200_000,
+                : 200_000),
           bootstrapPromptContext: finalBootstrapContext,
           pendingPrompts: [],
           role: opts?.role ?? "serving",
@@ -4242,6 +4257,19 @@ Structured summary:`;
               "contextWindowSize",
               reportedContextWindow,
             );
+            // Persist (provider, modelId) -> contextWindow so next spawn of
+            // this model starts with the correct value instead of the
+            // agent-type default. Fire-and-forget; failures are non-fatal.
+            const sess = state.sessions[sessionId];
+            const modelKey = sess?.currentModelId;
+            const provider = sess?.info?.agentType;
+            if (modelKey && provider) {
+              void recordModelContextWindow(
+                provider,
+                modelKey,
+                reportedContextWindow,
+              );
+            }
           }
           if (inputTokens != null) {
             setState("sessions", sessionId, "lastInputTokens", inputTokens);
