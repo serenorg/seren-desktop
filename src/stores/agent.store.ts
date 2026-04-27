@@ -2633,8 +2633,26 @@ export const agentStore = {
 
   /**
    * Terminate a session.
+   *
+   * `opts.nextActiveSessionId` — when supplied and the terminated session was
+   * the active one, the supplied id replaces the default first-remaining-key
+   * fallback. Pass an explicit value (or `null` for "no active session") from
+   * call sites that know where the user should land next, e.g. standby
+   * promotion. #1686.
+   *
+   * `opts.skipProviderKill` — when true, the synchronous state cleanup runs
+   * but the provider-IPC `terminateSession` call (which sends SIGTERM to the
+   * child) is the caller's responsibility. Used by `promoteStandbyAndDispatch`
+   * to defer the kill until the new prompt has been dispatched, so the
+   * SIGTERM cannot race the standby's first turn. #1686.
    */
-  async terminateSession(sessionId: string) {
+  async terminateSession(
+    sessionId: string,
+    opts?: {
+      nextActiveSessionId?: string | null;
+      skipProviderKill?: boolean;
+    },
+  ) {
     const session = state.sessions[sessionId];
     if (!session) return;
 
@@ -2665,10 +2683,12 @@ export const agentStore = {
       );
     }
 
-    try {
-      await providerService.terminateSession(sessionId);
-    } catch (error) {
-      console.error("Failed to terminate session:", error);
+    if (!opts?.skipProviderKill) {
+      try {
+        await providerService.terminateSession(sessionId);
+      } catch (error) {
+        console.error("Failed to terminate session:", error);
+      }
     }
 
     // Clean up ready promise if still pending
@@ -2683,12 +2703,22 @@ export const agentStore = {
       }),
     );
 
-    // Switch to another session if this was active
+    // Switch to another session if this was active. Callers that know which
+    // session should become active (e.g. standby promotion) pass it via
+    // opts.nextActiveSessionId; otherwise fall back to the first remaining
+    // key, which preserves the historical behaviour for ad-hoc terminations.
+    // #1686.
     if (state.activeSessionId === sessionId) {
-      const remainingIds = Object.keys(state.sessions).filter(
-        (id) => id !== sessionId,
-      );
-      setState("activeSessionId", remainingIds[0] ?? null);
+      let next: string | null;
+      if (opts && "nextActiveSessionId" in opts) {
+        next = opts.nextActiveSessionId ?? null;
+      } else {
+        const remainingIds = Object.keys(state.sessions).filter(
+          (id) => id !== sessionId,
+        );
+        next = remainingIds[0] ?? null;
+      }
+      setState("activeSessionId", next);
     }
 
     // Stop global event subscription when no sessions remain.
@@ -3146,12 +3176,34 @@ Structured summary:`;
     setState("sessions", standbyId!, "role", "serving");
     setState("sessions", standbyId!, "seedCompleted", undefined);
 
-    // Clear the serving pointer before terminating so late events from the
-    // old session are fully dropped.
-    await this.terminateSession(servingSessionId);
+    // Make the promoted standby the active session BEFORE the old serving
+    // session is torn down. Without this, terminateSession's auto-pickup
+    // branch lands on the first remaining key (an unrelated session) and the
+    // UI's view of activeSessionId no longer matches the session actually
+    // serving the user's prompt. #1686.
+    setState("activeSessionId", standbyId!);
 
-    // Dispatch on the promoted session.
-    await this.sendPrompt(prompt, context, options, standbyId!);
+    // Two-phase teardown of the old serving session. Phase 1 (synchronous
+    // state cleanup) drops late events from the old child immediately, so
+    // dispatch on the standby is unaffected. Phase 2 (the provider-IPC kill
+    // that sends SIGTERM) is deferred to after sendPrompt resolves so the
+    // SIGTERM cannot race the standby's first turn. #1686.
+    await this.terminateSession(servingSessionId, {
+      nextActiveSessionId: standbyId!,
+      skipProviderKill: true,
+    });
+
+    try {
+      // Dispatch on the promoted session.
+      await this.sendPrompt(prompt, context, options, standbyId!);
+    } finally {
+      // Phase 2: now that dispatch has settled, reap the old child.
+      try {
+        await providerService.terminateSession(servingSessionId);
+      } catch (error) {
+        console.warn("[AgentStore] Deferred provider terminate failed:", error);
+      }
+    }
   },
 
   /**

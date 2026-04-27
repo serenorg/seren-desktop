@@ -54,7 +54,11 @@ describe("#1631 — kickPredictiveCompact + promoteStandbyAndDispatch", () => {
     expect(agentStoreSource).toContain("async promoteStandbyAndDispatch(");
     // serving gets terminated after the transcript transfers to the promoted id.
     expect(agentStoreSource).toContain('setState("sessions", standbyId!, "role", "serving")');
-    expect(agentStoreSource).toContain("await this.terminateSession(servingSessionId)");
+    // The terminate call now passes opts (#1686) — match the call site loosely
+    // so the formatting of the opts object doesn't regress this test.
+    expect(agentStoreSource).toMatch(
+      /await this\.terminateSession\(\s*servingSessionId,\s*\{/,
+    );
   });
 
   it("sendPrompt checks for a ready standby and promotes when present", () => {
