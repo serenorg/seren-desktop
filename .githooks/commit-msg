@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ABOUTME: Local git commit-msg hook — enforces conventional-commit format (#1709).
+# ABOUTME: Opt-in: `git config core.hooksPath .githooks`. See CONTRIBUTING.md.
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+exec "$REPO_ROOT/scripts/check-commit-msg.sh" "$1"
