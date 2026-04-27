@@ -4448,19 +4448,29 @@ Structured summary:`;
         this.handleStatusChange(sessionId, event.data.status, event.data);
         break;
 
-      case "error":
-        // Log full error content for diagnostics (helps debug cascade crashes)
-        console.error(
-          `[AgentStore] Error event for session ${sessionId} (${agentDisplayName(state.sessions[sessionId]?.info.agentType)}):`,
-          event.data.error,
-        );
+      case "error": {
+        // Graceful "Task cancelled" is a system/user-initiated cancel
+        // (predictive-compaction promotion teardown, Stop button, etc.) and
+        // not a defect. Detect it before the diagnostic console.error so
+        // the cancel branch can log strings only — the support hook's
+        // capture filter requires an Error instance / stack-bearing object,
+        // and a plain string skips the public-bug-report path. Mirrors the
+        // RPC-timeout filter from #1699. #1708.
+        const errorMessage = String(event.data.error);
+        const isGracefulCancel = errorMessage.includes("Task cancelled");
+        const errorPrefix = `[AgentStore] Error event for session ${sessionId} (${agentDisplayName(state.sessions[sessionId]?.info.agentType)}):`;
+        if (isGracefulCancel) {
+          console.error(errorPrefix, errorMessage);
+        } else {
+          console.error(errorPrefix, event.data.error);
+        }
 
         // Clean up any in-flight streaming and tool cards
         this.flushPendingUserMessage(sessionId);
         this.finalizeStreamingContent(sessionId);
         this.markPendingToolCallsComplete(sessionId);
 
-        if (String(event.data.error).includes("Task cancelled")) {
+        if (isGracefulCancel) {
           // User-initiated cancellation: record in chat history but don't
           // show the persistent error banner (it's not a real error).
           const cancelMsg: AgentMessage = {
@@ -4626,6 +4636,7 @@ Structured summary:`;
           this.addErrorMessage(sessionId, event.data.error);
         }
         break;
+      }
 
       case "permissionRequest": {
         const permEvent = event.data as PermissionRequestEvent;
