@@ -23,6 +23,23 @@ export const AgentModelSelector: Component<Props> = (props) => {
     return model?.name ?? id;
   };
 
+  // CLI silent-fallback notice (#1678 Option B). Set by the agent store when
+  // the runtime's `message.model` ground truth disagrees with the user's last
+  // explicit selection — surfaces here as an inline warning instead of letting
+  // the picker silently snap back to the actual model.
+  const fallbackNotice = () => props.session?.modelFallbackNotice;
+  const fallbackTitle = () => {
+    const notice = fallbackNotice();
+    if (!notice) return null;
+    const requestedName =
+      availableModels().find((m) => m.modelId === notice.requested)?.name ??
+      notice.requested;
+    const actualName =
+      availableModels().find((m) => m.modelId === notice.actual)?.name ??
+      notice.actual;
+    return `You selected ${requestedName}; the CLI is running ${actualName}. Some Claude Code installs silently fall back when the requested model isn't available.`;
+  };
+
   const handleClickOutside = (event: MouseEvent) => {
     if (dropdownRef && !dropdownRef.contains(event.target as Node)) {
       setIsOpen(false);
@@ -69,6 +86,22 @@ export const AgentModelSelector: Component<Props> = (props) => {
           <span class="font-medium max-w-[120px] truncate">
             {currentModelName() ?? "Model"}
           </span>
+          <Show when={fallbackNotice()}>
+            <svg
+              class="w-3 h-3 text-yellow-500 flex-shrink-0"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+              role="img"
+              aria-label="Model fallback warning"
+            >
+              <title>{fallbackTitle() ?? ""}</title>
+              <path
+                fill-rule="evenodd"
+                d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a1 1 0 011 1v4a1 1 0 11-2 0V6a1 1 0 011-1zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </Show>
           <svg
             class={`w-3 h-3 text-muted-foreground transition-transform ${isOpen() ? "rotate-180" : ""}`}
             fill="none"
