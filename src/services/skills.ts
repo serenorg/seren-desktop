@@ -615,6 +615,15 @@ function publisherToSkill(publisher: Publisher): Skill {
     description: publisher.description,
     source: "seren" as SkillSource,
     sourceUrl: `${apiBase}/publishers/${publisher.slug}/skill.md`,
+    publisherSlug: publisher.slug,
+    publisherSourceUrl: `${apiBase}/publishers/${publisher.slug}/skill.md`,
+    publisherName: publisher.resource_name || publisher.name,
+    publisherDescription: publisher.description,
+    publisherType: publisher.publisher_type,
+    publisherCapabilities: publisher.capabilities ?? [],
+    publisherEndpoints: publisher.endpoints ?? [],
+    publisherApiUrl: publisher.api_url ?? null,
+    publisherMcpEndpoint: publisher.mcp_endpoint ?? null,
     tags,
     author: publisher.name,
   };
@@ -629,13 +638,34 @@ function skillMergeKey(skill: Skill, publisherSlugs: Set<string>): string {
     const publisherSlug = skill.slug.slice("seren-".length);
     if (publisherSlugs.has(publisherSlug)) {
       // seren-skills indexes publisher wrappers as category-prefixed slugs
-      // (e.g. seren/seren-bounty -> seren-seren-bounty). Prefer the live
-      // publisher record when that stable upstream slug is present.
+      // (e.g. seren/seren-bounty -> seren-seren-bounty). Collapse them onto
+      // the live publisher slug, but merge precedence is handled separately.
       return publisherSlug;
     }
   }
 
   return skill.slug;
+}
+
+function mergePublisherMetadata(
+  repoSkill: Skill,
+  publisherSkill: Skill,
+): Skill {
+  return {
+    ...repoSkill,
+    id: `${repoSkill.source}:${publisherSkill.slug}`,
+    slug: publisherSkill.slug,
+    tags: [...new Set([...repoSkill.tags, ...publisherSkill.tags])],
+    publisherSlug: publisherSkill.slug,
+    publisherSourceUrl: publisherSkill.sourceUrl,
+    publisherName: publisherSkill.name,
+    publisherDescription: publisherSkill.description,
+    publisherType: publisherSkill.publisherType,
+    publisherCapabilities: publisherSkill.publisherCapabilities,
+    publisherEndpoints: publisherSkill.publisherEndpoints,
+    publisherApiUrl: publisherSkill.publisherApiUrl,
+    publisherMcpEndpoint: publisherSkill.publisherMcpEndpoint,
+  };
 }
 
 /**
@@ -768,7 +798,9 @@ export const skills = {
       this.fetchPublisherSkills(skipCache),
     ]);
 
-    // Merge skills, with publisher skills taking precedence for duplicates
+    // Merge skills by canonical publisher slug. When a seren-skills wrapper is
+    // present, keep its richer SKILL.md/sourceUrl and attach live publisher
+    // metadata for availability/execution.
     const skillMap = new Map<string, Skill>();
     const publisherSlugs = new Set(publisherSkills.map((skill) => skill.slug));
 
@@ -777,9 +809,17 @@ export const skills = {
       skillMap.set(skillMergeKey(skill, publisherSlugs), skill);
     }
 
-    // Publisher skills override index skills (they're more up-to-date)
+    // Publisher-only skills remain available; repo-backed duplicates keep repo
+    // content while gaining publisher metadata.
     for (const skill of publisherSkills) {
-      skillMap.set(skillMergeKey(skill, publisherSlugs), skill);
+      const mergeKey = skillMergeKey(skill, publisherSlugs);
+      const existingSkill = skillMap.get(mergeKey);
+      skillMap.set(
+        mergeKey,
+        existingSkill?.source === "serenorg"
+          ? mergePublisherMetadata(existingSkill, skill)
+          : skill,
+      );
     }
 
     return Array.from(skillMap.values());

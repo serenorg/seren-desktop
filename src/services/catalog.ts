@@ -2,6 +2,7 @@
 // ABOUTME: Uses generated hey-api SDK for type-safe API calls.
 
 import {
+  type EndpointDefinition,
   getStorePublisher,
   listStorePublishers,
   type PublisherResponse,
@@ -42,6 +43,10 @@ export interface Publisher {
   unique_agents_served: number;
   // Metadata
   categories: string[];
+  capabilities: string[];
+  endpoints: EndpointDefinition[];
+  api_url: string | null;
+  mcp_endpoint: string | null;
   is_verified: boolean;
   is_active: boolean;
 }
@@ -130,6 +135,10 @@ function transformPublisher(raw: RawPublisher): Publisher {
     total_transactions: raw.total_queries || 0,
     unique_agents_served: raw.unique_agents_served || 0,
     categories,
+    capabilities: raw.capabilities ?? [],
+    endpoints: raw.endpoints ?? [],
+    api_url: raw.api_url ?? null,
+    mcp_endpoint: raw.mcp_endpoint ?? null,
     is_verified: raw.is_verified ?? false,
     is_active: raw.is_active ?? true,
   };
@@ -311,6 +320,10 @@ export const catalog = {
       total_transactions: 0,
       unique_agents_served: 0,
       categories: suggestion.capabilities || [],
+      capabilities: suggestion.capabilities || [],
+      endpoints: [],
+      api_url: null,
+      mcp_endpoint: null,
       is_verified: false,
       is_active: true,
     }));

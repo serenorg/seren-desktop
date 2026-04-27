@@ -57,6 +57,35 @@ export interface Skill {
   source: SkillSource;
   /** URL to fetch full SKILL.md content */
   sourceUrl?: string;
+  /**
+   * Live Seren publisher slug attached to a repo-backed skill. This preserves
+   * the richer seren-skills SKILL.md while keeping publisher availability and
+   * execution metadata discoverable.
+   */
+  publisherSlug?: string;
+  /** URL to fetch the live publisher-generated skill.md, when available. */
+  publisherSourceUrl?: string;
+  /** Human-readable publisher name, when attached to a repo-backed skill. */
+  publisherName?: string;
+  /** Live publisher catalog description, when attached to a repo-backed skill. */
+  publisherDescription?: string;
+  /** Publisher integration type, used to understand execution mode. */
+  publisherType?: string;
+  /** Publisher-declared capabilities for task matching and availability. */
+  publisherCapabilities?: string[];
+  /** Publisher endpoint definitions for live execution/discovery. */
+  publisherEndpoints?: Array<{
+    method: string;
+    path: string;
+    description?: string | null;
+    access?: string;
+    is_default?: boolean;
+    is_protected?: boolean;
+  }>;
+  /** External API URL for API publishers, when exposed by the catalog. */
+  publisherApiUrl?: string | null;
+  /** MCP endpoint URL for MCP publishers, when exposed by the catalog. */
+  publisherMcpEndpoint?: string | null;
   /** Tags for categorization and filtering */
   tags: string[];
   /** Author name or organization */

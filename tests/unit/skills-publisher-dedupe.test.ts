@@ -1,5 +1,5 @@
 // ABOUTME: Regression coverage for live publisher-backed skill de-duplication.
-// ABOUTME: Ensures seren-skills wrappers do not duplicate live publisher records.
+// ABOUTME: Ensures wrappers keep repo content while retaining publisher metadata.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,7 +51,7 @@ describe("skills.fetchAllSkills publisher-backed de-dupe", () => {
     installLocalStorageMock();
   });
 
-  it("prefers the live publisher skill over the seren-skills wrapper", async () => {
+  it("canonicalizes publisher wrappers but preserves seren-skills content", async () => {
     mockAppFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -80,6 +80,15 @@ describe("skills.fetchAllSkills publisher-backed de-dupe", () => {
         description: "Live publisher-backed bounty protocol",
         publisher_type: "mcp",
         categories: ["bounties"],
+        capabilities: ["bounty-creation"],
+        endpoints: [
+          {
+            method: "POST",
+            path: "/events/ingest",
+            description: "Ingest bounty protocol events",
+          },
+        ],
+        mcp_endpoint: "https://api.example.com/mcp",
         is_active: true,
       },
       {
@@ -103,9 +112,29 @@ describe("skills.fetchAllSkills publisher-backed de-dupe", () => {
     ]);
     expect(allSkills.find((skill) => skill.slug === "seren-bounty")).toMatchObject(
       {
-        source: "seren",
-        description: "Live publisher-backed bounty protocol",
+        id: "serenorg:seren-bounty",
+        source: "serenorg",
+        sourceUrl:
+          "https://raw.githubusercontent.com/serenorg/seren-skills/main/seren/seren-bounty/SKILL.md",
+        description: "Repo wrapper for SerenBounty",
+        publisherSlug: "seren-bounty",
+        publisherName: "SerenBounty",
+        publisherDescription: "Live publisher-backed bounty protocol",
+        publisherType: "mcp",
+        publisherCapabilities: ["bounty-creation"],
+        publisherEndpoints: [
+          {
+            method: "POST",
+            path: "/events/ingest",
+            description: "Ingest bounty protocol events",
+          },
+        ],
+        publisherMcpEndpoint: "https://api.example.com/mcp",
       },
     );
+    expect(
+      allSkills.find((skill) => skill.slug === "seren-bounty")
+        ?.publisherSourceUrl,
+    ).toContain("/publishers/seren-bounty/skill.md");
   });
 });
