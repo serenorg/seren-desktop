@@ -2225,16 +2225,29 @@ export const agentStore = {
 
         return info.id;
       } catch (error) {
-        console.error(
-          `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`,
-          error,
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        // Runtime RPC timeouts surface when the embedded provider-runtime is
+        // unresponsive — the Rust runtime monitor will restart it and the
+        // `provider-runtime://restarted` listener re-dispatches the in-flight
+        // turn. This is a transient runtime-layer failure, not a code defect
+        // the user can act on; pass strings (no Error) to console.error so
+        // the support pipeline doesn't capture it as a public bug report.
+        // #151.
+        if (message.includes("Runtime RPC timed out")) {
+          console.error(
+            `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}) — runtime unresponsive: ${message}`,
+          );
+        } else {
+          console.error(
+            `[AgentStore] Spawn error (${agentDisplayName(resolvedAgentType)}):`,
+            error,
+          );
+        }
         // Mark as terminated so the global event subscriber drops any
         // late-arriving events from this dead session. Without this,
         // stale errors leak into retried sessions that reuse the same ID.
         terminatedSessionIds.add(spawnKey);
         tempUnsubscribe();
-        const message = error instanceof Error ? error.message : String(error);
         setState("error", message);
         setState("isLoading", false);
         return null;
