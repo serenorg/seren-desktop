@@ -47,7 +47,7 @@ async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 jiff = { version = "0.2", features = ["serde"] }
 thiserror = "2"
-alloy = { version = "1", default-features = false, features = ["signers", "signer-local", "sol-types"] }
+alloy = { version = "2", default-features = false, features = ["signers", "signer-local", "sol-types"] }
 hex = "0.4"
 hmac = "0.12"
 rand = "0.10"
