@@ -1378,6 +1378,23 @@ export function createProviderHandlers({ emit }) {
     );
   }
 
+  async function buildSyntheticTranscript({
+    sessionId,
+    summaryText,
+    preserveCount,
+  }) {
+    if (!claudeRuntime.hasSession(sessionId)) {
+      throw new Error(
+        "Synthetic-transcript pre-warm is only supported for Claude sessions.",
+      );
+    }
+    return claudeRuntime.buildSyntheticTranscript({
+      sessionId,
+      summaryText,
+      preserveCount,
+    });
+  }
+
   async function setSessionModel({ sessionId, modelId }) {
     const session = sessions.get(sessionId);
     if (!session) {
@@ -1457,6 +1474,7 @@ export function createProviderHandlers({ emit }) {
     launchLogin,
     listRemoteSessions,
     nativeForkSession,
+    buildSyntheticTranscript,
     setSessionModel,
     setSessionMode,
     updateSessionConfigOption,

@@ -55,6 +55,15 @@ export interface Settings {
   autoCompactEnabled: boolean;
   autoCompactThreshold: number;
   autoCompactPreserveMessages: number;
+  /**
+   * Use synthetic-transcript pre-warm for predictive standby promotion (#1713).
+   * When true, the standby's prior assistant turn is the real prior assistant
+   * turn rather than a seed acknowledgement, so referential follow-ups
+   * ("This is done.", "yes") resolve correctly. Falls back to the seed-prompt
+   * path if the CLI rejects the synthetic file or schema-drift is detected.
+   * Off at first ship; flipped on after schema-drift gate proves stable.
+   */
+  compactSyntheticTranscript: boolean;
 
   // Editor settings
   editorFontSize: number;
@@ -188,6 +197,7 @@ const DEFAULT_SETTINGS: Settings = {
   autoCompactEnabled: true,
   autoCompactThreshold: 85,
   autoCompactPreserveMessages: 10,
+  compactSyntheticTranscript: false,
   // Editor
   editorFontSize: 14,
   editorTabSize: 2,

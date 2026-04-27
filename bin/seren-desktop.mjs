@@ -271,6 +271,10 @@ function registerBrowserLocalHandlers() {
     providerHandlers.nativeForkSession,
   );
   registerHandler(
+    "provider_build_synthetic_transcript",
+    providerHandlers.buildSyntheticTranscript,
+  );
+  registerHandler(
     "provider_set_session_model",
     providerHandlers.setSessionModel,
   );

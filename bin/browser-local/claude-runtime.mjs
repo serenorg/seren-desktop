@@ -17,6 +17,7 @@ import {
 } from "./effort.mjs";
 import { updatePeakInputTokens } from "./usage.mjs";
 import { chooseUpdatedModelId, inferCurrentModelId } from "./model-resolution.mjs";
+import { buildSyntheticTranscript as writeSyntheticJsonl } from "./synthetic-transcript.mjs";
 
 /**
  * Resolve the full path to the `claude` binary.
@@ -1924,6 +1925,49 @@ export function createClaudeRuntime({ emit }) {
     }
   }
 
+  async function buildSyntheticTranscript({
+    sessionId,
+    summaryText,
+    preserveCount,
+  }) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    const sourceAgentSessionId = session.agentSessionId;
+    if (!sourceAgentSessionId) {
+      throw new Error(
+        "Claude session does not have a resumable session id yet.",
+      );
+    }
+    const parentJsonlPath = await findSessionJsonlPath(
+      session.cwd,
+      sourceAgentSessionId,
+    );
+    if (!parentJsonlPath) {
+      throw new Error(
+        `Parent JSONL transcript not found: ${sourceAgentSessionId}`,
+      );
+    }
+
+    const syntheticSessionId = randomUUID();
+    const outputJsonlPath = path.join(
+      claudeProjectsRoot(),
+      encodeProjectDirName(session.cwd),
+      `${syntheticSessionId}.jsonl`,
+    );
+
+    await writeSyntheticJsonl({
+      parentJsonlPath,
+      outputJsonlPath,
+      summaryText,
+      preserveCount,
+      syntheticSessionId,
+    });
+
+    return syntheticSessionId;
+  }
+
   return {
     hasSession(sessionId) {
       return sessions.has(sessionId);
@@ -1939,5 +1983,6 @@ export function createClaudeRuntime({ emit }) {
     setModel,
     setConfigOption,
     forkSession,
+    buildSyntheticTranscript,
   };
 }
