@@ -2258,9 +2258,12 @@ export const agentStore = {
     conversationId: string,
     cwd?: string,
   ): Promise<string | null> {
-    // If already running, just focus it.
-    if (state.sessions[conversationId]) {
-      setState("activeSessionId", conversationId);
+    // If already running, just focus it. Use the conversationId-aware helper
+    // — state.sessions is keyed by sessionId, and after a predictive-compaction
+    // promotion the running session id no longer matches the conversation. #1682.
+    const existing = this.getSessionForConversation(conversationId);
+    if (existing) {
+      setState("activeSessionId", existing.info.id);
       return conversationId;
     }
 
@@ -5198,7 +5201,10 @@ Structured summary:`;
     conversationId: string,
     fromMessageId: string,
   ): Promise<string | null> {
-    const session = state.sessions[conversationId];
+    // state.sessions is keyed by runtime sessionId, which only matches the
+    // conversationId on cold-start. After a predictive-compaction promotion
+    // the two diverge — fork must resolve via the conversationId field. #1682.
+    const session = this.getSessionForConversation(conversationId);
     if (!session) {
       console.error("[AgentStore] forkConversation: session not found");
       return null;
@@ -5224,15 +5230,16 @@ Structured summary:`;
 
     if (useNativeFork) {
       try {
-        newAgentSessionId =
-          await providerService.nativeForkSession(conversationId);
+        newAgentSessionId = await providerService.nativeForkSession(
+          session.info.id,
+        );
       } catch (err) {
         console.error(
           "[AgentStore] forkConversation: native fork failed:",
           err,
         );
         this.addErrorMessage(
-          conversationId,
+          session.info.id,
           `Fork failed: ${err instanceof Error ? err.message : String(err)}`,
         );
         return null;
