@@ -22,21 +22,27 @@ describe("#1639 — auto-compact auth gate", () => {
     );
   });
 
-  it("checks authStore.isAuthenticated before calling compactAgentConversation", () => {
+  it("checks authStore.isAuthenticated before kicking predictive compaction", () => {
+    // Post-#1716: the auto-compact branch routes through
+    // `this.kickPredictiveCompact(sessionId)` instead of calling
+    // `compactAgentConversation` directly. The auth gate must still
+    // dominate the kick — otherwise an unauthenticated user at >=85%
+    // usage triggers a Sonnet-4 summary call that will fail at the
+    // gateway and burn telemetry.
     const authCheck = "if (!authStore.isAuthenticated)";
-    const compactCall = "this.compactAgentConversation(";
-    const authCheckIdx = agentStoreSource.indexOf(authCheck);
-    expect(authCheckIdx, "auth check must exist").toBeGreaterThan(0);
-
-    // The auth check must appear before the compact call in the auto-compact block
+    const kickCall = "this.kickPredictiveCompact(sessionId)";
     const autoCompactAnchor = "Auto-compact check runs BEFORE drain (#1623)";
     const autoCompactIdx = agentStoreSource.indexOf(autoCompactAnchor);
+    expect(autoCompactIdx, "auto-compact anchor must exist").toBeGreaterThan(
+      0,
+    );
+
     const authCheckAfterAnchor = agentStoreSource.indexOf(
       authCheck,
       autoCompactIdx,
     );
-    const compactCallAfterAnchor = agentStoreSource.indexOf(
-      compactCall,
+    const kickCallAfterAnchor = agentStoreSource.indexOf(
+      kickCall,
       autoCompactIdx,
     );
     expect(
@@ -44,9 +50,13 @@ describe("#1639 — auto-compact auth gate", () => {
       "auth check must appear after auto-compact anchor",
     ).toBeGreaterThan(autoCompactIdx);
     expect(
+      kickCallAfterAnchor,
+      "auto-compact branch must call kickPredictiveCompact",
+    ).toBeGreaterThan(autoCompactIdx);
+    expect(
       authCheckAfterAnchor,
-      "auth check must appear before compactAgentConversation call",
-    ).toBeLessThan(compactCallAfterAnchor);
+      "auth check must appear before kickPredictiveCompact call",
+    ).toBeLessThan(kickCallAfterAnchor);
   });
 
   it("calls requestSignInModal() when auth check fails in auto-compact path (#1661 — was promptLogin, now real modal)", () => {

@@ -4431,22 +4431,24 @@ Structured summary:`;
                 // we just declined to compact. Show the modal.
                 requestSignInModal();
               } else {
-                // Explicit undefined for pendingUserPrompt: the prompt that
-                // just produced this promptComplete already succeeded, so we
-                // do NOT retry it — retrying would duplicate the turn. Queued
-                // prompts handled via pendingPrompts transfer inside compaction.
                 // Predictive mode (#1675): spawn a standby alongside the live
                 // serving session instead of tearing it down. The next user
                 // submit promotes the standby; the chatbox stays mounted so
                 // there is no flash. The standby-not-ready fallback in
                 // sendPrompt handles the race when the user submits before
                 // the seed completes.
-                this.compactAgentConversation(
-                  sessionId,
-                  settingsStore.settings.autoCompactPreserveMessages,
-                  undefined,
-                  { mode: "predictive" },
-                );
+                //
+                // #1716: route through `kickPredictiveCompact` rather than
+                // calling `compactAgentConversation` directly. The helper
+                // flips `predictiveCompactBusy` and `predictiveCompactInFlight`
+                // synchronously before the first await, so the 70% predictive
+                // block below short-circuits on the same `promptComplete`.
+                // Calling `compactAgentConversation` directly bypassed both
+                // flags and let the 70% block kick a second concurrent
+                // standby that orphaned the first. Queued prompts and
+                // pendingUserPrompt handling already live inside
+                // `kickPredictiveCompact` -> `compactAgentConversation`.
+                void this.kickPredictiveCompact(sessionId);
               }
             }
           }
