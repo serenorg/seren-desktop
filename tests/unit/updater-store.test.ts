@@ -1,7 +1,7 @@
 // ABOUTME: Tests the updater install sequence around browsing-data clearing.
 // ABOUTME: Verifies updates clear the current webview cache before restart without blocking relaunch.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   mockStoreState,
@@ -62,6 +62,13 @@ describe("updaterStore install flow", () => {
     relaunchMock.mockReset();
     clearAllBrowsingDataMock.mockReset();
     captureErrorMock.mockReset();
+    // Vitest sets import.meta.env.DEV=true; the prod-only code paths under
+    // test would otherwise short-circuit through isDevRuntime().
+    vi.stubEnv("DEV", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("clears browsing data before relaunching an installed update", async () => {
@@ -85,6 +92,37 @@ describe("updaterStore install flow", () => {
     expect(clearAllBrowsingDataMock.mock.invocationCallOrder[0]).toBeLessThan(
       relaunchMock.mock.invocationCallOrder[0],
     );
+  });
+
+  it("initUpdater silently installs an available update on startup (#1720)", async () => {
+    isTauriRuntimeMock.mockReturnValue(true);
+    const downloadAndInstallMock = vi.fn(async () => {});
+    checkMock.mockResolvedValue({
+      version: "1.3.53",
+      downloadAndInstall: downloadAndInstallMock,
+    });
+    clearAllBrowsingDataMock.mockResolvedValue(undefined);
+    relaunchMock.mockResolvedValue(undefined);
+
+    const { updaterStore } = await import("@/stores/updater.store");
+
+    await updaterStore.initUpdater();
+
+    expect(downloadAndInstallMock).toHaveBeenCalledOnce();
+    expect(relaunchMock).toHaveBeenCalledOnce();
+  });
+
+  it("initUpdater does not install when no update is available (#1720)", async () => {
+    isTauriRuntimeMock.mockReturnValue(true);
+    const downloadAndInstallMock = vi.fn(async () => {});
+    checkMock.mockResolvedValue(null);
+
+    const { updaterStore } = await import("@/stores/updater.store");
+
+    await updaterStore.initUpdater();
+
+    expect(downloadAndInstallMock).not.toHaveBeenCalled();
+    expect(relaunchMock).not.toHaveBeenCalled();
   });
 
   it("still relaunches if browsing-data clearing fails", async () => {

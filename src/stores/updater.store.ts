@@ -70,6 +70,13 @@ async function initUpdater(): Promise<void> {
 
   await checkForUpdates();
 
+  // Auto-install on startup only (#1720). Mid-session interval re-checks keep
+  // today's manual-pill behavior so the user is not forced to restart while
+  // working.
+  if (state.status === "available") {
+    await installAvailableUpdate();
+  }
+
   // Re-check every 15 minutes so the badge appears without requiring a restart
   setInterval(() => {
     if (state.status !== "downloading" && state.status !== "installing") {
