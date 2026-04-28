@@ -4,6 +4,7 @@
 import { MCP_GATEWAY_URL } from "@/lib/config";
 import { mcpClient } from "@/lib/mcp/client";
 import type { McpTool, McpToolResult } from "@/lib/mcp/types";
+import { captureSupportError } from "@/lib/support/hook";
 import { getSerenApiKey } from "@/lib/tauri-bridge";
 
 const SEREN_MCP_SERVER_NAME = "seren-gateway";
@@ -145,10 +146,12 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
   );
 
   if (pubResult.isError || !pubResult.content) {
-    console.warn(
-      "[MCP Gateway] list_agent_publishers returned error/empty content",
-      { isError: pubResult.isError, hasContent: !!pubResult.content },
-    );
+    const message = `list_agent_publishers returned error/empty content (isError=${!!pubResult.isError}, hasContent=${!!pubResult.content})`;
+    console.warn(`[MCP Gateway] ${message}`);
+    void captureSupportError({
+      kind: "McpGatewayPublisherListFailure",
+      message,
+    });
     return [];
   }
 
@@ -166,15 +169,22 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
         .map((p: { slug?: string; name?: string }) => p.slug ?? p.name)
         .filter(Boolean);
     } else {
-      console.warn(
-        "[MCP Gateway] list_agent_publishers returned no text content",
-      );
+      const message =
+        "list_agent_publishers returned no text content in response";
+      console.warn(`[MCP Gateway] ${message}`);
+      void captureSupportError({
+        kind: "McpGatewayPublisherListFailure",
+        message,
+      });
     }
   } catch (err) {
-    console.warn(
-      "[MCP Gateway] failed to parse list_agent_publishers response",
-      err,
-    );
+    const message = `failed to parse list_agent_publishers response: ${err instanceof Error ? err.message : String(err)}`;
+    console.warn(`[MCP Gateway] ${message}`);
+    void captureSupportError({
+      kind: "McpGatewayPublisherListParseFailure",
+      message,
+      stack: err instanceof Error && err.stack ? [err.stack] : undefined,
+    });
     return [];
   }
 
@@ -219,10 +229,13 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
         const parsed = JSON.parse(textContent);
         tools = parsed.tools ?? parsed ?? [];
       } catch (err) {
-        console.warn(
-          `[MCP Gateway] failed to parse list_mcp_tools(${slug}) response`,
-          err,
-        );
+        const message = `failed to parse list_mcp_tools(${slug}) response: ${err instanceof Error ? err.message : String(err)}`;
+        console.warn(`[MCP Gateway] ${message}`);
+        void captureSupportError({
+          kind: "McpGatewayPublisherToolsParseFailure",
+          message,
+          stack: err instanceof Error && err.stack ? [err.stack] : undefined,
+        });
         return [];
       }
 
