@@ -144,7 +144,13 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
     { name: "list_agent_publishers", arguments: {} },
   );
 
-  if (pubResult.isError || !pubResult.content) return [];
+  if (pubResult.isError || !pubResult.content) {
+    console.warn(
+      "[MCP Gateway] list_agent_publishers returned error/empty content",
+      { isError: pubResult.isError, hasContent: !!pubResult.content },
+    );
+    return [];
+  }
 
   let publisherSlugs: string[] = [];
   try {
@@ -159,12 +165,23 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
       publisherSlugs = pubs
         .map((p: { slug?: string; name?: string }) => p.slug ?? p.name)
         .filter(Boolean);
+    } else {
+      console.warn(
+        "[MCP Gateway] list_agent_publishers returned no text content",
+      );
     }
-  } catch {
+  } catch (err) {
+    console.warn(
+      "[MCP Gateway] failed to parse list_agent_publishers response",
+      err,
+    );
     return [];
   }
 
-  if (publisherSlugs.length === 0) return [];
+  if (publisherSlugs.length === 0) {
+    console.warn("[MCP Gateway] list_agent_publishers returned 0 publishers");
+    return [];
+  }
 
   // Cache the full publisher list — this is the canonical source of callable
   // publishers, regardless of whether they expose first-class MCP tools.
@@ -178,7 +195,13 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
         SEREN_MCP_SERVER_NAME,
         { name: "list_mcp_tools", arguments: { publisher: slug } },
       );
-      if (toolResult.isError || !toolResult.content) return [];
+      if (toolResult.isError || !toolResult.content) {
+        console.warn(
+          `[MCP Gateway] list_mcp_tools(${slug}) returned error/empty content`,
+          { isError: toolResult.isError, hasContent: !!toolResult.content },
+        );
+        return [];
+      }
 
       const contentArray = toolResult.content as Array<{
         type: string;
@@ -195,7 +218,11 @@ async function discoverPublisherTools(): Promise<GatewayTool[]> {
       try {
         const parsed = JSON.parse(textContent);
         tools = parsed.tools ?? parsed ?? [];
-      } catch {
+      } catch (err) {
+        console.warn(
+          `[MCP Gateway] failed to parse list_mcp_tools(${slug}) response`,
+          err,
+        );
         return [];
       }
 
