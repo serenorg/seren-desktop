@@ -1096,10 +1096,19 @@ function handleAssistantMessage(emit, session, payload) {
   // set_model control request that the CLI ignores (or that falls back to
   // a different model upstream) leaves the UI showing a model the session
   // isn't actually running. See #1635.
+  const previousModelId = session.currentModelId;
   const nextModelId = chooseUpdatedModelId(
-    session.currentModelId,
+    previousModelId,
     message.model,
     session.availableModelRecords,
+  );
+  // Trace every resolution — both the changing path and the steady-state — so
+  // when the picker disagrees with the assistant's self-report (#1718) we can
+  // read message.model directly from the log instead of guessing. The line
+  // ends up in `~/Library/Logs/com.serendb.desktop/SerenDesktop.log` via the
+  // ProviderRuntime stderr bridge.
+  console.warn(
+    `[browser-local][claude] chooseUpdatedModelId: previous=${previousModelId ?? "<unset>"}, incoming=${message.model ?? "<missing>"}, resolved=${nextModelId ?? "<null>"}`,
   );
   if (nextModelId != null && nextModelId !== session.currentModelId) {
     session.currentModelId = nextModelId;
@@ -1783,13 +1792,26 @@ export function createClaudeRuntime({ emit }) {
       );
     }
 
-    await sendControlRequest(
+    const setModelResponse = await sendControlRequest(
       session,
       {
         subtype: "set_model",
         model: modelId,
       },
       10_000,
+    );
+    // Log the raw control response so silent CLI fallbacks (some control
+    // APIs return an "actual model used" field that disagrees with the
+    // request) become visible. Stringification is bounded to keep the log
+    // line under a sane size. #1718.
+    let responseSummary;
+    try {
+      responseSummary = JSON.stringify(setModelResponse).slice(0, 500);
+    } catch {
+      responseSummary = "<unserializable>";
+    }
+    console.warn(
+      `[browser-local][claude] setModel ack: requested=${modelId}, response=${responseSummary}`,
     );
 
     session.currentModelId = targetModel?.modelId ?? modelId;
