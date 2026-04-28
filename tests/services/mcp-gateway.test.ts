@@ -3,11 +3,23 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock tauri-bridge to avoid localStorage dependency in Node
+// Mock tauri-bridge to avoid localStorage dependency in Node.
 vi.mock("@/lib/tauri-bridge", () => ({
   getSerenApiKey: vi.fn().mockResolvedValue("test-api-key"),
   clearSerenApiKey: vi.fn().mockResolvedValue(undefined),
   isTauri: vi.fn().mockReturnValue(false),
+  isTauriRuntime: vi.fn().mockReturnValue(false),
+}));
+
+// Mock the support pipeline so captureSupportError is a no-op. Otherwise
+// fire-and-forget `void captureSupportError(...)` promises in
+// discoverPublisherTools resolve after the test finishes and surface as
+// unhandled rejections — which CI treats as failures even when the test
+// itself passes.
+vi.mock("@/lib/support/hook", () => ({
+  captureSupportError: vi.fn().mockResolvedValue(undefined),
+  captureUnknownError: vi.fn(),
+  appendSupportLog: vi.fn(),
 }));
 
 // Mock MCP OAuth
@@ -41,8 +53,10 @@ vi.mock("@/lib/mcp/client", () => ({
         },
       ],
     }),
+    // Valid JSON so discoverPublisherTools' parse step succeeds and the
+    // legitimate "0 publishers" branch runs (no captureSupportError fires).
     callToolHttp: vi.fn().mockResolvedValue({
-      content: [{ type: "text", text: "result" }],
+      content: [{ type: "text", text: '{"publishers":[]}' }],
       isError: false,
     }),
   },
