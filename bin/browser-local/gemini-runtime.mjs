@@ -988,6 +988,14 @@ export function createGeminiRuntime({ emit }) {
     }
     session.currentModelId = modelId;
     emit("provider://session-status", buildSessionStatus(session));
+    // Phase 1 limitation: Gemini's --model flag is set at spawn time. The
+    // running gemini-cli process keeps its spawn-time model regardless of
+    // this assignment; the picker change only takes effect on the next
+    // session spawn. Surface this so the user can see the disconnect in
+    // logs instead of silently sending prompts to the wrong model. #1718.
+    console.warn(
+      `[browser-local][gemini] setModel: ${modelId} stored as session intent — no-op against the running CLI process (Gemini --model is fixed at spawn time). The next session spawn will use this model.`,
+    );
   }
 
   return {

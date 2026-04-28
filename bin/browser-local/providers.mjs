@@ -1042,11 +1042,26 @@ export function createProviderHandlers({ emit }) {
         threadResult?.threadId ??
         session.agentSessionId;
       session.codexVersion = threadResult?.thread?.cliVersion ?? session.codexVersion;
-      session.currentModelId =
-        threadResult?.model ??
+      const requestedModelId =
         getSelectedModelRecord(session)?.modelId ??
         session.availableModelRecords[0]?.modelId ??
         null;
+      const servedModelId = threadResult?.model ?? null;
+      // Codex's only place where a CLI silent fallback can surface is the
+      // thread/start (or thread/resume) response — message.model is not
+      // emitted by the codex stream the way Anthropic's is. Log when the
+      // CLI hands us back a different model than we requested. #1718.
+      if (
+        servedModelId &&
+        requestedModelId &&
+        servedModelId !== requestedModelId
+      ) {
+        console.warn(
+          `[browser-local][codex] threadResult.model: requested=${requestedModelId}, served=${servedModelId}`,
+        );
+      }
+      session.currentModelId =
+        servedModelId ?? requestedModelId ?? null;
       session.reasoningEffort =
         threadResult?.reasoningEffort ??
         getSelectedModelRecord(session)?.defaultReasoningEffort ??
