@@ -10,15 +10,53 @@ const agentStoreSource = readFileSync(
   "utf-8",
 );
 
-describe("#1675 — auto-compact-from-promptComplete uses predictive mode", () => {
-  it("passes { mode: \"predictive\" } so the chatbox stays mounted", () => {
-    // The flash regression: if this call defaults to reactive, terminateSession
-    // deletes the active session, hasSession() flips to false, and
-    // <Show when={hasSession()}> unmounts the input area until the new session
-    // registers. Predictive mode warms a standby alongside the live session
-    // and promotes it on the NEXT user submit — no teardown, no flash.
-    expect(agentStoreSource).toContain(
-      "settingsStore.settings.autoCompactPreserveMessages,\n                  undefined,\n                  { mode: \"predictive\" },",
+describe("#1675 / #1716 — auto-compact-from-promptComplete uses predictive mode", () => {
+  it("routes through kickPredictiveCompact so the chatbox stays mounted (#1675) AND the predictive mutex is set before the first await (#1716)", () => {
+    // The flash regression (#1675): if compaction defaults to reactive,
+    // terminateSession deletes the active session, hasSession() flips to
+    // false, and <Show when={hasSession()}> unmounts the input area until
+    // the new session registers. Predictive mode warms a standby alongside
+    // the live session and promotes it on the NEXT user submit.
+    //
+    // The duplicate-spawn regression (#1716): calling compactAgentConversation
+    // directly bypasses `kickPredictiveCompact`, which is the only caller
+    // that flips `predictiveCompactBusy` / `predictiveCompactInFlight`
+    // synchronously before the first await. The 70% predictive block that
+    // runs immediately after in the same promptComplete handler then sees
+    // clean guards and spawns a SECOND standby, orphaning the first.
+    //
+    // Routing through `kickPredictiveCompact` (which itself uses predictive
+    // mode internally) fixes both at once.
+    const autoCompactAnchor = "Auto-compact check runs BEFORE drain (#1623)";
+    const drainAnchor = "Drain the prompt queue for this session";
+    const autoCompactIdx = agentStoreSource.indexOf(autoCompactAnchor);
+    const drainIdx = agentStoreSource.indexOf(drainAnchor);
+    expect(autoCompactIdx, "auto-compact anchor must exist").toBeGreaterThan(0);
+    expect(drainIdx, "drain anchor must exist").toBeGreaterThan(autoCompactIdx);
+    const block = agentStoreSource.slice(autoCompactIdx, drainIdx);
+
+    // The auto-compact branch must call kickPredictiveCompact, NOT
+    // compactAgentConversation directly.
+    expect(block).toContain("this.kickPredictiveCompact(sessionId)");
+    expect(block).not.toMatch(
+      /this\.compactAgentConversation\(\s*sessionId,\s*settingsStore\.settings\.autoCompactPreserveMessages/,
+    );
+  });
+
+  it("kickPredictiveCompact still drives compactAgentConversation in predictive mode", () => {
+    // Belt-and-suspenders: the call site changed from a direct invocation
+    // to the mutexed helper, but the helper itself must still pass
+    // `mode: "predictive"` — otherwise the chatbox flash regression
+    // returns even though the duplicate-spawn race is fixed.
+    const helperStart = agentStoreSource.indexOf(
+      "async kickPredictiveCompact(",
+    );
+    expect(helperStart, "kickPredictiveCompact must exist").toBeGreaterThan(0);
+    const helperEnd = agentStoreSource.indexOf("\n  },", helperStart);
+    const helperBody = agentStoreSource.slice(helperStart, helperEnd);
+    expect(helperBody).toContain('mode: "predictive"');
+    expect(helperBody).toContain(
+      "settingsStore.settings.autoCompactPreserveMessages",
     );
   });
 });

@@ -50,6 +50,65 @@ describe("#1631 — kickPredictiveCompact + promoteStandbyAndDispatch", () => {
     expect(agentStoreSource).toContain("if (predictiveCompactBusy) return");
   });
 
+  it("#1716 — sets predictiveCompactBusy + predictiveCompactInFlight synchronously before the first await", () => {
+    // The duplicate-spawn race (#1716) was: the 85% auto-compact branch
+    // called compactAgentConversation directly, so the global mutex
+    // (`predictiveCompactBusy`) and per-session flag
+    // (`predictiveCompactInFlight`) stayed false until well after the
+    // first `await` (the Sonnet-4 summary call). The 70% predictive block
+    // that ran on the same `promptComplete` event then saw clean guards
+    // and kicked a SECOND standby — orphaning the first.
+    //
+    // The fix routes the 85% branch through `kickPredictiveCompact`,
+    // which is the only caller that flips both flags synchronously
+    // before any `await`. Guard against a regression that pushes the
+    // flag flip after an `await` (which would re-open the race).
+    const fnStart = agentStoreSource.indexOf("async kickPredictiveCompact(");
+    expect(fnStart, "kickPredictiveCompact must exist").toBeGreaterThan(0);
+    const fnEnd = agentStoreSource.indexOf("\n  },", fnStart);
+    const fnBody = agentStoreSource.slice(fnStart, fnEnd);
+
+    const busyFlipIdx = fnBody.indexOf("predictiveCompactBusy = true");
+    const inFlightFlipIdx = fnBody.indexOf(
+      'setState("sessions", sessionId, "predictiveCompactInFlight", true)',
+    );
+    const firstAwaitIdx = fnBody.indexOf("await ");
+
+    expect(busyFlipIdx, "predictiveCompactBusy must be flipped true").toBeGreaterThan(
+      0,
+    );
+    expect(
+      inFlightFlipIdx,
+      "predictiveCompactInFlight must be flipped true",
+    ).toBeGreaterThan(0);
+    expect(firstAwaitIdx, "first await must exist").toBeGreaterThan(0);
+    expect(
+      busyFlipIdx,
+      "predictiveCompactBusy must flip BEFORE the first await",
+    ).toBeLessThan(firstAwaitIdx);
+    expect(
+      inFlightFlipIdx,
+      "predictiveCompactInFlight must flip BEFORE the first await",
+    ).toBeLessThan(firstAwaitIdx);
+  });
+
+  it("#1716 — 85% auto-compact branch and 70% predictive branch both gate on the same per-session flag", () => {
+    // Without this contract the orphan-standby race returns: the 85%
+    // branch could route through kickPredictiveCompact while the 70%
+    // branch still gates on something else, and a third concurrent path
+    // would be created. Both branches must observe predictiveCompactInFlight.
+    const promptCompleteAnchor = "Predictive compaction — warm a replacement";
+    const promptCompleteIdx = agentStoreSource.indexOf(promptCompleteAnchor);
+    expect(promptCompleteIdx).toBeGreaterThan(0);
+    const block = agentStoreSource.slice(
+      promptCompleteIdx,
+      promptCompleteIdx + 1000,
+    );
+    expect(block).toContain("!sess.predictiveCompactInFlight");
+    expect(block).toContain("PREDICTIVE_COMPACT_THRESHOLD");
+    expect(block).toContain("this.kickPredictiveCompact(sessionId)");
+  });
+
   it("promoteStandbyAndDispatch swaps serving/standby at turn boundary", () => {
     expect(agentStoreSource).toContain("async promoteStandbyAndDispatch(");
     // serving gets terminated after the transcript transfers to the promoted id.

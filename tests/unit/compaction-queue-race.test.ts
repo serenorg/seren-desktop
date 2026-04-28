@@ -60,11 +60,35 @@ describe("#1623 — compactAgentConversation transfers pendingPrompts to new ses
     );
   });
 
-  it("auto-compact-from-promptComplete passes undefined for pendingUserPrompt", () => {
+  it("auto-compact-from-promptComplete does not retry the just-completed prompt (#1716 routes via kickPredictiveCompact)", () => {
     // The prompt that produced this promptComplete already succeeded — we
     // MUST NOT retry it or the user sees a duplicate turn.
-    expect(agentStoreSource).toContain(
-      "settingsStore.settings.autoCompactPreserveMessages,\n                  undefined,",
+    //
+    // Post-#1716, the auto-compact branch routes through
+    // `this.kickPredictiveCompact(sessionId)` rather than calling
+    // `compactAgentConversation` directly. `kickPredictiveCompact` does
+    // not accept a pendingUserPrompt param, and its internal compact call
+    // hardcodes `undefined` — so the no-retry contract still holds, just
+    // one indirection deeper.
+    const autoCompactAnchor = "Auto-compact check runs BEFORE drain (#1623)";
+    const drainAnchor = "Drain the prompt queue for this session";
+    const autoCompactIdx = agentStoreSource.indexOf(autoCompactAnchor);
+    const drainIdx = agentStoreSource.indexOf(drainAnchor);
+    const autoCompactBlock = agentStoreSource.slice(autoCompactIdx, drainIdx);
+    expect(autoCompactBlock).toContain("this.kickPredictiveCompact(sessionId)");
+    // The auto-compact branch must NOT pass any pendingUserPrompt arg —
+    // it has no business retrying the just-completed prompt.
+    expect(autoCompactBlock).not.toMatch(
+      /kickPredictiveCompact\(sessionId,\s*[^)]/,
+    );
+
+    // kickPredictiveCompact's internal compactAgentConversation call must
+    // still pass undefined for pendingUserPrompt.
+    const kickStart = agentStoreSource.indexOf("async kickPredictiveCompact(");
+    const kickEnd = agentStoreSource.indexOf("\n  },", kickStart);
+    const kickBody = agentStoreSource.slice(kickStart, kickEnd);
+    expect(kickBody).toMatch(
+      /this\.compactAgentConversation\([\s\S]*?undefined,[\s\S]*?\{ mode: "predictive" \}/,
     );
   });
 
