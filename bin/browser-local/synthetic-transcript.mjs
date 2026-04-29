@@ -4,9 +4,14 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 
-const SYNTHETIC_ACK_TEXT =
-  "Understood. Context restored from summary. Continuing from prior conversation.";
-const SYNTHETIC_MODEL_FALLBACK = "claude-opus-4-7";
+// Action-oriented framing (#1733): the prior wording "Understood. Context
+// restored from summary. Continuing from prior conversation." primed the
+// promoted standby into another acknowledgement turn instead of the next
+// agentic action — see the questionnaire-stall repro. Keep this short and
+// active so the agent's next turn picks up the user's flow rather than
+// re-confirming context receipt.
+const SYNTHETIC_ACK_TEXT = "Resuming the task.";
+const SYNTHETIC_MODEL_FALLBACK = "claude-opus-4-7[1m]";
 
 /**
  * Determine whether a parsed JSONL record is a "real" user turn — i.e., a
