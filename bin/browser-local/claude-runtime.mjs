@@ -979,6 +979,28 @@ function handlePermissionRequest(emit, session, payload) {
 
   emitToolCall(emit, session, toolName, toolInput, toolUseId, "pending");
 
+  // AskUserQuestion (#1731): Claude Code's built-in interactive picker has
+  // no stream-json render path. If the call is auto-allowed (e.g. the
+  // session is in bypassPermissions, or AskUserQuestion was previously
+  // approved via allow_session), the CLI executes the tool with no UI and
+  // silently returns an empty answers payload — the agent reads "User has
+  // answered your questions: ." and proceeds as if the user chose nothing.
+  // Until Seren renders this picker natively, deny the call with a
+  // structured message that the agent can read as the tool result so it
+  // can fall back to plain-text Q&A intentionally. Runs BEFORE
+  // autoPermissionDecision so bypassPermissions sessions are covered too.
+  if (toolName === "AskUserQuestion") {
+    const message =
+      "AskUserQuestion is not supported in this surface. Ask the same question(s) as plain text in your reply and the user will answer in chat.";
+    emitToolResult(emit, session, toolUseId, message, true);
+    respondToControlRequest(session, payload, {
+      behavior: "deny",
+      message,
+      interrupt: false,
+    });
+    return;
+  }
+
   const autoDecision = autoPermissionDecision(session, toolName);
   if (autoDecision === "allow_once") {
     respondToControlRequest(
