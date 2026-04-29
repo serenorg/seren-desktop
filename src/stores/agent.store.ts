@@ -287,6 +287,7 @@ function subscribeToProviderRuntimeRestarted(): void {
         cwd: s.cwd,
         agentType: s.info.agentType,
         messages: s.messages,
+        currentModelId: s.currentModelId,
       }));
       for (const { id } of snapshot) terminatedSessionIds.add(id);
       setState(
@@ -311,6 +312,7 @@ function subscribeToProviderRuntimeRestarted(): void {
             {
               localSessionId: snap.conversationId,
               restoredMessages: snap.messages,
+              initialModelId: snap.currentModelId,
             },
           );
           if (!newId) {
@@ -2875,7 +2877,7 @@ GOAL: <what the user is trying to accomplish>
 FILES: <files created or modified, comma-separated paths only>
 DECISIONS: <key technical decisions made>
 STATE: <what is done vs in progress>
-NEXT: <what the user will likely ask next>
+NEXT: <what the agent should do next to continue the work>
 
 Conversation:
 ${toCompact.map((m) => `${m.type.toUpperCase()}: ${m.content}`).join("\n\n")}
@@ -2955,6 +2957,7 @@ Structured summary:`;
             const syntheticStandbyId = await this.spawnSession(cwd, agentType, {
               role: "standby",
               resumeAgentSessionId: syntheticAgentSessionId,
+              initialModelId: session.currentModelId,
             });
             if (syntheticStandbyId == null) {
               throw new Error("synthetic standby spawn returned null");
@@ -2995,6 +2998,7 @@ Structured summary:`;
 
         const standbyId = await this.spawnSession(cwd, agentType, {
           role: "standby",
+          initialModelId: session.currentModelId,
         });
         if (!standbyId) {
           // Predictive warm-up is best-effort — the serving session is still
@@ -3021,10 +3025,14 @@ Structured summary:`;
       }
 
       // Reactive path: terminate old, spawn fresh serving, seed, retry.
+      // Capture model id before terminate so the new session inherits the
+      // cached per-model context window via #1700.
+      const priorModelId = session.currentModelId;
       await this.terminateSession(sessionId);
 
       const newSessionId = await this.spawnSession(cwd, agentType, {
         localSessionId: conversationId,
+        initialModelId: priorModelId,
       });
 
       if (!newSessionId) {
@@ -3123,6 +3131,7 @@ Structured summary:`;
         try {
           const recoveryId = await this.spawnSession(cwd, agentType, {
             localSessionId: conversationId,
+            initialModelId: session.currentModelId,
           });
           if (recoveryId) {
             setState("sessions", recoveryId, "messages", fullTranscript);
@@ -3725,6 +3734,7 @@ Structured summary:`;
           const newSessionId = await this.spawnSession(cwd, agentType, {
             localSessionId: session.conversationId,
             bootstrapPromptContext: session.bootstrapPromptContext,
+            initialModelId: session.currentModelId,
           });
           if (newSessionId) {
             await this.restoreSessionSettings(session, newSessionId);
@@ -5504,6 +5514,7 @@ Structured summary:`;
       conversationTitle: forkTitle,
       restoredMessages: forkedMessages,
       bootstrapPromptContext,
+      initialModelId: session.currentModelId,
     });
 
     if (!newSessionId) {

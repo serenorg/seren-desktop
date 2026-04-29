@@ -162,8 +162,9 @@ describe("#1639 — compaction failure preserves transcript", () => {
     expect(agentStoreSource).toContain(
       "Attempting recovery — restoring",
     );
-    expect(agentStoreSource).toContain(
-      'localSessionId: conversationId,\n          });',
-    );
+    // Recovery spawn passes localSessionId so the new session inherits the
+    // conversation. (#1733 added initialModelId here too — the closing brace
+    // no longer immediately follows localSessionId.)
+    expect(agentStoreSource).toContain("localSessionId: conversationId,");
   });
 });
