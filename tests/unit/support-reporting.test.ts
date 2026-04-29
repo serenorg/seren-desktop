@@ -177,7 +177,7 @@ describe("support report hook behavior", () => {
   beforeEach(() => {
     installBrowserGlobals();
     vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(console, "debug").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.resolve(new Response(null, { status: 201 }))),
@@ -248,7 +248,7 @@ describe("support report hook behavior", () => {
     expect(supportHooks.seenSignatures()).toHaveLength(2);
   });
 
-  it("logs submit failures through console.debug without re-entering reporting", async () => {
+  it("logs submit failures through console.warn with the report signature without re-entering reporting (#1736)", async () => {
     localStorage.setItem("seren_api_key", "seren_test_key");
     vi.stubGlobal(
       "fetch",
@@ -262,15 +262,20 @@ describe("support report hook behavior", () => {
     });
     await flushSupportPipeline();
 
-    // Match the redacted form with a regex so the assertion stays robust if
-    // the message format ever expands (e.g. `Error: ...`); the regression
-    // intent is "the raw token must not appear" - that's what we lock in.
-    expect(console.debug).toHaveBeenCalledWith(
-      "[support-report] submit failed",
-      expect.stringMatching(/Bearer \[REDACTED\]/),
+    // The warn line shape is "[support-report] submit failed (signature=..., reason=...)".
+    // Two regression guarantees we lock in:
+    // 1. Redaction works — raw "Bearer secret-token" must not appear in the log
+    //    (only the redacted "Bearer [REDACTED]" form does). #1736 keeps the
+    //    redactString call from the original logSubmitFailure path.
+    // 2. The line is loud (console.warn) so it lands in the support log slice
+    //    rather than vanishing into console.debug — without this, silent
+    //    submission failures like the 2026-04-29 cascade are invisible.
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[support-report\] submit failed \(signature=[0-9a-f]{1,16}, reason=.*Bearer \[REDACTED\].*\)$/,
+      ),
     );
-    expect(console.debug).not.toHaveBeenCalledWith(
-      "[support-report] submit failed",
+    expect(console.warn).not.toHaveBeenCalledWith(
       expect.stringContaining("secret-token"),
     );
   });
