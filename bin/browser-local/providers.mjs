@@ -854,6 +854,36 @@ function attachProcessListeners(emit, sessions, session) {
     }
   });
 
+  // Spawn-error guard (#1735): when the codex binary is missing or not
+  // executable, Node emits an 'error' event on the ChildProcess. Without
+  // a listener here, the default handling rethrows it as an
+  // uncaughtException, killing the entire provider-runtime helper —
+  // which takes down every agent runtime (claude, gemini, codex) for the
+  // user. Translate to a structured per-session error so the UI can
+  // surface "Codex is not installed" and the runtime stays alive.
+  session.process.on("error", (err) => {
+    const message =
+      err && err.code === "ENOENT"
+        ? "Codex binary not found. Install codex or fix the spawn path."
+        : `Codex spawn error: ${err?.message ?? String(err)}`;
+    console.warn(`[browser-local][codex] ${message}`);
+    sessions.delete(session.id);
+    if (session.currentPrompt) {
+      rejectCurrentPrompt(session, new Error(message));
+    }
+    rejectPendingRequests(session, new Error(message));
+    emit("provider://error", {
+      sessionId: session.id,
+      error: message,
+    });
+    session.status = "terminated";
+    emit("provider://session-status", {
+      sessionId: session.id,
+      status: "terminated",
+      agentSessionId: session.agentSessionId,
+    });
+  });
+
   session.process.on("exit", () => {
     const wasTracked = sessions.delete(session.id);
     if (!wasTracked) {
