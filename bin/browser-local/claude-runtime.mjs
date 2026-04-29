@@ -3,7 +3,7 @@
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +25,25 @@ import { buildSyntheticTranscript as writeSyntheticJsonl } from "./synthetic-tra
  * and bare `spawn("claude")` may fail even when Claude Code is installed.
  * Check well-known install locations before falling back to bare command name.
  */
+/**
+ * Return true when `candidate` is a real, executable file. Symlinks resolve
+ * through to their target via `accessSync`; broken symlinks, non-executable
+ * files, and stale entries from a prior install all return false. #1735.
+ *
+ * Pure `existsSync` is not enough — it passes for broken symlinks and for
+ * files that lack the executable bit, both of which fail `spawn` with
+ * ENOENT/EACCES at runtime. The recovery path then surfaces "Spawn error"
+ * to the user with no usable diagnostic.
+ */
+function isExecutableCandidate(candidate) {
+  try {
+    accessSync(candidate, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveClaudeBinary() {
   if (process.platform === "win32") {
     const home = os.homedir();
@@ -43,7 +62,7 @@ function resolveClaudeBinary() {
     ];
 
     for (const candidate of candidates) {
-      if (existsSync(candidate)) {
+      if (isExecutableCandidate(candidate)) {
         return candidate;
       }
     }
@@ -54,7 +73,7 @@ function resolveClaudeBinary() {
         encoding: "utf8",
         timeout: 5_000,
       }).trim().split(/\r?\n/)[0];
-      if (resolved) {
+      if (resolved && isExecutableCandidate(resolved)) {
         return resolved;
       }
     } catch {
@@ -75,7 +94,7 @@ function resolveClaudeBinary() {
   ];
 
   for (const candidate of candidates) {
-    if (existsSync(candidate)) {
+    if (isExecutableCandidate(candidate)) {
       return candidate;
     }
   }
@@ -86,7 +105,7 @@ function resolveClaudeBinary() {
       encoding: "utf8",
       timeout: 5_000,
     }).trim();
-    if (resolved) {
+    if (resolved && isExecutableCandidate(resolved)) {
       return resolved;
     }
   } catch {
