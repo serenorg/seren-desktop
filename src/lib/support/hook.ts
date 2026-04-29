@@ -248,33 +248,66 @@ export function appendSupportLog(
   }
 }
 
-async function submitPayload(payload: SupportReportPayload): Promise<void> {
+type SubmitOutcome = { status: "ok" } | { status: "failed"; reason: string };
+
+async function submitPayload(
+  payload: SupportReportPayload,
+): Promise<SubmitOutcome> {
   if (isTauriRuntime()) {
-    await rawInvoke("submit_support_report", { bundle: payload });
-    return;
+    try {
+      await rawInvoke("submit_support_report", { bundle: payload });
+      return { status: "ok" };
+    } catch (err) {
+      return {
+        status: "failed",
+        reason: `tauri-invoke: ${redactString(normalizeError(err).message)}`,
+      };
+    }
   }
 
   const apiKey = await getSerenApiKey();
-  if (!apiKey) return;
-  await fetch(`${API_BASE}/support/report`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  if (!apiKey) {
+    return { status: "failed", reason: "no-api-key" };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/support/report`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    return {
+      status: "failed",
+      reason: `fetch: ${redactString(normalizeError(err).message)}`,
+    };
+  }
+
+  if (!response.ok) {
+    return { status: "failed", reason: `http-${response.status}` };
+  }
+  return { status: "ok" };
 }
 
-function logSubmitFailure(error: unknown): void {
-  if (typeof console.debug !== "function") return;
+/**
+ * Log a submit failure in a way that a user or operator can audit later.
+ * Uses `console.warn` so it lands in the support log slice (the install
+ * hook captures `console.warn` to `appendSupportLog` without recursing
+ * into `captureSupportError`, which is reserved for `console.error`).
+ * The signature prefix is included so a user reporting "I saw an error
+ * but no ticket exists" can correlate with which capture dropped. #1736.
+ */
+function logSubmitFailure(signature: string, reason: string): void {
   try {
-    console.debug(
-      "[support-report] submit failed",
-      redactString(normalizeError(error).message),
+    console.warn(
+      `[support-report] submit failed (signature=${signature.slice(0, 8)}, reason=${reason})`,
     );
   } catch {
-    // Drop debug failures; support reporting must never recurse on itself.
+    // Drop log failures; support reporting must never recurse on itself.
   }
 }
 
@@ -336,7 +369,21 @@ export async function captureSupportError(
   );
 
   showSupportToast();
-  void submitPayload(payload).catch(logSubmitFailure);
+  void submitPayload(payload)
+    .then((outcome) => {
+      if (outcome.status === "failed") {
+        logSubmitFailure(signature, outcome.reason);
+      }
+    })
+    .catch((err) => {
+      // submitPayload itself is structured to never throw, but a thrown
+      // exception from the surrounding plumbing (e.g. payload serialization
+      // edge case) should still be loud, not silent.
+      logSubmitFailure(
+        signature,
+        `unexpected: ${redactString(normalizeError(err).message)}`,
+      );
+    });
 }
 
 export function captureUnknownError(kind: string, error: unknown): void {
