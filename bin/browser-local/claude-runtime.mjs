@@ -1091,28 +1091,40 @@ function handleAssistantMessage(emit, session, payload) {
   if (typeof payload.session_id === "string") {
     session.agentSessionId = payload.session_id;
   }
-  // Always refresh from Anthropic's per-message model. The picker is a
-  // request; message.model is ground truth. Without this, a successful
-  // set_model control request that the CLI ignores (or that falls back to
-  // a different model upstream) leaves the UI showing a model the session
-  // isn't actually running. See #1635.
-  const previousModelId = session.currentModelId;
-  const nextModelId = chooseUpdatedModelId(
-    previousModelId,
-    message.model,
-    session.availableModelRecords,
-  );
-  // Trace every resolution — both the changing path and the steady-state — so
-  // when the picker disagrees with the assistant's self-report (#1718) we can
-  // read message.model directly from the log instead of guessing. The line
-  // ends up in `~/Library/Logs/com.serendb.desktop/SerenDesktop.log` via the
-  // ProviderRuntime stderr bridge.
-  console.warn(
-    `[browser-local][claude] chooseUpdatedModelId: previous=${previousModelId ?? "<unset>"}, incoming=${message.model ?? "<missing>"}, resolved=${nextModelId ?? "<null>"}`,
-  );
-  if (nextModelId != null && nextModelId !== session.currentModelId) {
-    session.currentModelId = nextModelId;
-    emit("provider://session-status", buildSessionStatus(session));
+  // Subagent guard (#1729): Task subagents emit assistant messages on the
+  // same stdout as the parent, with `parent_tool_use_id` set on the envelope.
+  // Their `message.model` is the subagent's own model (haiku-4-5 by default),
+  // not the parent's. Adopting it via #1635 leaks the subagent model into
+  // the parent's `session.currentModelId` and flips the picker mid-turn.
+  // Skip the model-state mutation for subagent messages — chunks and tool
+  // calls still flow normally below.
+  const isSubagentMessage =
+    typeof payload.parent_tool_use_id === "string" &&
+    payload.parent_tool_use_id.length > 0;
+  if (!isSubagentMessage) {
+    // Always refresh from Anthropic's per-message model on parent messages.
+    // The picker is a request; message.model is ground truth. Without this,
+    // a successful set_model control request that the CLI ignores (or that
+    // falls back to a different model upstream) leaves the UI showing a
+    // model the session isn't actually running. See #1635.
+    const previousModelId = session.currentModelId;
+    const nextModelId = chooseUpdatedModelId(
+      previousModelId,
+      message.model,
+      session.availableModelRecords,
+    );
+    // Trace every resolution — both the changing path and the steady-state —
+    // so when the picker disagrees with the assistant's self-report (#1718)
+    // we can read message.model directly from the log instead of guessing.
+    // The line ends up in `~/Library/Logs/com.serendb.desktop/SerenDesktop.log`
+    // via the ProviderRuntime stderr bridge.
+    console.warn(
+      `[browser-local][claude] chooseUpdatedModelId: previous=${previousModelId ?? "<unset>"}, incoming=${message.model ?? "<missing>"}, resolved=${nextModelId ?? "<null>"}`,
+    );
+    if (nextModelId != null && nextModelId !== session.currentModelId) {
+      session.currentModelId = nextModelId;
+      emit("provider://session-status", buildSessionStatus(session));
+    }
   }
 
   for (const block of blocks) {

@@ -57,7 +57,7 @@ describe("#1686 — terminateSession accepts an explicit nextActiveSessionId", (
 describe("#1686 — promoteStandbyAndDispatch fixes the activeSessionId mismatch", () => {
   it("sets activeSessionId to the promoted standby BEFORE terminating the old serving session", () => {
     const setActiveIdx = promoteBody.indexOf(
-      'setState("activeSessionId", standbyId!)',
+      'setState("activeSessionId", standbyId)',
     );
     const terminateCallIdx = promoteBody.indexOf("this.terminateSession(servingSessionId");
     expect(setActiveIdx, "activeSessionId must be set in promote body").toBeGreaterThan(0);
@@ -68,9 +68,9 @@ describe("#1686 — promoteStandbyAndDispatch fixes the activeSessionId mismatch
     ).toBeLessThan(terminateCallIdx);
   });
 
-  it("passes nextActiveSessionId: standbyId! to terminateSession as defense-in-depth", () => {
+  it("passes nextActiveSessionId: standbyId to terminateSession as defense-in-depth", () => {
     expect(promoteBody).toMatch(
-      /this\.terminateSession\(\s*servingSessionId,\s*\{[\s\S]*?nextActiveSessionId:\s*standbyId!/,
+      /this\.terminateSession\(\s*servingSessionId,\s*\{[\s\S]*?nextActiveSessionId:\s*standbyId\b/,
     );
   });
 });
@@ -84,7 +84,7 @@ describe("#1686 — promoteStandbyAndDispatch defers the provider kill past disp
 
   it("invokes providerService.terminateSession AFTER sendPrompt, inside a finally block", () => {
     const sendPromptIdx = promoteBody.indexOf(
-      "this.sendPrompt(prompt, context, options, standbyId!)",
+      "this.sendPrompt(prompt, context, options, standbyId)",
     );
     const finallyIdx = promoteBody.indexOf("finally", sendPromptIdx);
     const providerKillIdx = promoteBody.indexOf(

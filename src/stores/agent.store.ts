@@ -480,22 +480,13 @@ export interface ActiveSession {
    */
   pendingModelId?: string;
   /**
-   * Last model id the user explicitly clicked in the picker (#1678 Option B).
-   * Persists past `pendingModelId`'s clear-on-ack so we can keep comparing
-   * the user's intent against `message.model` ground truth (#1635). When the
-   * runtime reports a `currentModelId` that diverges from this, the CLI is
-   * silently falling back — surface the gap to the picker via
-   * `modelFallbackNotice` rather than letting the picker visibly snap back.
+   * Last model id the user explicitly clicked in the picker. Sticky: it
+   * does NOT get overwritten by `message.model` ground truth from the
+   * runtime (#1635). The picker label binds to this so the UI never
+   * flickers as the CLI streams turns; only an explicit picker click
+   * moves it. #1729.
    */
   userSelectedModelId?: string;
-  /**
-   * Set when `models.currentModelId` from the runtime disagrees with
-   * `userSelectedModelId`. The picker reads this to render an inline warning
-   * ("requested X, CLI is running Y") so users on legacy Opus tiers
-   * understand why their selection didn't take. Cleared when the two line
-   * up again. #1678.
-   */
-  modelFallbackNotice?: { requested: string; actual: string } | null;
   /** Available models reported by the agent */
   availableModels?: AgentModelInfo[];
   /** Currently selected mode ID (if agent supports mode selection) */
@@ -1258,7 +1249,7 @@ export const agentStore = {
     const timer = setTimeout(() => {
       restartTimers.delete(threadId);
       const ts = state.threadStates[threadId];
-      if (!ts || !ts.turnInFlight) return;
+      if (!ts?.turnInFlight) return;
       const session = Object.values(state.sessions).find(
         (s) => s.conversationId === threadId,
       );
@@ -3297,9 +3288,12 @@ Structured summary:`;
   ): Promise<void> {
     const serving = state.sessions[servingSessionId];
     const standbyId = serving?.standbySessionId;
-    const standby = standbyId ? state.sessions[standbyId] : undefined;
-    if (!serving || !standby) {
+    if (!serving || !standbyId) {
       // Fall through — caller will dispatch to serving.
+      return;
+    }
+    const standby = state.sessions[standbyId];
+    if (!standby) {
       return;
     }
     const conversationId = serving.conversationId;
@@ -3307,24 +3301,24 @@ Structured summary:`;
     // Transfer the UI transcript to the promoted session so scroll-up is
     // preserved across the swap. The standby session was invisible until now.
     const fullTranscript = [...serving.messages];
-    setState("sessions", standbyId!, "messages", fullTranscript);
+    setState("sessions", standbyId, "messages", fullTranscript);
     setState(
       "sessions",
-      standbyId!,
+      standbyId,
       "restoredMessageCount",
       fullTranscript.length,
     );
     // Inherit persisted conversationId so SQLite keeps a single thread.
-    setState("sessions", standbyId!, "conversationId", conversationId);
-    setState("sessions", standbyId!, "role", "serving");
-    setState("sessions", standbyId!, "seedCompleted", undefined);
+    setState("sessions", standbyId, "conversationId", conversationId);
+    setState("sessions", standbyId, "role", "serving");
+    setState("sessions", standbyId, "seedCompleted", undefined);
 
     // Make the promoted standby the active session BEFORE the old serving
     // session is torn down. Without this, terminateSession's auto-pickup
     // branch lands on the first remaining key (an unrelated session) and the
     // UI's view of activeSessionId no longer matches the session actually
     // serving the user's prompt. #1686.
-    setState("activeSessionId", standbyId!);
+    setState("activeSessionId", standbyId);
 
     // Two-phase teardown of the old serving session. Phase 1 (synchronous
     // state cleanup) drops late events from the old child immediately, so
@@ -3332,13 +3326,13 @@ Structured summary:`;
     // that sends SIGTERM) is deferred to after sendPrompt resolves so the
     // SIGTERM cannot race the standby's first turn. #1686.
     await this.terminateSession(servingSessionId, {
-      nextActiveSessionId: standbyId!,
+      nextActiveSessionId: standbyId,
       skipProviderKill: true,
     });
 
     try {
       // Dispatch on the promoted session.
-      await this.sendPrompt(prompt, context, options, standbyId!);
+      await this.sendPrompt(prompt, context, options, standbyId);
     } finally {
       // Phase 2: now that dispatch has settled, reap the old child.
       try {
@@ -3433,14 +3427,19 @@ Structured summary:`;
     // boundary before dispatching. The old serving session is terminated
     // inside promoteStandbyAndDispatch; transcript + conversationId transfer
     // so the user sees no break. #1631.
-    if (session && session.role === "serving" && session.standbySessionId) {
+    if (
+      sessionId &&
+      session &&
+      session.role === "serving" &&
+      session.standbySessionId
+    ) {
       const standby = state.sessions[session.standbySessionId];
       if (standby && standby.seedCompleted === true) {
         console.info(
           `[AgentStore] Promoting standby ${session.standbySessionId} for serving ${sessionId}`,
         );
         await this.promoteStandbyAndDispatch(
-          sessionId!,
+          sessionId,
           prompt,
           context,
           options,
@@ -3477,7 +3476,7 @@ Structured summary:`;
               `[AgentStore] Promoting just-seeded standby ${session.standbySessionId}`,
             );
             await this.promoteStandbyAndDispatch(
-              sessionId!,
+              sessionId,
               prompt,
               context,
               options,
@@ -3492,9 +3491,9 @@ Structured summary:`;
           "[AgentStore] Standby not ready at submit; cancelling warm-up",
         );
         await this.terminateSession(session.standbySessionId).catch(() => {});
-        setState("sessions", sessionId!, "standbySessionId", null);
+        setState("sessions", sessionId, "standbySessionId", null);
         predictiveCompactBusy = false;
-        setState("sessions", sessionId!, "predictiveCompactInFlight", false);
+        setState("sessions", sessionId, "predictiveCompactInFlight", false);
       }
     }
 
@@ -3911,10 +3910,6 @@ Structured summary:`;
 
     setState("sessions", sessionId, "pendingModelId", modelId);
     setState("sessions", sessionId, "userSelectedModelId", modelId);
-    // The user just made a fresh selection — clear any stale fallback
-    // notice from a previous selection so the picker doesn't carry an
-    // out-of-date warning forward. #1678.
-    setState("sessions", sessionId, "modelFallbackNotice", null);
     setState("sessions", sessionId, "currentModelId", modelId);
     try {
       await providerService.setModel(sessionId, modelId);
@@ -4754,7 +4749,7 @@ Structured summary:`;
 
   flushPendingUserMessage(sessionId: string) {
     const session = state.sessions[sessionId];
-    if (!session || !session.pendingUserMessage) return;
+    if (!session?.pendingUserMessage) return;
 
     // During history replay skip mode, discard the buffered replay text
     // instead of appending it (restored SQLite messages are authoritative).
@@ -5221,25 +5216,6 @@ Structured summary:`;
         "availableModels",
         models.availableModels,
       );
-
-      // CLI silent-fallback detection (#1678 Option B). Once the setModel
-      // ack has cleared `pendingModelId`, the next `message.model` from the
-      // CLI is ground truth via #1635 and lands here as
-      // `models.currentModelId`. If that disagrees with the user's last
-      // explicit selection, the CLI accepted the request but is running
-      // something else — record the gap so the picker can surface it
-      // instead of letting `currentModelId` silently snap back.
-      const userSelected = state.sessions[sessionId]?.userSelectedModelId;
-      if (!pending && userSelected) {
-        if (userSelected !== models.currentModelId) {
-          setState("sessions", sessionId, "modelFallbackNotice", {
-            requested: userSelected,
-            actual: models.currentModelId,
-          });
-        } else {
-          setState("sessions", sessionId, "modelFallbackNotice", null);
-        }
-      }
     }
 
     // Extract mode state from session status events (e.g. ready with modes,
