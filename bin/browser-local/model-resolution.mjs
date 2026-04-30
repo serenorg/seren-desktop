@@ -68,6 +68,16 @@ export function chooseUpdatedModelId(
   if (typeof incomingMessageModel !== "string" || incomingMessageModel.length === 0) {
     return null;
   }
+  // Reject sentinel-bracketed placeholders. The Claude Code CLI emits
+  // synthesized assistant turns (e.g. on "Stream idle timeout - partial
+  // response received") with `message.model` set to internal placeholders
+  // like `<synthetic>`. Real Anthropic model ids never use angle brackets,
+  // so accepting these as ground truth poisons `session.currentModelId`
+  // and propagates to the next `--model` spawn arg, which the CLI hard-
+  // rejects with "issue with the selected model (<synthetic>)".
+  if (/^<.+>$/.test(incomingMessageModel)) {
+    return null;
+  }
   const records = Array.isArray(availableModelRecords)
     ? availableModelRecords
     : [];
