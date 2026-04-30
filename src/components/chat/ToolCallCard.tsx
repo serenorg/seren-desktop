@@ -2,7 +2,7 @@
 // ABOUTME: Shows tool summary, status indicator, and expandable details.
 
 import type { Component } from "solid-js";
-import { createSignal, Show } from "solid-js";
+import { createEffect, createSignal, Show } from "solid-js";
 import {
   isDirectoryListing,
   summarizeDirectoryListing,
@@ -11,6 +11,17 @@ import type { ToolCallEvent } from "@/services/providers";
 
 interface ToolCallCardProps {
   toolCall: ToolCallEvent;
+  /**
+   * When true, the card renders expanded regardless of the user's local
+   * toggle state. Used by the parent group's Tail mode (#1748) so the
+   * running card auto-opens without dropping the user's chevron control.
+   */
+  forceExpanded?: boolean;
+  /**
+   * When true, pin the result container's scroll to the bottom whenever the
+   * tool's parameters/result change. Only applied while the card is open.
+   */
+  tail?: boolean;
 }
 
 /** Truncate a string to maxLen characters with ellipsis. */
@@ -112,6 +123,24 @@ function extractSummary(toolCall: ToolCallEvent): string {
 export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   const [isExpanded, setIsExpanded] = createSignal(false);
   const [isResultExpanded, setIsResultExpanded] = createSignal(false);
+
+  // Effective open state: parent's tail force-open OR user's local toggle.
+  const isOpen = () => props.forceExpanded || isExpanded();
+
+  // Inner-card auto-scroll for Tail mode. We pin the parameters and result
+  // containers (the two scrollable surfaces inside the card) so streaming
+  // updates stay at the bottom — without ever touching the outer chat scroll.
+  let paramsRef: HTMLDivElement | undefined;
+  let resultRef: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    if (!props.tail || !isOpen()) return;
+    // Read reactive deps so this effect refires on streaming updates.
+    void props.toolCall.parameters;
+    void props.toolCall.result;
+    if (paramsRef) paramsRef.scrollTop = paramsRef.scrollHeight;
+    if (resultRef) resultRef.scrollTop = resultRef.scrollHeight;
+  });
 
   const resultIsListing = () => {
     const result = props.toolCall.result;
@@ -382,12 +411,12 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
 
         {/* Expand Icon */}
         <svg
-          class={`w-4 h-4 shrink-0 text-muted-foreground transition-transform ${isExpanded() ? "rotate-180" : ""}`}
+          class={`w-4 h-4 shrink-0 text-muted-foreground transition-transform ${isOpen() ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
           role="img"
-          aria-label={isExpanded() ? "Collapse" : "Expand"}
+          aria-label={isOpen() ? "Collapse" : "Expand"}
         >
           <path
             stroke-linecap="round"
@@ -399,7 +428,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
       </button>
 
       {/* Details */}
-      <Show when={isExpanded()}>
+      <Show when={isOpen()}>
         <div class="px-3 py-2 border-t border-surface-2 text-xs">
           {/* Parameters */}
           <Show when={props.toolCall.parameters}>
@@ -407,7 +436,10 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
               <div class="text-muted-foreground/70 font-medium mb-1">
                 Parameters:
               </div>
-              <div class="bg-background border border-surface-3 rounded p-2 font-mono text-foreground max-h-48 overflow-auto">
+              <div
+                ref={paramsRef}
+                class="bg-background border border-surface-3 rounded p-2 font-mono text-foreground max-h-48 overflow-auto"
+              >
                 {Object.entries(props.toolCall.parameters || {}).map(
                   ([key, value]) => (
                     <div class="mb-1 last:mb-0">
@@ -433,7 +465,10 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
               <Show
                 when={resultIsListing()}
                 fallback={
-                  <div class="bg-background border border-success/70 rounded p-2 text-success max-h-48 overflow-auto">
+                  <div
+                    ref={resultRef}
+                    class="bg-background border border-success/70 rounded p-2 text-success max-h-48 overflow-auto"
+                  >
                     {props.toolCall.result}
                   </div>
                 }

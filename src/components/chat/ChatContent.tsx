@@ -106,9 +106,30 @@ type GroupedMessage =
   | { type: "single"; message: UnifiedMessage }
   | {
       type: "tool_group";
+      /**
+       * Stable identity for this group across regroup remounts (#1748).
+       * Derived from the first tool call's id so per-group UI state
+       * (expand/Tail) survives the rebuild.
+       */
+      id: string;
       messages: UnifiedMessage[];
       toolCalls: ToolCallEvent[];
     };
+
+function flushToolGroup(group: UnifiedMessage[], out: GroupedMessage[]): void {
+  if (group.length === 0) return;
+  if (group.length >= 3) {
+    const toolCalls = group
+      .filter((m) => m.toolCall)
+      .map((m) => toToolCallEvent(m.toolCall as ToolCallData));
+    const id = toolCalls[0]?.toolCallId ?? group[0].id;
+    out.push({ type: "tool_group", id, messages: group, toolCalls });
+  } else {
+    for (const msg of group) {
+      out.push({ type: "single", message: msg });
+    }
+  }
+}
 
 /** Group consecutive tool_call messages into collapsed groups */
 function groupConsecutiveToolCalls(
@@ -119,49 +140,14 @@ function groupConsecutiveToolCalls(
 
   for (const message of messages) {
     if (message.type === "tool_call" && message.toolCall) {
-      // Add to current group
       currentGroup.push(message);
     } else {
-      // Flush current group if any
-      if (currentGroup.length > 0) {
-        if (currentGroup.length >= 3) {
-          // Group 3+ consecutive tool calls
-          grouped.push({
-            type: "tool_group",
-            messages: currentGroup,
-            toolCalls: currentGroup
-              .filter((m) => m.toolCall)
-              .map((m) => toToolCallEvent(m.toolCall as ToolCallData)),
-          });
-        } else {
-          // Show individual cards for 1-2 tool calls
-          for (const msg of currentGroup) {
-            grouped.push({ type: "single", message: msg });
-          }
-        }
-        currentGroup = [];
-      }
-      // Add non-tool message
+      flushToolGroup(currentGroup, grouped);
+      currentGroup = [];
       grouped.push({ type: "single", message });
     }
   }
-
-  // Flush remaining group
-  if (currentGroup.length > 0) {
-    if (currentGroup.length >= 3) {
-      grouped.push({
-        type: "tool_group",
-        messages: currentGroup,
-        toolCalls: currentGroup
-          .filter((m) => m.toolCall)
-          .map((m) => toToolCallEvent(m.toolCall as ToolCallData)),
-      });
-    } else {
-      for (const msg of currentGroup) {
-        grouped.push({ type: "single", message: msg });
-      }
-    }
-  }
+  flushToolGroup(currentGroup, grouped);
 
   return grouped;
 }
@@ -1143,6 +1129,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 if (item.type === "tool_group") {
                   return (
                     <ToolCallGroup
+                      groupId={item.id}
                       toolCalls={item.toolCalls}
                       isComplete={true}
                     />
