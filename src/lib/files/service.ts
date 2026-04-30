@@ -197,16 +197,42 @@ function entriesToNodes(entries: FileEntry[]): FileNode[] {
   }));
 }
 
+const HASH_ANCHOR = /^(.+?)#L(\d+)(?:-L?\d+)?$/;
+const COLON_ANCHOR = /^(.+?):(\d+)(?::\d+)?$/;
+
+function matchAnchor(rawPath: string): RegExpMatchArray | null {
+  return rawPath.match(HASH_ANCHOR) ?? rawPath.match(COLON_ANCHOR);
+}
+
+/**
+ * Strip a trailing line/column anchor from an agent-generated file link.
+ * Handles `#L42`, `#L10-L20`, `:42`, and `:42:5`. Returns the input unchanged
+ * if no anchor is present (including Windows paths like `C:\foo\bar.md`).
+ */
+export function stripLineAnchor(rawPath: string): string {
+  const match = matchAnchor(rawPath);
+  return match ? match[1] : rawPath;
+}
+
+/**
+ * Extract the line number from an agent-generated file link, or undefined
+ * if no anchor is present.
+ */
+export function extractLineAnchor(rawPath: string): number | undefined {
+  const match = matchAnchor(rawPath);
+  return match ? Number.parseInt(match[2], 10) : undefined;
+}
+
 /**
  * Open a file in a tab.
  */
 export async function openFileInTab(rawPath: string): Promise<void> {
-  // Strip line/column anchors (#L79, #L10-L20) from the path before reading.
-  // Agent-generated links include these for navigation but the OS can't open
-  // a file with '#' in the name.
-  const anchorMatch = rawPath.match(/^(.+?)#L(\d+)(?:-L?\d+)?$/);
-  const path = anchorMatch ? anchorMatch[1] : rawPath;
-  const line = anchorMatch ? Number.parseInt(anchorMatch[2], 10) : undefined;
+  // Strip line/column anchors before reading. Agents emit two styles:
+  // markdown anchors (#L79, #L10-L20) and grep/editor refs
+  // (path:line, path:line:col). Both must be removed before readFile.
+  // Non-greedy + end-anchor preserves Windows drive letters like C:\foo.md.
+  const path = stripLineAnchor(rawPath);
+  const line = extractLineAnchor(rawPath);
 
   console.log(
     "[openFileInTab] Opening file:",
