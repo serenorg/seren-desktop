@@ -63,6 +63,20 @@ export const BUDGET_REACTIVE_COMPACT_MS = 90_000;
 export const BUDGET_CRASH_MS = 60_000;
 
 /**
+ * Predictive-compaction failure classifier (#1741). Errors thrown inside
+ * `kickPredictiveCompact` fall into two buckets: transient races (spawn
+ * returned null, "Session not found" mid-compaction, etc.) that the user
+ * never notices, and structural CLI rejections that are 100% repro on the
+ * affected install (model-poison from #1739, missing CLI binary, missing
+ * parent transcript JSONL). The blanket downgrade in #152 silenced both.
+ * This regex matches the structural class so those — and only those —
+ * escalate to `captureSupportError` and open a serenorg/seren-core ticket.
+ * Add new patterns here when a new structural failure mode is identified.
+ */
+export const PREDICTIVE_STRUCTURAL_FAILURE_RE =
+  /issue with the selected model|model.*not exist|ENOENT|schema_drift|Parent JSONL transcript not found/i;
+
+/**
  * Instruction prepended to every agent session telling Claude Code / Codex
  * that the Seren MCP gateway exists and MUST be queried live before refusing
  * any third-party service. Intentionally does NOT embed a snapshot of
@@ -3102,10 +3116,31 @@ Structured summary:`;
       // log so the support pipeline doesn't capture every standby-spawn race
       // as a public bug report. The reactive path stays catastrophic. #152.
       if (mode === "predictive") {
+        const errMessage =
+          error instanceof Error ? error.message : String(error);
         console.warn(
           "[AgentStore] Predictive standby compaction failed (non-fatal):",
-          error instanceof Error ? error.message : String(error),
+          errMessage,
         );
+        // Triage by error signature (#1741). The original blanket downgrade
+        // (#152) silenced every standby-spawn race so the support pipeline
+        // didn't get spammed by transient noise. But the same path also
+        // swallowed STRUCTURAL CLI rejections that are 100% repro on the
+        // affected user (e.g. #1739's `<synthetic>` model poison producing
+        // "issue with the selected model"). Only the structural class
+        // escalates to captureSupportError; transient races stay quiet.
+        if (PREDICTIVE_STRUCTURAL_FAILURE_RE.test(errMessage)) {
+          void captureSupportError({
+            kind: "agent.predictive_compact_failed",
+            message: errMessage,
+            stack: error instanceof Error && error.stack ? [error.stack] : [],
+            agentContext: {
+              model: session.currentModelId,
+              provider: session.info.agentType,
+              tool_calls: [],
+            },
+          });
+        }
         // Clear standbySessionId pointer if it was wired up before the throw
         // so the next sendPrompt doesn't try to promote a dead standby. The
         // serving session itself is untouched (isCompacting was never set in
