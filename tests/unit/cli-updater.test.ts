@@ -1,13 +1,7 @@
 // ABOUTME: Critical tests for #1637 — background CLI updater pure logic.
 // ABOUTME: Guards TTL gate, semver compare, and same-channel classification.
 
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -19,6 +13,8 @@ const modulePath = new URL(
 const {
   UPDATE_CHECK_TTL_MS,
   isNewer,
+  isBelowBaseline,
+  CLI_MIN_VERSION_BASELINE,
   classifyInstallChannel,
   backgroundUpdateCli,
   loadState,
@@ -125,6 +121,80 @@ describe("backgroundUpdateCli TTL gate", () => {
       outcome: "skipped:unresolved",
       skipped: "unresolved",
     });
+  });
+
+  it("ignores the 24h TTL when the installed version is below the package baseline (#1761)", async () => {
+    // Users on stale CLI versions (e.g. 2.1.30 from a poisoned cli-tools
+    // package.json pin) would otherwise stay on the old binary for 24h
+    // every launch. The baseline gate must override TTL so the upgrade
+    // path runs on the very next launch after the desktop ships this fix.
+    // We mock npm view to return null so the install path short-circuits
+    // at `skipped:network` — the assertion is that we got past TTL, not
+    // that we shelled out to the registry.
+    const state = {
+      "lastUpdateCheck:claude": Date.now() - 1000, // well within TTL
+    };
+    const result = await backgroundUpdateCli({
+      label: "Claude Code",
+      bareCommand: "claude",
+      resolvedPath: "/Users/u/.local/bin/claude",
+      packageName: "@anthropic-ai/claude-code",
+      state,
+      now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "2.1.30",
+        runNpmView: async () => null,
+      },
+    });
+    expect(result.skipped).not.toBe("ttl");
+  });
+
+  it("honors TTL when the installed version is at or above the baseline", async () => {
+    const state = {
+      "lastUpdateCheck:claude": Date.now() - 1000,
+    };
+    const result = await backgroundUpdateCli({
+      label: "Claude Code",
+      bareCommand: "claude",
+      resolvedPath: "/Users/u/.local/bin/claude",
+      packageName: "@anthropic-ai/claude-code",
+      state,
+      now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "2.1.123",
+        runNpmView: async () => null,
+      },
+    });
+    expect(result).toMatchObject({ outcome: "skipped:ttl", skipped: "ttl" });
+  });
+});
+
+describe("isBelowBaseline (#1761)", () => {
+  it("returns true when installed is older on any semver component", () => {
+    expect(isBelowBaseline("2.1.30", "2.1.120")).toBe(true);
+    expect(isBelowBaseline("2.0.99", "2.1.0")).toBe(true);
+    expect(isBelowBaseline("1.99.99", "2.0.0")).toBe(true);
+  });
+
+  it("returns false when installed is at or above the baseline", () => {
+    expect(isBelowBaseline("2.1.120", "2.1.120")).toBe(false);
+    expect(isBelowBaseline("2.1.123", "2.1.120")).toBe(false);
+    expect(isBelowBaseline("3.0.0", "2.1.120")).toBe(false);
+  });
+
+  it("returns false on unparseable input — never blocks an update on bad data", () => {
+    expect(isBelowBaseline(null, "2.1.120")).toBe(false);
+    expect(isBelowBaseline("2.1.30-rc.1", "2.1.120")).toBe(false);
+    expect(isBelowBaseline("2.1.30", "")).toBe(false);
+  });
+
+  it("Claude Code baseline is at the JS→native migration boundary", () => {
+    // 2.1.120 is the first native-binary release. Below this, users miss
+    // the Opus 4.7 catalog and the binary structure the install detection
+    // expects. The baseline must not regress without explicit reasoning.
+    expect(CLI_MIN_VERSION_BASELINE["@anthropic-ai/claude-code"]).toBe(
+      "2.1.120",
+    );
   });
 });
 

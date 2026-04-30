@@ -438,10 +438,51 @@ const LEGACY_OPUS_RECORDS = [
   },
 ];
 
+// 1M-tier picker entries. Anthropic gates the 1M tier on a `[1m]` suffix in
+// the model id; without the suffix, the API serves the 200K tier. Surfacing
+// these as distinct picker entries lets the user opt into the wider window
+// per-session — selecting one routes the suffixed id straight through the
+// CLI's set_model control, which forwards it to the API and triggers the
+// `context-1m-2025-08-07` beta header. #1761.
+function makeOneMTierRecord(baseId, displayBase) {
+  return {
+    modelId: `${baseId}[1m]`,
+    name: `${displayBase} (1M context)`,
+    description: `${displayBase} on the 1M-token context tier`,
+    supportsEffort: false,
+    supportedEffortLevels: [],
+    isDefault: false,
+  };
+}
+
+const ONE_M_TIER_RECORDS = [
+  makeOneMTierRecord("claude-opus-4-7", "Opus 4.7"),
+  makeOneMTierRecord("claude-opus-4-6", "Opus 4.6"),
+  makeOneMTierRecord("claude-opus-4-5", "Opus 4.5"),
+  makeOneMTierRecord("claude-sonnet-4-7", "Sonnet 4.7"),
+  makeOneMTierRecord("claude-sonnet-4-6", "Sonnet 4.6"),
+  makeOneMTierRecord("claude-sonnet-4-5", "Sonnet 4.5"),
+];
+
 function augmentWithLegacyOpus(records) {
   const existingIds = new Set(records.map((r) => r.modelId));
-  const extras = LEGACY_OPUS_RECORDS.filter((r) => !existingIds.has(r.modelId));
-  return [...extras, ...records];
+  const legacyExtras = LEGACY_OPUS_RECORDS.filter(
+    (r) => !existingIds.has(r.modelId),
+  );
+  // 1M-tier entries are prepended only when the bare base id is reported by
+  // the CLI catalog OR the legacy fallback brought it in. That keeps the
+  // picker honest — we don't advertise a 1M variant of a model the active
+  // CLI doesn't ship.
+  const knownBareIds = new Set([
+    ...records.map((r) => r.modelId),
+    ...legacyExtras.map((r) => r.modelId),
+  ]);
+  const oneMExtras = ONE_M_TIER_RECORDS.filter(
+    (r) =>
+      !existingIds.has(r.modelId) &&
+      knownBareIds.has(r.modelId.replace(/\[1m\]$/i, "")),
+  );
+  return [...oneMExtras, ...legacyExtras, ...records];
 }
 
 function combinePrompt(prompt, context) {
@@ -687,25 +728,31 @@ function buildClaudeArgs({
   return args;
 }
 
-// Mirror of CLAUDE_1M_MODELS in src/stores/agent.store.ts. The CLI does not
-// always populate result.modelUsage[*].contextWindow (single-turn shortcuts,
-// abort paths, single-message --output-format runs), so the runtime needs
-// its own derivation table to keep `meta.contextWindow` reliable on every
-// prompt-complete. Without this, the desktop's auto-compaction gauge stays
-// pinned to the cold-start default (200K) and trips premature compaction on
-// 1M-tier sessions. #1754.
-const CLAUDE_1M_MODELS = new Set([
-  "claude-opus-4-7",
+// Mirror of CLAUDE_1M_TIER_CAPABLE_MODELS in src/stores/agent.store.ts. Set
+// membership identifies the bare model IDs whose `[1m]` suffix variant is
+// served on the 1M tier; the bare ID itself defaults to 200K. Anthropic gates
+// the 1M tier on the `[1m]` suffix in the model id (CLI sends the
+// `context-1m-2025-08-07` beta header, API returns `contextWindow: 1000000`).
+// Without the suffix, every Opus/Sonnet bare-id request lands on 200K. #1761.
+const CLAUDE_1M_TIER_CAPABLE_MODELS = new Set([
+  "claude-opus-4-5",
   "claude-opus-4-6",
-  "claude-sonnet-4-7",
+  "claude-opus-4-7",
+  "claude-sonnet-4-5",
   "claude-sonnet-4-6",
+  "claude-sonnet-4-7",
 ]);
 
 function inferClaudeContextWindow(modelId) {
   if (typeof modelId !== "string" || modelId.length === 0) return undefined;
-  if (/\[1m\]$/i.test(modelId)) return 1_000_000;
-  const normalized = modelId.replace(/\[1m\]$/i, "");
-  if (CLAUDE_1M_MODELS.has(normalized)) return 1_000_000;
+  // CLI keys modelUsage by the resolved API id, sometimes with a date suffix
+  // like "claude-opus-4-7-20251201". Strip date and `[1m]` so the lookup
+  // matches the canonical bare id.
+  const stripped = modelId.replace(/\[1m\]$/i, "");
+  const normalized = stripped.replace(/-\d{8}$/, "");
+  if (/\[1m\]$/i.test(modelId)) {
+    return CLAUDE_1M_TIER_CAPABLE_MODELS.has(normalized) ? 1_000_000 : undefined;
+  }
   if (normalized.startsWith("claude-")) return 200_000;
   return undefined;
 }
@@ -2099,3 +2146,11 @@ export function createClaudeRuntime({ emit }) {
     buildSyntheticTranscript,
   };
 }
+
+// Test-only re-exports — internal helpers exposed for unit tests so the
+// 1M-tier semantics can be exercised without spinning up a full session.
+export {
+  inferClaudeContextWindow as _inferClaudeContextWindow,
+  augmentWithLegacyOpus as _augmentWithLegacyOpus,
+  ONE_M_TIER_RECORDS as _ONE_M_TIER_RECORDS,
+};

@@ -11,30 +11,34 @@ const claudeRuntime = readFileSync(
 );
 
 describe("#1754 — Claude provider runtime infers contextWindow when CLI omits modelUsage", () => {
-  it("inferClaudeContextWindow exists and enumerates known 1M-tier Claude IDs", () => {
-    // The 1M Claude variants must be enumerated here so a fresh session on
-    // claude-opus-4-7 reports its real window even when the CLI's result
-    // event has empty modelUsage. The set must mirror CLAUDE_1M_MODELS in
-    // src/stores/agent.store.ts so the runtime and the store agree on
-    // cold-start defaults.
+  it("inferClaudeContextWindow exists and enumerates 1M-tier-capable Claude IDs", () => {
+    // The 1M-tier-capable bare IDs must be enumerated here so a fresh
+    // session on claude-opus-4-7[1m] reports its real window even when the
+    // CLI's result event has empty modelUsage. The set must mirror
+    // CLAUDE_1M_TIER_CAPABLE_MODELS in src/stores/agent.store.ts so the
+    // runtime and the store agree on cold-start defaults. #1761.
     expect(claudeRuntime).toContain("function inferClaudeContextWindow(");
     expect(claudeRuntime).toContain('"claude-opus-4-7"');
     expect(claudeRuntime).toContain('"claude-opus-4-6"');
+    expect(claudeRuntime).toContain('"claude-opus-4-5"');
     expect(claudeRuntime).toContain('"claude-sonnet-4-7"');
     expect(claudeRuntime).toContain('"claude-sonnet-4-6"');
+    expect(claudeRuntime).toContain('"claude-sonnet-4-5"');
   });
 
-  it("inferClaudeContextWindow handles the [1m] suffix variant", () => {
-    // The CLI advertises the 1M tier as a bracketed suffix
-    // (`claude-opus-4-7[1m]`). The helper must accept the suffix form so a
-    // brand-new model that has not yet been added to the explicit set still
-    // reports the right window via the suffix path.
+  it("inferClaudeContextWindow checks for the [1m] suffix and the 1M-tier set", () => {
+    // The 1M tier is gated on the `[1m]` suffix upstream; the helper must
+    // detect the suffix and look the canonical bare id up in the
+    // 1M-tier-capable set. Behavioural assertions live in
+    // claude-runtime-1m-tier.test.ts; this test guards the function's
+    // structural anchors so the regression cannot quietly disappear.
     const fnStart = claudeRuntime.indexOf("function inferClaudeContextWindow(");
     const fnEnd = claudeRuntime.indexOf("\n}\n", fnStart);
     const fnBody = claudeRuntime.slice(fnStart, fnEnd);
     expect(fnBody).toContain("\\[1m\\]");
-    expect(fnBody).toMatch(/return\s+1_000_000/);
-    expect(fnBody).toMatch(/return\s+200_000/);
+    expect(fnBody).toContain("CLAUDE_1M_TIER_CAPABLE_MODELS");
+    expect(fnBody).toContain("1_000_000");
+    expect(fnBody).toContain("200_000");
   });
 
   it("buildPromptMeta takes a fallbackModelId and uses inference when modelUsage lacks contextWindow", () => {

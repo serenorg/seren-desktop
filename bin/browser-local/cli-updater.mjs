@@ -30,6 +30,33 @@ const NPM_INSTALL_TIMEOUT_MS = 180_000;
 const SEMVER_EXACT_RE = /^(\d+)\.(\d+)\.(\d+)$/;
 const SEMVER_EXTRACT_RE = /\d+\.\d+\.\d+[^\s]*/;
 
+/**
+ * Per-package minimum required version. When the resolved binary is below
+ * the baseline we ignore the 24h TTL and force an update on the next launch.
+ * This unsticks installs that were poisoned by an old `cli-tools/package.json`
+ * caret pin (e.g. `^2.1.30`) or by a transient registry failure that the TTL
+ * then masked for months. Bumped together with #1761 so users gain access to
+ * the JS→native migration boundary at 2.1.120 and the Opus 4.7 catalog. */
+export const CLI_MIN_VERSION_BASELINE = {
+  "@anthropic-ai/claude-code": "2.1.120",
+};
+
+/** Returns true when `installed` is a clean semver below `baseline`. */
+export function isBelowBaseline(installed, baseline) {
+  if (typeof installed !== "string" || typeof baseline !== "string") {
+    return false;
+  }
+  const a = installed.match(SEMVER_EXACT_RE);
+  const b = baseline.match(SEMVER_EXACT_RE);
+  if (!a || !b) return false;
+  for (let i = 1; i <= 3; i++) {
+    const ai = Number(a[i]);
+    const bi = Number(b[i]);
+    if (ai !== bi) return ai < bi;
+  }
+  return false;
+}
+
 function serenDataDir() {
   if (process.platform === "win32") {
     const base = process.env.APPDATA ?? os.homedir();
@@ -414,9 +441,6 @@ export async function backgroundUpdateCli({
     const persisted = state ?? loadState();
     const key = `lastUpdateCheck:${bareCommand}`;
     const lastCheck = persisted[key];
-    if (typeof lastCheck === "number" && now - lastCheck < UPDATE_CHECK_TTL_MS) {
-      return report("skipped:ttl");
-    }
 
     const channel = classifyInstallChannel(resolvedPath, bareCommand);
     if (channel === "unresolved") {
@@ -425,10 +449,22 @@ export async function backgroundUpdateCli({
       return report("skipped:unresolved");
     }
 
-    const [installed, latest] = await Promise.all([
-      installedVersionFn(resolvedPath, bareCommand),
-      npmViewFn(packageName, { npmCliScript }),
-    ]);
+    // Read installed version up-front so the baseline gate can override TTL.
+    // The npm view is still deferred until we decide whether to run.
+    const installed = await installedVersionFn(resolvedPath, bareCommand);
+    const baseline = CLI_MIN_VERSION_BASELINE[packageName];
+    const belowBaseline =
+      typeof baseline === "string" && isBelowBaseline(installed, baseline);
+
+    if (
+      !belowBaseline &&
+      typeof lastCheck === "number" &&
+      now - lastCheck < UPDATE_CHECK_TTL_MS
+    ) {
+      return report("skipped:ttl");
+    }
+
+    const latest = await npmViewFn(packageName, { npmCliScript });
 
     // Record the check timestamp even when we couldn't compare — offline
     // and rate-limited cases should not retry every launch.
