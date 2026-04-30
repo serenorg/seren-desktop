@@ -78,7 +78,11 @@ describe("#1675 — compactAndRetry still uses reactive (failed-prompt retry)", 
     expect(callIdx, "compactAndRetry must call compactAgentConversation").toBeGreaterThan(0);
     const callBlock = fnBody.slice(callIdx, callIdx + 400);
     expect(callBlock).not.toContain("predictive");
-    expect(callBlock).toContain("lastPrompt,");
+    // Post-#1757 compactAndRetry retries lastPrompt itself — the helper
+    // never sees it. Verify the retry dispatch lives in compactAndRetry.
+    expect(fnBody).toMatch(
+      /providerService\.sendPrompt\(newSessionId,\s*lastPrompt\)/,
+    );
   });
 });
 

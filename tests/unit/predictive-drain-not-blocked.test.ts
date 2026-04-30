@@ -54,9 +54,11 @@ describe("#1673 — predictive compaction does not block drain", () => {
     const branchStart = agentStoreSource.indexOf('if (mode === "predictive")');
     expect(branchStart).toBeGreaterThan(0);
     // Reactive branch follows immediately after the predictive block returns;
-    // capture the predictive body up to its `return "succeeded";`.
+    // capture the predictive body up to its terminal "succeeded" return.
+    // Post-#1757 returns the structured result shape so we anchor on the
+    // standby-id field that the predictive path always carries.
     const branchEnd = agentStoreSource.indexOf(
-      'return "succeeded";',
+      'newSessionId: standbyId',
       branchStart,
     );
     expect(branchEnd).toBeGreaterThan(branchStart);

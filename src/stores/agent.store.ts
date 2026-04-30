@@ -124,6 +124,8 @@ function waitForSessionReady(sessionId: string): Promise<void> {
  * transient or "no-op" outcomes keep the user inside the agent session.
  *
  * - `retried`: compaction succeeded AND the user's last prompt was re-sent.
+ *   Returned by `compactAndRetry` only — `compactAgentConversation` never
+ *   retries; that responsibility lives with the caller.
  * - `succeeded`: compaction succeeded, no prompt to retry.
  * - `skipped_nothing_to_compact`: message count is below `preserveCount`;
  *   the session was already too small to compact. Usually means a single
@@ -136,6 +138,21 @@ export type CompactionOutcome =
   | "succeeded"
   | "skipped_nothing_to_compact"
   | "failed_catastrophic";
+
+/**
+ * Return shape of `compactAgentConversation`. The new session id is plumbed
+ * back to callers so they don't have to re-derive it by searching
+ * `state.sessions` for a matching `conversationId` — that lookup falsely
+ * fails for agents like Codex where `sessionId === conversationId` (#1757).
+ *
+ * `newSessionId` is set on reactive success (the post-compaction serving
+ * session). On predictive success the standby id is stored on the parent
+ * via `standbySessionId`; predictive callers consult that pointer instead.
+ */
+type CompactAgentResult = {
+  outcome: Exclude<CompactionOutcome, "retried">;
+  newSessionId?: string;
+};
 
 /** Wait for a session to return to 'ready' (not 'prompting') with a timeout.
  * Used after sending the compaction seed prompt to avoid racing with the retry. */
@@ -2846,26 +2863,17 @@ export const agentStore = {
     sessionId: string,
     preserveCount: number,
     /**
-     * Optional prompt to retry on the new session after compaction. Callers
-     * pass this when a send failed mid-flight (e.g. `compactAndRetry`). The
-     * auto-compact-from-promptComplete path passes `undefined` because the
-     * previous prompt already completed successfully — retrying it would
-     * duplicate. Queued prompts are handled separately via the pendingPrompts
-     * transfer below — see #1623.
-     */
-    pendingUserPrompt?: string,
-    /**
      * Predictive mode spawns a warm standby (role="standby") WITHOUT
      * terminating the old serving session. The new session is visible to
      * events but invisible to the UI until `promoteStandbyAndDispatch`
      * promotes it on the next user submit. #1631.
      */
     opts?: { mode?: "reactive" | "predictive" },
-  ): Promise<CompactionOutcome> {
+  ): Promise<CompactAgentResult> {
     const mode = opts?.mode ?? "reactive";
     const session = state.sessions[sessionId];
     if (!session || session.isCompacting) {
-      return "skipped_nothing_to_compact";
+      return { outcome: "skipped_nothing_to_compact" };
     }
 
     const messages = session.messages;
@@ -2873,7 +2881,7 @@ export const agentStore = {
       console.info(
         "[AgentStore] Not enough messages to compact (message count below preserve threshold)",
       );
-      return "skipped_nothing_to_compact";
+      return { outcome: "skipped_nothing_to_compact" };
     }
 
     // isCompacting signals "this serving session is being torn down and
@@ -3019,7 +3027,7 @@ Structured summary:`;
             console.info(
               `[compact.synthetic.success] standby ${syntheticStandbyId} resumed synthetic transcript ${syntheticAgentSessionId} for serving ${sessionId}`,
             );
-            return "succeeded";
+            return { outcome: "succeeded", newSessionId: syntheticStandbyId };
           } catch (err) {
             // Defensive fallback: any failure (CLI rejects file, parent
             // JSONL unreadable, write fails) drops through to today's
@@ -3043,7 +3051,7 @@ Structured summary:`;
           console.warn(
             "[AgentStore] Predictive standby spawn returned null — keeping serving session, will retry next turn",
           );
-          return "failed_catastrophic";
+          return { outcome: "failed_catastrophic" };
         }
         setState("sessions", standbyId, "compactedSummary", compactedSummary);
         setState("sessions", sessionId, "standbySessionId", standbyId);
@@ -3055,7 +3063,7 @@ Structured summary:`;
         console.info(
           `[AgentStore] Predictive compaction: standby ${standbyId} seeding for serving ${sessionId}`,
         );
-        return "succeeded";
+        return { outcome: "succeeded", newSessionId: standbyId };
       }
 
       // Reactive path: terminate old, spawn fresh serving, seed, retry.
@@ -3114,22 +3122,17 @@ Structured summary:`;
         `[AgentStore] Compacted ${toCompact.length} messages, preserved ${toPreserve.length}. Seeding new session.`,
       );
 
-      // Wait for the new session to be ready, then restore settings and seed
+      // Wait for the new session to be ready, then restore settings and seed.
+      // We deliberately stop here: dispatching the user's failed prompt is the
+      // caller's job (`compactAndRetry`). Doing it inline produced two bugs in
+      // one function — see #1757. The contract is "produce a fresh, idle,
+      // seeded session and return its id"; nothing more.
       await waitForSessionReady(newSessionId);
       await this.restoreSessionSettings(session, newSessionId);
       await providerService.sendPrompt(newSessionId, seedPrompt);
       await waitForSessionIdle(newSessionId);
 
-      if (pendingUserPrompt) {
-        console.info(
-          "[AgentStore] Retrying user prompt after auto-compaction:",
-          pendingUserPrompt.slice(0, 60),
-        );
-        setState("sessions", newSessionId, "lastUserPrompt", pendingUserPrompt);
-        await providerService.sendPrompt(newSessionId, pendingUserPrompt);
-        return "retried";
-      }
-      return "succeeded";
+      return { outcome: "succeeded", newSessionId };
     } catch (error) {
       // Predictive warm-up failures are not catastrophic — the serving
       // session is still alive and the user can keep working. Downgrade the
@@ -3168,7 +3171,7 @@ Structured summary:`;
         if (state.sessions[sessionId]?.standbySessionId) {
           setState("sessions", sessionId, "standbySessionId", null);
         }
-        return "failed_catastrophic";
+        return { outcome: "failed_catastrophic" };
       }
       console.error(
         "[AgentStore] Failed to compact agent conversation (catastrophic):",
@@ -3204,7 +3207,7 @@ Structured summary:`;
           );
         }
       }
-      return "failed_catastrophic";
+      return { outcome: "failed_catastrophic" };
     }
   },
 
@@ -3226,12 +3229,13 @@ Structured summary:`;
     );
 
     try {
-      // Retry the last prompt that failed — this entry point is called from
-      // sendPrompt's error handler when the CLI rejected for context overflow.
-      const outcome = await this.compactAgentConversation(
+      // compactAgentConversation returns the id of the fresh, seeded, idle
+      // session. We trust that id and do the retry locally — splitting
+      // dispatch across both functions, or re-deriving the id via a state
+      // lookup, regressed for #1757.
+      const result = await this.compactAgentConversation(
         sessionId,
         settingsStore.settings.autoCompactPreserveMessages,
-        lastPrompt,
       );
 
       // Propagate non-success outcomes directly. "skipped" means the message
@@ -3239,42 +3243,20 @@ Structured summary:`;
       // "failed_catastrophic" means spawn or summary threw. Chat fallback is
       // only correct for the latter; the former means a single prompt is too
       // large and Chat would fail identically — show an error instead.
-      if (outcome === "skipped_nothing_to_compact") {
-        return outcome;
-      }
-      if (outcome === "failed_catastrophic") {
-        return outcome;
+      if (result.outcome !== "succeeded") {
+        return result.outcome;
       }
 
-      // After compaction, the old session is terminated and a new one exists.
-      // Find the new session by conversation ID.
-      const convoId = session.conversationId;
-      const newEntry = Object.entries(state.sessions).find(
-        ([, s]) => s.conversationId === convoId && !s.isCompacting,
-      );
-      if (!newEntry) {
+      const newSessionId = result.newSessionId;
+      if (!newSessionId) {
+        // Defensive: the type contract guarantees newSessionId on
+        // "succeeded", but if it ever drifts we treat the absence as
+        // catastrophic so the caller can fall back to Chat.
         console.warn(
-          "[AgentStore] compactAndRetry: new session not found after compaction — treating as catastrophic",
+          "[AgentStore] compactAndRetry: succeeded outcome without newSessionId — treating as catastrophic",
         );
         return "failed_catastrophic";
       }
-
-      const [newSessionId] = newEntry;
-
-      // If the search returned the original session, compaction never
-      // swapped it out — treat as catastrophic so the user isn't silently
-      // stuck on a full session.
-      if (newSessionId === sessionId) {
-        console.warn(
-          "[AgentStore] compactAndRetry: new session matches old session id — compaction did not swap",
-        );
-        return "failed_catastrophic";
-      }
-
-      // compactAgentConversation sends the seed prompt before returning, so the
-      // session may still be in 'prompting' state. Wait for it to go idle before
-      // sending the user's original prompt to avoid a concurrent-prompt race.
-      await waitForSessionIdle(newSessionId);
 
       // Retry the original prompt if available; otherwise leave the
       // compacted session ready for the user's next input.
@@ -3282,6 +3264,7 @@ Structured summary:`;
         console.info(
           `[AgentStore] Compaction complete, retrying prompt on session ${newSessionId}`,
         );
+        setState("sessions", newSessionId, "lastUserPrompt", lastPrompt);
         await providerService.sendPrompt(newSessionId, lastPrompt);
         return "retried";
       }
@@ -3312,17 +3295,16 @@ Structured summary:`;
     predictiveCompactBusy = true;
     setState("sessions", sessionId, "predictiveCompactInFlight", true);
     try {
-      const outcome = await this.compactAgentConversation(
+      const result = await this.compactAgentConversation(
         sessionId,
         settingsStore.settings.autoCompactPreserveMessages,
-        undefined,
         { mode: "predictive" },
       );
-      if (outcome !== "succeeded") {
+      if (result.outcome !== "succeeded") {
         // Silent abort — serving session is still healthy.
         console.warn(
           "[AgentStore] kickPredictiveCompact: non-success outcome",
-          outcome,
+          result.outcome,
         );
         predictiveCompactBusy = false;
         setState("sessions", sessionId, "predictiveCompactInFlight", false);

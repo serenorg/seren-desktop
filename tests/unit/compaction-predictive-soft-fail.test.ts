@@ -41,10 +41,12 @@ describe("#152 — predictive standby spawn null is non-catastrophic", () => {
       predictiveIdx,
     );
     // The block after the null check should warn, not error, and must return
-    // an outcome (not throw).
-    const block = compactBody.slice(nullCheckIdx, nullCheckIdx + 600);
+    // an outcome (not throw). Post-#1757 the return is a structured object.
+    const block = compactBody.slice(nullCheckIdx, nullCheckIdx + 800);
     expect(block).toMatch(/console\.warn\(/);
-    expect(block).toContain('return "failed_catastrophic"');
+    expect(block).toMatch(
+      /return\s*\{\s*outcome:\s*"failed_catastrophic"\s*\}/,
+    );
   });
 
   it("catch block treats predictive mode as non-fatal", () => {
