@@ -190,7 +190,7 @@ const CLAUDE_1M_MODELS = new Set([
 ]);
 
 function defaultContextWindowFor(agentType: string, modelId?: string): number {
-  if (agentType === "codex") return 400_000;
+  if (agentType === "codex") return 1_000_000;
   if (agentType === "gemini") return 1_000_000;
   if (agentType === "claude-code" && modelId) {
     const normalized = modelId.replace(/\[1m\]$/i, "");

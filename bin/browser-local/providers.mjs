@@ -487,18 +487,27 @@ function emitToolResult(emit, session, item) {
   session.toolOutputs.delete(toolCallId);
 }
 
-function normalizeTurnUsage(tokenUsage) {
+export function normalizeTurnUsage(tokenUsage) {
   const last = tokenUsage?.last ?? tokenUsage?.total ?? null;
   if (!last) {
     return undefined;
   }
 
-  return {
+  const meta = {
     usage: {
       input_tokens: last.inputTokens,
       output_tokens: last.outputTokens,
     },
   };
+
+  if (
+    typeof tokenUsage?.modelContextWindow === "number" &&
+    tokenUsage.modelContextWindow > 0
+  ) {
+    meta.contextWindow = tokenUsage.modelContextWindow;
+  }
+
+  return meta;
 }
 
 function buildApprovalToolCall(method, params) {

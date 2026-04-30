@@ -139,7 +139,6 @@ describe("#1749 — defaultContextWindowFor recognises 1M Claude variants at spa
 
     // Codex / Gemini cases must still return their existing defaults.
     expect(helperBody).toContain('agentType === "codex"');
-    expect(helperBody).toContain("400_000");
     expect(helperBody).toContain('agentType === "gemini"');
     expect(helperBody).toContain("1_000_000");
 
