@@ -2,13 +2,28 @@
 // ABOUTME: Reduces clutter by showing "searched 5 files, ran 3 commands" instead of 20+ individual cards.
 
 import type { Component } from "solid-js";
-import { createSignal, For, Show } from "solid-js";
+import { For, Show } from "solid-js";
 import type { ToolCallEvent } from "@/services/providers";
+import {
+  getToolCallGroupState,
+  setToolCallGroupExpanded,
+  setToolCallGroupTailing,
+} from "@/stores/tool-call-groups.store";
 import { ToolCallCard } from "./ToolCallCard";
 
 interface ToolCallGroupProps {
   toolCalls: ToolCallEvent[];
+  /**
+   * Stable identity for this group across regroup remounts (#1748). Provided
+   * by ChatContent and derived from the first tool call's id.
+   */
+  groupId: string;
   isComplete?: boolean;
+}
+
+function isRunning(tool: ToolCallEvent): boolean {
+  const status = tool.status.toLowerCase();
+  return status.includes("running") || status.includes("progress");
 }
 
 /** Categorize tool calls into plain language summary */
@@ -98,12 +113,20 @@ function buildSummary(
 }
 
 export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
-  const [isExpanded, setIsExpanded] = createSignal(false);
+  // State lives in the store, keyed by groupId, so it survives regroup remounts.
+  const groupState = () => getToolCallGroupState(props.groupId);
+  const isExpanded = () => groupState().expanded;
+  const isTailing = () => groupState().tailing;
+  const toggleExpanded = () =>
+    setToolCallGroupExpanded(props.groupId, !isExpanded());
+  const toggleTailing = (e: MouseEvent) => {
+    e.stopPropagation(); // don't also toggle the chevron
+    setToolCallGroupTailing(props.groupId, !isTailing());
+  };
 
   const categories = () => categorizeToolCalls(props.toolCalls);
   const summary = () => buildSummary(categories());
-  const hasRunning = () =>
-    props.toolCalls.some((t) => t.status.toLowerCase().includes("running"));
+  const hasRunning = () => props.toolCalls.some(isRunning);
 
   return (
     <div class="my-2 mx-5 bg-surface-0 border border-surface-3 rounded-lg overflow-hidden">
@@ -111,7 +134,7 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
       <button
         type="button"
         class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-2 transition-colors"
-        onClick={() => setIsExpanded(!isExpanded())}
+        onClick={toggleExpanded}
       >
         {/* Status Icon */}
         <Show
@@ -167,6 +190,42 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
           {props.toolCalls.length} tool{props.toolCalls.length > 1 ? "s" : ""}
         </span>
 
+        {/* Tail Toggle — only meaningful while a tool is running */}
+        <Show when={hasRunning()}>
+          <button
+            type="button"
+            onClick={toggleTailing}
+            aria-pressed={isTailing() ? "true" : "false"}
+            title={
+              isTailing()
+                ? "Stop tailing running tool output"
+                : "Tail running tool output"
+            }
+            class={`shrink-0 flex items-center gap-1 px-2 py-0.5 rounded text-xs border transition-colors ${
+              isTailing()
+                ? "bg-primary/15 border-primary/40 text-primary"
+                : "bg-surface-2 border-surface-3 text-muted-foreground hover:text-foreground hover:border-primary/40"
+            }`}
+          >
+            <svg
+              class="w-3 h-3"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              role="img"
+              aria-label="Tail"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M19 14l-7 7m0 0l-7-7m7 7V3"
+              />
+            </svg>
+            <span>Tail</span>
+          </button>
+        </Show>
+
         {/* Expand Icon */}
         <svg
           class={`w-4 h-4 shrink-0 text-muted-foreground transition-transform ${isExpanded() ? "rotate-180" : ""}`}
@@ -189,7 +248,13 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
       <Show when={isExpanded()}>
         <div class="border-t border-surface-2 px-3 py-2 space-y-2">
           <For each={props.toolCalls}>
-            {(toolCall) => <ToolCallCard toolCall={toolCall} />}
+            {(toolCall) => (
+              <ToolCallCard
+                toolCall={toolCall}
+                forceExpanded={isTailing() && isRunning(toolCall)}
+                tail={isTailing() && isRunning(toolCall)}
+              />
+            )}
           </For>
         </div>
       </Show>
