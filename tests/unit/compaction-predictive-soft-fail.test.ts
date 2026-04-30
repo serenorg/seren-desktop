@@ -53,8 +53,9 @@ describe("#152 — predictive standby spawn null is non-catastrophic", () => {
     // with the Error instance.
     const catchIdx = compactBody.indexOf("} catch (error) {");
     expect(catchIdx, "catch block must exist").toBeGreaterThan(0);
-    const catchBody = compactBody.slice(catchIdx, catchIdx + 1500);
-    // Guard: predictive branch is checked first
+    // Slice to end of the function so growth in the predictive branch
+    // doesn't push the catastrophic log past a fixed window.
+    const catchBody = compactBody.slice(catchIdx);
     const predictiveCatchIdx = catchBody.indexOf('if (mode === "predictive")');
     const catastrophicLogIdx = catchBody.indexOf(
       "Failed to compact agent conversation (catastrophic)",
@@ -62,6 +63,10 @@ describe("#152 — predictive standby spawn null is non-catastrophic", () => {
     expect(
       predictiveCatchIdx,
       "predictive branch must be inside catch",
+    ).toBeGreaterThan(0);
+    expect(
+      catastrophicLogIdx,
+      "catastrophic console.error must exist after the predictive branch",
     ).toBeGreaterThan(0);
     expect(
       predictiveCatchIdx,
@@ -73,7 +78,7 @@ describe("#152 — predictive standby spawn null is non-catastrophic", () => {
     // Without this, the next sendPrompt's standby-promotion path would try
     // to promote a session id that is gone or unreachable.
     const catchIdx = compactBody.indexOf("} catch (error) {");
-    const catchBody = compactBody.slice(catchIdx, catchIdx + 1500);
+    const catchBody = compactBody.slice(catchIdx);
     expect(catchBody).toMatch(/standbySessionId/);
     expect(catchBody).toMatch(/setState\([^)]*standbySessionId[^)]*null/);
   });
