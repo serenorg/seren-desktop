@@ -49,6 +49,17 @@ describe("chooseUpdatedModelId (#1635)", () => {
       chooseUpdatedModelId("claude-opus-4-5", "claude-opus-4-6", records),
     ).toBe("claude-opus-4-6");
   });
+
+  it("rejects sentinel-bracketed placeholders so CLI-fabricated turns can't poison currentModelId", () => {
+    // Repro for the stream-idle-timeout regression: Claude Code emits a
+    // synthesized assistant turn with `message.model = "<synthetic>"` after
+    // a partial-response timeout. Without this guard, `<synthetic>` flows
+    // into `session.currentModelId` and the next `--model` spawn arg, which
+    // the CLI hard-rejects ("issue with the selected model (<synthetic>)").
+    expect(
+      chooseUpdatedModelId("claude-opus-4-7", "<synthetic>", records),
+    ).toBeNull();
+  });
 });
 
 describe("inferCurrentModelId fuzzy tiers", () => {
