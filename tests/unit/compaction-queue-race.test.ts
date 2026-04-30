@@ -47,14 +47,18 @@ describe("#1623 — compactAgentConversation transfers pendingPrompts to new ses
     );
   });
 
-  it("takes an explicit pendingUserPrompt parameter (not session.lastUserPrompt)", () => {
-    // The old code read session.lastUserPrompt inline, which retried
-    // whatever the last sendPrompt set — in the auto-compact path that was
-    // the just-completed prompt, causing a duplicate turn. An explicit param
-    // lets callers distinguish "failed in-flight prompt" (compactAndRetry)
-    // from "prompt completed successfully" (auto-compact from promptComplete).
-    expect(agentStoreSource).toContain("pendingUserPrompt?: string,");
-    // The inline read must be gone.
+  it("compactAgentConversation does not accept a retry-prompt parameter (#1757)", () => {
+    // Post-#1757, retry dispatch is the caller's responsibility.
+    // compactAgentConversation produces a fresh, idle, seeded session and
+    // returns its id; nothing more. Reintroducing a pendingUserPrompt-style
+    // param would re-open the double-dispatch latent in the old design
+    // (Codex short-circuited via the swap-check; Claude Code double-sent).
+    const fnStart = agentStoreSource.indexOf("async compactAgentConversation(");
+    expect(fnStart, "compactAgentConversation must exist").toBeGreaterThan(0);
+    const sigEnd = agentStoreSource.indexOf("): Promise<", fnStart);
+    const signature = agentStoreSource.slice(fnStart, sigEnd);
+    expect(signature).not.toMatch(/pendingUserPrompt/);
+    // The inline read must also be gone.
     expect(agentStoreSource).not.toContain(
       "const pendingUserPrompt = session.lastUserPrompt;",
     );
@@ -64,12 +68,12 @@ describe("#1623 — compactAgentConversation transfers pendingPrompts to new ses
     // The prompt that produced this promptComplete already succeeded — we
     // MUST NOT retry it or the user sees a duplicate turn.
     //
-    // Post-#1716, the auto-compact branch routes through
+    // Post-#1716 the auto-compact branch routes through
     // `this.kickPredictiveCompact(sessionId)` rather than calling
-    // `compactAgentConversation` directly. `kickPredictiveCompact` does
-    // not accept a pendingUserPrompt param, and its internal compact call
-    // hardcodes `undefined` — so the no-retry contract still holds, just
-    // one indirection deeper.
+    // `compactAgentConversation` directly. Post-#1757 compactAgentConversation
+    // never retries at all — there is no retry-prompt param to forward — so
+    // the no-retry contract is now structural, not a question of which
+    // sentinel value gets passed.
     const autoCompactAnchor = "Auto-compact check runs BEFORE drain (#1623)";
     const drainAnchor = "Drain the prompt queue for this session";
     const autoCompactIdx = agentStoreSource.indexOf(autoCompactAnchor);
@@ -81,21 +85,25 @@ describe("#1623 — compactAgentConversation transfers pendingPrompts to new ses
     expect(autoCompactBlock).not.toMatch(
       /kickPredictiveCompact\(sessionId,\s*[^)]/,
     );
-
-    // kickPredictiveCompact's internal compactAgentConversation call must
-    // still pass undefined for pendingUserPrompt.
-    const kickStart = agentStoreSource.indexOf("async kickPredictiveCompact(");
-    const kickEnd = agentStoreSource.indexOf("\n  },", kickStart);
-    const kickBody = agentStoreSource.slice(kickStart, kickEnd);
-    expect(kickBody).toMatch(
-      /this\.compactAgentConversation\([\s\S]*?undefined,[\s\S]*?\{ mode: "predictive" \}/,
-    );
   });
 
-  it("compactAndRetry passes lastPrompt for pendingUserPrompt", () => {
-    // The failed-prompt retry path must still work — it IS a real retry.
-    expect(agentStoreSource).toContain(
-      "settingsStore.settings.autoCompactPreserveMessages,\n        lastPrompt,",
+  it("compactAndRetry retries the failed prompt itself, after compactAgentConversation returns (#1757)", () => {
+    // The failed-prompt retry path must still work — it IS a real retry —
+    // but the dispatch lives in compactAndRetry, not compactAgentConversation.
+    // Single responsibility per function, no double-dispatch.
+    const fnStart = agentStoreSource.indexOf("async compactAndRetry(");
+    expect(fnStart, "compactAndRetry must exist").toBeGreaterThan(0);
+    const fnEnd = agentStoreSource.indexOf("\n  },", fnStart);
+    const fnBody = agentStoreSource.slice(fnStart, fnEnd);
+
+    // The retry sendPrompt is in compactAndRetry's body, gated on lastPrompt.
+    expect(fnBody).toMatch(
+      /if \(lastPrompt\) \{[\s\S]*?providerService\.sendPrompt\(newSessionId,\s*lastPrompt\)/,
+    );
+    // And compactAndRetry's compactAgentConversation call passes neither
+    // a retry prompt nor a positional sentinel for one.
+    expect(fnBody).not.toMatch(
+      /this\.compactAgentConversation\(\s*sessionId,\s*[^,]+,\s*lastPrompt/,
     );
   });
 });
