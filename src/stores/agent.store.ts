@@ -194,25 +194,27 @@ async function waitForStandbySeed(
   return state.sessions[standbyId]?.seedCompleted === true;
 }
 
-/** Claude Code model IDs that ship with a 1M-token context tier. The CLI
- * advertises the variant either as a bracketed suffix (`claude-opus-4-7[1m]`)
- * or as the bare ID once the tier has been negotiated; both forms hit this
- * helper. The first promptComplete still upserts the CLI-reported window via
- * recordModelContextWindow, so this is just the cold-start default. #1749. */
-const CLAUDE_1M_MODELS = new Set([
-  "claude-opus-4-7",
+/** Claude Code model IDs that ship a 1M-token context tier behind the
+ * `[1m]` suffix. Bare IDs default to 200K — Anthropic gates the 1M tier on
+ * the suffix, which the CLI translates into a `context-1m-2025-08-07` beta
+ * header. The first promptComplete still upserts the CLI-reported window via
+ * recordModelContextWindow, so this is just the cold-start default. #1761. */
+const CLAUDE_1M_TIER_CAPABLE_MODELS = new Set([
+  "claude-opus-4-5",
   "claude-opus-4-6",
-  "claude-sonnet-4-7",
+  "claude-opus-4-7",
+  "claude-sonnet-4-5",
   "claude-sonnet-4-6",
+  "claude-sonnet-4-7",
 ]);
 
 function defaultContextWindowFor(agentType: string, modelId?: string): number {
   if (agentType === "codex") return 1_000_000;
   if (agentType === "gemini") return 1_000_000;
   if (agentType === "claude-code" && modelId) {
-    const normalized = modelId.replace(/\[1m\]$/i, "");
-    if (CLAUDE_1M_MODELS.has(normalized) || /\[1m\]$/i.test(modelId)) {
-      return 1_000_000;
+    if (/\[1m\]$/i.test(modelId)) {
+      const stripped = modelId.replace(/\[1m\]$/i, "").replace(/-\d{8}$/, "");
+      if (CLAUDE_1M_TIER_CAPABLE_MODELS.has(stripped)) return 1_000_000;
     }
   }
   return 200_000;
@@ -617,6 +619,10 @@ export interface ActiveSession {
   predictiveCompactInFlight?: boolean;
   /** Sibling standby session id while predictive compaction is warming. */
   standbySessionId?: string | null;
+  /** True once a tier-promise drift has been captured to the support
+   *  pipeline, so the same session doesn't spam captureSupportError on every
+   *  promptComplete. #1761. */
+  contextWindowMismatchReported?: boolean;
 }
 
 // ============================================================================
@@ -4443,6 +4449,39 @@ Structured summary:`;
             typeof reportedContextWindow === "number" &&
             reportedContextWindow > 0
           ) {
+            // Surface tier-promise drift to the support pipeline. If the
+            // picker entry's id ends in `[1m]` but the runtime reported a
+            // window below 1M, the request never opted into the 1M tier
+            // upstream and the gauge will lie about every subsequent turn.
+            // Capture once per session so we get a regression signal without
+            // spamming. #1761.
+            const sess = state.sessions[sessionId];
+            const expectedFromPicker = defaultContextWindowFor(
+              sess?.info?.agentType ?? "",
+              sess?.currentModelId,
+            );
+            if (
+              !sess?.contextWindowMismatchReported &&
+              expectedFromPicker > reportedContextWindow &&
+              /\[1m\]$/i.test(sess?.currentModelId ?? "")
+            ) {
+              setState(
+                "sessions",
+                sessionId,
+                "contextWindowMismatchReported",
+                true,
+              );
+              void captureSupportError({
+                kind: "agent.context_window_tier_mismatch",
+                message: `Picker promised ${expectedFromPicker.toLocaleString()} but CLI reported ${reportedContextWindow.toLocaleString()} for ${sess?.currentModelId}`,
+                stack: [],
+                agentContext: {
+                  model: sess?.currentModelId,
+                  provider: sess?.info?.agentType,
+                  tool_calls: [],
+                },
+              });
+            }
             setState(
               "sessions",
               sessionId,
@@ -4452,7 +4491,6 @@ Structured summary:`;
             // Persist (provider, modelId) -> contextWindow so next spawn of
             // this model starts with the correct value instead of the
             // agent-type default. Fire-and-forget; failures are non-fatal.
-            const sess = state.sessions[sessionId];
             const modelKey = sess?.currentModelId;
             const provider = sess?.info?.agentType;
             if (modelKey && provider) {
