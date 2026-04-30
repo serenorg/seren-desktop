@@ -60,6 +60,35 @@ describe("chooseUpdatedModelId (#1635)", () => {
       chooseUpdatedModelId("claude-opus-4-7", "<synthetic>", records),
     ).toBeNull();
   });
+
+  it("preserves the [1m] suffix when Anthropic echoes the bare resolved id (#1763)", () => {
+    // Anthropic's API rewrites the request id into a dated bare form on the
+    // way back (`claude-opus-4-7-20251201`). Without the guard, that bare
+    // id would overwrite `session.currentModelId`, the next spawn would
+    // drop `[1m]` from `--model`, and the API would silently serve 200K.
+    expect(
+      chooseUpdatedModelId(
+        "claude-opus-4-7[1m]",
+        "claude-opus-4-7-20251201",
+        records,
+      ),
+    ).toBe("claude-opus-4-7[1m]");
+    expect(
+      chooseUpdatedModelId("claude-opus-4-7[1m]", "claude-opus-4-7", records),
+    ).toBe("claude-opus-4-7[1m]");
+  });
+
+  it("does not preserve [1m] when the user actually switched models", () => {
+    // A real model switch must surface as a real model switch — we only
+    // re-attach `[1m]` when the bare base matches.
+    expect(
+      chooseUpdatedModelId(
+        "claude-opus-4-7[1m]",
+        "claude-sonnet-4-6",
+        records,
+      ),
+    ).toBe("claude-sonnet-4-6");
+  });
 });
 
 describe("inferCurrentModelId fuzzy tiers", () => {

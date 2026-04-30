@@ -78,6 +78,29 @@ export function chooseUpdatedModelId(
   if (/^<.+>$/.test(incomingMessageModel)) {
     return null;
   }
+  // Preserve the `[1m]` suffix when the session is on a 1M-tier variant.
+  // Anthropic echoes the bare resolved id (e.g. `claude-opus-4-7-20251201`)
+  // in `message.model`; without this guard the next assistant turn would
+  // overwrite `session.currentModelId` with the bare id, the next spawn
+  // would drop the `[1m]` suffix from `--model`, and the API would silently
+  // serve the 200K tier on subsequent turns. The bare-id `incomingMessageModel`
+  // remains ground truth for the underlying model identity — we only
+  // re-attach the tier marker the CLI was asked to keep. See #1763.
+  if (
+    typeof previousModelId === "string" &&
+    /\[1m\]$/i.test(previousModelId)
+  ) {
+    const previousBare = previousModelId
+      .replace(/\[1m\]$/i, "")
+      .replace(/-\d{8}$/, "");
+    const incomingBare = incomingMessageModel.replace(/-\d{8}$/, "");
+    if (
+      previousBare.length > 0 &&
+      (previousBare === incomingBare || incomingBare.startsWith(previousBare))
+    ) {
+      return previousModelId;
+    }
+  }
   const records = Array.isArray(availableModelRecords)
     ? availableModelRecords
     : [];
