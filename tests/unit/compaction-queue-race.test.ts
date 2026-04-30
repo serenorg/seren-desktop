@@ -109,11 +109,12 @@ describe("#1623 — sendPrompt defensive guard against compaction race", () => {
     // The guard must live BEFORE the session.info.status === "error" branch
     // because a compacting session still has an otherwise-valid status.
     // Window widened to accommodate the predictive-swap block added in #1631
-    // before the compacting guard. The invariant we care about is that the
-    // compacting guard still fires BEFORE the `status === "error"` branch.
+    // and the predictive-compact-race guard added in #1749, both before the
+    // compacting guard. The invariant we care about is that the compacting
+    // guard still fires BEFORE the `status === "error"` branch.
     const sendPromptWindow = agentStoreSource.slice(
       sendPromptStart,
-      sendPromptStart + 5000,
+      sendPromptStart + 7000,
     );
     expect(sendPromptWindow).toContain("session?.isCompacting");
     expect(sendPromptWindow).toContain("this.enqueuePrompt(sessionId, prompt)");
