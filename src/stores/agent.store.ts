@@ -177,6 +177,30 @@ async function waitForStandbySeed(
   return state.sessions[standbyId]?.seedCompleted === true;
 }
 
+/** Claude Code model IDs that ship with a 1M-token context tier. The CLI
+ * advertises the variant either as a bracketed suffix (`claude-opus-4-7[1m]`)
+ * or as the bare ID once the tier has been negotiated; both forms hit this
+ * helper. The first promptComplete still upserts the CLI-reported window via
+ * recordModelContextWindow, so this is just the cold-start default. #1749. */
+const CLAUDE_1M_MODELS = new Set([
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-7",
+  "claude-sonnet-4-6",
+]);
+
+function defaultContextWindowFor(agentType: string, modelId?: string): number {
+  if (agentType === "codex") return 400_000;
+  if (agentType === "gemini") return 1_000_000;
+  if (agentType === "claude-code" && modelId) {
+    const normalized = modelId.replace(/\[1m\]$/i, "");
+    if (CLAUDE_1M_MODELS.has(normalized) || /\[1m\]$/i.test(modelId)) {
+      return 1_000_000;
+    }
+  }
+  return 200_000;
+}
+
 import { isLikelyAuthError } from "@/lib/auth-errors";
 import { buildChatRequest, sendProviderMessage } from "@/lib/providers";
 import {
@@ -1986,11 +2010,7 @@ export const agentStore = {
             : undefined,
           contextWindowSize:
             cachedContextWindow ??
-            (resolvedAgentType === "codex"
-              ? 400_000
-              : resolvedAgentType === "gemini"
-                ? 1_000_000
-                : 200_000),
+            defaultContextWindowFor(resolvedAgentType, opts?.initialModelId),
           bootstrapPromptContext: finalBootstrapContext,
           pendingPrompts: [],
           role: opts?.role ?? "serving",
@@ -3356,6 +3376,14 @@ Structured summary:`;
     setState("sessions", standbyId, "conversationId", conversationId);
     setState("sessions", standbyId, "role", "serving");
     setState("sessions", standbyId, "seedCompleted", undefined);
+    // Transfer queued prompts. The #1749 enqueue-during-spawn-race guard in
+    // sendPrompt parks user prompts on the serving session while
+    // predictiveCompactInFlight=true; without this transfer those prompts
+    // would be lost when terminateSession deletes the serving session below.
+    const carriedQueue = serving.pendingPrompts ?? [];
+    if (carriedQueue.length > 0) {
+      setState("sessions", standbyId, "pendingPrompts", [...carriedQueue]);
+    }
 
     // Make the promoted standby the active session BEFORE the old serving
     // session is torn down. Without this, terminateSession's auto-pickup
@@ -3465,6 +3493,39 @@ Structured summary:`;
         options?.docNames,
       );
       this.clearTurnError(threadId);
+    }
+
+    // Predictive-compact race guard (#1749): auto-compact kicks
+    // `kickPredictiveCompact` which sets `predictiveCompactInFlight=true`
+    // synchronously, but the standby session is only spawned ~10s later
+    // (line ~3029). If the user submits during that window, the existing
+    // standbySessionId block below is a no-op and the prompt would dispatch
+    // on the overloaded serving session, growing context further (e.g. 127% →
+    // 183%). Enqueue instead — the standby's promptComplete handler kicks a
+    // drain once seedCompleted=true, which re-enters sendPrompt with the
+    // standby ready and promotes-and-dispatches normally.
+    if (
+      sessionId &&
+      session &&
+      session.role === "serving" &&
+      session.predictiveCompactInFlight &&
+      !session.standbySessionId &&
+      session.lastInputTokens != null &&
+      session.contextWindowSize > 0 &&
+      session.lastInputTokens / session.contextWindowSize >=
+        settingsStore.settings.autoCompactThreshold / 100
+    ) {
+      console.info(
+        `[AgentStore] sendPrompt: predictive compact in-flight at ${Math.round(
+          (session.lastInputTokens / session.contextWindowSize) * 100,
+        )}% — enqueuing prompt until standby is seeded (#1749)`,
+      );
+      // Keep turnInFlight=true (matching the #1623 isCompacting branch
+      // below) so the UI keeps showing "sending..." until the dispatched
+      // prompt actually completes on the promoted standby. The standby's
+      // seed-complete handler kicks the drain that dispatches this prompt.
+      this.enqueuePrompt(sessionId, prompt);
+      return;
     }
 
     // Predictive swap: if a warm standby is ready, promote it at this turn
@@ -4305,6 +4366,7 @@ Structured summary:`;
           );
           predictiveCompactBusy = false;
           const owner = state.sessions[sessionId];
+          let servingForDrain: string | null = null;
           if (owner?.conversationId) {
             for (const [sid, s] of Object.entries(state.sessions)) {
               if (
@@ -4312,7 +4374,34 @@ Structured summary:`;
                 s.role === "serving"
               ) {
                 setState("sessions", sid, "predictiveCompactInFlight", false);
+                if ((s.pendingPrompts ?? []).length > 0) {
+                  servingForDrain = sid;
+                }
               }
+            }
+          }
+          // Drain any prompts the user enqueued via the #1749 race guard while
+          // this standby was being spawned. The drained sendPrompt will see
+          // standbySessionId set + seedCompleted=true and route through
+          // promoteStandbyAndDispatch, which carries the remaining queue
+          // across the swap.
+          if (servingForDrain) {
+            const drainTarget = servingForDrain;
+            const queue = state.sessions[drainTarget]?.pendingPrompts ?? [];
+            const [nextPrompt, ...remaining] = queue;
+            if (nextPrompt != null) {
+              setState("sessions", drainTarget, "pendingPrompts", remaining);
+              console.info(
+                `[AgentStore] Standby ${sessionId} seeded — draining queued prompt on ${drainTarget} (#1749)`,
+              );
+              setTimeout(() => {
+                void this.sendPrompt(
+                  nextPrompt,
+                  undefined,
+                  undefined,
+                  drainTarget,
+                );
+              }, 0);
             }
           }
           break;

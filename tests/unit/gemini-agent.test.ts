@@ -138,8 +138,17 @@ describe("Gemini Agent — agent.store.ts wiring (#1471)", () => {
   it("contextWindowSize defaults to 1M for gemini", () => {
     // Gemini 2.5 Pro has a 1M+ context window — defaulting to 200k like
     // Claude would silently throttle the agent. Regression guard.
-    expect(agentStoreTs).toMatch(
-      /resolvedAgentType\s*===\s*"gemini"[^?]*\?\s*1_000_000/,
+    // #1749: this default now lives in defaultContextWindowFor; the spawn
+    // block delegates via that helper. Assert the helper still maps gemini
+    // to 1M.
+    const helperStart = agentStoreTs.indexOf(
+      "function defaultContextWindowFor(",
+    );
+    expect(helperStart, "defaultContextWindowFor must exist").toBeGreaterThan(0);
+    const helperEnd = agentStoreTs.indexOf("\n}\n", helperStart);
+    const helperBody = agentStoreTs.slice(helperStart, helperEnd);
+    expect(helperBody).toMatch(
+      /agentType\s*===\s*"gemini"\)?\s*return\s*1_000_000/,
     );
   });
 
