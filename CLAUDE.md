@@ -286,6 +286,7 @@ pnpm prepare:runtime:linux-x64       # Linux
 - Don't bypass MCP approval workflow.
 - Don't call `fetch` directly for Gateway APIs.
 - Don't shell out to system `node`/`npm` from Rust — use the embedded runtime.
+- Don't end replies with "Want me to /schedule..." follow-up offers (or any proactive routine/recurring-agent pitch). The harness default encourages these after work with a natural follow-up signal — that default is overridden for this project. End the turn with the result and stop. Taariq will ask directly when he wants a routine.
 
 ---
 
