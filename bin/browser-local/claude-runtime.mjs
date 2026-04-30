@@ -687,7 +687,30 @@ function buildClaudeArgs({
   return args;
 }
 
-function buildPromptMeta(result, peakInputTokens) {
+// Mirror of CLAUDE_1M_MODELS in src/stores/agent.store.ts. The CLI does not
+// always populate result.modelUsage[*].contextWindow (single-turn shortcuts,
+// abort paths, single-message --output-format runs), so the runtime needs
+// its own derivation table to keep `meta.contextWindow` reliable on every
+// prompt-complete. Without this, the desktop's auto-compaction gauge stays
+// pinned to the cold-start default (200K) and trips premature compaction on
+// 1M-tier sessions. #1754.
+const CLAUDE_1M_MODELS = new Set([
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-7",
+  "claude-sonnet-4-6",
+]);
+
+function inferClaudeContextWindow(modelId) {
+  if (typeof modelId !== "string" || modelId.length === 0) return undefined;
+  if (/\[1m\]$/i.test(modelId)) return 1_000_000;
+  const normalized = modelId.replace(/\[1m\]$/i, "");
+  if (CLAUDE_1M_MODELS.has(normalized)) return 1_000_000;
+  if (normalized.startsWith("claude-")) return 200_000;
+  return undefined;
+}
+
+function buildPromptMeta(result, peakInputTokens, fallbackModelId) {
   const usage = result?.usage ?? {};
   // Prefer per-turn peak tracked from assistant message usage events — the
   // authoritative per-API-call input size. The final turn in a multi-turn
@@ -721,13 +744,20 @@ function buildPromptMeta(result, peakInputTokens) {
   const outputTokens =
     typeof usage.output_tokens === "number" ? usage.output_tokens : undefined;
 
-  // Extract context window size from modelUsage if available.
+  // Extract context window size from modelUsage if available; otherwise
+  // derive it from the resolved model id. The CLI does not always populate
+  // modelUsage on result events, and when it doesn't the desktop store has
+  // no other channel to learn the window. #1754.
   const modelUsage = result?.modelUsage ?? {};
-  const firstModel = Object.values(modelUsage)[0];
-  const contextWindow =
+  const firstModelKey = Object.keys(modelUsage)[0];
+  const firstModel = firstModelKey != null ? modelUsage[firstModelKey] : undefined;
+  let contextWindow =
     typeof firstModel?.contextWindow === "number"
       ? firstModel.contextWindow
       : undefined;
+  if (contextWindow == null) {
+    contextWindow = inferClaudeContextWindow(firstModelKey ?? fallbackModelId);
+  }
 
   return {
     meta: {
@@ -1154,14 +1184,22 @@ function handleAssistantMessage(emit, session, payload) {
       message.model,
       session.availableModelRecords,
     );
-    // Trace every resolution — both the changing path and the steady-state —
-    // so when the picker disagrees with the assistant's self-report (#1718)
-    // we can read message.model directly from the log instead of guessing.
-    // The line ends up in `~/Library/Logs/com.serendb.desktop/SerenDesktop.log`
-    // via the ProviderRuntime stderr bridge.
-    console.warn(
-      `[browser-local][claude] chooseUpdatedModelId: previous=${previousModelId ?? "<unset>"}, incoming=${message.model ?? "<missing>"}, resolved=${nextModelId ?? "<null>"}`,
-    );
+    // Trace resolutions when something actually moves — transitions, picker
+    // disagreements, missing fields — so #1718's diagnostic intent is
+    // preserved. Steady-state no-ops (previous=incoming=resolved) carry no
+    // signal; the Rust stderr bridge wraps every line as log::warn!, so
+    // logging them every turn was spamming the desktop log (#1755).
+    const isNoOpResolution =
+      previousModelId != null &&
+      message.model != null &&
+      nextModelId != null &&
+      previousModelId === message.model &&
+      previousModelId === nextModelId;
+    if (!isNoOpResolution) {
+      console.warn(
+        `[browser-local][claude] chooseUpdatedModelId: previous=${previousModelId ?? "<unset>"}, incoming=${message.model ?? "<missing>"}, resolved=${nextModelId ?? "<null>"}`,
+      );
+    }
     if (nextModelId != null && nextModelId !== session.currentModelId) {
       session.currentModelId = nextModelId;
       emit("provider://session-status", buildSessionStatus(session));
@@ -1266,7 +1304,7 @@ function handleResult(emit, session, payload) {
   emit("provider://prompt-complete", {
     sessionId: session.id,
     stopReason: payload?.stop_reason ?? (payload?.is_error ? "error" : "end_turn"),
-    ...buildPromptMeta(payload, peakInputTokens),
+    ...buildPromptMeta(payload, peakInputTokens, session.currentModelId),
   });
   // Reset for the next prompt. Peak is prompt-scoped, not session-scoped.
   session.peakInputTokens = 0;
