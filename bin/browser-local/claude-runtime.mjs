@@ -1314,16 +1314,20 @@ function handleAssistantMessage(emit, session, payload) {
       message.model,
       session.availableModelRecords,
     );
-    // Trace resolutions when something actually moves — transitions, picker
-    // disagreements, missing fields — so #1718's diagnostic intent is
-    // preserved. Steady-state no-ops (previous=incoming=resolved) carry no
-    // signal; the Rust stderr bridge wraps every line as log::warn!, so
-    // logging them every turn was spamming the desktop log (#1755).
+    // Trace resolutions when something actually moves — transitions, missing
+    // fields — so #1718's diagnostic intent is preserved. Suppress when the
+    // resolver's output matches the previous session state, regardless of
+    // what `incoming` was: the [1m]-preservation guard (#1763) makes the
+    // Anthropic bare-id echoback (`incoming=claude-opus-4-7`) get rewritten
+    // to the suffixed id on every parent message, so the prior strict
+    // `previous === incoming === resolved` check (#1755) only suppressed the
+    // un-suffixed steady-state and spammed once per turn for every 1M-tier
+    // user. A resolution where session state does not change carries no
+    // signal — the mutation block below is the source of truth for actual
+    // model swaps. #1769.
     const isNoOpResolution =
       previousModelId != null &&
-      message.model != null &&
       nextModelId != null &&
-      previousModelId === message.model &&
       previousModelId === nextModelId;
     if (!isNoOpResolution) {
       console.warn(
