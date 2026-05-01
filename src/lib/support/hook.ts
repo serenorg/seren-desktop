@@ -1,6 +1,5 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { createSignal } from "solid-js";
 import { API_BASE } from "@/lib/config";
 import { getSerenApiKey, isTauriRuntime } from "@/lib/tauri-bridge";
 import {
@@ -21,7 +20,6 @@ const SESSION_ID = buildSessionId();
 const LOG_LIMIT = 600;
 const LOG_ENTRY_MESSAGE_LIMIT = 4_096;
 const SEEN_SIGNATURES_LIMIT = 256;
-const TOAST_DURATION_MS = 6_000;
 const HTTP_BODY_CAPTURE_LIMIT = 64 * 1024;
 const SIGNATURE_LENGTH = 64;
 const ID_LENGTH = 16;
@@ -31,7 +29,6 @@ const HEX_PATTERN = /^[0-9a-f]+$/;
 // cannot grow this unbounded.
 const seenSignatures = new Map<string, true>();
 const logSlice: SupportReportLogEntry[] = [];
-const [supportToastVisible, setSupportToastVisible] = createSignal(false);
 
 let installed = false;
 type SupportReportingGlobal = typeof globalThis & {
@@ -50,10 +47,6 @@ function supportReportingGlobal(): SupportReportingGlobal {
 // single-flight gate; concurrent unrelated errors continue to be captured
 // and dedupe is enforced by `seenSignatures` instead.
 let capturing = false;
-
-let toastTimer: number | undefined;
-
-export { supportToastVisible };
 
 function buildSessionId(): string {
   if (globalThis.crypto?.randomUUID) {
@@ -192,11 +185,6 @@ export const __supportReportingTestHooks = import.meta.env.DEV
         logSlice.splice(0);
         capturing = false;
         installed = false;
-        if (toastTimer && typeof window !== "undefined") {
-          window.clearTimeout(toastTimer);
-        }
-        toastTimer = undefined;
-        setSupportToastVisible(false);
 
         const supportGlobal = supportReportingGlobal();
         if (supportGlobal.__serenSupportOriginalError) {
@@ -211,20 +199,6 @@ export const __supportReportingTestHooks = import.meta.env.DEV
       },
     }
   : undefined;
-
-function showSupportToast(): void {
-  setSupportToastVisible(true);
-  if (toastTimer) window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(
-    () => setSupportToastVisible(false),
-    TOAST_DURATION_MS,
-  );
-}
-
-export function dismissSupportToast(): void {
-  if (toastTimer) window.clearTimeout(toastTimer);
-  setSupportToastVisible(false);
-}
 
 export function appendSupportLog(
   level: SupportReportLogEntry["level"],
@@ -368,7 +342,6 @@ export async function captureSupportError(
     }),
   );
 
-  showSupportToast();
   void submitPayload(payload)
     .then((outcome) => {
       if (outcome.status === "failed") {
@@ -474,7 +447,6 @@ export function installSupportReporting(): void {
       if (isValidSignature(payload.signature)) {
         rememberSignature(payload.signature);
       }
-      showSupportToast();
     }).catch(() => {});
 
     void rawInvoke("sweep_support_crash_reports").catch(() => {});

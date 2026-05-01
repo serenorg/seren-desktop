@@ -4742,6 +4742,17 @@ Structured summary:`;
             "status",
             "ready" as SessionStatus,
           );
+
+          // promptComplete is the only other code path that clears thread
+          // turnInFlight, and it does not fire after a cancellation. Without
+          // this, the ThinkingStatus dots stay stuck on "Evaluating…" while
+          // the composer unfreezes — particularly visible when ef3d0467's
+          // "cancelled" CompactionOutcome falls through to this branch
+          // during a Stop / predictive-promotion teardown. #1767.
+          if (cancelConvoId) {
+            this.setTurnInFlight(cancelConvoId, false);
+            this.clearTurnError(cancelConvoId);
+          }
         } else if (String(event.data.error).includes("unresponsive")) {
           // "Agent unresponsive" errors are handled by the sendPrompt catch
           // block which spawns a fresh session and retries. Adding the error
