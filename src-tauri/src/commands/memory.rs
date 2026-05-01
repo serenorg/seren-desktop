@@ -81,6 +81,10 @@ pub struct RecallOutput {
     pub content: String,
     pub memory_type: String,
     pub relevance_score: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vector_score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_score: Option<f64>,
 }
 
 /// Output type for sync results (serializable to frontend).
@@ -160,6 +164,8 @@ pub async fn memory_remember(
         created_at: seren_memory_sdk::chrono::Utc::now(),
         synced: false,
         cloud_id: None,
+        feedback_signal: None,
+        pinned: false,
     };
     {
         let guard = state.cache.lock().map_err(|e| e.to_string())?;
@@ -202,24 +208,28 @@ pub async fn memory_recall(
                 content: r.content,
                 memory_type: r.memory_type,
                 relevance_score: r.relevance_score,
+                vector_score: r.vector_score,
+                bm25_score: r.bm25_score,
             })
             .collect()),
         Err(e) => {
-            // Offline fallback: search local cache.
             log::warn!("Cloud recall failed, trying local cache: {e}");
             state.ensure_cache()?;
             let guard = state.cache.lock().map_err(|e| e.to_string())?;
             if let Some(cache) = guard.as_ref() {
-                // Use a zero query embedding for local fallback (returns by insertion order).
+                // No offline embedding source on the desktop, so hybrid_search
+                // degrades to BM25-only — content-aware, unlike list_recent.
                 let local = cache
-                    .list_recent(limit.unwrap_or(10))
+                    .hybrid_search(&query, None, limit.unwrap_or(10))
                     .map_err(|e| e.to_string())?;
                 Ok(local
                     .into_iter()
-                    .map(|m| RecallOutput {
-                        content: m.content,
-                        memory_type: m.memory_type,
-                        relevance_score: m.relevance_score,
+                    .map(|r| RecallOutput {
+                        content: r.memory.content,
+                        memory_type: r.memory.memory_type,
+                        relevance_score: r.rrf_score,
+                        vector_score: r.vector_score,
+                        bm25_score: r.bm25_score,
                     })
                     .collect())
             } else {
