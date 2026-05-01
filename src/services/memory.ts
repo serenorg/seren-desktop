@@ -10,6 +10,8 @@ export interface RecallResult {
   content: string;
   memory_type: string;
   relevance_score: number;
+  vector_score?: number;
+  bm25_score?: number;
 }
 
 export interface SyncResult {
