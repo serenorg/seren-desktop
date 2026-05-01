@@ -86,19 +86,23 @@ describe("#1755 — chooseUpdatedModelId log skips no-op resolutions", () => {
     expect(region).toMatch(/if\s*\(\s*!isNoOpResolution\s*\)/);
   });
 
-  it("the no-op short-circuit requires all three fields to match (previous, incoming, resolved)", () => {
-    // A weaker check (e.g. only previous === incoming) would suppress
-    // legitimate divergence cases where the picker resolved a different
-    // id than the assistant's self-report — exactly the case #1718 was
-    // built to catch. All three must be equal AND non-null for the log
-    // to be safely suppressed.
+  it("the no-op short-circuit suppresses whenever the resolver's output matches the previous session state (#1769)", () => {
+    // The earlier strict form required previous === incoming === resolved.
+    // That left the [1m]-preservation steady-state un-suppressed: Anthropic
+    // echoes back the bare id (e.g. claude-opus-4-7), the resolver re-applies
+    // the `[1m]` suffix, and `previous !== incoming` always — so the WARN
+    // fired every parent message for every 1M-tier user. The mutation block
+    // immediately below remains the source of truth for actual model swaps;
+    // when resolved equals the previous session state nothing material
+    // happened, so the diagnostic carries no signal worth logging.
     const noopIdx = claudeRuntime.indexOf("isNoOpResolution");
     expect(noopIdx).toBeGreaterThan(0);
     const region = claudeRuntime.slice(noopIdx, noopIdx + 600);
     expect(region).toContain("previousModelId != null");
-    expect(region).toContain("message.model != null");
     expect(region).toContain("nextModelId != null");
-    expect(region).toContain("previousModelId === message.model");
     expect(region).toContain("previousModelId === nextModelId");
+    // Must NOT keep the strict incoming check — that is the regression we
+    // are removing. Asserting the absence locks the looser form in place.
+    expect(region).not.toContain("previousModelId === message.model");
   });
 });

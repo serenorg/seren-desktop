@@ -3327,6 +3327,7 @@ Structured summary:`;
         );
         predictiveCompactBusy = false;
         setState("sessions", sessionId, "predictiveCompactInFlight", false);
+        this.drainAfterPredictiveAbort(sessionId);
       }
       // On success, the standby's promptComplete handler clears both flags.
     } catch (err) {
@@ -3336,7 +3337,31 @@ Structured summary:`;
       );
       predictiveCompactBusy = false;
       setState("sessions", sessionId, "predictiveCompactInFlight", false);
+      this.drainAfterPredictiveAbort(sessionId);
     }
+  },
+
+  /**
+   * Drain the head of `pendingPrompts` after a predictive compaction aborts.
+   * Prompts land in the queue via the #1749 race guard in `sendPrompt` while
+   * a standby is being warmed; the standby-success drain at the bottom of
+   * `promptComplete` only fires when the seed completes. When the seed fails
+   * (e.g. Gateway 504), the queue is otherwise stranded forever. Mirror the
+   * standard drain shape: dispatch the head, let its promptComplete drain
+   * the next entry. #1769.
+   */
+  drainAfterPredictiveAbort(sessionId: string): void {
+    const queue = state.sessions[sessionId]?.pendingPrompts ?? [];
+    if (queue.length === 0) return;
+    const [nextPrompt, ...remaining] = queue;
+    if (nextPrompt == null) return;
+    setState("sessions", sessionId, "pendingPrompts", remaining);
+    console.info(
+      `[AgentStore] Predictive compact aborted — draining queued prompt on ${sessionId} (#1769)`,
+    );
+    setTimeout(() => {
+      void this.sendPrompt(nextPrompt, undefined, undefined, sessionId);
+    }, 0);
   },
 
   /**
