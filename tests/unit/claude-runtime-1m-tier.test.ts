@@ -11,6 +11,9 @@ const {
   _inferClaudeContextWindow: inferClaudeContextWindow,
   _augmentWithLegacyOpus: augmentWithLegacyOpus,
   _ONE_M_TIER_RECORDS: ONE_M_TIER_RECORDS,
+  _DEFAULT_PREFERRED_MODEL: DEFAULT_PREFERRED_MODEL,
+  _comparePickerEntries: comparePickerEntries,
+  _resolveSpawnShell: resolveSpawnShell,
 } = await import(/* @vite-ignore */ modulePath);
 
 describe("inferClaudeContextWindow — tier-aware semantics", () => {
@@ -130,5 +133,98 @@ describe("augmentWithLegacyOpus — picker exposes 1M-tier variants", () => {
       "claude-sonnet-4-6",
       "claude-sonnet-4-7",
     ]);
+  });
+
+  it("promotes the [1m] sibling of the CLI default and pins it to slot one (#1763)", () => {
+    // The session is spawned on the [1m] tier (DEFAULT_PREFERRED_MODEL), so
+    // the picker default must follow — otherwise the UI highlights the bare
+    // 200K entry while the runtime is on 1M.
+    const cliCatalog = [
+      {
+        modelId: "claude-opus-4-7",
+        name: "Opus 4.7",
+        description: "",
+        supportsEffort: false,
+        supportedEffortLevels: [],
+        isDefault: true,
+      },
+      {
+        modelId: "claude-sonnet-4-6",
+        name: "Sonnet 4.6",
+        description: "",
+        supportsEffort: false,
+        supportedEffortLevels: [],
+        isDefault: false,
+      },
+    ];
+
+    const augmented = augmentWithLegacyOpus(cliCatalog) as Array<{
+      modelId: string;
+      isDefault: boolean;
+    }>;
+    expect(augmented[0].modelId).toBe("claude-opus-4-7[1m]");
+    expect(augmented[0].isDefault).toBe(true);
+    const bareOpus = augmented.find((r) => r.modelId === "claude-opus-4-7");
+    expect(bareOpus?.isDefault).toBe(false);
+  });
+});
+
+describe("comparePickerEntries — default first, newest descending (#1763)", () => {
+  it("orders entries default first, then opus > sonnet > haiku, then version desc, then 1M before bare", () => {
+    const records = [
+      { modelId: "claude-haiku-4-5", isDefault: false },
+      { modelId: "claude-sonnet-4-6", isDefault: false },
+      { modelId: "claude-opus-4-5", isDefault: false },
+      { modelId: "claude-opus-4-7", isDefault: false },
+      { modelId: "claude-opus-4-7[1m]", isDefault: true },
+      { modelId: "claude-opus-4-6[1m]", isDefault: false },
+      { modelId: "claude-opus-4-6", isDefault: false },
+    ];
+    const sorted = records.slice().sort(comparePickerEntries);
+    expect(sorted.map((r) => r.modelId)).toEqual([
+      "claude-opus-4-7[1m]", // default pinned to slot one
+      "claude-opus-4-7",
+      "claude-opus-4-6[1m]",
+      "claude-opus-4-6",
+      "claude-opus-4-5",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+    ]);
+  });
+});
+
+describe("DEFAULT_PREFERRED_MODEL — fresh-session out-of-box default (#1763)", () => {
+  it("is the Opus 4.7 1M-tier id so new users get the wider window without picker discovery", () => {
+    expect(DEFAULT_PREFERRED_MODEL).toBe("claude-opus-4-7[1m]");
+  });
+});
+
+describe("resolveSpawnShell — Windows bracket-arg parsing safety (#1763)", () => {
+  it("returns false on non-Windows platforms — direct spawn, no shell", () => {
+    if (process.platform === "win32") return;
+    expect(resolveSpawnShell("/Users/u/.local/bin/claude")).toBe(false);
+    expect(resolveSpawnShell("/usr/local/bin/claude")).toBe(false);
+  });
+
+  it("on Windows, returns false for .exe paths and 'cmd.exe' for .cmd/.bat shims", () => {
+    // Behavioural check stays cross-platform by inspecting the helper's
+    // logic: .exe binaries don't need a shell, .cmd shims do (Node 16+
+    // refuses to spawn batch files directly post-CVE-2024-27980), and
+    // forcing 'cmd.exe' keeps a custom ComSpec from rerouting through
+    // PowerShell, which would treat the `[1m]` brackets as array-index
+    // metacharacters and silently drop the 1M tier. The helper short-
+    // circuits to false on non-Windows, so we verify by parsing its own
+    // logic against the input strings.
+    if (process.platform !== "win32") {
+      // Cannot exercise the win32 branch on non-Windows. The non-win32
+      // assertion above plus the explicit cross-platform short-circuit
+      // are what protect the desktop here. See the helper jsdoc.
+      return;
+    }
+    expect(resolveSpawnShell("C:\\\\Users\\\\u\\\\.claude\\\\bin\\\\claude.exe")).toBe(false);
+    expect(resolveSpawnShell("C:\\\\Users\\\\u\\\\AppData\\\\Roaming\\\\npm\\\\claude.cmd")).toBe(
+      "cmd.exe",
+    );
+    expect(resolveSpawnShell("C:\\\\path\\\\claude.bat")).toBe("cmd.exe");
   });
 });

@@ -116,6 +116,28 @@ function resolveClaudeBinary() {
 }
 
 /**
+ * Decide the `shell` option to pass to `spawn` for the resolved Claude
+ * binary. Windows is the only platform that needs special handling:
+ *   - `.exe` paths are spawned directly with `shell: false`. The previous
+ *     `shell: true` default routed through `process.env.ComSpec`, which
+ *     defaults to cmd.exe but resolves to PowerShell when ComSpec is set
+ *     to `pwsh.exe` / `powershell.exe`. PowerShell treats `[` and `]` as
+ *     array-index metacharacters, so `--model claude-opus-4-7[1m]` parses
+ *     incorrectly there and the 1M tier is silently dropped. Avoiding the
+ *     shell layer entirely for the native binary kills that whole class
+ *     of problems. #1763.
+ *   - `.cmd`/`.bat` paths still need a shell wrapper (Node 16+ refuses to
+ *     spawn batch files directly post-CVE-2024-27980), but we pin to the
+ *     literal `cmd.exe` so a custom ComSpec cannot reroute through
+ *     PowerShell.
+ * Non-Windows platforms always spawn directly — `shell: false`.
+ */
+function resolveSpawnShell(claudeBin) {
+  if (process.platform !== "win32") return false;
+  return /\.(cmd|bat)$/i.test(claudeBin) ? "cmd.exe" : false;
+}
+
+/**
  * Build a PATH string that includes well-known CLI install locations.
  * GUI apps don't inherit the user's shell profile, so tools installed via
  * native installers or npm global aren't on PATH. Without this, spawned
@@ -464,6 +486,46 @@ const ONE_M_TIER_RECORDS = [
   makeOneMTierRecord("claude-sonnet-4-5", "Sonnet 4.5"),
 ];
 
+// Default model for fresh sessions. Chosen so users land on the 1M-tier
+// experience without needing picker discovery; the cli-updater baseline at
+// 2.1.120 (#1761) guarantees every running CLI knows this id. #1763.
+const DEFAULT_PREFERRED_MODEL = "claude-opus-4-7[1m]";
+
+// Picker order (top → bottom): the active default first, then by family
+// (opus → sonnet → haiku → other), then by version descending (4-7 → 4-6 →
+// 4-5 → older), then 1M-tier variant before its bare counterpart for the
+// same base. This matches the user's mental model — newest at the top, with
+// the active default always pinned in slot one. #1763.
+function modelFamilyRank(modelId) {
+  const lower = modelId.toLowerCase();
+  if (lower.includes("opus")) return 0;
+  if (lower.includes("sonnet")) return 1;
+  if (lower.includes("haiku")) return 2;
+  return 3;
+}
+
+function modelVersionScore(modelId) {
+  // Capture the first two `-N-N` triples (e.g. "4-7" in "claude-opus-4-7"
+  // and in "claude-opus-4-7-20251201[1m]"). Larger score = newer.
+  const match = modelId.toLowerCase().match(/-(\d+)-(\d+)/);
+  if (!match) return 0;
+  return Number(match[1]) * 100 + Number(match[2]);
+}
+
+function comparePickerEntries(a, b) {
+  if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+  const fa = modelFamilyRank(a.modelId);
+  const fb = modelFamilyRank(b.modelId);
+  if (fa !== fb) return fa - fb;
+  const va = modelVersionScore(a.modelId);
+  const vb = modelVersionScore(b.modelId);
+  if (va !== vb) return vb - va;
+  const aIsOneM = /\[1m\]$/i.test(a.modelId);
+  const bIsOneM = /\[1m\]$/i.test(b.modelId);
+  if (aIsOneM !== bIsOneM) return aIsOneM ? -1 : 1;
+  return a.modelId.localeCompare(b.modelId);
+}
+
 function augmentWithLegacyOpus(records) {
   const existingIds = new Set(records.map((r) => r.modelId));
   const legacyExtras = LEGACY_OPUS_RECORDS.filter(
@@ -482,7 +544,28 @@ function augmentWithLegacyOpus(records) {
       !existingIds.has(r.modelId) &&
       knownBareIds.has(r.modelId.replace(/\[1m\]$/i, "")),
   );
-  return [...oneMExtras, ...legacyExtras, ...records];
+  // Promote the [1m] sibling of whichever bare entry the CLI marked default.
+  // The session is spawned on the [1m] variant (#1763), so the picker default
+  // must follow — otherwise a UI rendered straight from `isDefault` would
+  // highlight the bare 200K entry while the runtime is on 1M.
+  const cliDefault = records.find((r) => r.isDefault === true);
+  const promotedDefaultId = cliDefault
+    ? `${cliDefault.modelId.replace(/\[1m\]$/i, "")}[1m]`
+    : null;
+  const promote = (record) => {
+    if (!promotedDefaultId) return record;
+    if (record.modelId === promotedDefaultId) return { ...record, isDefault: true };
+    if (record.modelId === cliDefault?.modelId) return { ...record, isDefault: false };
+    return record;
+  };
+  const merged = [
+    ...oneMExtras.map(promote),
+    ...legacyExtras.map(promote),
+    ...records.map(promote),
+  ];
+  // Stable sort by the configured comparator so the picker reflects the
+  // requested ordering: default → newest family/version → 1M before bare.
+  return merged.slice().sort(comparePickerEntries);
 }
 
 function combinePrompt(prompt, context) {
@@ -1590,15 +1673,18 @@ export function createClaudeRuntime({ emit }) {
       normalizeEffort(reasoningEffort) ?? DEFAULT_CLAUDE_EFFORT;
     // Prefer the user's persisted choice (agent_model_id from the conversation
     // row) so a resumed thread spawns on the model the user actually picked.
-    // Falls back to Opus 4.5 for fresh threads with no prior selection — still
-    // the cheapest current Opus on the API. When the CLI adds/changes models,
-    // the picker stays authoritative; the assistant message handler below then
-    // corrects session.currentModelId from Anthropic's message.model ground
-    // truth on the first response. See #1635.
+    // Falls back to Opus 4.7 with the 1M-tier suffix for fresh threads — that
+    // is the out-of-box default users should land on so the wider window is
+    // active without requiring picker discovery (#1763). The cli-updater
+    // baseline at 2.1.120 (#1761) ensures every running CLI knows this model.
+    // When the CLI adds/changes models, the picker stays authoritative; the
+    // assistant message handler below then corrects session.currentModelId
+    // from Anthropic's message.model ground truth on the first response,
+    // preserving the `[1m]` suffix via chooseUpdatedModelId. See #1635 / #1763.
     const preferredModel =
       typeof initialModelId === "string" && initialModelId.length > 0
         ? initialModelId
-        : "claude-opus-4-5";
+        : DEFAULT_PREFERRED_MODEL;
     const claudeArgs = buildClaudeArgs({
       sessionId: remoteSessionId,
       resumeSessionId: resumeAgentSessionId ?? null,
@@ -1618,7 +1704,7 @@ export function createClaudeRuntime({ emit }) {
           PATH: extendedPath,
         },
         stdio: ["pipe", "pipe", "pipe"],
-        shell: process.platform === "win32",
+        shell: resolveSpawnShell(claudeBin),
       },
     );
 
@@ -2014,7 +2100,7 @@ export function createClaudeRuntime({ emit }) {
           PATH: buildExtendedPath(),
         },
         stdio: ["pipe", "pipe", "pipe"],
-        shell: process.platform === "win32",
+        shell: resolveSpawnShell(claudeBin),
       },
     );
 
@@ -2148,9 +2234,13 @@ export function createClaudeRuntime({ emit }) {
 }
 
 // Test-only re-exports — internal helpers exposed for unit tests so the
-// 1M-tier semantics can be exercised without spinning up a full session.
+// 1M-tier semantics and picker ordering can be exercised without spinning
+// up a full session.
 export {
   inferClaudeContextWindow as _inferClaudeContextWindow,
   augmentWithLegacyOpus as _augmentWithLegacyOpus,
   ONE_M_TIER_RECORDS as _ONE_M_TIER_RECORDS,
+  DEFAULT_PREFERRED_MODEL as _DEFAULT_PREFERRED_MODEL,
+  comparePickerEntries as _comparePickerEntries,
+  resolveSpawnShell as _resolveSpawnShell,
 };
