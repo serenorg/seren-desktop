@@ -130,6 +130,11 @@ function waitForSessionReady(sessionId: string): Promise<void> {
  * - `skipped_nothing_to_compact`: message count is below `preserveCount`;
  *   the session was already too small to compact. Usually means a single
  *   message is gigantic — Chat fallback would not help.
+ * - `cancelled`: a Stop / predictive-promotion teardown / other graceful
+ *   cancel propagated up as "Task cancelled" while compaction or the
+ *   retry was in flight. Not a defect — the error event handler's
+ *   graceful-cancel branch already restores UI state. Chat fallback would
+ *   be wrong, since the user's intent was to stop, not to switch modes.
  * - `failed_catastrophic`: unrecoverable failure (spawn failed, summary API
  *   threw after refresh, agent runtime broken). Chat fallback is correct.
  */
@@ -137,6 +142,7 @@ export type CompactionOutcome =
   | "retried"
   | "succeeded"
   | "skipped_nothing_to_compact"
+  | "cancelled"
   | "failed_catastrophic";
 
 /**
@@ -3279,6 +3285,13 @@ Structured summary:`;
       );
       return "succeeded";
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("Task cancelled")) {
+        console.info(
+          "[AgentStore] compactAndRetry cancelled — Stop / teardown propagated 'Task cancelled' through the retry; not a fallback condition",
+        );
+        return "cancelled";
+      }
       console.error(
         "[AgentStore] compactAndRetry threw — treating as catastrophic:",
         error,
