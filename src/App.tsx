@@ -12,7 +12,6 @@ import {
 import { AboutDialog } from "@/components/common/AboutDialog";
 import { LowBalanceModal } from "@/components/common/LowBalanceWarning";
 import { OrganizationOtpModal } from "@/components/common/OrganizationOtpModal";
-import { SupportToast } from "@/components/common/SupportToast";
 import { GatewayToolApproval } from "@/components/gateway/GatewayToolApproval";
 import { AppShell } from "@/components/layout/AppShell";
 import { X402PaymentApproval } from "@/components/mcp/X402PaymentApproval";
@@ -331,7 +330,6 @@ function App() {
         </ErrorBoundary>
         <LowBalanceModal />
         <DailyClaimPopup />
-        <SupportToast />
         <X402PaymentApproval />
         <Show when={runtime.capabilities.localMcp}>
           <GatewayToolApproval />
