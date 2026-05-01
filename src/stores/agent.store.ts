@@ -4391,18 +4391,21 @@ Structured summary:`;
             "ready" as SessionStatus,
           );
           predictiveCompactBusy = false;
-          const owner = state.sessions[sessionId];
+          // Find the serving session via its standbySessionId backref. The
+          // serving's conversationId is the persisted thread id (e.g.
+          // 3fa906a4…), but the standby is spawned with conversationId =
+          // info.id (its own session id) and only inherits the serving's
+          // conversationId during promoteStandbyAndDispatch — i.e. AFTER
+          // promotion, well past this seed-completion tick. So a
+          // conversationId pivot finds zero matches and strands every
+          // queued #1749 prompt. Pivot through the standbySessionId backref
+          // set at agent.store.ts:3069 instead. #1772.
           let servingForDrain: string | null = null;
-          if (owner?.conversationId) {
-            for (const [sid, s] of Object.entries(state.sessions)) {
-              if (
-                s.conversationId === owner.conversationId &&
-                s.role === "serving"
-              ) {
-                setState("sessions", sid, "predictiveCompactInFlight", false);
-                if ((s.pendingPrompts ?? []).length > 0) {
-                  servingForDrain = sid;
-                }
+          for (const [sid, s] of Object.entries(state.sessions)) {
+            if (s.standbySessionId === sessionId && s.role === "serving") {
+              setState("sessions", sid, "predictiveCompactInFlight", false);
+              if ((s.pendingPrompts ?? []).length > 0) {
+                servingForDrain = sid;
               }
             }
           }
