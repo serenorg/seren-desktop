@@ -4837,8 +4837,9 @@ Structured summary:`;
           !state.sessions[sessionId]?.promptTooLongHandled
         ) {
           // Context window full — try compaction + retry before falling back.
-          // Guard with promptTooLongHandled to prevent duplicate fallbacks
-          // when the error is also detected in streamed content.
+          // The structured is_error event from the runtime is the only signal
+          // we trust for prompt-too-long; promptTooLongHandled prevents this
+          // path from racing with the rejection-reason check in sendPrompt.
           console.info("[AgentStore] Prompt too long detected in error event");
           setState("sessions", sessionId, "promptTooLongHandled", true);
 
@@ -5564,45 +5565,12 @@ Structured summary:`;
         setState("sessions", sessionId, "error", session.streamingContent);
       }
 
-      // If the agent's response is a prompt-too-long error (context window full),
-      // try compaction + retry before falling back to Chat mode.
-      // Guard with promptTooLongHandled to prevent duplicate fallbacks when
-      // the error is detected in both streamed content and the error event.
-      if (
-        isPromptTooLongError(session.streamingContent) &&
-        !session.promptTooLongHandled
-      ) {
-        console.info(
-          "[AgentStore] Prompt too long detected in streamed content",
-        );
-        setState("sessions", sessionId, "promptTooLongHandled", true);
-        const compactPromise = this.compactAndRetry(sessionId).then(
-          (outcome) => {
-            if (outcome === "failed_catastrophic") {
-              console.error(
-                "[AgentStore] Compaction failed catastrophically from streamed content — falling back to Chat",
-              );
-              setState("sessions", sessionId, "promptTooLong", true);
-              this.acceptRateLimitFallback().catch((err) => {
-                console.error(
-                  "[AgentStore] Auto-failover from streamed content failed:",
-                  err,
-                );
-              });
-            } else if (outcome === "skipped_nothing_to_compact") {
-              console.warn(
-                "[AgentStore] Compaction skipped for streamed content — single prompt too large",
-              );
-              this.addErrorMessage(
-                sessionId,
-                "Your last message is too large for this agent's context window. Try shortening it, attaching files instead of pasting content, or starting a new thread.",
-              );
-            }
-            return outcome;
-          },
-        );
-        setState("sessions", sessionId, "compactRetryPromise", compactPromise);
-      }
+      // Prompt-too-long is detected exclusively from the CLI's structured
+      // is_error result event (handled at the "error" event branch above).
+      // The runtime emits provider://error only when payload.is_error is set,
+      // so that path is the canonical signal. Scanning streamed assistant
+      // prose for context-window keywords self-triggered compaction whenever
+      // the model discussed those topics in normal output (#1776).
 
       setState("sessions", sessionId, "streamingContent", "");
       setState("sessions", sessionId, "streamingContentTimestamp", undefined);

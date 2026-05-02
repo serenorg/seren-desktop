@@ -1769,11 +1769,23 @@ export function createClaudeRuntime({ emit }) {
       session.availableModelRecords = augmentWithLegacyOpus(
         normalizeModelRecords(initResult),
       );
+      // Route the inferred id through chooseUpdatedModelId so the `[1m]`
+      // suffix from the spawn-time `--model` arg is preserved when the CLI
+      // echoes the bare equivalent in initResult.model. Without this the
+      // post-init clobber strips `[1m]` from every fresh `[1m]` thread,
+      // poisoning the picker and the next setModel arg with the 200K-tier
+      // bare id even though the session is actually running on 1M. #1776.
+      const inferredFromInit = inferCurrentModelId(
+        initResult?.model ?? null,
+        session.availableModelRecords,
+      );
       session.currentModelId =
-        inferCurrentModelId(
-          initResult?.model ?? null,
+        chooseUpdatedModelId(
+          session.currentModelId,
+          inferredFromInit,
           session.availableModelRecords,
         ) ??
+        inferredFromInit ??
         session.currentModelId;
 
       // The launched session stays in its default permission flow until we
@@ -2149,11 +2161,21 @@ export function createClaudeRuntime({ emit }) {
       tempSession.availableModelRecords = augmentWithLegacyOpus(
         normalizeModelRecords(initResult),
       );
+      // Symmetric with spawnSession's post-init handling — preserve the
+      // `[1m]` suffix from the seed `currentModelId` when the CLI echoes the
+      // bare equivalent in initResult.model. See #1776.
+      const inferredFromInit = inferCurrentModelId(
+        initResult?.model ?? null,
+        tempSession.availableModelRecords,
+      );
       tempSession.currentModelId =
-        inferCurrentModelId(
-          initResult?.model ?? null,
+        chooseUpdatedModelId(
+          tempSession.currentModelId,
+          inferredFromInit,
           tempSession.availableModelRecords,
-        ) ?? tempSession.currentModelId;
+        ) ??
+        inferredFromInit ??
+        tempSession.currentModelId;
 
       if (!tempSession.agentSessionId) {
         throw new Error("Claude fork did not return a resumable session id.");
