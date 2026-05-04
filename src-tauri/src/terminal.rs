@@ -168,6 +168,13 @@ struct TerminalGrid {
     /// title change rides one diff and isn't replayed forever. None
     /// means the title hasn't changed since the last drain.
     pending_title: Option<String>,
+    /// Last non-empty title we have published to a diff drain. Lives
+    /// across drains (unlike pending_title which is taken on each
+    /// drain) so the snapshot endpoint can report the current title
+    /// to a frontend that resyncs after MAX_PENDING_DIFFS overflow
+    /// without depending on the next OSC to refresh it. Stays None
+    /// until the running app sets a title.
+    current_title: Option<String>,
     /// Per-row dirty bitmap. `dirty_rows[r] == true` means row `r`'s
     /// cells (or cursor presence) changed since the last `drain_diff`
     /// call. The diff event ships only marked rows; cursor + mode
@@ -185,6 +192,10 @@ struct TerminalGrid {
     /// not narrowed). New rows push to the back; oldest pop off the
     /// front when the cap is hit. Index 0 = oldest available row.
     scrollback: VecDeque<Vec<GridCell>>,
+    /// Monotonic id of `scrollback[0]`. Increments whenever the fixed-size
+    /// history ring evicts its oldest row, so frontend caches can key rows by
+    /// stable ids instead of by shifting VecDeque indices.
+    scrollback_base: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -348,6 +359,9 @@ pub struct GridSnapshot {
     /// compact.
     #[serde(skip_serializing_if = "GridSnapshot::scrollback_len_is_default")]
     pub scrollback_len: u32,
+    /// Monotonic id of the oldest retained scrollback row. Skipped when zero.
+    #[serde(skip_serializing_if = "GridSnapshot::scrollback_base_is_default")]
+    pub scrollback_base: u64,
     /// Mouse-tracking mode requested by the running app (DECSET 1000 /
     /// 1002 / 1003). Skipped when Off so the typical no-mouse case
     /// stays compact.
@@ -358,6 +372,16 @@ pub struct GridSnapshot {
     /// column 223; better to stay silent than send garbage).
     #[serde(skip_serializing_if = "GridSnapshot::mouse_sgr_is_default")]
     pub mouse_sgr: bool,
+    /// Latest title the running app has set via OSC 0/2 since the
+    /// terminal started, mirrored from `TerminalGrid::current_title`.
+    /// Differs from `GridDiff.title` (which is one-shot per-drain)
+    /// in that it persists across drains so a frontend resyncing
+    /// after MAX_PENDING_DIFFS overflow can recover the title without
+    /// waiting for the next OSC. None until the running app sets a
+    /// title; skipped on the wire so the typical no-title case stays
+    /// compact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 impl GridSnapshot {
@@ -371,6 +395,9 @@ impl GridSnapshot {
         !*value
     }
     fn scrollback_len_is_default(value: &u32) -> bool {
+        *value == 0
+    }
+    fn scrollback_base_is_default(value: &u64) -> bool {
         *value == 0
     }
     fn mouse_tracking_is_default(value: &MouseTracking) -> bool {
@@ -416,6 +443,8 @@ pub struct GridDiff {
     /// available (e.g. user can keep wheeling up further).
     #[serde(skip_serializing_if = "GridDiff::scrollback_len_is_default")]
     pub scrollback_len: u32,
+    #[serde(skip_serializing_if = "GridDiff::scrollback_base_is_default")]
+    pub scrollback_base: u64,
     #[serde(skip_serializing_if = "GridDiff::mouse_tracking_is_default")]
     pub mouse_tracking: MouseTracking,
     #[serde(skip_serializing_if = "GridDiff::mouse_sgr_is_default")]
@@ -430,6 +459,9 @@ pub struct GridDiff {
 
 impl GridDiff {
     fn scrollback_len_is_default(value: &u32) -> bool {
+        *value == 0
+    }
+    fn scrollback_base_is_default(value: &u64) -> bool {
         *value == 0
     }
     fn mouse_tracking_is_default(value: &MouseTracking) -> bool {
@@ -534,9 +566,11 @@ impl TerminalGrid {
             dirty_rows: vec![true; rows as usize],
             last_diff_seq: 0,
             scrollback: VecDeque::new(),
+            scrollback_base: 0,
             mouse_tracking: MouseTracking::Off,
             mouse_sgr: false,
             pending_title: None,
+            current_title: None,
         }
     }
 
@@ -576,8 +610,10 @@ impl TerminalGrid {
             cursor_keys_app: self.cursor_keys_app,
             bracketed_paste: self.bracketed_paste,
             scrollback_len: self.scrollback.len() as u32,
+            scrollback_base: self.scrollback_base,
             mouse_tracking: self.mouse_tracking,
             mouse_sgr: self.mouse_sgr,
+            title: self.current_title.clone(),
         }
     }
 
@@ -623,6 +659,7 @@ impl TerminalGrid {
             rows_total: self.rows,
             cols_total: self.cols,
             scrollback_len: self.scrollback.len() as u32,
+            scrollback_base: self.scrollback_base,
             mouse_tracking: self.mouse_tracking,
             mouse_sgr: self.mouse_sgr,
             title: self.pending_title.take(),
@@ -812,7 +849,17 @@ impl TerminalGrid {
             Osc::SetIconNameAndWindowTitle(t)
             | Osc::SetWindowTitle(t)
             | Osc::SetWindowTitleSun(t) => {
-                self.pending_title = Some(sanitize_title(&t));
+                // Drop the OSC entirely when sanitize produces an empty
+                // string (controls-only / whitespace-only payload).
+                // Otherwise diff_has_changes would still report change
+                // for `Some("")` and we'd emit a wasted IPC event with
+                // a `title: ""` field that the receiving frontend
+                // already filters as a no-op.
+                let title = sanitize_title(&t);
+                if !title.is_empty() {
+                    self.current_title = Some(title.clone());
+                    self.pending_title = Some(title);
+                }
             }
             Osc::SetIconName(_)
             | Osc::SetIconNameSun(_)
@@ -1556,6 +1603,7 @@ impl TerminalGrid {
             if capture_history {
                 if self.scrollback.len() >= SCROLLBACK_LIMIT {
                     self.scrollback.pop_front();
+                    self.scrollback_base = self.scrollback_base.wrapping_add(1);
                 }
                 self.scrollback.push_back(removed);
             }
@@ -1939,6 +1987,23 @@ pub fn terminal_resize(
         g.resize(rows, cols);
         g.drain_diff()
     });
+    // If a title arrived in the same drain (OSC 0/2 just before this
+    // resize), mirror it onto the buffer's info under the same lock so
+    // a subsequent terminal_list_buffers call doesn't return stale
+    // text. Frontend already gets the title via the emitted diff and
+    // setBufferTitle; this keeps the backend authoritative copy in
+    // step with that. We're already holding the buffers lock, so we
+    // can skip the re-lock dance sync_title_to_buffer does.
+    if let Some(title) = diff
+        .as_ref()
+        .and_then(|d| d.title.as_deref())
+        .filter(|t| !t.is_empty())
+    {
+        if process.info.title != title {
+            process.info.title = title.to_string();
+            process.info.updated_at = unix_millis();
+        }
+    }
     let info = process.info.clone();
     drop(buffers);
     if let Some(diff) = diff.filter(diff_has_changes) {
@@ -1990,10 +2055,13 @@ pub fn terminal_kill(
 /// returned so the caller can trust the upper bound without a separate
 /// trip - the live emitter may grow scrollback between snapshot and
 /// fetch, and the frontend uses this to gate further wheel-up requests.
+/// `scrollback_base` is the monotonic id of relative index 0, so a
+/// frontend can cache rows under stable ids even when the ring evicts.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScrollbackWindow {
     pub start: u32,
+    pub scrollback_base: u64,
     pub rows: Vec<Vec<GridCell>>,
     pub scrollback_len: u32,
 }
@@ -2039,6 +2107,7 @@ pub fn terminal_grid_scrollback(
     };
     Ok(ScrollbackWindow {
         start,
+        scrollback_base: grid.scrollback_base,
         rows,
         scrollback_len: total as u32,
     })
@@ -2193,17 +2262,22 @@ fn spawn_reader_thread(
                 }
                 // Reader signaled EOF; flush one final diff if anything
                 // landed between the last tick and shutdown so the
-                // renderer's last-paint state matches the PTY's.
+                // renderer's last-paint state matches the PTY's. Drain
+                // inside a `map()` so the grid MutexGuard is dropped at
+                // the end of the statement - sync_title_to_buffer takes
+                // the buffers lock, and terminal_resize takes the locks
+                // in the opposite order (buffers, then grid). Holding
+                // grid across sync_title_to_buffer would invert the
+                // order and risk an AB/BA deadlock under shutdown +
+                // concurrent resize.
                 if pending.swap(false, Ordering::AcqRel) {
-                    if let Ok(mut g) = grid.lock() {
-                        let diff = g.drain_diff();
-                        if diff_has_changes(&diff) {
-                            sync_title_to_buffer(&app, &buffer_id, diff.title.as_deref());
-                            let _ = app.emit(
-                                TERMINAL_GRID_DIFF_EVENT,
-                                GridDiffEvent { buffer_id, diff },
-                            );
-                        }
+                    let diff = grid.lock().ok().map(|mut g| g.drain_diff());
+                    if let Some(diff) = diff.filter(diff_has_changes) {
+                        sync_title_to_buffer(&app, &buffer_id, diff.title.as_deref());
+                        let _ = app.emit(
+                            TERMINAL_GRID_DIFF_EVENT,
+                            GridDiffEvent { buffer_id, diff },
+                        );
                     }
                 }
             })?;
@@ -3152,6 +3226,36 @@ mod tests {
     }
 
     #[test]
+    fn grid_snapshot_carries_current_title_after_drain() {
+        // Snapshot must report the latest title even AFTER drain_diff
+        // has consumed pending_title. Otherwise a frontend resyncing
+        // via snapshot (MAX_PENDING_DIFFS overflow recovery) would
+        // see the buffer header revert to whatever was there before
+        // the first OSC and not refresh until the next OSC fires.
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b]2;persistent\x07");
+        let _ = grid.drain_diff();
+        // Subsequent snapshot must still carry the title.
+        let body = TerminalSnapshotBody::Grid(grid.snapshot());
+        let snap = TerminalSnapshot { seq: 0, body };
+        let json = serde_json::to_value(&snap).unwrap();
+        assert_eq!(json["payload"]["title"], "persistent");
+    }
+
+    #[test]
+    fn grid_snapshot_skips_title_when_never_set() {
+        // Wire compactness contract: a grid that has never received an
+        // OSC title must not serialize a title field. Downstream code
+        // already keys off the field's presence to decide whether to
+        // call setBufferTitle.
+        let grid = TerminalGrid::new(2, 4);
+        let body = TerminalSnapshotBody::Grid(grid.snapshot());
+        let snap = TerminalSnapshot { seq: 0, body };
+        let json = serde_json::to_value(&snap).unwrap();
+        assert!(json["payload"].get("title").is_none());
+    }
+
+    #[test]
     fn grid_decset_then_decrst_round_trips_to_default_wire_shape() {
         // Round-trip: flip every mode on then back off; the snapshot must
         // skip-serialize the fields again so DECRST does not leave residual
@@ -3436,12 +3540,19 @@ mod tests {
     #[test]
     fn grid_scrollback_caps_at_limit_dropping_oldest() {
         let mut grid = TerminalGrid::new(2, 2);
-        // Force 3 rows past the cap - oldest 3 should drop, len stays
+        // Force rows past the cap - oldest rows should drop, len stays
         // at SCROLLBACK_LIMIT.
         for _ in 0..(SCROLLBACK_LIMIT + 3) {
             grid.feed(b"x\r\n");
         }
         assert_eq!(grid.scrollback.len(), SCROLLBACK_LIMIT);
+        assert_eq!(grid.scrollback_base, 2);
+        let snap = grid.snapshot();
+        assert_eq!(snap.scrollback_len, SCROLLBACK_LIMIT as u32);
+        assert_eq!(snap.scrollback_base, 2);
+        let diff = grid.drain_diff();
+        assert_eq!(diff.scrollback_len, SCROLLBACK_LIMIT as u32);
+        assert_eq!(diff.scrollback_base, 2);
     }
 
     #[test]
@@ -3481,6 +3592,22 @@ mod tests {
         grid.feed(b"\x1b]0;build: pass\x1b\\");
         let diff = grid.drain_diff();
         assert_eq!(diff.title.as_deref(), Some("build: pass"));
+    }
+
+    #[test]
+    fn grid_osc_whitespace_only_title_does_not_set_pending() {
+        // Sanitize trims whitespace; a whitespace-only payload
+        // (`OSC 2 ;   BEL`) collapses to "". We must drop the OSC
+        // entirely rather than parking Some("") in pending_title -
+        // otherwise diff_has_changes would still flag the diff as
+        // changed and emit a wasted event with `title: ""` that the
+        // frontend filters out as a no-op anyway.
+        let mut grid = TerminalGrid::new(2, 4);
+        let _ = grid.drain_diff();
+        grid.feed(b"\x1b]2;   \x07");
+        assert!(grid.pending_title.is_none());
+        let diff = grid.drain_diff();
+        assert!(diff.title.is_none());
     }
 
     #[test]
@@ -3629,5 +3756,23 @@ mod tests {
         assert!(!diff.cursor_visible);
         assert!(diff.cursor_keys_app);
         assert!(diff.bracketed_paste);
+    }
+
+    #[test]
+    fn grid_resize_drain_carries_pending_title() {
+        // OSC title written just before a resize must ride out on the
+        // resize-inline diff drain, so terminal_resize sees the title
+        // and can mirror it onto the per-buffer info. Without this,
+        // the resize would emit a diff with title=None and the
+        // backend's info.title would silently drift from what the
+        // running app set.
+        let mut grid = TerminalGrid::new(3, 5);
+        let _ = grid.drain_diff();
+        grid.feed(b"\x1b]2;after-osc\x07");
+        grid.resize(2, 4);
+        let diff = grid.drain_diff();
+        assert_eq!(diff.title.as_deref(), Some("after-osc"));
+        assert_eq!(diff.rows_total, 2);
+        assert_eq!(diff.cols_total, 4);
     }
 }

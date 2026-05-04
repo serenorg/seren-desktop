@@ -42,12 +42,19 @@ interface GridSnapshot {
   // Number of rows preserved in scrollback above the live screen.
   // Backend skips serializing when zero.
   scrollbackLen?: number;
+  // Monotonic id of the oldest retained scrollback row. Backend skips
+  // serializing while zero.
+  scrollbackBase?: number;
   // Mouse-tracking mode requested by the running app. 0 = off,
   // 1000 = press/release, 1002 = + drag, 1003 = + all motion.
   mouseTracking?: number;
   // DECSET 1006 SGR encoding. Frontend refuses to emit reports
   // unless this is set.
   mouseSgr?: boolean;
+  // Last title the running app set via OSC 0/2. Persists across
+  // diff drains so the frontend can refresh after a snapshot resync
+  // without waiting for the next OSC.
+  title?: string;
 }
 
 interface TerminalSnapshotGrid {
@@ -90,6 +97,7 @@ interface GridDiffEvent {
   // Current scrollback length. Frontend uses the delta between diffs
   // to keep the viewport anchored when in scroll-back mode.
   scrollbackLen?: number;
+  scrollbackBase?: number;
   mouseTracking?: number;
   mouseSgr?: boolean;
   // Window title set via OSC 0/2 since the previous diff. Backend
@@ -99,6 +107,7 @@ interface GridDiffEvent {
 
 interface ScrollbackWindow {
   start: number;
+  scrollbackBase?: number;
   rows: GridCell[][];
   scrollbackLen: number;
 }
@@ -355,10 +364,12 @@ export const TerminalBuffer: Component = () => {
   // the live bottom that the user has scrolled up; 0 means the live
   // grid is fully visible. `scrollbackLen` mirrors the backend's
   // current history length and is the upper bound on viewportOffset.
-  // The cache is keyed by absolute scrollback row index (0 = oldest)
-  // so the same row stays valid even as the live screen scrolls.
+  // The cache is keyed by monotonic scrollback row id. Rust reports
+  // scrollbackBase = id of its oldest retained row, so cache keys stay
+  // stable when the fixed-size history ring evicts from the front.
   const [viewportOffset, setViewportOffset] = createSignal(0);
   const [scrollbackLen, setScrollbackLen] = createSignal(0);
+  const [scrollbackBase, setScrollbackBase] = createSignal(0);
   const scrollbackCache = new Map<number, GridCell[]>();
   const scrollbackInFlight = new Set<number>();
   // How many wheel-delta units accumulate to one row of scroll. Wheel
@@ -370,6 +381,20 @@ export const TerminalBuffer: Component = () => {
   const buffer = createMemo(() =>
     terminalStore.getBuffer(threadStore.activeThreadId),
   );
+
+  const pruneScrollbackCache = (base: number, len: number) => {
+    const end = base + len;
+    for (const key of scrollbackCache.keys()) {
+      if (key < base || key >= end) {
+        scrollbackCache.delete(key);
+      }
+    }
+    for (const key of scrollbackInFlight) {
+      if (key < base || key >= end) {
+        scrollbackInFlight.delete(key);
+      }
+    }
+  };
 
   const fetchGridSnapshot = async () => {
     const id = threadStore.activeThreadId;
@@ -394,7 +419,40 @@ export const TerminalBuffer: Component = () => {
         needsFullRepaint = true;
         setGrid(snap.payload);
         setGridSeq(snap.seq);
-        setScrollbackLen(snap.payload.scrollbackLen ?? 0);
+        // Re-sync the title in case dropped diffs (overflow recovery)
+        // carried OSC titles the frontend never observed. The diff
+        // path only ever ships title once per OSC; without this, a
+        // resync after a torrent could leave the buffer header
+        // showing the old title until the next OSC fires.
+        if (snap.payload.title) {
+          terminalStore.setBufferTitle(id, snap.payload.title);
+        }
+        const nextLen = snap.payload.scrollbackLen ?? 0;
+        const nextBase = snap.payload.scrollbackBase ?? 0;
+        const prevLen = scrollbackLen();
+        const prevBase = scrollbackBase();
+        setScrollbackLen(nextLen);
+        setScrollbackBase(nextBase);
+        if (nextBase !== prevBase || nextLen !== prevLen) {
+          pruneScrollbackCache(nextBase, nextLen);
+        }
+        const offset = viewportOffset();
+        if (offset > nextLen) {
+          // Snapshot reports less history than the user had scrolled
+          // into (resize trim, backend buffer reset, thread-switch
+          // race). Without this the viewport could sit past the live
+          // edge of scrollback and cellAt would resolve to undefined
+          // for every cell above the live screen.
+          setViewportOffset(nextLen);
+        } else if (offset > 0 && nextLen > prevLen) {
+          // MAX_PENDING_DIFFS overflow drops queued diffs that may
+          // have grown scrollback by `delta` rows. Mirror the
+          // applyDiffInternal anchor logic so the user's view stays
+          // pinned to the same historical rows instead of sliding up
+          // by `delta` after the resync.
+          const delta = nextBase + nextLen - (prevBase + prevLen);
+          setViewportOffset(Math.min(offset + delta, nextLen));
+        }
         scheduleFrame();
       }
     } catch {
@@ -469,6 +527,13 @@ export const TerminalBuffer: Component = () => {
       needsFullRepaint = true;
       pendingRepaintRows.clear();
       pendingCanvasScrolls = [];
+      // Resize reflows scrollback rows to the new col count on the
+      // backend (terminal.rs). Cached rows still hold the old col
+      // count, so painting them after a dim change would draw
+      // wrong-width rows. Drop the cache + in-flight set; the next
+      // ensureScrollbackForViewport will repopulate from the backend.
+      scrollbackCache.clear();
+      scrollbackInFlight.clear();
       return "ok";
     }
     // Same dims: mutate the existing cells in place. Track every row
@@ -523,12 +588,18 @@ export const TerminalBuffer: Component = () => {
     // move - so bump the offset by however much the history grew. If
     // the user is at the live view (offset 0), this is a no-op.
     const nextLen = diff.scrollbackLen ?? 0;
+    const nextBase = diff.scrollbackBase ?? 0;
     const prevLen = scrollbackLen();
-    if (nextLen !== prevLen) {
+    const prevBase = scrollbackBase();
+    if (nextLen !== prevLen || nextBase !== prevBase) {
       setScrollbackLen(nextLen);
+      setScrollbackBase(nextBase);
+      pruneScrollbackCache(nextBase, nextLen);
       const offset = viewportOffset();
-      if (offset > 0 && nextLen > prevLen) {
-        const delta = nextLen - prevLen;
+      const prevEnd = prevBase + prevLen;
+      const nextEnd = nextBase + nextLen;
+      if (offset > 0 && nextEnd > prevEnd) {
+        const delta = nextEnd - prevEnd;
         const next = Math.min(offset + delta, nextLen);
         if (next !== offset) {
           setViewportOffset(next);
@@ -614,30 +685,54 @@ export const TerminalBuffer: Component = () => {
   };
 
   /**
-   * Fetch a window of scrollback rows starting at absolute index
-   * `start`. Skipped when an overlapping window is already in flight
-   * (the next paint will pick up cached rows when they land).
+   * Fetch a window of scrollback rows starting at monotonic row id
+   * `startRowId`. The backend command still takes a start index relative
+   * to its current oldest retained row; scrollbackBase bridges that shifting
+   * index space back into stable cache keys.
    */
-  const fetchScrollbackWindow = async (start: number, count: number) => {
+  const fetchScrollbackWindow = async (startRowId: number, count: number) => {
     const id = threadStore.activeThreadId;
     if (!id || count <= 0) return;
-    if (scrollbackInFlight.has(start)) return;
-    scrollbackInFlight.add(start);
+    const base = scrollbackBase();
+    const len = scrollbackLen();
+    if (startRowId < base || startRowId >= base + len) return;
+    const relativeStart = startRowId - base;
+    const boundedCount = Math.min(count, base + len - startRowId);
+    let marked = 0;
+    for (let i = 0; i < boundedCount; i++) {
+      const rowId = startRowId + i;
+      if (scrollbackInFlight.has(rowId)) break;
+      scrollbackInFlight.add(rowId);
+      marked++;
+    }
+    if (marked === 0) return;
     try {
       const win = await invoke<ScrollbackWindow>("terminal_grid_scrollback", {
         bufferId: id,
-        start,
-        count,
+        start: relativeStart,
+        count: marked,
       });
       if (id !== threadStore.activeThreadId) return;
-      // Trust the window's own start - the live emitter may have
-      // grown scrollback between request and reply, but absolute
-      // indices remain stable until the cap evicts.
+      const nextBase = win.scrollbackBase ?? 0;
+      const prevBase = scrollbackBase();
       for (let i = 0; i < win.rows.length; i++) {
-        scrollbackCache.set(win.start + i, win.rows[i]);
+        scrollbackCache.set(nextBase + win.start + i, win.rows[i]);
       }
-      if (win.scrollbackLen !== scrollbackLen()) {
+      if (win.scrollbackLen !== scrollbackLen() || nextBase !== prevBase) {
+        const prevLen = scrollbackLen();
         setScrollbackLen(win.scrollbackLen);
+        setScrollbackBase(nextBase);
+        pruneScrollbackCache(nextBase, win.scrollbackLen);
+        const offset = viewportOffset();
+        const prevEnd = prevBase + prevLen;
+        const nextEnd = nextBase + win.scrollbackLen;
+        if (offset > 0 && nextEnd > prevEnd) {
+          setViewportOffset(
+            Math.min(offset + nextEnd - prevEnd, win.scrollbackLen),
+          );
+        } else if (offset > win.scrollbackLen) {
+          setViewportOffset(win.scrollbackLen);
+        }
       }
       if (viewportOffset() > 0) {
         needsFullRepaint = true;
@@ -646,7 +741,9 @@ export const TerminalBuffer: Component = () => {
     } catch {
       // Buffer killed mid-flight; nothing useful to do.
     } finally {
-      scrollbackInFlight.delete(start);
+      for (let i = 0; i < marked; i++) {
+        scrollbackInFlight.delete(startRowId + i);
+      }
     }
   };
 
@@ -663,15 +760,16 @@ export const TerminalBuffer: Component = () => {
     const g = grid();
     if (!g || len === 0) return;
     const visibleRows = Math.min(offset, g.rows);
-    const firstAbsolute = Math.max(0, len - offset);
+    const base = scrollbackBase();
+    const firstRowId = base + Math.max(0, len - offset);
     let missingStart = -1;
     let missingEnd = -1;
     for (let i = 0; i < visibleRows; i++) {
-      const abs = firstAbsolute + i;
-      if (abs >= len) break;
-      if (!scrollbackCache.has(abs) && !scrollbackInFlight.has(abs)) {
-        if (missingStart === -1) missingStart = abs;
-        missingEnd = abs;
+      const rowId = firstRowId + i;
+      if (rowId >= base + len) break;
+      if (!scrollbackCache.has(rowId) && !scrollbackInFlight.has(rowId)) {
+        if (missingStart === -1) missingStart = rowId;
+        missingEnd = rowId;
       }
     }
     if (missingStart !== -1) {
@@ -730,7 +828,14 @@ export const TerminalBuffer: Component = () => {
 
   const onWindowMouseMoveTracking = (e: MouseEvent) => {
     const g = grid();
-    if (!g) return;
+    // Grid may flip to null mid-tracking when the active thread is
+    // killed or switched away; without explicit detach the window
+    // listeners would keep firing until onCleanup. Same path as the
+    // mode-turned-off branch below.
+    if (!g) {
+      detachMouseTracking();
+      return;
+    }
     const tracking = g.mouseTracking ?? 0;
     if (tracking === 0 || !(g.mouseSgr ?? false)) {
       detachMouseTracking();
@@ -755,6 +860,20 @@ export const TerminalBuffer: Component = () => {
     const baseButton = mouseTrackingButton ?? 3; // 3 = no-button motion
     const button = baseButton + 32 + mouseEventModifiers(e);
     sendMouseReport(id, button, cell.col, cell.row, false);
+  };
+
+  const onSurfaceMouseMoveTracking = (e: MouseEvent) => {
+    const g = grid();
+    const tracking = g?.mouseTracking ?? 0;
+    if (
+      tracking !== 1003 ||
+      !(g?.mouseSgr ?? false) ||
+      mouseTrackingButton !== null ||
+      e.shiftKey
+    ) {
+      return;
+    }
+    onWindowMouseMoveTracking(e);
   };
 
   const onWindowMouseUpTracking = (e: MouseEvent) => {
@@ -1064,9 +1183,9 @@ export const TerminalBuffer: Component = () => {
     const cellAt = (visibleRow: number, col: number): GridCell | undefined => {
       if (!inScrollback) return g.cells[visibleRow * g.cols + col];
       if (visibleRow < offset) {
-        const absolute = scrollbackLen() - offset + visibleRow;
-        if (absolute < 0) return undefined;
-        return scrollbackCache.get(absolute)?.[col];
+        const rowId = scrollbackBase() + scrollbackLen() - offset + visibleRow;
+        if (rowId < scrollbackBase()) return undefined;
+        return scrollbackCache.get(rowId)?.[col];
       }
       const liveRow = visibleRow - offset;
       if (liveRow >= g.rows) return undefined;
@@ -1302,6 +1421,7 @@ export const TerminalBuffer: Component = () => {
         scrollbackCache.clear();
         scrollbackInFlight.clear();
         setScrollbackLen(0);
+        setScrollbackBase(0);
         setViewportOffset(0);
         wheelAccumulator = 0;
         detachMouseTracking();
@@ -1596,6 +1716,7 @@ export const TerminalBuffer: Component = () => {
               onKeyDown={(e) => void handleKeyDown(e)}
               onPaste={(e) => void handlePaste(e)}
               onMouseDown={onSurfaceMouseDown}
+              onMouseMove={onSurfaceMouseMoveTracking}
               onWheel={onSurfaceWheel}
             >
               <canvas ref={canvasRef} class="block" />
