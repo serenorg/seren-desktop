@@ -10,6 +10,51 @@ import { getToken } from "@/services/auth";
 
 const RETRY_DELAYS_MS = [10_000, 20_000];
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Walk a parsed JSON response from POST /publishers/seren-notes/notes and
+// return the upstream note id. Tolerates every envelope we have observed:
+//   • upstream raw: { id, ... }
+//   • upstream NoteDataResponse: { data: { id, ... } }
+//   • Gateway publisher-proxy: { data: { status, body, cost } } where body
+//     is either a parsed object or a JSON-encoded string (older proxy build).
+//   • DataResponse with extra siblings (e.g. request_id) that block the
+//     strict outer unwrap in unwrapDataResponse.
+// Returns the first UUID-shaped id encountered; nothing else opens a valid
+// notes.serendb.com URL, so we refuse anything that isn't a UUID.
+export function extractNoteId(value: unknown): string | undefined {
+  const seen = new WeakSet<object>();
+  const queue: unknown[] = [value];
+  while (queue.length) {
+    const node = queue.shift();
+    if (typeof node === "string") {
+      // Some Gateway builds JSON-encode the upstream body as a string.
+      if (node.startsWith("{") || node.startsWith("[")) {
+        try {
+          queue.push(JSON.parse(node));
+        } catch {
+          // Not JSON, ignore.
+        }
+      }
+      continue;
+    }
+    if (!node || typeof node !== "object") continue;
+    if (seen.has(node as object)) continue;
+    seen.add(node as object);
+    const record = node as Record<string, unknown>;
+    if (typeof record.id === "string" && UUID_RE.test(record.id)) {
+      return record.id;
+    }
+    for (const child of Object.values(record)) {
+      if (child && (typeof child === "object" || typeof child === "string")) {
+        queue.push(child);
+      }
+    }
+  }
+  return undefined;
+}
+
 export async function saveToSerenNotes(
   title: string,
   content: string,
@@ -44,11 +89,29 @@ export async function saveToSerenNotes(
     }
 
     const result = await response.json();
-    const payload = unwrapPublisherBody(result) as
+    // Try the documented envelope first; fall back to a tolerant walk that
+    // covers proxy variants (string-encoded body, missing `status` key, extra
+    // top-level siblings) so a saved note still resolves to a usable URL.
+    const direct = unwrapPublisherBody(result) as
       | { data?: { id?: string }; id?: string }
+      | string
       | undefined;
-    const noteId = payload?.data?.id ?? payload?.id;
-    if (!noteId) throw new Error("Note created but ID missing from response");
+    let noteId: string | undefined;
+    if (direct && typeof direct === "object") {
+      noteId = direct.data?.id ?? direct.id;
+    }
+    if (!noteId) {
+      noteId = extractNoteId(result);
+    }
+    if (!noteId) {
+      console.error(
+        "[SerenNotes] Saved note but could not extract id. Response:",
+        JSON.stringify(result).slice(0, 800),
+      );
+      throw new Error(
+        "Note saved to Seren Notes but the URL could not be opened.",
+      );
+    }
 
     openExternalLink(`https://notes.serendb.com/notes/${noteId}`);
     return;
