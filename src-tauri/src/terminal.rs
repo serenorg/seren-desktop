@@ -56,6 +56,61 @@ pub struct TerminalState {
     buffers: Mutex<HashMap<String, TerminalProcess>>,
 }
 
+impl TerminalState {
+    /// Best-effort shutdown hook for app exit. Drain the process map first so
+    /// reader threads observe the buffers as gone, then kill outside the
+    /// global mutex so one slow child cannot stall unrelated terminal cleanup.
+    ///
+    /// Windows note: `child.kill()` only TerminateProcess's the immediate
+    /// shell - grandchildren (npm, node, claude CLI, anything the user spawned
+    /// inside the shell) survive and hold file locks that block the next NSIS
+    /// install. Mirror `provider_runtime::kill_sync` and use `taskkill /F /T`
+    /// so the full process tree dies. Unix terminates the foreground group
+    /// implicitly when the PTY master drops at end of scope, plus SIGKILL to
+    /// the shell.
+    pub fn kill_all(&self) {
+        let processes = match self.buffers.lock() {
+            Ok(mut buffers) => buffers.drain().collect::<Vec<_>>(),
+            Err(err) => {
+                log::warn!("[Terminal] Failed to lock buffers during shutdown: {err}");
+                return;
+            }
+        };
+
+        for (buffer_id, process) in processes {
+            if !matches!(process.info.status, TerminalStatus::Running) {
+                continue;
+            }
+
+            let Ok(mut child) = process.child.lock() else {
+                log::warn!("[Terminal] Failed to lock child during shutdown: {buffer_id}");
+                continue;
+            };
+            let pid = child.process_id();
+            if let Err(err) = child.kill() {
+                log::debug!(
+                    "[Terminal] Failed to kill PTY child during shutdown: {buffer_id}: {err}"
+                );
+            }
+            // Drop the lock before invoking taskkill - the spawn can take a
+            // few hundred ms and we don't want to block other consumers of
+            // the child Arc waiting on it.
+            drop(child);
+
+            #[cfg(windows)]
+            if let Some(pid) = pid {
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .status();
+            }
+            #[cfg(not(windows))]
+            let _ = pid;
+        }
+    }
+}
+
 struct TerminalProcess {
     info: TerminalBufferInfo,
     master: Box<dyn MasterPty + Send>,

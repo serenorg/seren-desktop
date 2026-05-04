@@ -907,6 +907,11 @@ pub fn run() {
                 if let Some(mcp_state) = app.try_state::<mcp::McpState>() {
                     mcp_state.kill_all();
                 }
+                // Kill terminal PTY children, especially for Windows ConPTY
+                // where dropping the master may not reliably terminate shells.
+                if let Some(terminal_state) = app.try_state::<terminal::TerminalState>() {
+                    terminal_state.kill_all();
+                }
                 // Stop the provider runtime node process
                 if let Some(rt_state) = app.try_state::<provider_runtime::ProviderRuntimeState>() {
                     rt_state.kill_sync();
