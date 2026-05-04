@@ -33,6 +33,12 @@ interface GridSnapshot {
   cursorRow: number;
   cursorCol: number;
   unhandledActions: number;
+  // Stage 4 mode-tracking fields. Backend skips serializing each when
+  // it equals its default (cursorVisible=true, cursorKeysApp=false,
+  // bracketedPaste=false), so a missing field means "default".
+  cursorVisible?: boolean;
+  cursorKeysApp?: boolean;
+  bracketedPaste?: boolean;
 }
 
 interface TerminalSnapshotGrid {
@@ -219,12 +225,24 @@ export const TerminalBuffer: Component = () => {
     if (!ctx) return;
     ctx.font = CELL_FONT;
     const m = ctx.measureText("M");
+    // Cell width: the FONT's ideographic width if exposed, else "M"'s
+    // bounding box. Both are stable for monospace.
     const w = m.width;
-    // measureText's actualBounding* are sometimes undefined in older
-    // engines; fall back to the font's nominal cell height.
-    const ascent = m.actualBoundingBoxAscent ?? 13;
-    const descent = m.actualBoundingBoxDescent ?? 3;
-    const h = ascent + descent + 2;
+    // Cell HEIGHT: must be the FONT's design metrics (fontBoundingBox*),
+    // not the GLYPH's ink box (actualBoundingBox*). "M" has no descender
+    // so actualBoundingBoxDescent is essentially 0, which produced a cell
+    // height roughly equal to cap-height and made descenders from one
+    // row overlap the caps of the next row (visible bug in vim/htop).
+    // Use fontBoundingBoxAscent + fontBoundingBoxDescent when the engine
+    // exposes them (modern WebKit + Chromium do), and fall back to a
+    // line-height multiplier of 1.4 - the conventional terminal value
+    // that gives breathing room without looking double-spaced.
+    const fbAscent = m.fontBoundingBoxAscent;
+    const fbDescent = m.fontBoundingBoxDescent;
+    const h =
+      fbAscent !== undefined && fbDescent !== undefined
+        ? Math.ceil(fbAscent + fbDescent)
+        : Math.ceil(CELL_FONT_SIZE * 1.4);
     setCellW(w);
     setCellH(h);
   };
@@ -250,6 +268,14 @@ export const TerminalBuffer: Component = () => {
     void terminalStore.resize(id, cols, rows).then(scheduleFetch);
   };
 
+  const clearCanvas = () => {
+    if (!canvasRef) return;
+    canvasRef.width = 0;
+    canvasRef.height = 0;
+    canvasRef.style.width = "0px";
+    canvasRef.style.height = "0px";
+  };
+
   // Re-render the canvas whenever the grid snapshot or cell metrics
   // change. Two passes: backgrounds first (so adjacent cells with bg
   // fills have no seams), then glyphs + decorations (underline, strike).
@@ -259,7 +285,11 @@ export const TerminalBuffer: Component = () => {
     const g = grid();
     const w = cellW();
     const h = cellH();
-    if (!g || !canvasRef || w === 0 || h === 0) return;
+    if (!g) {
+      clearCanvas();
+      return;
+    }
+    if (!canvasRef || w === 0 || h === 0) return;
     const dpr = window.devicePixelRatio || 1;
     const pxW = g.cols * w;
     const pxH = g.rows * h;
@@ -366,7 +396,11 @@ export const TerminalBuffer: Component = () => {
     // Cursor: inverted block at (cursorRow, cursorCol). For a wide
     // cursor cell, paint two columns wide so the cursor matches the
     // glyph. The cursor background overrides any cell bg below it.
-    if (g.cursorRow < g.rows && g.cursorCol < g.cols) {
+    // Stage 4: respect DECSET 25 (cursor_visible). Apps like vim, less,
+    // and tmux hide the cursor in alt-screen UI; default true when the
+    // backend skip-serializes the field.
+    const cursorVisible = g.cursorVisible ?? true;
+    if (cursorVisible && g.cursorRow < g.rows && g.cursorCol < g.cols) {
       const cell = g.cells[g.cursorRow * g.cols + g.cursorCol];
       const cursorWidth = (cell?.width ?? 1) === 2 ? 2 * w : w;
       const cx = g.cursorCol * w;
@@ -431,6 +465,22 @@ export const TerminalBuffer: Component = () => {
       return;
     }
 
+    // Stage 4: arrow keys + Home/End honor DECSET 1 (DECCKM application
+    // cursor keys) when the backend has it on. vim sets DECCKM as part
+    // of its alt-screen entry; without this branch its cursor keys do
+    // nothing. PageUp/PageDown/Delete are xterm tilde sequences
+    // (`\x1b[5~`, `\x1b[6~`, `\x1b[3~`) and have no app-mode variants
+    // in standard xterm, so they stay constant below.
+    //
+    // Modifier+arrow (Shift+Up, Ctrl+Up, etc.) currently falls through
+    // to plain arrow encoding - the xterm modifyOtherKeys / CSI 1;mod
+    // sequences (e.g. `\x1b[1;5A` for Ctrl+Up) are deferred to the
+    // Stage 4 terminput integration. Apps that key off modifier+arrow
+    // (tmux pane resize, some vim plugins) will see only the bare
+    // arrow until then.
+    const decckm = grid()?.cursorKeysApp ?? false;
+    const arrowPrefix = decckm ? "\x1bO" : "\x1b[";
+
     let bytes: string | null = null;
     switch (k) {
       case "Enter":
@@ -446,22 +496,22 @@ export const TerminalBuffer: Component = () => {
         bytes = "\x1b";
         break;
       case "ArrowUp":
-        bytes = "\x1b[A";
+        bytes = `${arrowPrefix}A`;
         break;
       case "ArrowDown":
-        bytes = "\x1b[B";
+        bytes = `${arrowPrefix}B`;
         break;
       case "ArrowRight":
-        bytes = "\x1b[C";
+        bytes = `${arrowPrefix}C`;
         break;
       case "ArrowLeft":
-        bytes = "\x1b[D";
+        bytes = `${arrowPrefix}D`;
         break;
       case "Home":
-        bytes = "\x1b[H";
+        bytes = decckm ? "\x1bOH" : "\x1b[H";
         break;
       case "End":
-        bytes = "\x1b[F";
+        bytes = decckm ? "\x1bOF" : "\x1b[F";
         break;
       case "PageUp":
         bytes = "\x1b[5~";
@@ -484,6 +534,32 @@ export const TerminalBuffer: Component = () => {
       event.preventDefault();
       await terminalStore.write(id, bytes);
     }
+  };
+
+  /**
+   * Handle a paste from the clipboard. Stage 4: when DECSET 2004
+   * (bracketed paste) is on, wrap the pasted text in
+   * `\x1b[200~ ... \x1b[201~` so the receiving app can distinguish
+   * pasted content from typed input. Otherwise send the raw text.
+   * Strips a single embedded `\x1b[201~` from pasted content as a
+   * safety measure - apps would otherwise see a paste-end marker
+   * mid-content and treat the trailing bytes as typed.
+   */
+  const handlePaste = async (event: ClipboardEvent) => {
+    const current = buffer();
+    if (!current || current.status !== "running") return;
+    const text = event.clipboardData?.getData("text") ?? "";
+    if (!text) return;
+    event.preventDefault();
+    // Strip embedded paste-end markers so a malicious or malformed
+    // clipboard cannot inject \x1b[201~ mid-content and have the
+    // receiving app treat the trailing bytes as typed input. split+join
+    // instead of a regex literal so biome's no-control-char-in-regex
+    // lint stays happy.
+    const safe = text.split("\x1b[201~").join("");
+    const bracketed = grid()?.bracketedPaste ?? false;
+    const payload = bracketed ? `\x1b[200~${safe}\x1b[201~` : safe;
+    await terminalStore.write(current.id, payload);
   };
 
   const sendInterrupt = async () => {
@@ -553,14 +629,6 @@ export const TerminalBuffer: Component = () => {
                 </div>
                 <div class="text-[11px] text-muted-foreground truncate">
                   {current().cwd || "Current environment"} - {current().status}
-                  <Show when={(grid()?.unhandledActions ?? 0) > 0}>
-                    <span
-                      class="ml-2 text-[10px] text-amber-400/70"
-                      title="Some terminal escape sequences are not yet handled by the Stage 2 grid; output may render incompletely."
-                    >
-                      ({grid()?.unhandledActions} unhandled)
-                    </span>
-                  </Show>
                 </div>
               </div>
               <button
@@ -594,6 +662,7 @@ export const TerminalBuffer: Component = () => {
               // biome-ignore lint/a11y/noNoninteractiveTabindex: terminal surfaces are interactive widgets that own their keyboard model (matches xterm.js, vscode terminal pattern)
               tabIndex={0}
               onKeyDown={(e) => void handleKeyDown(e)}
+              onPaste={(e) => void handlePaste(e)}
               onMouseDown={(e) => {
                 (e.currentTarget as HTMLDivElement).focus();
               }}

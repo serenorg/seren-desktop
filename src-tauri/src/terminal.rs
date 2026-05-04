@@ -16,8 +16,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use termwiz::cell::Intensity;
 use termwiz::color::ColorSpec;
 use termwiz::escape::{
-    Action, ControlCode,
-    csi::{CSI, Cursor, Edit, EraseInDisplay, EraseInLine, Sgr},
+    Action, ControlCode, Esc, EscCode,
+    csi::{
+        CSI, Cursor, DecPrivateMode, DecPrivateModeCode, Edit, EraseInDisplay,
+        EraseInLine, Mode, Sgr, TerminalMode, TerminalModeCode,
+    },
     parser::Parser,
 };
 use unicode_width::UnicodeWidthChar;
@@ -107,6 +110,8 @@ struct TerminalGrid {
     parser: Parser,
     rows: u16,
     cols: u16,
+    /// Active screen cells. Either the main screen or the alternate
+    /// screen depending on whether `alt_state` is set.
     cells: Vec<Vec<GridCell>>,
     cursor_row: u16,
     cursor_col: u16,
@@ -121,6 +126,82 @@ struct TerminalGrid {
     current_fg: u32,
     current_bg: u32,
     current_attrs: u8,
+    // --- Stage 4 mode state -----------------------------------------
+    /// DECSET 25 - false hides the cursor (renderer must not paint it).
+    cursor_visible: bool,
+    /// DECSET 1 (DECCKM) - when true, arrow keys are expected in the
+    /// application form (`ESC O X`) rather than ANSI form (`ESC [ X`).
+    /// Tracked here, surfaced in the snapshot, consumed by the frontend
+    /// key encoder.
+    cursor_keys_app: bool,
+    /// DECSET 2004 - frontend paste handler must wrap pasted text in
+    /// `\x1b[200~ ... \x1b[201~` when this is true.
+    bracketed_paste: bool,
+    /// DECSTBM scroll region [top, bottom] inclusive, 0-indexed. Defaults
+    /// to (0, rows-1). LF at `cursor_row == scroll_bottom` scrolls the
+    /// region; LF outside the region just advances the cursor.
+    scroll_top: u16,
+    scroll_bottom: u16,
+    /// DECSC / DECRC saved cursor (and pen). None means a future DECRC
+    /// is a no-op (or homes the cursor depending on emulator policy; we
+    /// pick no-op).
+    saved_cursor: Option<SavedCursor>,
+    /// State for DECSET 1049 alt-screen restore. None means main screen
+    /// is active. Some(...) means the alt screen is active and the saved
+    /// main state will be restored on DECRST 1049.
+    alt_state: Option<AltState>,
+    /// Bytes the emulator owes back to the PTY in response to terminal
+    /// queries (DA1 `\x1b[c`, DA2/DA3, DSR `\x1b[5n` / `\x1b[6n`,
+    /// XTVERSION `\x1b[>q`). Drained by the reader thread after each
+    /// `feed` and written via the per-process PTY writer Arc. Without
+    /// this, fish (and any shell probing terminal capabilities on
+    /// startup) waits 10s for a DA1 reply and prints a warning about
+    /// the terminal being incompatible.
+    pending_responses: Vec<u8>,
+    /// G0 / G1 character set designations and the currently shifted-in
+    /// set. Stage 4.4 honors DEC special-graphics line drawing so
+    /// older TUIs that emit `\x1b(0qqq` for box characters render the
+    /// real glyphs (U+250C / U+2500 / U+2510 corners and lines) instead
+    /// of literal letters.
+    g0_charset: CharSet,
+    g1_charset: CharSet,
+    /// false = G0 active (default), true = G1 active. Toggled by
+    /// SI (0x0F) and SO (0x0E).
+    active_g1: bool,
+    /// ANSI mode 4 (IRM, Insert/Replace). When true, write_char shifts
+    /// existing cells right at the cursor before stamping so the new
+    /// glyph inserts rather than overwrites. Defaults to false (replace
+    /// mode) which matches xterm's default and what readline-based
+    /// shells expect.
+    insert_mode: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CharSet {
+    Ascii,
+    DecLineDrawing,
+}
+
+#[derive(Debug, Clone)]
+struct SavedCursor {
+    row: u16,
+    col: u16,
+    fg: u32,
+    bg: u32,
+    attrs: u8,
+}
+
+#[derive(Debug, Clone)]
+struct AltState {
+    saved_cells: Vec<Vec<GridCell>>,
+    saved_cursor_row: u16,
+    saved_cursor_col: u16,
+    saved_fg: u32,
+    saved_bg: u32,
+    saved_attrs: u8,
+    saved_scroll_top: u16,
+    saved_scroll_bottom: u16,
+    saved_cursor_visible: bool,
 }
 
 /// Sentinel value meaning "use the renderer's default fg/bg color." Since
@@ -210,6 +291,31 @@ pub struct GridSnapshot {
     pub cursor_row: u16,
     pub cursor_col: u16,
     pub unhandled_actions: u32,
+    /// DECSET 25 state. Renderer hides the cursor block when false.
+    /// Defaults to true; skipped on the wire when default to keep the
+    /// snapshot compact.
+    #[serde(skip_serializing_if = "GridSnapshot::cursor_visible_is_default")]
+    pub cursor_visible: bool,
+    /// DECSET 1 (DECCKM). Frontend key encoder picks `ESC O X` arrows
+    /// when true, `ESC [ X` when false.
+    #[serde(skip_serializing_if = "GridSnapshot::cursor_keys_app_is_default")]
+    pub cursor_keys_app: bool,
+    /// DECSET 2004. Frontend paste handler wraps the clipboard content
+    /// in `\x1b[200~ ... \x1b[201~` when true.
+    #[serde(skip_serializing_if = "GridSnapshot::bracketed_paste_is_default")]
+    pub bracketed_paste: bool,
+}
+
+impl GridSnapshot {
+    fn cursor_visible_is_default(value: &bool) -> bool {
+        *value
+    }
+    fn cursor_keys_app_is_default(value: &bool) -> bool {
+        !*value
+    }
+    fn bracketed_paste_is_default(value: &bool) -> bool {
+        !*value
+    }
 }
 
 impl TerminalGrid {
@@ -229,7 +335,26 @@ impl TerminalGrid {
             current_fg: COLOR_DEFAULT,
             current_bg: COLOR_DEFAULT,
             current_attrs: 0,
+            cursor_visible: true,
+            cursor_keys_app: false,
+            bracketed_paste: false,
+            scroll_top: 0,
+            scroll_bottom: rows.saturating_sub(1),
+            saved_cursor: None,
+            alt_state: None,
+            pending_responses: Vec::new(),
+            g0_charset: CharSet::Ascii,
+            g1_charset: CharSet::Ascii,
+            active_g1: false,
+            insert_mode: false,
         }
+    }
+
+    /// Take the bytes owed back to the PTY in response to terminal
+    /// queries processed during the most recent `feed`. The reader
+    /// thread calls this and writes the result through the writer Arc.
+    fn drain_responses(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending_responses)
     }
 
     /// Parse `bytes` and apply each emitted Action against the grid. Each
@@ -258,6 +383,9 @@ impl TerminalGrid {
             cursor_row: self.cursor_row,
             cursor_col: self.cursor_col,
             unhandled_actions: self.unhandled_actions,
+            cursor_visible: self.cursor_visible,
+            cursor_keys_app: self.cursor_keys_app,
+            bracketed_paste: self.bracketed_paste,
         }
     }
 
@@ -272,21 +400,31 @@ impl TerminalGrid {
         if rows == self.rows && cols == self.cols {
             return;
         }
-        let mut new_cells = vec![vec![GridCell::default(); cols as usize]; rows as usize];
-        let copy_rows = (rows.min(self.rows)) as usize;
-        let copy_cols = (cols.min(self.cols)) as usize;
-        for (new_row, old_row) in new_cells
-            .iter_mut()
-            .zip(self.cells.iter())
-            .take(copy_rows)
-        {
-            new_row[..copy_cols].copy_from_slice(&old_row[..copy_cols]);
+        let new_cells = resize_cells(&self.cells, rows, cols);
+        // If we're in alt mode, the saved main screen also needs to track
+        // the new dimensions so a DECRST 1049 restores into a grid that
+        // matches the current PTY WINSIZE rather than the original size.
+        if let Some(alt) = self.alt_state.as_mut() {
+            alt.saved_cells = resize_cells(&alt.saved_cells, rows, cols);
+            alt.saved_cursor_row = alt.saved_cursor_row.min(rows.saturating_sub(1));
+            alt.saved_cursor_col = alt.saved_cursor_col.min(cols.saturating_sub(1));
+            alt.saved_scroll_top = alt.saved_scroll_top.min(rows.saturating_sub(1));
+            alt.saved_scroll_bottom = rows.saturating_sub(1);
         }
         self.cells = new_cells;
         self.rows = rows;
         self.cols = cols;
         self.cursor_row = self.cursor_row.min(rows.saturating_sub(1));
         self.cursor_col = self.cursor_col.min(cols.saturating_sub(1));
+        // DECSTBM resets to the full screen on resize - keeping a stale
+        // narrower scroll region after a resize would confine apps to a
+        // strip of the new screen.
+        self.scroll_top = 0;
+        self.scroll_bottom = rows.saturating_sub(1);
+        if let Some(saved) = self.saved_cursor.as_mut() {
+            saved.row = saved.row.min(rows.saturating_sub(1));
+            saved.col = saved.col.min(cols.saturating_sub(1));
+        }
         self.seq = self.seq.wrapping_add(1);
     }
 
@@ -300,17 +438,123 @@ impl TerminalGrid {
             }
             Action::Control(code) => self.apply_control(code),
             Action::CSI(csi) => self.apply_csi(csi),
-            // Stage 2 deliberately ignores Esc (single-char escape sequences
-            // like DECALN, RIS), DeviceControl, OSC (titles, hyperlinks),
-            // Sixel/KittyImage, and XtGetTcap. Each is its own well-bounded
-            // expansion. Counted so the gap is visible in snapshots.
+            Action::Esc(esc) => self.apply_esc(esc),
+            Action::OperatingSystemCommand(osc) => self.apply_osc(*osc),
+            // DeviceControl, Sixel/KittyImage, XtGetTcap deferred to later
+            // stages. Counted in diagnostics if a TUI actually depends on
+            // them.
             _ => {
                 self.unhandled_actions = self.unhandled_actions.saturating_add(1);
             }
         }
     }
 
+    fn apply_esc(&mut self, esc: Esc) {
+        match esc {
+            Esc::Code(EscCode::DecSaveCursorPosition) => self.save_cursor(),
+            Esc::Code(EscCode::DecRestoreCursorPosition) => self.restore_cursor(),
+            // Application / normal keypad mode (ESC = / ESC >). Every
+            // shell sends one or the other on startup; silently
+            // acknowledge so diagnostics stay focused. Stage 5 will track
+            // and consume the mode in the key encoder when we wire
+            // numeric-keypad-aware sequences.
+            Esc::Code(EscCode::DecApplicationKeyPad) => {}
+            Esc::Code(EscCode::DecNormalKeyPad) => {}
+            // Character set designation. Stage 4.4 actually tracks G0
+            // and G1 so DEC special-graphics line drawing renders as
+            // real box characters when the active set is shifted to
+            // it. UK character set is treated as ASCII for our purposes
+            // (the only difference is the # vs pound sign mapping
+            // which the dec_special_graphics table doesn't touch).
+            Esc::Code(EscCode::AsciiCharacterSetG0) => {
+                self.g0_charset = CharSet::Ascii;
+            }
+            Esc::Code(EscCode::AsciiCharacterSetG1) => {
+                self.g1_charset = CharSet::Ascii;
+            }
+            Esc::Code(EscCode::DecLineDrawingG0) => {
+                self.g0_charset = CharSet::DecLineDrawing;
+            }
+            Esc::Code(EscCode::DecLineDrawingG1) => {
+                self.g1_charset = CharSet::DecLineDrawing;
+            }
+            Esc::Code(EscCode::UkCharacterSetG0)
+            | Esc::Code(EscCode::UkCharacterSetG1) => {
+                // Treated as ASCII; the # -> pound difference is not
+                // significant for our terminal use.
+            }
+            // RIS (`\x1b c`) is the Reset to Initial State sequence.
+            // `clear` and some recovery scripts emit it. We don't
+            // implement a full RIS today (would need to reset every
+            // mode + saved cursor + scroll region + alt screen + pen
+            // + grid contents), but silently acknowledge so diagnostics
+            // don't count routine recovery noise. Stage 5 candidate.
+            Esc::Code(EscCode::FullReset) => {}
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    /// Acknowledge OS Command sequences. Stage 4.2 silently swallows the
+    /// common-and-known variants (titles, cwd, color theme set/reset,
+    /// hyperlinks, notifications, semantic prompts, vendor-proprietary)
+    /// without bumping `unhandled_actions` - every shell sends a handful
+    /// of these on startup and counting them as "unhandled" alarms users
+    /// when nothing visible is broken. Only `Unspecified` (an OSC
+    /// termwiz couldn't classify) bumps the counter, since that is what
+    /// "the emulator didn't recognize this" actually means.
+    ///
+    /// Future stages will lift title and cwd into TerminalGrid state so
+    /// the frontend can surface them in the buffer's tab; for now the
+    /// values are dropped on the floor.
+    fn apply_osc(&mut self, osc: termwiz::escape::OperatingSystemCommand) {
+        use termwiz::escape::OperatingSystemCommand as Osc;
+        match osc {
+            Osc::SetIconNameAndWindowTitle(_)
+            | Osc::SetWindowTitle(_)
+            | Osc::SetWindowTitleSun(_)
+            | Osc::SetIconName(_)
+            | Osc::SetIconNameSun(_)
+            | Osc::CurrentWorkingDirectory(_)
+            | Osc::SetHyperlink(_)
+            | Osc::ChangeColorNumber(_)
+            | Osc::ChangeDynamicColors(_, _)
+            | Osc::ResetDynamicColor(_)
+            | Osc::ResetColors(_)
+            | Osc::ClearSelection(_)
+            | Osc::QuerySelection(_)
+            | Osc::SetSelection(_, _)
+            | Osc::SystemNotification(_)
+            | Osc::ITermProprietary(_)
+            | Osc::FinalTermSemanticPrompt(_)
+            | Osc::RxvtExtension(_)
+            | Osc::ConEmuProgress(_) => {
+                // Known sequences we deliberately don't act on yet.
+                // Don't bump unhandled.
+            }
+            Osc::Unspecified(_) => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
     fn write_char(&mut self, c: char) {
+        // Translate via the active character set. ASCII is identity;
+        // DEC line drawing remaps printable bytes 0x60..=0x7e to box-
+        // drawing / math glyphs so older TUIs that emit `\x1b)0\x0eqq`
+        // for a horizontal line render real glyphs instead of literal
+        // 'q' characters.
+        let active = if self.active_g1 {
+            self.g1_charset
+        } else {
+            self.g0_charset
+        };
+        let c = if active == CharSet::DecLineDrawing {
+            dec_special_graphics(c)
+        } else {
+            c
+        };
         let width = UnicodeWidthChar::width(c).unwrap_or(1) as u16;
         if width == 0 {
             // Combining marks / zero-width-joiner / variation selectors. A
@@ -330,6 +574,13 @@ impl TerminalGrid {
         }
         let row = self.cursor_row as usize;
         let col = self.cursor_col as usize;
+        // ANSI mode 4 (IRM): shift cells right at the cursor before
+        // stamping so the new glyph inserts rather than overwrites.
+        // Cells past the right margin fall off. Done before the wide-
+        // char sweep so the sweep operates on the post-shift state.
+        if self.insert_mode {
+            self.shift_cells_right(row, col, width);
+        }
         // Defensive bounds: resize races could in theory leave the cursor
         // out of range until the next clamp; just no-op rather than panic.
         if row < self.cells.len() && col < self.cells[row].len() {
@@ -400,6 +651,20 @@ impl TerminalGrid {
                 self.cursor_col = next.min(self.cols.saturating_sub(1));
             }
             ControlCode::Bell => { /* visual bell is a UI concern, ignore */ }
+            // SI / SO toggle the active character set between G0 and
+            // G1. Apps that use DEC line drawing typically designate
+            // it once on G1 then SO/SI around the box-drawing region:
+            //   ESC ) 0   designate DEC line drawing as G1
+            //   SO        shift to G1 -> subsequent bytes get the DEC
+            //             special-graphics translation
+            //   q         renders as horizontal line
+            //   SI        shift back to G0 -> ASCII again
+            ControlCode::ShiftIn => {
+                self.active_g1 = false;
+            }
+            ControlCode::ShiftOut => {
+                self.active_g1 = true;
+            }
             _ => {
                 self.unhandled_actions = self.unhandled_actions.saturating_add(1);
             }
@@ -411,13 +676,220 @@ impl TerminalGrid {
             CSI::Cursor(c) => self.apply_cursor(c),
             CSI::Edit(e) => self.apply_edit(e),
             CSI::Sgr(s) => self.apply_sgr(s),
-            // Mode (alt-screen, mouse, DECCKM, bracketed paste), Window,
-            // Mouse, Keyboard, Device deferred. Every additional handler
-            // here is one step closer to "flawless codex/claude".
+            CSI::Mode(m) => self.apply_mode(m),
+            CSI::Device(dev) => self.apply_device(*dev),
+            // Window manipulation (resize / move / iconify / report
+            // size). A WebView-hosted terminal can't honor these and
+            // they're not visible-rendering bugs, so swallow without
+            // bumping unhandled diagnostics.
+            CSI::Window(_) => {}
+            // Mouse + Keyboard mode/report dispatch deferred. Counted
+            // because not handling these IS visible (htop column drag,
+            // Kitty keyboard protocol features go silently dead).
             _ => {
                 self.unhandled_actions = self.unhandled_actions.saturating_add(1);
             }
         }
+    }
+
+    /// Reply to terminal capability queries. Stage 4.1 covers the
+    /// queries every modern shell sends on startup: DA1 (`\x1b[c`),
+    /// DA2 (`\x1b[>c`), DA3 (`\x1b[=c`), DSR (`\x1b[5n`), and
+    /// XTVERSION (`\x1b[>q`). Without responses fish prints a 10s
+    /// timeout warning ("could not read response to Primary Device
+    /// Attribute query") and disables its progressive features.
+    /// SoftReset (DECSTR) and XtSmGraphics deferred to the unhandled
+    /// bucket - they don't gate startup the way the queries do.
+    fn apply_device(&mut self, dev: termwiz::escape::csi::Device) {
+        use termwiz::escape::csi::Device;
+        match dev {
+            // Identify as VT220 with no extended attribute set. xterm
+            // returns a longer list (`\x1b[?62;1;6;9;15;22c`) but a
+            // bare VT220 reply satisfies fish, bash, zsh, vim, and
+            // tmux without claiming features we don't actually have.
+            Device::RequestPrimaryDeviceAttributes => {
+                self.pending_responses.extend_from_slice(b"\x1b[?62;c");
+            }
+            // Secondary: terminal type 1 (xterm-class), firmware 0,
+            // keyboard 0. Apps key off the type byte to decide which
+            // extended sequences to attempt.
+            Device::RequestSecondaryDeviceAttributes => {
+                self.pending_responses.extend_from_slice(b"\x1b[>1;0;0c");
+            }
+            // Tertiary (DECRPTUI): unit ID is a hex site code; zero
+            // is the conventional "anonymous" reply.
+            Device::RequestTertiaryDeviceAttributes => {
+                self.pending_responses
+                    .extend_from_slice(b"\x1bP!|00000000\x1b\\");
+            }
+            // DSR 5: device status. Reply 0 = OK.
+            Device::StatusReport => {
+                self.pending_responses.extend_from_slice(b"\x1b[0n");
+            }
+            // XTVERSION: identify the emulator. Some apps (kitty's
+            // graphics protocol, mpv) condition behavior on this.
+            Device::RequestTerminalNameAndVersion => {
+                self.pending_responses
+                    .extend_from_slice(b"\x1bP>|seren-desktop\x1b\\");
+            }
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    /// Apply DEC private and ANSI mode set/reset. Stage 4 covers DECCKM
+    /// (1, application cursor keys), ShowCursor (25), the alt-screen
+    /// trio (47, 1047, 1049 - all collapsed to "switch to alt + clear"
+    /// because that's what every modern TUI uses), and BracketedPaste
+    /// (2004). All other modes (mouse reporting, focus events, origin
+    /// mode, etc.) go to the unhandled bucket.
+    fn apply_mode(&mut self, mode: Mode) {
+        match mode {
+            Mode::SetDecPrivateMode(DecPrivateMode::Code(code)) => {
+                self.set_dec_mode(code, true);
+            }
+            Mode::ResetDecPrivateMode(DecPrivateMode::Code(code)) => {
+                self.set_dec_mode(code, false);
+            }
+            // DEC private modes termwiz parsed but couldn't classify
+            // are vendor extensions or rarely-used codes; treat as
+            // known-unrecognized rather than as broken-rendering.
+            Mode::SetDecPrivateMode(DecPrivateMode::Unspecified(_))
+            | Mode::ResetDecPrivateMode(DecPrivateMode::Unspecified(_)) => {}
+            // XTSAVE / XTRESTORE - tmux uses these to save/restore
+            // mouse modes around shell-out. We don't track the modes
+            // they save, but the operation itself is benign.
+            Mode::SaveDecPrivateMode(_) | Mode::RestoreDecPrivateMode(_) => {}
+            // ANSI mode 4 (IRM): insert/replace toggle. When set, the
+            // next character at the cursor pushes existing cells right
+            // instead of overwriting. Stage 4.4 honors this so non-
+            // readline line editors (mostly older shells, some custom
+            // REPLs) render correctly. KAM and SRM are silently
+            // swallowed since apps very rarely depend on them in 2024.
+            Mode::SetMode(TerminalMode::Code(TerminalModeCode::Insert)) => {
+                self.insert_mode = true;
+            }
+            Mode::ResetMode(TerminalMode::Code(TerminalModeCode::Insert)) => {
+                self.insert_mode = false;
+            }
+            Mode::SetMode(_) | Mode::ResetMode(_) => {}
+            // Mode queries (DECRQM `\x1b[?N$p`) expect a response we
+            // don't emit yet. Apps that depend on them would hang.
+            // Counted because the gap is real.
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    fn set_dec_mode(&mut self, code: DecPrivateModeCode, on: bool) {
+        match code {
+            DecPrivateModeCode::ApplicationCursorKeys => {
+                self.cursor_keys_app = on;
+            }
+            DecPrivateModeCode::ShowCursor => {
+                self.cursor_visible = on;
+            }
+            DecPrivateModeCode::BracketedPaste => {
+                self.bracketed_paste = on;
+            }
+            // 1049 is the canonical "save cursor + switch to alt + clear"
+            // combo used by vim/htop/less/tmux. 1047 is "switch + clear"
+            // without the save; 47 is "switch" without clear or save.
+            // Collapsing all three into the same enter/exit-alt path is
+            // a deliberate simplification: real-world TUIs use 1049 and
+            // the difference for the older two is negligible for our
+            // visible-correctness goal here.
+            DecPrivateModeCode::ClearAndEnableAlternateScreen
+            | DecPrivateModeCode::OptEnableAlternateScreen
+            | DecPrivateModeCode::EnableAlternateScreen => {
+                if on {
+                    self.enter_alt_screen();
+                } else {
+                    self.exit_alt_screen();
+                }
+            }
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    /// DECSC: save cursor position + current pen attributes.
+    fn save_cursor(&mut self) {
+        self.saved_cursor = Some(SavedCursor {
+            row: self.cursor_row,
+            col: self.cursor_col,
+            fg: self.current_fg,
+            bg: self.current_bg,
+            attrs: self.current_attrs,
+        });
+    }
+
+    /// DECRC: restore the saved cursor + pen, or no-op if nothing saved.
+    fn restore_cursor(&mut self) {
+        if let Some(saved) = self.saved_cursor.clone() {
+            self.cursor_row = saved.row.min(self.rows.saturating_sub(1));
+            self.cursor_col = saved.col.min(self.cols.saturating_sub(1));
+            self.current_fg = saved.fg;
+            self.current_bg = saved.bg;
+            self.current_attrs = saved.attrs;
+        }
+    }
+
+    /// DECSET 1049 enter: stash main screen + cursor + pen + scroll
+    /// region, then switch to a freshly-blanked alt screen with the
+    /// pen carried over (so colored TUIs paint into a clean slate).
+    /// The blank cells are stamped via `erase_blank()` so the alt
+    /// screen inherits current_bg, matching xterm's DECSET 1049 clear
+    /// semantics (the clear uses the current SGR background) and the
+    /// same invariant `erase_blank` enforces for explicit erase and
+    /// `scroll_region_up`. Idempotent: a second 1049 while alt is
+    /// active is a no-op.
+    fn enter_alt_screen(&mut self) {
+        if self.alt_state.is_some() {
+            return;
+        }
+        let blank = self.erase_blank();
+        let saved_cells = std::mem::replace(
+            &mut self.cells,
+            vec![vec![blank; self.cols as usize]; self.rows as usize],
+        );
+        self.alt_state = Some(AltState {
+            saved_cells,
+            saved_cursor_row: self.cursor_row,
+            saved_cursor_col: self.cursor_col,
+            saved_fg: self.current_fg,
+            saved_bg: self.current_bg,
+            saved_attrs: self.current_attrs,
+            saved_scroll_top: self.scroll_top,
+            saved_scroll_bottom: self.scroll_bottom,
+            saved_cursor_visible: self.cursor_visible,
+        });
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+        self.scroll_top = 0;
+        self.scroll_bottom = self.rows.saturating_sub(1);
+    }
+
+    /// DECRST 1049 exit: drop alt cells, restore the saved main state.
+    /// No-op if alt was never entered.
+    fn exit_alt_screen(&mut self) {
+        let Some(alt) = self.alt_state.take() else {
+            return;
+        };
+        self.cells = alt.saved_cells;
+        self.cursor_row = alt.saved_cursor_row.min(self.rows.saturating_sub(1));
+        self.cursor_col = alt.saved_cursor_col.min(self.cols.saturating_sub(1));
+        self.current_fg = alt.saved_fg;
+        self.current_bg = alt.saved_bg;
+        self.current_attrs = alt.saved_attrs;
+        self.scroll_top = alt.saved_scroll_top.min(self.rows.saturating_sub(1));
+        self.scroll_bottom = alt
+            .saved_scroll_bottom
+            .min(self.rows.saturating_sub(1));
+        self.cursor_visible = alt.saved_cursor_visible;
     }
 
     /// Apply a Select Graphic Rendition update to the current pen state.
@@ -464,9 +936,24 @@ impl TerminalGrid {
             Sgr::Inverse(false) => self.current_attrs &= !ATTR_REVERSE,
             Sgr::StrikeThrough(true) => self.current_attrs |= ATTR_STRIKE,
             Sgr::StrikeThrough(false) => self.current_attrs &= !ATTR_STRIKE,
-            _ => {
-                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
-            }
+            // SGR variants we don't render but where text still appears
+            // correctly (just without the requested attribute). Silently
+            // acknowledge so diagnostics stay focused. Each is a known
+            // visual gap, not an unknown rendering issue.
+            //   Blink: text shows steady instead of blinking
+            //   Invisible: text shows instead of being hidden (rare;
+            //              mostly used for password input which uses
+            //              control chars instead)
+            //   Overline: missing line above text (cosmetic)
+            //   UnderlineColor: underline draws in fg color
+            //   Font: alternate font selection (we use one font)
+            //   VerticalAlign: subscript/superscript shows as baseline
+            Sgr::Blink(_)
+            | Sgr::Invisible(_)
+            | Sgr::Overline(_)
+            | Sgr::UnderlineColor(_)
+            | Sgr::Font(_)
+            | Sgr::VerticalAlign(_) => {}
         }
     }
 
@@ -507,6 +994,73 @@ impl TerminalGrid {
             Cursor::LinePositionAbsolute(line) => {
                 let line = line.saturating_sub(1) as u16;
                 self.cursor_row = line.min(self.rows.saturating_sub(1));
+            }
+            Cursor::SaveCursor => self.save_cursor(),
+            Cursor::RestoreCursor => self.restore_cursor(),
+            // CNL: cursor down n lines + CR to col 0. CPL: cursor up
+            // n lines + CR to col 0. Both used by some prompt
+            // renderers; cheap to implement properly so we don't drop
+            // semantically-meaningful cursor movement.
+            Cursor::NextLine(n) => {
+                let n = n.max(1) as u16;
+                for _ in 0..n {
+                    self.line_feed();
+                }
+                self.cursor_col = 0;
+            }
+            Cursor::PrecedingLine(n) => {
+                let n = n.max(1) as u16;
+                for _ in 0..n {
+                    self.reverse_line_feed();
+                }
+                self.cursor_col = 0;
+            }
+            // DECSCUSR `\x1b[N q`: set cursor style (block / underline /
+            // bar, blinking or steady). Fish sets a bar cursor in insert
+            // mode on startup; vim toggles between styles by mode. We
+            // always render a steady block; silently acknowledge so the
+            // diagnostics stay focused. Stage 5 candidate for actually honoring.
+            Cursor::CursorStyle(_) => {}
+            // CHT/CBT (forward/backward tab) and tabulation
+            // set/clear/control. We don't track tab stops (cursor jumps
+            // to next 8-col multiple in apply_control HT); these stop
+            // sequences let an app override that grid. Rare for shells;
+            // silently swallow.
+            Cursor::ForwardTabulation(_)
+            | Cursor::BackwardTabulation(_)
+            | Cursor::TabulationClear(_)
+            | Cursor::TabulationControl(_)
+            | Cursor::LineTabulation(_) => {}
+            // DSR 6: Cursor Position Report. Reply with the current
+            // (1-based) row;col so apps that probe cursor position
+            // (e.g. some prompts after paste) get a real answer.
+            Cursor::RequestActivePositionReport => {
+                let resp = format!(
+                    "\x1b[{};{}R",
+                    self.cursor_row + 1,
+                    self.cursor_col + 1,
+                );
+                self.pending_responses.extend_from_slice(resp.as_bytes());
+            }
+            Cursor::SetTopAndBottomMargins { top, bottom } => {
+                let last_row = self.rows.saturating_sub(1);
+                let t = (top.as_zero_based() as u16).min(last_row);
+                let b = (bottom.as_zero_based() as u16).min(last_row);
+                // DECSTBM with bottom <= top is undefined per the spec.
+                // xterm's behavior is to ignore the request entirely - no
+                // change to the scroll region AND no cursor home. Our prior
+                // code reset to full screen and homed the cursor, which
+                // could displace a TUI cursor on a malformed CSI r. Match
+                // xterm: silent ignore on inverted/empty regions.
+                if b > t {
+                    self.scroll_top = t;
+                    self.scroll_bottom = b;
+                    // DECSTBM also homes the cursor (or to scroll-region
+                    // home if origin mode is set; we don't track origin
+                    // mode yet).
+                    self.cursor_row = self.scroll_top;
+                    self.cursor_col = 0;
+                }
             }
             _ => {
                 self.unhandled_actions = self.unhandled_actions.saturating_add(1);
@@ -599,19 +1153,98 @@ impl TerminalGrid {
         }
     }
 
-    /// Move cursor down one row; if we'd fall off the bottom, scroll the
-    /// grid up by one row (oldest row drops, new blank row appended).
-    /// The newly appended row inherits the current pen's background so a
-    /// scroll generated while a colored bg is active does not introduce
-    /// default-bg stripes - same xterm/ECMA-48 invariant `erase_blank`
-    /// preserves for explicit erase commands.
+    /// Move cursor down one row; the scroll behavior depends on the
+    /// DECSTBM scroll region. If the cursor sits at `scroll_bottom`,
+    /// scroll the region up by one (line at `scroll_top` drops, blank
+    /// inserted at `scroll_bottom`). If the cursor is below the scroll
+    /// region, advance freely until the last row. Otherwise just step
+    /// down. The newly inserted blank inherits the current pen's
+    /// background so a scroll generated while a colored bg is active
+    /// does not introduce default-bg stripes (same invariant
+    /// `erase_blank` preserves for explicit erase).
     fn line_feed(&mut self) {
-        if self.cursor_row + 1 < self.rows {
+        if self.cursor_row == self.scroll_bottom {
+            self.scroll_region_up(1);
+        } else if self.cursor_row + 1 < self.rows {
             self.cursor_row += 1;
+        }
+    }
+
+    /// Move cursor up one row. If the cursor sits at `scroll_top`, reverse
+    /// scroll the DECSTBM region down by one (blank inserted at `scroll_top`).
+    /// Outside the region, move freely until the first row.
+    fn reverse_line_feed(&mut self) {
+        if self.cursor_row == self.scroll_top {
+            self.scroll_region_down(1);
         } else {
-            self.cells.remove(0);
-            let blank = self.erase_blank();
-            self.cells.push(vec![blank; self.cols as usize]);
+            self.cursor_row = self.cursor_row.saturating_sub(1);
+        }
+    }
+
+    /// Scroll the DECSTBM region up by `n` rows. Lines at and above
+    /// `scroll_top` are unchanged; the row at `scroll_top` is removed,
+    /// blank rows (with current_bg) are inserted at `scroll_bottom`.
+    fn scroll_region_up(&mut self, n: u16) {
+        if self.scroll_bottom < self.scroll_top {
+            return;
+        }
+        let blank = self.erase_blank();
+        let cols = self.cols as usize;
+        let top = self.scroll_top as usize;
+        let bot = self.scroll_bottom as usize;
+        for _ in 0..n {
+            if bot >= self.cells.len() {
+                break;
+            }
+            self.cells.remove(top);
+            self.cells.insert(bot, vec![blank; cols]);
+        }
+    }
+
+    /// Scroll the DECSTBM region down by `n` rows. Lines outside the region
+    /// are unchanged; blank rows (with current_bg) are inserted at
+    /// `scroll_top`, and rows at `scroll_bottom` drop.
+    fn scroll_region_down(&mut self, n: u16) {
+        if self.scroll_bottom < self.scroll_top {
+            return;
+        }
+        let blank = self.erase_blank();
+        let cols = self.cols as usize;
+        let top = self.scroll_top as usize;
+        let bot = self.scroll_bottom as usize;
+        for _ in 0..n {
+            if bot >= self.cells.len() {
+                break;
+            }
+            self.cells.insert(top, vec![blank; cols]);
+            self.cells.remove(bot + 1);
+        }
+    }
+
+    /// Shift cells in `row` from `col` rightward by `n` positions, in
+    /// place. Cells past the right margin fall off. Used by IRM
+    /// insert mode: the caller stamps the new glyph at `col` after
+    /// the shift, so that position is overwritten anyway and doesn't
+    /// need explicit clearing here. Cells from the source range are
+    /// NOT zeroed - they remain as duplicate references that the
+    /// subsequent stamp+sweep clean up.
+    fn shift_cells_right(&mut self, row: usize, col: usize, n: u16) {
+        if row >= self.cells.len() || n == 0 {
+            return;
+        }
+        let line = &mut self.cells[row];
+        let cols = line.len();
+        if col >= cols {
+            return;
+        }
+        let shift = (n as usize).min(cols - col);
+        if shift == 0 {
+            return;
+        }
+        // Move [col..(cols - shift)] to [col + shift..cols] right-to-
+        // left so we don't clobber source cells before reading them.
+        for src in (col..(cols - shift)).rev() {
+            line[src + shift] = line[src];
         }
     }
 }
@@ -809,6 +1442,7 @@ pub fn terminal_create_buffer(
 
     let output = Arc::new(Mutex::new(RawOutputBuffer::new(TERMINAL_BUFFER_CAP)));
     let grid = Arc::new(Mutex::new(TerminalGrid::new(rows, cols)));
+    let writer_arc = Arc::new(Mutex::new(writer));
 
     {
         let mut buffers = state
@@ -825,7 +1459,7 @@ pub fn terminal_create_buffer(
             TerminalProcess {
                 info: info.clone(),
                 master: pair.master,
-                writer: Arc::new(Mutex::new(writer)),
+                writer: Arc::clone(&writer_arc),
                 child: Arc::new(Mutex::new(child)),
                 output: Arc::clone(&output),
                 grid: Arc::clone(&grid),
@@ -833,8 +1467,11 @@ pub fn terminal_create_buffer(
         );
     }
 
+    // Pass the writer Arc to the reader thread too so it can write
+    // emulator query responses (DA1, DSR, XTVERSION) back to the PTY
+    // without going through the global buffers lock.
     if let Err(spawn_err) =
-        spawn_reader_thread(app.clone(), id.clone(), reader, output, grid)
+        spawn_reader_thread(app.clone(), id.clone(), reader, output, grid, writer_arc)
     {
         if let Ok(mut buffers) = state.buffers.lock() {
             if let Some(rolled_back) = buffers.remove(&id) {
@@ -1091,6 +1728,7 @@ fn spawn_reader_thread(
     mut reader: Box<dyn Read + Send>,
     output: Arc<Mutex<RawOutputBuffer>>,
     grid: Arc<Mutex<TerminalGrid>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
 ) -> std::io::Result<()> {
     thread::Builder::new()
         .name(format!("terminal-reader-{buffer_id}"))
@@ -1108,8 +1746,22 @@ fn spawn_reader_thread(
                         // partial-sequence carry internally and does not care
                         // about UTF-8 chunk boundaries). The grid mutation is
                         // independent of the raw-text path's UTF-8 buffering.
-                        if let Ok(mut g) = grid.lock() {
-                            g.feed(&buf[..n]);
+                        // Drain any query responses (DA1, DSR, XTVERSION,
+                        // CPR) the emulator owes back to the PTY. Released
+                        // grid lock before taking the writer lock so a
+                        // blocked PTY write can't stall snapshot calls.
+                        let responses = grid
+                            .lock()
+                            .map(|mut g| {
+                                g.feed(&buf[..n]);
+                                g.drain_responses()
+                            })
+                            .unwrap_or_default();
+                        if !responses.is_empty() {
+                            if let Ok(mut w) = writer.lock() {
+                                let _ = w.write_all(&responses);
+                                let _ = w.flush();
+                            }
                         }
                         let data = drain_utf8(&mut carry, &buf[..n]);
                         if !data.is_empty() {
@@ -1196,10 +1848,66 @@ fn spawn_reader_thread(
 /// codepoints. Trailing bytes that could be the start of an unfinished sequence
 /// are kept in `carry` for the next call. Trailing bytes that are clearly
 /// invalid pass through `from_utf8_lossy` so the caller still sees output.
+/// Resize a cell grid to (rows, cols), preserving overlapping content.
+/// New cells are blank defaults; dropped cells are gone. Pulled out of
+/// `TerminalGrid::resize` so the same logic resizes the saved alt-state
+/// cells when in alt mode.
+fn resize_cells(old: &[Vec<GridCell>], rows: u16, cols: u16) -> Vec<Vec<GridCell>> {
+    let mut new_cells = vec![vec![GridCell::default(); cols as usize]; rows as usize];
+    let copy_rows = (rows as usize).min(old.len());
+    let copy_cols = (cols as usize).min(old.first().map(|r| r.len()).unwrap_or(0));
+    for (new_row, old_row) in new_cells.iter_mut().zip(old.iter()).take(copy_rows) {
+        new_row[..copy_cols].copy_from_slice(&old_row[..copy_cols]);
+    }
+    new_cells
+}
+
 /// Convert a termwiz `ColorSpec` into the cell's packed u32 color
 /// representation. `Default` becomes the COLOR_DEFAULT sentinel; palette
 /// indices are tagged via COLOR_PALETTE_TAG; truecolor is converted from
 /// f32 sRGB to 8-bit RGB with the high byte left at 0.
+/// Map a printable byte to its DEC special-graphics glyph. Bytes outside
+/// the 0x60..=0x7e range pass through unchanged so ASCII text mixed with
+/// line-drawing keeps rendering normally. The mapping follows the
+/// VT220/xterm "DEC special-graphics character set" table - columns 6 and
+/// 7 of the ROM table become box-drawing, math, and symbol glyphs.
+fn dec_special_graphics(c: char) -> char {
+    match c {
+        '`' => '\u{25C6}', // diamond
+        'a' => '\u{2592}', // checkerboard / shade
+        'b' => '\u{2409}', // HT symbol
+        'c' => '\u{240C}', // FF symbol
+        'd' => '\u{240D}', // CR symbol
+        'e' => '\u{240A}', // LF symbol
+        'f' => '\u{00B0}', // degree
+        'g' => '\u{00B1}', // plus-minus
+        'h' => '\u{2424}', // NL symbol
+        'i' => '\u{240B}', // VT symbol
+        'j' => '\u{2518}', // lower-right corner
+        'k' => '\u{2510}', // upper-right corner
+        'l' => '\u{250C}', // upper-left corner
+        'm' => '\u{2514}', // lower-left corner
+        'n' => '\u{253C}', // crossing lines
+        'o' => '\u{23BA}', // scan line 1
+        'p' => '\u{23BB}', // scan line 3
+        'q' => '\u{2500}', // horizontal line / scan 5
+        'r' => '\u{23BC}', // scan line 7
+        's' => '\u{23BD}', // scan line 9
+        't' => '\u{251C}', // left T
+        'u' => '\u{2524}', // right T
+        'v' => '\u{2534}', // bottom T
+        'w' => '\u{252C}', // top T
+        'x' => '\u{2502}', // vertical line
+        'y' => '\u{2264}', // less than or equal
+        'z' => '\u{2265}', // greater than or equal
+        '{' => '\u{03C0}', // pi
+        '|' => '\u{2260}', // not equal
+        '}' => '\u{00A3}', // pound
+        '~' => '\u{00B7}', // centered dot
+        other => other,
+    }
+}
+
 fn color_spec_to_packed(spec: ColorSpec) -> u32 {
     match spec {
         ColorSpec::Default => COLOR_DEFAULT,
@@ -1539,15 +2247,51 @@ mod tests {
     #[test]
     fn grid_unhandled_actions_are_counted_not_panicked() {
         let mut grid = TerminalGrid::new(3, 10);
-        // SGR (color) and OSC (window title) are not interpreted yet; both
-        // should increment the counter rather than being applied silently.
-        grid.feed(b"\x1b[31mred text\x1b[0m");
-        grid.feed(b"\x1b]0;new title\x07");
+        // Pick a sequence that genuinely falls outside the action
+        // interpreter's coverage. DECSET 1000 (X10 mouse reporting) is
+        // a real visible-functionality gap (htop column-drag fails) so
+        // it MUST bump the counter rather than getting silently
+        // swallowed. Sgr::Blink and friends are now silent-swallowed
+        // because text still renders correctly without the attribute.
+        grid.feed(b"text\x1b[?1000h");
         let snap = grid.snapshot();
-        // The text portion is still printed; only the SGR / OSC frames go
-        // unhandled.
-        assert!(row_string(&snap, 0).contains("red text"));
+        assert!(row_string(&snap, 0).contains("text"));
         assert!(snap.unhandled_actions > 0);
+    }
+
+    #[test]
+    fn grid_typical_shell_startup_keeps_unhandled_low() {
+        // Lock the selective-ignore behavior so a regression that
+        // re-bumps the counter on routine startup sequences fails
+        // loudly. The counter stays in the snapshot for diagnostics
+        // even though the user-facing badge is gone. Every sequence
+        // below is a known known we deliberately don't act on.
+        let mut grid = TerminalGrid::new(24, 80);
+        // Device-attribute probes (handled with replies).
+        grid.feed(b"\x1b[c");
+        // OSC 0 window title.
+        grid.feed(b"\x1b]0;~/projects\x07");
+        // OSC 7 current working directory.
+        grid.feed(b"\x1b]7;file:///Users/me/projects\x07");
+        // ESC = application keypad mode.
+        grid.feed(b"\x1b=");
+        // ESC ( B designate ASCII as G0 - fish sends this.
+        grid.feed(b"\x1b(B");
+        // DECSCUSR cursor style (fish in insert mode).
+        grid.feed(b"\x1b[5 q");
+        // DECSET 25 hide / show cursor (both handled).
+        grid.feed(b"\x1b[?25l\x1b[?25h");
+        // CSI Window resize report (silently ignored).
+        grid.feed(b"\x1b[8;24;80t");
+        // XTSAVE mouse mode (silently ignored).
+        grid.feed(b"\x1b[?1000s");
+        // Sgr Blink + Italic + Reset (text renders without blink).
+        grid.feed(b"\x1b[5;3mfancy\x1b[0m");
+        let snap = grid.snapshot();
+        assert_eq!(
+            snap.unhandled_actions, 0,
+            "shell startup probes should not surface as unhandled"
+        );
     }
 
     #[test]
@@ -1886,5 +2630,367 @@ mod tests {
         // not an orphaned continuation of a glyph that no longer exists.
         assert_eq!(snap.cells[3].ch, 0);
         assert_eq!(snap.cells[3].width, 1);
+    }
+
+    // --- Stage 4 mode-tracking tests ---------------------------------
+
+    #[test]
+    fn grid_decset_show_cursor_toggles_visibility() {
+        let mut grid = TerminalGrid::new(2, 4);
+        // Default visible.
+        assert!(grid.snapshot().cursor_visible);
+        grid.feed(b"\x1b[?25l");
+        assert!(!grid.snapshot().cursor_visible);
+        grid.feed(b"\x1b[?25h");
+        assert!(grid.snapshot().cursor_visible);
+    }
+
+    #[test]
+    fn grid_decset_application_cursor_keys_toggles_decckm() {
+        let mut grid = TerminalGrid::new(2, 4);
+        assert!(!grid.snapshot().cursor_keys_app);
+        grid.feed(b"\x1b[?1h");
+        assert!(grid.snapshot().cursor_keys_app);
+        grid.feed(b"\x1b[?1l");
+        assert!(!grid.snapshot().cursor_keys_app);
+    }
+
+    #[test]
+    fn grid_decset_bracketed_paste_toggles() {
+        let mut grid = TerminalGrid::new(2, 4);
+        assert!(!grid.snapshot().bracketed_paste);
+        grid.feed(b"\x1b[?2004h");
+        assert!(grid.snapshot().bracketed_paste);
+        grid.feed(b"\x1b[?2004l");
+        assert!(!grid.snapshot().bracketed_paste);
+    }
+
+    #[test]
+    fn grid_alt_screen_save_restore_main_state() {
+        // Write to main, enter alt, write to alt, exit - main should be
+        // intact and alt's content gone.
+        let mut grid = TerminalGrid::new(2, 5);
+        grid.feed(b"main!");
+        grid.feed(b"\x1b[?1049h");
+        // Cursor should be at (0, 0) of a fresh alt screen.
+        let alt_snap = grid.snapshot();
+        assert_eq!(alt_snap.cursor_row, 0);
+        assert_eq!(alt_snap.cursor_col, 0);
+        assert_eq!(row_string(&alt_snap, 0), "");
+        grid.feed(b"alt!!");
+        assert_eq!(row_string(&grid.snapshot(), 0), "alt!!");
+        grid.feed(b"\x1b[?1049l");
+        let restored = grid.snapshot();
+        assert_eq!(row_string(&restored, 0), "main!");
+        // Cursor restored to where it was before the enter (col 5 = end
+        // of "main!"; but cursor advanced past the last col with each
+        // write, so we just check it landed back on row 0).
+        assert_eq!(restored.cursor_row, 0);
+    }
+
+    #[test]
+    fn grid_alt_screen_double_enter_is_idempotent() {
+        // Two DECSET 1049 in a row must not save the alt content as
+        // the new "main" - the second enter should be a no-op so a
+        // subsequent DECRST 1049 restores the original main.
+        let mut grid = TerminalGrid::new(2, 5);
+        grid.feed(b"orig!");
+        grid.feed(b"\x1b[?1049h");
+        grid.feed(b"alt-1");
+        grid.feed(b"\x1b[?1049h"); // no-op
+        grid.feed(b"\x1b[?1049l");
+        assert_eq!(row_string(&grid.snapshot(), 0), "orig!");
+    }
+
+    #[test]
+    fn grid_decsc_decrc_save_and_restore_cursor_and_pen() {
+        // ESC 7 saves, move cursor + change pen, ESC 8 restores.
+        let mut grid = TerminalGrid::new(3, 10);
+        grid.feed(b"\x1b[2;3H"); // cursor to (1, 2)
+        grid.feed(b"\x1b[31m"); // red fg
+        grid.feed(b"\x1b7"); // DECSC
+        grid.feed(b"\x1b[1;1H"); // move to (0, 0)
+        grid.feed(b"\x1b[34m"); // blue fg
+        grid.feed(b"\x1b8"); // DECRC
+        let snap = grid.snapshot();
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 2);
+        // After restore, write a char and check fg matches the saved red.
+        grid.feed(b"X");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[1 * snap.cols as usize + 2].ch, b'X' as u32);
+        assert_eq!(snap.cells[1 * snap.cols as usize + 2].fg, palette_color(1));
+    }
+
+    #[test]
+    fn grid_decstbm_scroll_region_only_scrolls_inside_region() {
+        // Set scroll region to rows 1-2 (0-indexed), then trigger LF at
+        // the bottom of the region. Row 0 must NOT change; rows 1-2
+        // scroll within themselves.
+        let mut grid = TerminalGrid::new(4, 5);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC\r\nDDDD");
+        // DECSTBM rows 2..=3 (1-based), then home (DECSTBM also homes).
+        grid.feed(b"\x1b[2;3r");
+        // Cursor is at (1, 0). Move to bottom of region (row 2) and LF.
+        grid.feed(b"\x1b[3;1H\n");
+        let snap = grid.snapshot();
+        // Row 0 unchanged, row 1 dropped (was BBBB), row 2 = CCCC,
+        // bottom of region (row 2) blanked. Wait actually: scroll the
+        // region means line at scroll_top (row 1, BBBB) drops, blank
+        // inserted at scroll_bottom (row 2). So row 0 unchanged, row 1
+        // = old row 2 (CCCC), row 2 = blank. Row 3 unchanged.
+        assert_eq!(row_string(&snap, 0), "AAAA");
+        assert_eq!(row_string(&snap, 1), "CCCC");
+        assert_eq!(row_string(&snap, 2), "");
+        assert_eq!(row_string(&snap, 3), "DDDD");
+    }
+
+    #[test]
+    fn grid_cursor_next_line_scrolls_inside_region_at_bottom() {
+        let mut grid = TerminalGrid::new(4, 5);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC\r\nDDDD");
+        grid.feed(b"\x1b[2;3r"); // region rows 1..=2, cursor homes to row 1
+        grid.feed(b"\x1b[3;4H"); // bottom of region, nonzero col
+        grid.feed(b"\x1b[1E"); // CNL: down one line + CR
+        let snap = grid.snapshot();
+        assert_eq!(row_string(&snap, 0), "AAAA");
+        assert_eq!(row_string(&snap, 1), "CCCC");
+        assert_eq!(row_string(&snap, 2), "");
+        assert_eq!(row_string(&snap, 3), "DDDD");
+        assert_eq!(snap.cursor_row, 2);
+        assert_eq!(snap.cursor_col, 0);
+    }
+
+    #[test]
+    fn grid_cursor_preceding_line_reverse_scrolls_inside_region_at_top() {
+        let mut grid = TerminalGrid::new(4, 5);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC\r\nDDDD");
+        grid.feed(b"\x1b[2;3r"); // region rows 1..=2, cursor homes to row 1
+        grid.feed(b"\x1b[2;4H"); // top of region, nonzero col
+        grid.feed(b"\x1b[1F"); // CPL: up one line + CR
+        let snap = grid.snapshot();
+        assert_eq!(row_string(&snap, 0), "AAAA");
+        assert_eq!(row_string(&snap, 1), "");
+        assert_eq!(row_string(&snap, 2), "BBBB");
+        assert_eq!(row_string(&snap, 3), "DDDD");
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 0);
+    }
+
+    #[test]
+    fn grid_alt_screen_resize_preserves_saved_main_dims() {
+        // Write to main, enter alt, resize, exit alt - the saved main
+        // must come back at the new dimensions, not the originals.
+        let mut grid = TerminalGrid::new(3, 10);
+        grid.feed(b"hello");
+        grid.feed(b"\x1b[?1049h");
+        grid.resize(2, 5);
+        grid.feed(b"\x1b[?1049l");
+        let snap = grid.snapshot();
+        assert_eq!(snap.rows, 2);
+        assert_eq!(snap.cols, 5);
+        assert_eq!(row_string(&snap, 0), "hello");
+    }
+
+    #[test]
+    fn grid_snapshot_skips_default_mode_fields() {
+        // Wire-shape contract: a fresh grid with default mode state
+        // (visible cursor, no DECCKM, no bracketed paste) must NOT ship
+        // those fields - they're skip-serialized when default.
+        let grid = TerminalGrid::new(2, 4);
+        let body = TerminalSnapshotBody::Grid(grid.snapshot());
+        let snap = TerminalSnapshot { seq: 0, body };
+        let json = serde_json::to_value(&snap).unwrap();
+        assert!(json["payload"].get("cursorVisible").is_none());
+        assert!(json["payload"].get("cursorKeysApp").is_none());
+        assert!(json["payload"].get("bracketedPaste").is_none());
+    }
+
+    #[test]
+    fn grid_snapshot_includes_non_default_mode_fields() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?25l\x1b[?1h\x1b[?2004h");
+        let body = TerminalSnapshotBody::Grid(grid.snapshot());
+        let snap = TerminalSnapshot { seq: 0, body };
+        let json = serde_json::to_value(&snap).unwrap();
+        assert_eq!(json["payload"]["cursorVisible"], false);
+        assert_eq!(json["payload"]["cursorKeysApp"], true);
+        assert_eq!(json["payload"]["bracketedPaste"], true);
+    }
+
+    #[test]
+    fn grid_decset_then_decrst_round_trips_to_default_wire_shape() {
+        // Round-trip: flip every mode on then back off; the snapshot must
+        // skip-serialize the fields again so DECRST does not leave residual
+        // false/true values on the wire that defeat the compaction.
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?25l\x1b[?1h\x1b[?2004h");
+        grid.feed(b"\x1b[?25h\x1b[?1l\x1b[?2004l");
+        let body = TerminalSnapshotBody::Grid(grid.snapshot());
+        let snap = TerminalSnapshot { seq: 0, body };
+        let json = serde_json::to_value(&snap).unwrap();
+        assert!(json["payload"].get("cursorVisible").is_none());
+        assert!(json["payload"].get("cursorKeysApp").is_none());
+        assert!(json["payload"].get("bracketedPaste").is_none());
+    }
+
+    #[test]
+    fn grid_decstbm_inverted_region_is_ignored() {
+        // xterm convention: DECSTBM with bottom <= top is silently ignored,
+        // including no cursor home. Our prior code reset to full screen
+        // AND homed the cursor, which could displace a TUI cursor on a
+        // malformed CSI r. Pin the silent-ignore behavior so the regression
+        // can't reappear.
+        let mut grid = TerminalGrid::new(4, 5);
+        // Set a valid region first so we can detect that an invalid one
+        // does not overwrite it.
+        grid.feed(b"\x1b[2;3r"); // region rows 1..=2, cursor homes to (1, 0)
+        assert_eq!(grid.cursor_row, 1);
+        assert_eq!(grid.scroll_top, 1);
+        assert_eq!(grid.scroll_bottom, 2);
+        // Move cursor away to detect the (illegal) home that the prior
+        // reset-on-inverted code would have performed.
+        grid.feed(b"\x1b[4;3H");
+        assert_eq!(grid.cursor_row, 3);
+        assert_eq!(grid.cursor_col, 2);
+        // Inverted region: bottom 2, top 4 (1-based). Must be a no-op.
+        grid.feed(b"\x1b[4;2r");
+        assert_eq!(grid.scroll_top, 1);
+        assert_eq!(grid.scroll_bottom, 2);
+        assert_eq!(grid.cursor_row, 3);
+        assert_eq!(grid.cursor_col, 2);
+    }
+
+    // --- Stage 4.1 device-query response tests -----------------------
+
+    #[test]
+    fn grid_da1_responds_with_vt220() {
+        // Fish + bash + zsh send `\x1b[c` on startup. Without a reply
+        // fish prints a 10s timeout warning. Reply with the bare
+        // VT220 attribute string `\x1b[?62;c`.
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[c");
+        assert_eq!(grid.drain_responses(), b"\x1b[?62;c");
+        // Drain is one-shot: a second call returns empty.
+        assert!(grid.drain_responses().is_empty());
+    }
+
+    #[test]
+    fn grid_da2_da3_status_xtversion_responses() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[>c");
+        assert_eq!(grid.drain_responses(), b"\x1b[>1;0;0c");
+        grid.feed(b"\x1b[=c");
+        assert_eq!(grid.drain_responses(), b"\x1bP!|00000000\x1b\\");
+        grid.feed(b"\x1b[5n");
+        assert_eq!(grid.drain_responses(), b"\x1b[0n");
+        grid.feed(b"\x1b[>q");
+        assert_eq!(
+            grid.drain_responses(),
+            b"\x1bP>|seren-desktop\x1b\\"
+        );
+    }
+
+    #[test]
+    fn grid_dsr_cpr_reports_one_based_cursor() {
+        // DSR 6 (`\x1b[6n`) asks for the cursor position and expects a
+        // 1-based `\x1b[<row>;<col>R` reply.
+        let mut grid = TerminalGrid::new(5, 10);
+        grid.feed(b"\x1b[3;7H"); // cursor to (1-based 3, 7) = (2, 6) 0-based
+        grid.feed(b"\x1b[6n");
+        assert_eq!(grid.drain_responses(), b"\x1b[3;7R");
+    }
+
+    #[test]
+    fn grid_multiple_queries_in_one_chunk_concatenate_in_order() {
+        // A single PTY chunk can carry several capability probes; the
+        // responses must concatenate in arrival order so the receiving
+        // shell parses them as a sequence rather than getting one reply
+        // and missing the rest. Mixed in some plain-text writes and a
+        // cursor move to verify queries interleave with grid mutations
+        // without losing or reordering responses.
+        let mut grid = TerminalGrid::new(3, 10);
+        grid.feed(b"\x1b[chi\x1b[5n\x1b[2;3H\x1b[6n");
+        // Expected order: DA1 reply, DSR 5 OK, DSR 6 cursor at (2, 3)
+        // after the explicit move to row 2 col 3.
+        let mut expected: Vec<u8> = Vec::new();
+        expected.extend_from_slice(b"\x1b[?62;c");
+        expected.extend_from_slice(b"\x1b[0n");
+        expected.extend_from_slice(b"\x1b[2;3R");
+        assert_eq!(grid.drain_responses(), expected);
+        // The plain text "hi" still landed in the grid in the right
+        // place (row 0 cols 0-1) before the cursor move.
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].ch, b'h' as u32);
+        assert_eq!(snap.cells[1].ch, b'i' as u32);
+    }
+
+    // --- Stage 4.4 DEC line drawing + IRM tests ----------------------
+
+    #[test]
+    fn grid_dec_line_drawing_via_so_si_renders_box_glyphs() {
+        // Real-world pattern: designate DEC line drawing as G1, SO to
+        // shift in, write the box bytes, SI to shift back to G0.
+        let mut grid = TerminalGrid::new(2, 8);
+        grid.feed(b"\x1b)0\x0elqk\x0fA");
+        let snap = grid.snapshot();
+        // q -> horizontal line, l -> upper-left, k -> upper-right
+        assert_eq!(snap.cells[0].ch, '\u{250C}' as u32);
+        assert_eq!(snap.cells[1].ch, '\u{2500}' as u32);
+        assert_eq!(snap.cells[2].ch, '\u{2510}' as u32);
+        // After SI we're back on G0 (ASCII), so 'A' renders literally.
+        assert_eq!(snap.cells[3].ch, b'A' as u32);
+    }
+
+    #[test]
+    fn grid_dec_line_drawing_g0_translates_without_shift() {
+        // Designating DEC line drawing as G0 means subsequent printable
+        // bytes get translated immediately (no SI/SO needed - G0 is
+        // already the active set by default).
+        let mut grid = TerminalGrid::new(1, 5);
+        grid.feed(b"\x1b(0qx");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].ch, '\u{2500}' as u32); // q -> hline
+        assert_eq!(snap.cells[1].ch, '\u{2502}' as u32); // x -> vline
+    }
+
+    #[test]
+    fn grid_charset_reset_restores_ascii() {
+        let mut grid = TerminalGrid::new(1, 5);
+        grid.feed(b"\x1b(0q\x1b(Bq");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].ch, '\u{2500}' as u32);
+        // After designating ASCII as G0, 'q' renders literally again.
+        assert_eq!(snap.cells[1].ch, b'q' as u32);
+    }
+
+    #[test]
+    fn grid_irm_insert_mode_shifts_existing_cells_right() {
+        // Write "abcde", move cursor to col 2, enable IRM (ESC [ 4 h),
+        // write 'X'. Result should be "abXcd" with 'e' falling off the
+        // right margin since the line is 5 cols.
+        let mut grid = TerminalGrid::new(1, 5);
+        grid.feed(b"abcde");
+        grid.feed(b"\x1b[1;3H"); // cursor to row 1 col 3 (1-based) = col 2
+        grid.feed(b"\x1b[4hX");
+        let snap = grid.snapshot();
+        assert_eq!(row_string(&snap, 0), "abXcd");
+        // Cursor advanced past the inserted glyph.
+        assert_eq!(snap.cursor_col, 3);
+    }
+
+    #[test]
+    fn grid_irm_reset_returns_to_replace_mode() {
+        // Toggle IRM off (`\x1b[4l`); subsequent writes overwrite as
+        // before instead of inserting.
+        let mut grid = TerminalGrid::new(1, 5);
+        grid.feed(b"abcde");
+        grid.feed(b"\x1b[1;3H"); // col 2
+        grid.feed(b"\x1b[4hX"); // insert
+        grid.feed(b"\x1b[4lY"); // replace mode + write 'Y'
+        let snap = grid.snapshot();
+        // After insert: "abXcd". Cursor at col 3. Reset IRM. Write 'Y'
+        // at col 3 in replace mode overwrites the 'c'.
+        assert_eq!(row_string(&snap, 0), "abXYd");
     }
 }
