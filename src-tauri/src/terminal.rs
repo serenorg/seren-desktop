@@ -13,9 +13,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+use termwiz::cell::Intensity;
+use termwiz::color::ColorSpec;
 use termwiz::escape::{
     Action, ControlCode,
-    csi::{CSI, Cursor, Edit, EraseInDisplay, EraseInLine},
+    csi::{CSI, Cursor, Edit, EraseInDisplay, EraseInLine, Sgr},
     parser::Parser,
 };
 use unicode_width::UnicodeWidthChar;
@@ -113,7 +115,41 @@ struct TerminalGrid {
     /// snapshot so Stage 3 can warn the user when the rendered grid is
     /// expected to be incomplete versus the source PTY stream.
     unhandled_actions: u32,
+    /// Current SGR (Select Graphic Rendition) state. Each subsequent
+    /// `write_char` stamps these onto the new cell. Reset by Sgr::Reset
+    /// (CSI 0 m) or implicitly by `RIS` if we ever handle it.
+    current_fg: u32,
+    current_bg: u32,
+    current_attrs: u8,
 }
+
+/// Sentinel value meaning "use the renderer's default fg/bg color." Since
+/// truecolor RGB only occupies the low 24 bits, the high byte is free for
+/// discriminator tags. 0xFFFFFFFF cannot collide with a legitimate
+/// 24-bit RGB value (those have high byte 0).
+pub const COLOR_DEFAULT: u32 = 0xFFFFFFFF;
+/// High-byte tag for a palette-indexed color. Low byte holds the index
+/// 0..255 (16 ANSI + 240-entry 256-color extended palette).
+const COLOR_PALETTE_TAG: u32 = 0xFE000000;
+
+/// Pack an 8-bit palette index into the cell's color u32.
+const fn palette_color(idx: u8) -> u32 {
+    COLOR_PALETTE_TAG | (idx as u32)
+}
+
+/// Pack a 24-bit RGB triple into the cell's color u32 (high byte = 0).
+const fn rgb_color(r: u8, g: u8, b: u8) -> u32 {
+    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+}
+
+// Cell attribute bitfield. Renderer reads these as a u8 mask. Order chosen
+// to put the visually-impactful attrs in the low bits.
+pub const ATTR_BOLD: u8 = 1 << 0;
+pub const ATTR_ITALIC: u8 = 1 << 1;
+pub const ATTR_UNDERLINE: u8 = 1 << 2;
+pub const ATTR_REVERSE: u8 = 1 << 3;
+pub const ATTR_DIM: u8 = 1 << 4;
+pub const ATTR_STRIKE: u8 = 1 << 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,11 +163,40 @@ pub struct GridCell {
     /// Empty cells default to width=1 so the renderer treats them as a
     /// single space slot rather than a continuation.
     pub width: u8,
+    /// Foreground color packed per the COLOR_* discriminator scheme.
+    /// Skipped on the wire when default so blank-screen snapshots stay
+    /// compact (typical case is "all default").
+    #[serde(skip_serializing_if = "GridCell::fg_is_default")]
+    pub fg: u32,
+    /// Background color, same packing as fg.
+    #[serde(skip_serializing_if = "GridCell::bg_is_default")]
+    pub bg: u32,
+    /// SGR attribute bitfield (ATTR_* bits). Skipped when 0.
+    #[serde(skip_serializing_if = "GridCell::attrs_is_default")]
+    pub attrs: u8,
+}
+
+impl GridCell {
+    fn fg_is_default(value: &u32) -> bool {
+        *value == COLOR_DEFAULT
+    }
+    fn bg_is_default(value: &u32) -> bool {
+        *value == COLOR_DEFAULT
+    }
+    fn attrs_is_default(value: &u8) -> bool {
+        *value == 0
+    }
 }
 
 impl Default for GridCell {
     fn default() -> Self {
-        Self { ch: 0, width: 1 }
+        Self {
+            ch: 0,
+            width: 1,
+            fg: COLOR_DEFAULT,
+            bg: COLOR_DEFAULT,
+            attrs: 0,
+        }
     }
 }
 
@@ -161,6 +226,9 @@ impl TerminalGrid {
             cursor_col: 0,
             seq: 0,
             unhandled_actions: 0,
+            current_fg: COLOR_DEFAULT,
+            current_bg: COLOR_DEFAULT,
+            current_attrs: 0,
         }
     }
 
@@ -265,16 +333,56 @@ impl TerminalGrid {
         // Defensive bounds: resize races could in theory leave the cursor
         // out of range until the next clamp; just no-op rather than panic.
         if row < self.cells.len() && col < self.cells[row].len() {
+            // Sweep stale wide-char partner slots before stamping the new
+            // glyph. Two cases the renderer would otherwise mis-paint:
+            //   (a) the target col is the right-half (width=0) of an old
+            //       width=2 glyph at col-1: blank that left half so the
+            //       old glyph stops claiming two columns.
+            //   (b) the target col currently holds a width=2 left half:
+            //       blank its right half (col+1) which is no longer a
+            //       continuation slot once we overwrite the left.
+            //   (c) the new glyph is itself width=2 and the cell at col+1
+            //       is a width=2 left half: blank ITS right half (col+2)
+            //       so the old wide glyph does not leak past the new one.
+            let blank = self.erase_blank();
+            if col > 0 {
+                let left = &self.cells[row][col - 1];
+                if left.width == 2 {
+                    self.cells[row][col - 1] = blank;
+                }
+            }
+            let target_width = self.cells[row][col].width;
+            if target_width == 2 && col + 1 < self.cells[row].len() {
+                self.cells[row][col + 1] = blank;
+            }
+            if width == 2
+                && col + 1 < self.cells[row].len()
+                && self.cells[row][col + 1].width == 2
+                && col + 2 < self.cells[row].len()
+            {
+                self.cells[row][col + 2] = blank;
+            }
+
             self.cells[row][col] = GridCell {
                 ch: c as u32,
                 width: width as u8,
+                fg: self.current_fg,
+                bg: self.current_bg,
+                attrs: self.current_attrs,
             };
             // Width-2 char occupies col and col+1. Mark col+1 as a
             // continuation slot (width=0) so the renderer doesn't try to
-            // draw a glyph there independently. Also evicts whatever
-            // single-cell glyph used to live in col+1.
+            // draw a glyph there independently. The continuation cell
+            // inherits the parent's fg/bg so background fills span the
+            // wide glyph correctly.
             if width == 2 && col + 1 < self.cells[row].len() {
-                self.cells[row][col + 1] = GridCell { ch: 0, width: 0 };
+                self.cells[row][col + 1] = GridCell {
+                    ch: 0,
+                    width: 0,
+                    fg: self.current_fg,
+                    bg: self.current_bg,
+                    attrs: self.current_attrs,
+                };
             }
         }
         self.cursor_col = self.cursor_col.saturating_add(width);
@@ -302,9 +410,60 @@ impl TerminalGrid {
         match csi {
             CSI::Cursor(c) => self.apply_cursor(c),
             CSI::Edit(e) => self.apply_edit(e),
-            // SGR (colors / attrs), Mode (alt-screen, mouse, etc.), Window,
+            CSI::Sgr(s) => self.apply_sgr(s),
+            // Mode (alt-screen, mouse, DECCKM, bracketed paste), Window,
             // Mouse, Keyboard, Device deferred. Every additional handler
             // here is one step closer to "flawless codex/claude".
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    /// Apply a Select Graphic Rendition update to the current pen state.
+    /// Subsequent `write_char` calls stamp these onto each new cell.
+    /// Stage 2.5 covers Reset, Foreground, Background, Intensity (Bold +
+    /// Dim), Italic, Underline (any non-None counts), Inverse, and
+    /// StrikeThrough. Blink, Invisible, Font, UnderlineColor, Overline,
+    /// VerticalAlign go into the unhandled bucket.
+    fn apply_sgr(&mut self, sgr: Sgr) {
+        match sgr {
+            Sgr::Reset => {
+                self.current_fg = COLOR_DEFAULT;
+                self.current_bg = COLOR_DEFAULT;
+                self.current_attrs = 0;
+            }
+            Sgr::Foreground(spec) => {
+                self.current_fg = color_spec_to_packed(spec);
+            }
+            Sgr::Background(spec) => {
+                self.current_bg = color_spec_to_packed(spec);
+            }
+            Sgr::Intensity(Intensity::Bold) => {
+                self.current_attrs = (self.current_attrs | ATTR_BOLD) & !ATTR_DIM;
+            }
+            Sgr::Intensity(Intensity::Half) => {
+                self.current_attrs = (self.current_attrs | ATTR_DIM) & !ATTR_BOLD;
+            }
+            Sgr::Intensity(Intensity::Normal) => {
+                self.current_attrs &= !(ATTR_BOLD | ATTR_DIM);
+            }
+            Sgr::Italic(true) => self.current_attrs |= ATTR_ITALIC,
+            Sgr::Italic(false) => self.current_attrs &= !ATTR_ITALIC,
+            Sgr::Underline(termwiz::cell::Underline::None) => {
+                self.current_attrs &= !ATTR_UNDERLINE;
+            }
+            Sgr::Underline(_) => {
+                // Stage 2.5 collapses all underline variants (Single,
+                // Double, Curly, Dotted, Dashed) to a single underline
+                // attr; the renderer draws one straight line under the
+                // cell. Per-style underlines are a Stage 4+ refinement.
+                self.current_attrs |= ATTR_UNDERLINE;
+            }
+            Sgr::Inverse(true) => self.current_attrs |= ATTR_REVERSE,
+            Sgr::Inverse(false) => self.current_attrs &= !ATTR_REVERSE,
+            Sgr::StrikeThrough(true) => self.current_attrs |= ATTR_STRIKE,
+            Sgr::StrikeThrough(false) => self.current_attrs &= !ATTR_STRIKE,
             _ => {
                 self.unhandled_actions = self.unhandled_actions.saturating_add(1);
             }
@@ -365,6 +524,23 @@ impl TerminalGrid {
         }
     }
 
+    /// Cell stamped into an erased slot. xterm semantics: erase preserves the
+    /// current pen's background color (and reverse-video bit, which swaps
+    /// fg/bg at paint time so a "reversed erased" cell must still draw with
+    /// the swapped color). Foreground and the glyph-shape attrs (bold,
+    /// italic, underline, strike, dim) are dropped because there's no glyph
+    /// to paint - keeping them would have no visual effect today and would
+    /// surprise a future renderer that gains underline-only-on-empty-cells.
+    fn erase_blank(&self) -> GridCell {
+        GridCell {
+            ch: 0,
+            width: 1,
+            fg: COLOR_DEFAULT,
+            bg: self.current_bg,
+            attrs: self.current_attrs & ATTR_REVERSE,
+        }
+    }
+
     fn erase_in_line(&mut self, mode: EraseInLine) {
         let row = self.cursor_row as usize;
         if row >= self.cells.len() {
@@ -372,7 +548,7 @@ impl TerminalGrid {
         }
         let col = self.cursor_col as usize;
         let cols = self.cols as usize;
-        let blank = GridCell::default();
+        let blank = self.erase_blank();
         match mode {
             EraseInLine::EraseToEndOfLine => {
                 for c in col..cols {
@@ -393,7 +569,7 @@ impl TerminalGrid {
     }
 
     fn erase_in_display(&mut self, mode: EraseInDisplay) {
-        let blank = GridCell::default();
+        let blank = self.erase_blank();
         match mode {
             EraseInDisplay::EraseToEndOfDisplay => {
                 self.erase_in_line(EraseInLine::EraseToEndOfLine);
@@ -425,12 +601,17 @@ impl TerminalGrid {
 
     /// Move cursor down one row; if we'd fall off the bottom, scroll the
     /// grid up by one row (oldest row drops, new blank row appended).
+    /// The newly appended row inherits the current pen's background so a
+    /// scroll generated while a colored bg is active does not introduce
+    /// default-bg stripes - same xterm/ECMA-48 invariant `erase_blank`
+    /// preserves for explicit erase commands.
     fn line_feed(&mut self) {
         if self.cursor_row + 1 < self.rows {
             self.cursor_row += 1;
         } else {
             self.cells.remove(0);
-            self.cells.push(vec![GridCell::default(); self.cols as usize]);
+            let blank = self.erase_blank();
+            self.cells.push(vec![blank; self.cols as usize]);
         }
     }
 }
@@ -1015,6 +1196,21 @@ fn spawn_reader_thread(
 /// codepoints. Trailing bytes that could be the start of an unfinished sequence
 /// are kept in `carry` for the next call. Trailing bytes that are clearly
 /// invalid pass through `from_utf8_lossy` so the caller still sees output.
+/// Convert a termwiz `ColorSpec` into the cell's packed u32 color
+/// representation. `Default` becomes the COLOR_DEFAULT sentinel; palette
+/// indices are tagged via COLOR_PALETTE_TAG; truecolor is converted from
+/// f32 sRGB to 8-bit RGB with the high byte left at 0.
+fn color_spec_to_packed(spec: ColorSpec) -> u32 {
+    match spec {
+        ColorSpec::Default => COLOR_DEFAULT,
+        ColorSpec::PaletteIndex(idx) => palette_color(idx),
+        ColorSpec::TrueColor(srgba) => {
+            let (r, g, b, _a) = srgba.to_srgb_u8();
+            rgb_color(r, g, b)
+        }
+    }
+}
+
 fn drain_utf8(carry: &mut Vec<u8>, chunk: &[u8]) -> String {
     carry.extend_from_slice(chunk);
     let split = utf8_complete_prefix(carry);
@@ -1480,6 +1676,123 @@ mod tests {
     }
 
     #[test]
+    fn grid_sgr_truecolor_foreground_stamps_cells() {
+        // CSI 38 ; 2 ; R ; G ; B m sets truecolor foreground.
+        // Then "X" should carry that color; subsequent "Y" after Reset
+        // should be back to default.
+        let mut grid = TerminalGrid::new(1, 5);
+        grid.feed(b"\x1b[38;2;255;100;0mX\x1b[0mY");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].ch, b'X' as u32);
+        assert_eq!(snap.cells[0].fg, rgb_color(255, 100, 0));
+        assert_eq!(snap.cells[0].bg, COLOR_DEFAULT);
+        assert_eq!(snap.cells[1].ch, b'Y' as u32);
+        assert_eq!(snap.cells[1].fg, COLOR_DEFAULT);
+    }
+
+    #[test]
+    fn grid_sgr_palette_background() {
+        // CSI 41 m sets background to ANSI red (palette 1).
+        let mut grid = TerminalGrid::new(1, 5);
+        grid.feed(b"\x1b[41mZ");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].ch, b'Z' as u32);
+        assert_eq!(snap.cells[0].bg, palette_color(1));
+    }
+
+    #[test]
+    fn grid_sgr_bold_then_normal() {
+        let mut grid = TerminalGrid::new(1, 6);
+        grid.feed(b"\x1b[1mA\x1b[22mB");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].attrs & ATTR_BOLD, ATTR_BOLD);
+        // CSI 22 m clears bold AND dim.
+        assert_eq!(snap.cells[1].attrs & (ATTR_BOLD | ATTR_DIM), 0);
+    }
+
+    #[test]
+    fn grid_sgr_underline_italic_reverse_strike_combo() {
+        let mut grid = TerminalGrid::new(1, 6);
+        grid.feed(b"\x1b[3;4;7;9mC");
+        let snap = grid.snapshot();
+        let want = ATTR_ITALIC | ATTR_UNDERLINE | ATTR_REVERSE | ATTR_STRIKE;
+        assert_eq!(snap.cells[0].attrs & want, want);
+    }
+
+    #[test]
+    fn grid_sgr_reset_clears_state() {
+        // Set fg, bg, bold, italic; reset; new char carries no state.
+        let mut grid = TerminalGrid::new(1, 4);
+        grid.feed(b"\x1b[31;42;1;3mA\x1b[0mB");
+        let snap = grid.snapshot();
+        assert_ne!(snap.cells[0].fg, COLOR_DEFAULT);
+        assert_ne!(snap.cells[0].bg, COLOR_DEFAULT);
+        assert_ne!(snap.cells[0].attrs, 0);
+        assert_eq!(snap.cells[1].fg, COLOR_DEFAULT);
+        assert_eq!(snap.cells[1].bg, COLOR_DEFAULT);
+        assert_eq!(snap.cells[1].attrs, 0);
+    }
+
+    #[test]
+    fn grid_default_cell_serializes_without_color_or_attr_fields() {
+        // Wire-shape contract: default cells (the common case for blank
+        // screens) ship as { ch, width } only - skip-serializing the
+        // sentinel-default fg/bg/attrs keeps snapshot JSON compact.
+        let cell = GridCell::default();
+        let json = serde_json::to_value(&cell).unwrap();
+        assert_eq!(json["ch"], 0);
+        assert_eq!(json["width"], 1);
+        assert!(json.get("fg").is_none());
+        assert!(json.get("bg").is_none());
+        assert!(json.get("attrs").is_none());
+    }
+
+    #[test]
+    fn grid_styled_cell_serializes_color_and_attr_fields() {
+        // Inverse of the above: a non-default cell carries fg/bg/attrs
+        // on the wire so the renderer can dispatch.
+        let mut grid = TerminalGrid::new(1, 2);
+        grid.feed(b"\x1b[31;1mX");
+        let snap = grid.snapshot();
+        let json = serde_json::to_value(&snap.cells[0]).unwrap();
+        assert_eq!(json["ch"], b'X' as u32);
+        assert!(json.get("fg").is_some());
+        assert!(json.get("attrs").is_some());
+    }
+
+    #[test]
+    fn grid_erase_preserves_current_background() {
+        // xterm semantics: EL/ED stamp the current pen's background into
+        // erased cells (a TUI that paints a colored row then erases it must
+        // keep the color). Stage 2.5 originally erased to default-bg, which
+        // dropped the color; this test pins the corrected behavior.
+        let mut grid = TerminalGrid::new(1, 6);
+        // Set bg to ANSI red (palette 1), write "abc", then erase to EOL.
+        grid.feed(b"\x1b[41mabc\x1b[K");
+        let snap = grid.snapshot();
+        // Cells that held glyphs keep their bg from the write; erased cells
+        // 3..6 must also carry palette_color(1), not COLOR_DEFAULT.
+        assert_eq!(snap.cells[0].bg, palette_color(1));
+        assert_eq!(snap.cells[3].bg, palette_color(1));
+        assert_eq!(snap.cells[5].bg, palette_color(1));
+        // Erased cells have no glyph and no fg.
+        assert_eq!(snap.cells[3].ch, 0);
+        assert_eq!(snap.cells[3].fg, COLOR_DEFAULT);
+    }
+
+    #[test]
+    fn grid_erase_after_reset_uses_default_bg() {
+        // The complement: after Reset clears the pen, erase falls back to
+        // default-bg. Guards against an over-eager "always carry bg" that
+        // would re-color cleared regions.
+        let mut grid = TerminalGrid::new(1, 4);
+        grid.feed(b"\x1b[41mab\x1b[0m\x1b[1;1H\x1b[K");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].bg, COLOR_DEFAULT);
+        assert_eq!(snap.cells[3].bg, COLOR_DEFAULT);
+    }
+
+    #[test]
     fn grid_resize_bumps_seq() {
         // Stage 3's snapshot/diff dedupe will key on seq; a resize-only
         // state change (rows/cols/cursor clamp) must observe a new seq or
@@ -1493,5 +1806,85 @@ mod tests {
         let seq_after_resize = grid.seq;
         grid.resize(2, 5);
         assert_eq!(grid.seq, seq_after_resize);
+    }
+
+    #[test]
+    fn grid_scroll_at_bottom_preserves_current_background() {
+        // Stage 2.5: line_feed at the bottom row scrolls and appends a
+        // blank line. That blank line must inherit current_bg, otherwise
+        // a TUI streaming colored output at the bottom row gets default-bg
+        // stripes whenever the scroll fires (same xterm/ECMA-48 invariant
+        // erase preserves).
+        let mut grid = TerminalGrid::new(2, 4);
+        // Fill row 0 with a colored bg, scroll once via LF at bottom.
+        grid.feed(b"\x1b[42mAAAA\r\nBBBB\r\n");
+        let snap = grid.snapshot();
+        // After two LFs, row 1's blank line was filled at scroll time
+        // while bg was still palette green; assert it carries that bg.
+        let bottom = &snap.cells[1 * snap.cols as usize];
+        assert_eq!(bottom.bg, palette_color(2));
+    }
+
+    #[test]
+    fn grid_overwrite_left_half_of_wide_clears_stale_continuation() {
+        // Write a wide char (occupies col 0-1), then overwrite col 0
+        // with a narrow char. The old continuation cell at col 1 must
+        // be cleared so the renderer doesn't keep treating col 1 as
+        // an unrenderable continuation slot of a glyph that no longer
+        // claims width 2.
+        let mut grid = TerminalGrid::new(1, 5);
+        grid.feed("\u{4E2D}".as_bytes());
+        // Cursor is now at col 2. Move back to col 0 and overwrite.
+        grid.feed(b"\x1b[1;1HX");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].ch, b'X' as u32);
+        assert_eq!(snap.cells[0].width, 1);
+        // The orphaned right half must now be a blank renderable cell,
+        // not a width=0 continuation.
+        assert_eq!(snap.cells[1].ch, 0);
+        assert_eq!(snap.cells[1].width, 1);
+    }
+
+    #[test]
+    fn grid_overwrite_continuation_clears_stale_left_half() {
+        // Inverse case: write a wide char at col 0, then overwrite the
+        // RIGHT half (col 1) with a narrow char. The old left-half cell
+        // at col 0 must lose its width=2 claim so the renderer doesn't
+        // try to span both columns from a glyph that has been broken.
+        let mut grid = TerminalGrid::new(1, 5);
+        grid.feed("\u{4E2D}".as_bytes());
+        grid.feed(b"\x1b[1;2HY");
+        let snap = grid.snapshot();
+        // Old left half at col 0 is now blank (cleared during sweep).
+        assert_eq!(snap.cells[0].ch, 0);
+        assert_eq!(snap.cells[0].width, 1);
+        assert_eq!(snap.cells[1].ch, b'Y' as u32);
+        assert_eq!(snap.cells[1].width, 1);
+    }
+
+    #[test]
+    fn grid_wide_glyph_overwrites_adjacent_wide_cleanly() {
+        // A new wide char written at col 1 must clear the right half
+        // (col 2) of an old wide char that started at col 1, AND must
+        // also evict any stale left half at col 2 that would otherwise
+        // claim col 3 as its continuation.
+        let mut grid = TerminalGrid::new(1, 6);
+        grid.feed("\u{4E2D}\u{4E2D}".as_bytes()); // wide at 0, wide at 2
+        // Move to col 1 and write another wide char.
+        grid.feed(b"\x1b[1;2H");
+        grid.feed("\u{4E2D}".as_bytes());
+        let snap = grid.snapshot();
+        // col 0 had a width=2 left half spanning 0-1; sweep cleared it.
+        assert_eq!(snap.cells[0].ch, 0);
+        assert_eq!(snap.cells[0].width, 1);
+        // New wide at col 1 with continuation at col 2.
+        assert_eq!(snap.cells[1].ch, 0x4E2D);
+        assert_eq!(snap.cells[1].width, 2);
+        assert_eq!(snap.cells[2].width, 0);
+        // The old wide that previously sat at col 2-3 had its right
+        // half (col 3) cleared by the sweep so it's now a blank cell,
+        // not an orphaned continuation of a glyph that no longer exists.
+        assert_eq!(snap.cells[3].ch, 0);
+        assert_eq!(snap.cells[3].width, 1);
     }
 }
