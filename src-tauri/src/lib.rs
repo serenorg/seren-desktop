@@ -741,6 +741,7 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_kill,
             terminal::terminal_snapshot,
+            terminal::terminal_grid_snapshot,
             terminal::terminal_signal,
             // Web fetch command
             commands::web::web_fetch,

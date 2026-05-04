@@ -83,6 +83,13 @@ const rehydrating = new Set<string>();
 // snapshot is still in flight, allowing chunks to bypass parking and the
 // later snapshot to unconditionally overwrite output with stale data.
 const rehydratePromises = new Map<string, Promise<void>>();
+// Tombstone set of buffer ids that the JS store has locally removed (via
+// removeLocal). The reader thread may still emit a tail chunk for an id
+// that's been archived, and a rehydrate that was in flight at archive time
+// may resolve after the entry is gone; both paths must drop their work
+// rather than re-creating output[id] / lastSeq[id]. Tombstones live for the
+// process lifetime since terminal ids are UUIDs (no reuse risk).
+const removedBuffers = new Set<string>();
 
 // Rust caps its authoritative buffer at 200_000 chars. Mirror the cap on the
 // live event path so a long-running TUI/build log can't grow JS memory and
@@ -102,6 +109,10 @@ function trimToCap(s: string, cap: number): string {
 }
 
 function appendChunk(bufferId: string, seq: number, data: string): void {
+  // Drop late events for locally-removed buffers; without this guard a tail
+  // chunk that the reader thread emits after archive would resurrect
+  // output[id]/lastSeq[id] and reintroduce the buffer into terminalStore.
+  if (removedBuffers.has(bufferId)) return;
   const lastSeq = state.lastSeq[bufferId] ?? 0;
   if (seq <= lastSeq) return;
   setState(
@@ -119,6 +130,7 @@ function applySnapshot(bufferId: string, snapshot: TerminalSnapshot): void {
   // snapshot.seq we will re-apply them from the holding queue below.
   // Dispatch on the envelope discriminator so Stage 2 grid snapshots can
   // route to the grid store without touching this raw-text path.
+  if (removedBuffers.has(bufferId)) return;
   if (snapshot.kind === "raw-text") {
     setState(
       produce((s: TerminalState) => {
@@ -160,12 +172,18 @@ function rehydrateBuffer(bufferId: string): Promise<void> {
     });
   rehydratePromises.set(bufferId, next);
   // Clear the slot only if no newer rehydrate has registered, so the chain
-  // shrinks when the most recent caller settles.
-  next.finally(() => {
+  // shrinks when the most recent caller settles. `next.finally(cleanup)`
+  // produces a fresh promise that re-rejects if `next` rejected; if nobody
+  // observes that derived promise it surfaces as an unhandled rejection
+  // even when the original caller already awaited `next` with try/catch.
+  // Use `.then(cleanup, cleanup)` and explicitly void the result so the
+  // cleanup chain is detached and never reports rejections of its own.
+  const cleanup = () => {
     if (rehydratePromises.get(bufferId) === next) {
       rehydratePromises.delete(bufferId);
     }
-  });
+  };
+  void next.then(cleanup, cleanup);
   return next;
 }
 
@@ -319,8 +337,17 @@ export const terminalStore = {
   },
 
   removeLocal(bufferId: string) {
+    // Tombstone first so any in-flight rehydrate completion or late chunk
+    // event finds removedBuffers.has(id) and short-circuits without
+    // resurrecting output[id] / lastSeq[id]. We also drop the rehydrate
+    // promise slot - the in-flight rehydrate may still complete its
+    // applySnapshot/drain steps but those checks short-circuit on the
+    // tombstone. Nothing else holds a reference to that promise after
+    // removeLocal returns.
+    removedBuffers.add(bufferId);
     rehydrating.delete(bufferId);
     pendingChunks.delete(bufferId);
+    rehydratePromises.delete(bufferId);
     setState(
       produce((s: TerminalState) => {
         delete s.buffers[bufferId];
@@ -337,6 +364,8 @@ export const terminalStore = {
     exitUnlisten = null;
     rehydrating.clear();
     pendingChunks.clear();
+    rehydratePromises.clear();
+    removedBuffers.clear();
     setState("initialized", false);
   },
 };

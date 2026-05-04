@@ -13,6 +13,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+use termwiz::escape::{
+    Action, ControlCode,
+    csi::{CSI, Cursor, Edit, EraseInDisplay, EraseInLine},
+    parser::Parser,
+};
+use unicode_width::UnicodeWidthChar;
 use uuid::Uuid;
 
 const TERMINAL_OUTPUT_EVENT: &str = "terminal://output";
@@ -34,6 +40,10 @@ struct TerminalProcess {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Arc<Mutex<Box<dyn Child + Send>>>,
     output: Arc<Mutex<RawOutputBuffer>>,
+    /// Stage 2 parsed grid, fed in parallel with the raw output buffer. The
+    /// raw buffer remains the authoritative source for the existing <pre>
+    /// renderer; the grid is what Stage 3's canvas renderer will read.
+    grid: Arc<Mutex<TerminalGrid>>,
 }
 
 /// Authoritative rolling buffer of decoded PTY output. Stage 1 holds raw text
@@ -79,6 +89,348 @@ impl RawOutputBuffer {
             body: TerminalSnapshotBody::RawText {
                 data: self.data.clone(),
             },
+        }
+    }
+}
+
+/// Stage 2 emulator grid. Owns a termwiz `Parser` that turns raw PTY bytes
+/// into structured `Action`s, and an apply loop that mutates a 2D cell grid.
+/// The action set we interpret is intentionally limited for Stage 2 (see
+/// `apply_action`); unhandled actions are dropped and noted in `unhandled`
+/// counters so we can grow coverage as Stage 3's renderer surfaces real
+/// output gaps. The parser is a pure function of byte history, so dropping
+/// an action only loses that one mutation - the next action that arrives
+/// applies cleanly against the current state.
+struct TerminalGrid {
+    parser: Parser,
+    rows: u16,
+    cols: u16,
+    cells: Vec<Vec<GridCell>>,
+    cursor_row: u16,
+    cursor_col: u16,
+    seq: u32,
+    /// Counts actions we received but did not interpret. Surfaced in the
+    /// snapshot so Stage 3 can warn the user when the rendered grid is
+    /// expected to be incomplete versus the source PTY stream.
+    unhandled_actions: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridCell {
+    /// The codepoint in this cell. NUL means "empty / never written".
+    /// Encoded as u32 (Unicode scalar value) for compact JSON.
+    pub ch: u32,
+    /// Display width in cells, per UAX#11. 1 for normal chars, 2 for wide
+    /// (CJK, emoji), 0 for the right-half continuation slot of a wide-char
+    /// pair to its left (renderer must skip drawing it independently).
+    /// Empty cells default to width=1 so the renderer treats them as a
+    /// single space slot rather than a continuation.
+    pub width: u8,
+}
+
+impl Default for GridCell {
+    fn default() -> Self {
+        Self { ch: 0, width: 1 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridSnapshot {
+    pub rows: u16,
+    pub cols: u16,
+    /// Row-major cells. Length is exactly rows * cols.
+    pub cells: Vec<GridCell>,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub unhandled_actions: u32,
+}
+
+impl TerminalGrid {
+    fn new(rows: u16, cols: u16) -> Self {
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+        let cells = vec![vec![GridCell::default(); cols as usize]; rows as usize];
+        Self {
+            parser: Parser::new(),
+            rows,
+            cols,
+            cells,
+            cursor_row: 0,
+            cursor_col: 0,
+            seq: 0,
+            unhandled_actions: 0,
+        }
+    }
+
+    /// Parse `bytes` and apply each emitted Action against the grid. Each
+    /// chunk increments seq once regardless of how many actions it produced
+    /// so callers can dedupe at chunk granularity (matches the RawOutputBuffer
+    /// model).
+    fn feed(&mut self, bytes: &[u8]) {
+        let mut actions: Vec<Action> = Vec::new();
+        self.parser
+            .parse(bytes, |action| actions.push(action));
+        for action in actions {
+            self.apply_action(action);
+        }
+        self.seq = self.seq.wrapping_add(1);
+    }
+
+    fn snapshot(&self) -> GridSnapshot {
+        let mut flat = Vec::with_capacity(self.rows as usize * self.cols as usize);
+        for row in &self.cells {
+            flat.extend_from_slice(row);
+        }
+        GridSnapshot {
+            rows: self.rows,
+            cols: self.cols,
+            cells: flat,
+            cursor_row: self.cursor_row,
+            cursor_col: self.cursor_col,
+            unhandled_actions: self.unhandled_actions,
+        }
+    }
+
+    /// Resize the grid, preserving overlapping cells. New cells are blank,
+    /// dropped cells are gone. Cursor clamps to the new bounds. Bumps `seq`
+    /// because rows/cols/cells/cursor have all visibly changed - Stage 3's
+    /// snapshot/diff dedupe must observe a resize-only state change as a
+    /// new revision rather than a no-op tied to the last byte chunk's seq.
+    fn resize(&mut self, rows: u16, cols: u16) {
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+        if rows == self.rows && cols == self.cols {
+            return;
+        }
+        let mut new_cells = vec![vec![GridCell::default(); cols as usize]; rows as usize];
+        let copy_rows = (rows.min(self.rows)) as usize;
+        let copy_cols = (cols.min(self.cols)) as usize;
+        for (new_row, old_row) in new_cells
+            .iter_mut()
+            .zip(self.cells.iter())
+            .take(copy_rows)
+        {
+            new_row[..copy_cols].copy_from_slice(&old_row[..copy_cols]);
+        }
+        self.cells = new_cells;
+        self.rows = rows;
+        self.cols = cols;
+        self.cursor_row = self.cursor_row.min(rows.saturating_sub(1));
+        self.cursor_col = self.cursor_col.min(cols.saturating_sub(1));
+        self.seq = self.seq.wrapping_add(1);
+    }
+
+    fn apply_action(&mut self, action: Action) {
+        match action {
+            Action::Print(c) => self.write_char(c),
+            Action::PrintString(s) => {
+                for c in s.chars() {
+                    self.write_char(c);
+                }
+            }
+            Action::Control(code) => self.apply_control(code),
+            Action::CSI(csi) => self.apply_csi(csi),
+            // Stage 2 deliberately ignores Esc (single-char escape sequences
+            // like DECALN, RIS), DeviceControl, OSC (titles, hyperlinks),
+            // Sixel/KittyImage, and XtGetTcap. Each is its own well-bounded
+            // expansion. Counted so the gap is visible in snapshots.
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    fn write_char(&mut self, c: char) {
+        let width = UnicodeWidthChar::width(c).unwrap_or(1) as u16;
+        if width == 0 {
+            // Combining marks / zero-width-joiner / variation selectors. A
+            // proper emulator merges these onto the previous cell as part of
+            // the same grapheme cluster; Stage 2's flat one-codepoint-per-
+            // cell DTO can't represent that yet, so we drop them rather
+            // than corrupting the next cell with an invisible mark.
+            // Counted so the gap is visible in snapshots.
+            self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            return;
+        }
+        // Wrap if this glyph wouldn't fit on the current row. Width=2 chars
+        // at the right edge wrap rather than getting clipped.
+        if self.cursor_col + width > self.cols {
+            self.line_feed();
+            self.cursor_col = 0;
+        }
+        let row = self.cursor_row as usize;
+        let col = self.cursor_col as usize;
+        // Defensive bounds: resize races could in theory leave the cursor
+        // out of range until the next clamp; just no-op rather than panic.
+        if row < self.cells.len() && col < self.cells[row].len() {
+            self.cells[row][col] = GridCell {
+                ch: c as u32,
+                width: width as u8,
+            };
+            // Width-2 char occupies col and col+1. Mark col+1 as a
+            // continuation slot (width=0) so the renderer doesn't try to
+            // draw a glyph there independently. Also evicts whatever
+            // single-cell glyph used to live in col+1.
+            if width == 2 && col + 1 < self.cells[row].len() {
+                self.cells[row][col + 1] = GridCell { ch: 0, width: 0 };
+            }
+        }
+        self.cursor_col = self.cursor_col.saturating_add(width);
+    }
+
+    fn apply_control(&mut self, code: ControlCode) {
+        match code {
+            ControlCode::CarriageReturn => self.cursor_col = 0,
+            ControlCode::LineFeed => self.line_feed(),
+            ControlCode::Backspace => {
+                self.cursor_col = self.cursor_col.saturating_sub(1);
+            }
+            ControlCode::HorizontalTab => {
+                let next = (self.cursor_col / 8 + 1) * 8;
+                self.cursor_col = next.min(self.cols.saturating_sub(1));
+            }
+            ControlCode::Bell => { /* visual bell is a UI concern, ignore */ }
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    fn apply_csi(&mut self, csi: CSI) {
+        match csi {
+            CSI::Cursor(c) => self.apply_cursor(c),
+            CSI::Edit(e) => self.apply_edit(e),
+            // SGR (colors / attrs), Mode (alt-screen, mouse, etc.), Window,
+            // Mouse, Keyboard, Device deferred. Every additional handler
+            // here is one step closer to "flawless codex/claude".
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    fn apply_cursor(&mut self, c: Cursor) {
+        match c {
+            Cursor::Position { line, col } => {
+                let r = line.as_zero_based() as u16;
+                let cc = col.as_zero_based() as u16;
+                self.cursor_row = r.min(self.rows.saturating_sub(1));
+                self.cursor_col = cc.min(self.cols.saturating_sub(1));
+            }
+            Cursor::Up(n) => {
+                let n = n.max(1) as u16;
+                self.cursor_row = self.cursor_row.saturating_sub(n);
+            }
+            Cursor::Down(n) => {
+                let n = n.max(1) as u16;
+                self.cursor_row = self
+                    .cursor_row
+                    .saturating_add(n)
+                    .min(self.rows.saturating_sub(1));
+            }
+            Cursor::Left(n) => {
+                let n = n.max(1) as u16;
+                self.cursor_col = self.cursor_col.saturating_sub(n);
+            }
+            Cursor::Right(n) => {
+                let n = n.max(1) as u16;
+                self.cursor_col = self
+                    .cursor_col
+                    .saturating_add(n)
+                    .min(self.cols.saturating_sub(1));
+            }
+            Cursor::CharacterAbsolute(col) | Cursor::CharacterPositionAbsolute(col) => {
+                self.cursor_col =
+                    (col.as_zero_based() as u16).min(self.cols.saturating_sub(1));
+            }
+            Cursor::LinePositionAbsolute(line) => {
+                let line = line.saturating_sub(1) as u16;
+                self.cursor_row = line.min(self.rows.saturating_sub(1));
+            }
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    fn apply_edit(&mut self, e: Edit) {
+        match e {
+            Edit::EraseInLine(mode) => self.erase_in_line(mode),
+            Edit::EraseInDisplay(mode) => self.erase_in_display(mode),
+            _ => {
+                self.unhandled_actions = self.unhandled_actions.saturating_add(1);
+            }
+        }
+    }
+
+    fn erase_in_line(&mut self, mode: EraseInLine) {
+        let row = self.cursor_row as usize;
+        if row >= self.cells.len() {
+            return;
+        }
+        let col = self.cursor_col as usize;
+        let cols = self.cols as usize;
+        let blank = GridCell::default();
+        match mode {
+            EraseInLine::EraseToEndOfLine => {
+                for c in col..cols {
+                    self.cells[row][c] = blank;
+                }
+            }
+            EraseInLine::EraseToStartOfLine => {
+                for c in 0..=col.min(cols.saturating_sub(1)) {
+                    self.cells[row][c] = blank;
+                }
+            }
+            EraseInLine::EraseLine => {
+                for c in 0..cols {
+                    self.cells[row][c] = blank;
+                }
+            }
+        }
+    }
+
+    fn erase_in_display(&mut self, mode: EraseInDisplay) {
+        let blank = GridCell::default();
+        match mode {
+            EraseInDisplay::EraseToEndOfDisplay => {
+                self.erase_in_line(EraseInLine::EraseToEndOfLine);
+                let next_row = self.cursor_row as usize + 1;
+                for r in next_row..self.cells.len() {
+                    for c in 0..self.cols as usize {
+                        self.cells[r][c] = blank;
+                    }
+                }
+            }
+            EraseInDisplay::EraseToStartOfDisplay => {
+                let row = self.cursor_row as usize;
+                for r in 0..row.min(self.cells.len()) {
+                    for c in 0..self.cols as usize {
+                        self.cells[r][c] = blank;
+                    }
+                }
+                self.erase_in_line(EraseInLine::EraseToStartOfLine);
+            }
+            EraseInDisplay::EraseDisplay | EraseInDisplay::EraseScrollback => {
+                for row in &mut self.cells {
+                    for cell in row.iter_mut() {
+                        *cell = blank;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Move cursor down one row; if we'd fall off the bottom, scroll the
+    /// grid up by one row (oldest row drops, new blank row appended).
+    fn line_feed(&mut self) {
+        if self.cursor_row + 1 < self.rows {
+            self.cursor_row += 1;
+        } else {
+            self.cells.remove(0);
+            self.cells.push(vec![GridCell::default(); self.cols as usize]);
         }
     }
 }
@@ -149,6 +501,9 @@ pub struct TerminalSnapshot {
 #[serde(tag = "kind", content = "payload", rename_all = "kebab-case")]
 pub enum TerminalSnapshotBody {
     RawText { data: String },
+    /// Stage 2: parsed grid. Wire shape:
+    /// { kind: "grid", payload: { rows, cols, cells, cursorRow, cursorCol, unhandledActions } }
+    Grid(GridSnapshot),
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -272,6 +627,7 @@ pub fn terminal_create_buffer(
     };
 
     let output = Arc::new(Mutex::new(RawOutputBuffer::new(TERMINAL_BUFFER_CAP)));
+    let grid = Arc::new(Mutex::new(TerminalGrid::new(rows, cols)));
 
     {
         let mut buffers = state
@@ -291,11 +647,14 @@ pub fn terminal_create_buffer(
                 writer: Arc::new(Mutex::new(writer)),
                 child: Arc::new(Mutex::new(child)),
                 output: Arc::clone(&output),
+                grid: Arc::clone(&grid),
             },
         );
     }
 
-    if let Err(spawn_err) = spawn_reader_thread(app.clone(), id.clone(), reader, output) {
+    if let Err(spawn_err) =
+        spawn_reader_thread(app.clone(), id.clone(), reader, output, grid)
+    {
         if let Ok(mut buffers) = state.buffers.lock() {
             if let Some(rolled_back) = buffers.remove(&id) {
                 if let Ok(mut child) = rolled_back.child.lock() {
@@ -381,6 +740,11 @@ pub fn terminal_resize(
     process.info.cols = cols;
     process.info.rows = rows;
     process.info.updated_at = unix_millis();
+    // Keep the parsed grid in sync with the PTY's WINSIZE so the renderer
+    // reads cells at the new dimensions on the next snapshot.
+    if let Ok(mut g) = process.grid.lock() {
+        g.resize(rows, cols);
+    }
     Ok(process.info.clone())
 }
 
@@ -435,6 +799,32 @@ pub fn terminal_snapshot(
         .map(|buffer| buffer.snapshot())
         .map_err(|err| format!("Terminal output mutex poisoned: {err}"))?;
     Ok(snapshot)
+}
+
+/// Stage 2: returns the parsed grid snapshot. Stage 3's canvas renderer
+/// will call this on mount and then subscribe to grid diff events; the
+/// existing `terminal_snapshot` (raw text) stays alive so the current
+/// `<pre>` renderer keeps working unchanged during the migration.
+#[tauri::command]
+pub fn terminal_grid_snapshot(
+    state: State<'_, TerminalState>,
+    buffer_id: String,
+) -> Result<TerminalSnapshot, String> {
+    let buffers = state
+        .buffers
+        .lock()
+        .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
+    let process = buffers
+        .get(&buffer_id)
+        .ok_or_else(|| format!("Terminal buffer not found: {buffer_id}"))?;
+    let grid = Arc::clone(&process.grid);
+    drop(buffers);
+
+    let (seq, body) = grid
+        .lock()
+        .map(|g| (g.seq, TerminalSnapshotBody::Grid(g.snapshot())))
+        .map_err(|err| format!("Terminal grid mutex poisoned: {err}"))?;
+    Ok(TerminalSnapshot { seq, body })
 }
 
 /// Send `signal` to the foreground process group of the terminal's PTY when
@@ -519,6 +909,7 @@ fn spawn_reader_thread(
     buffer_id: String,
     mut reader: Box<dyn Read + Send>,
     output: Arc<Mutex<RawOutputBuffer>>,
+    grid: Arc<Mutex<TerminalGrid>>,
 ) -> std::io::Result<()> {
     thread::Builder::new()
         .name(format!("terminal-reader-{buffer_id}"))
@@ -532,6 +923,13 @@ fn spawn_reader_thread(
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
+                        // Feed the parser the RAW bytes (it manages its own
+                        // partial-sequence carry internally and does not care
+                        // about UTF-8 chunk boundaries). The grid mutation is
+                        // independent of the raw-text path's UTF-8 buffering.
+                        if let Ok(mut g) = grid.lock() {
+                            g.feed(&buf[..n]);
+                        }
                         let data = drain_utf8(&mut carry, &buf[..n]);
                         if !data.is_empty() {
                             // Append to the authoritative buffer first so a
@@ -774,6 +1172,7 @@ mod tests {
     fn snapshot_data(snap: &TerminalSnapshot) -> &str {
         match &snap.body {
             TerminalSnapshotBody::RawText { data } => data.as_str(),
+            TerminalSnapshotBody::Grid(_) => panic!("expected raw-text snapshot"),
         }
     }
 
@@ -851,5 +1250,248 @@ mod tests {
         let second = drain_utf8(&mut carry, &[0xAC, b'b']);
         assert_eq!(second, "\u{20AC}b");
         assert!(carry.is_empty());
+    }
+
+    fn cell_at(snap: &GridSnapshot, row: u16, col: u16) -> char {
+        let idx = row as usize * snap.cols as usize + col as usize;
+        let ch = snap.cells[idx].ch;
+        if ch == 0 {
+            ' '
+        } else {
+            char::from_u32(ch).unwrap_or('?')
+        }
+    }
+
+    fn row_string(snap: &GridSnapshot, row: u16) -> String {
+        (0..snap.cols)
+            .map(|c| cell_at(snap, row, c))
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    #[test]
+    fn grid_writes_plain_text_left_to_right() {
+        let mut grid = TerminalGrid::new(3, 10);
+        grid.feed(b"hello");
+        let snap = grid.snapshot();
+        assert_eq!(snap.rows, 3);
+        assert_eq!(snap.cols, 10);
+        assert_eq!(row_string(&snap, 0), "hello");
+        assert_eq!(snap.cursor_row, 0);
+        assert_eq!(snap.cursor_col, 5);
+    }
+
+    #[test]
+    fn grid_carriage_return_then_overwrite() {
+        let mut grid = TerminalGrid::new(2, 10);
+        grid.feed(b"abc\rxy");
+        let snap = grid.snapshot();
+        // CR returns cursor to col 0, "xy" overwrites "ab" leaving "xyc".
+        assert_eq!(row_string(&snap, 0), "xyc");
+        assert_eq!(snap.cursor_col, 2);
+    }
+
+    #[test]
+    fn grid_line_feed_advances_row() {
+        let mut grid = TerminalGrid::new(3, 10);
+        grid.feed(b"row1\r\nrow2");
+        let snap = grid.snapshot();
+        assert_eq!(row_string(&snap, 0), "row1");
+        assert_eq!(row_string(&snap, 1), "row2");
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 4);
+    }
+
+    #[test]
+    fn grid_csi_cursor_position_is_one_based() {
+        // ESC [ 2 ; 3 H -> move cursor to row=2, col=3 (1-based) = (1, 2) 0-based.
+        let mut grid = TerminalGrid::new(5, 10);
+        grid.feed(b"\x1b[2;3HX");
+        let snap = grid.snapshot();
+        assert_eq!(cell_at(&snap, 1, 2), 'X');
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 3);
+    }
+
+    #[test]
+    fn grid_erase_to_end_of_line() {
+        let mut grid = TerminalGrid::new(2, 10);
+        grid.feed(b"hello world");
+        // Wrap means the second word is on row 1; reset cursor and erase
+        // from col 3 to EOL on row 0.
+        grid.feed(b"\x1b[1;4H\x1b[K");
+        let snap = grid.snapshot();
+        assert_eq!(row_string(&snap, 0), "hel");
+    }
+
+    #[test]
+    fn grid_resize_preserves_overlap_and_clamps_cursor() {
+        let mut grid = TerminalGrid::new(3, 10);
+        grid.feed(b"abcdefghij");
+        grid.feed(b"\x1b[3;10H"); // cursor at (2, 9)
+        grid.resize(2, 5);
+        let snap = grid.snapshot();
+        assert_eq!(snap.rows, 2);
+        assert_eq!(snap.cols, 5);
+        assert_eq!(row_string(&snap, 0), "abcde");
+        // Cursor was at (2, 9); now clamped to (1, 4).
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 4);
+    }
+
+    #[test]
+    fn grid_unhandled_actions_are_counted_not_panicked() {
+        let mut grid = TerminalGrid::new(3, 10);
+        // SGR (color) and OSC (window title) are not interpreted yet; both
+        // should increment the counter rather than being applied silently.
+        grid.feed(b"\x1b[31mred text\x1b[0m");
+        grid.feed(b"\x1b]0;new title\x07");
+        let snap = grid.snapshot();
+        // The text portion is still printed; only the SGR / OSC frames go
+        // unhandled.
+        assert!(row_string(&snap, 0).contains("red text"));
+        assert!(snap.unhandled_actions > 0);
+    }
+
+    #[test]
+    fn grid_snapshot_serializes_with_versioned_envelope() {
+        // Wire shape: { seq, kind: "grid", payload: { rows, cols, cells, ... } }
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"hi");
+        let body = TerminalSnapshotBody::Grid(grid.snapshot());
+        let snap = TerminalSnapshot { seq: grid.seq, body };
+        let json = serde_json::to_value(&snap).unwrap();
+        assert_eq!(json["kind"], "grid");
+        assert_eq!(json["payload"]["rows"], 2);
+        assert_eq!(json["payload"]["cols"], 4);
+        assert_eq!(json["payload"]["cursorCol"], 2);
+        assert!(json["payload"]["cells"].is_array());
+        assert_eq!(json["payload"]["cells"].as_array().unwrap().len(), 8);
+    }
+
+    #[test]
+    fn grid_write_wraps_at_right_edge() {
+        // Writing exactly cols chars leaves the cursor "parked" at col == cols
+        // (post-print position). The next char must trigger line_feed and land
+        // at (row+1, 0), with the second char following at (row+1, 1).
+        let mut grid = TerminalGrid::new(3, 5);
+        grid.feed(b"abcdefg");
+        let snap = grid.snapshot();
+        assert_eq!(row_string(&snap, 0), "abcde");
+        assert_eq!(row_string(&snap, 1), "fg");
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 2);
+    }
+
+    #[test]
+    fn grid_backspace_at_col_zero_holds() {
+        // BS at the left margin must not underflow; cursor stays at col 0 and
+        // does not jump back to the previous row (we don't implement reverse
+        // wrap in Stage 2 - matches xterm default for plain BS).
+        let mut grid = TerminalGrid::new(2, 5);
+        grid.feed(b"\nx\x08\x08\x08");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 0);
+    }
+
+    #[test]
+    fn grid_horizontal_tab_jumps_to_next_eight_then_clamps() {
+        // Tab from col 0 lands on col 8. A tab from col 9 in a 12-col grid
+        // would target col 16, which clamps to cols-1 (11) - the spec allows
+        // either "stop at right margin" or "wrap"; xterm-compat is clamp.
+        let mut grid = TerminalGrid::new(2, 12);
+        grid.feed(b"\tA");
+        let snap = grid.snapshot();
+        assert_eq!(cell_at(&snap, 0, 8), 'A');
+        assert_eq!(snap.cursor_col, 9);
+
+        let mut grid = TerminalGrid::new(2, 12);
+        // Move to col 9 (1-based 10), then tab; should clamp to col 11.
+        grid.feed(b"\x1b[1;10H\t");
+        let snap = grid.snapshot();
+        assert_eq!(snap.cursor_col, 11);
+    }
+
+    #[test]
+    fn grid_line_feed_at_bottom_scrolls() {
+        let mut grid = TerminalGrid::new(2, 5);
+        grid.feed(b"top\r\nbot\r\n");
+        // The trailing LF on row 1 should scroll: old row 0 ("top") is
+        // dropped, "bot" moves to row 0, row 1 becomes blank.
+        let snap = grid.snapshot();
+        assert_eq!(row_string(&snap, 0), "bot");
+        assert_eq!(row_string(&snap, 1), "");
+        assert_eq!(snap.cursor_row, 1);
+    }
+
+    #[test]
+    fn grid_wide_char_occupies_two_cells_and_advances_cursor_by_two() {
+        // CJK ideograph U+4E2D ("zhong"/middle, width 2 per UAX#11).
+        let mut grid = TerminalGrid::new(2, 6);
+        grid.feed("a\u{4E2D}b".as_bytes());
+        let snap = grid.snapshot();
+        // col 0: 'a' (width 1), col 1+2: wide char (width 2 then continuation
+        // width 0), col 3: 'b' (width 1).
+        assert_eq!(snap.cells[0].ch, b'a' as u32);
+        assert_eq!(snap.cells[0].width, 1);
+        assert_eq!(snap.cells[1].ch, 0x4E2D);
+        assert_eq!(snap.cells[1].width, 2);
+        assert_eq!(snap.cells[2].ch, 0);
+        assert_eq!(snap.cells[2].width, 0);
+        assert_eq!(snap.cells[3].ch, b'b' as u32);
+        assert_eq!(snap.cells[3].width, 1);
+        assert_eq!(snap.cursor_col, 4);
+    }
+
+    #[test]
+    fn grid_wide_char_at_right_edge_wraps() {
+        // 5-col grid, write 4 ASCII then a wide char; the wide char would
+        // need cols 4-5 but col 5 is past the end, so it wraps to row 1.
+        let mut grid = TerminalGrid::new(2, 5);
+        grid.feed("abcd\u{4E2D}".as_bytes());
+        let snap = grid.snapshot();
+        // Row 0 has "abcd" then a default cell (the wide char did NOT fit).
+        assert_eq!(snap.cells[0].ch, b'a' as u32);
+        assert_eq!(snap.cells[3].ch, b'd' as u32);
+        assert_eq!(snap.cells[4].ch, 0);
+        assert_eq!(snap.cells[4].width, 1);
+        // Row 1 (idx 5..10) starts with the wide char.
+        assert_eq!(snap.cells[5].ch, 0x4E2D);
+        assert_eq!(snap.cells[5].width, 2);
+        assert_eq!(snap.cells[6].width, 0);
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 2);
+    }
+
+    #[test]
+    fn grid_combining_mark_is_dropped_and_counted() {
+        // U+0301 (combining acute accent, width 0). Stage 2's flat cell DTO
+        // can't merge it with the previous cell, so we drop it and bump the
+        // unhandled counter rather than corrupting the grid.
+        let mut grid = TerminalGrid::new(1, 4);
+        grid.feed("e\u{0301}".as_bytes());
+        let snap = grid.snapshot();
+        assert_eq!(snap.cells[0].ch, b'e' as u32);
+        assert_eq!(snap.cells[0].width, 1);
+        assert_eq!(snap.cursor_col, 1);
+        assert!(snap.unhandled_actions >= 1);
+    }
+
+    #[test]
+    fn grid_resize_bumps_seq() {
+        // Stage 3's snapshot/diff dedupe will key on seq; a resize-only
+        // state change (rows/cols/cursor clamp) must observe a new seq or
+        // dedupe will drop the visible change.
+        let mut grid = TerminalGrid::new(3, 10);
+        grid.feed(b"hi");
+        let seq_before = grid.seq;
+        grid.resize(2, 5);
+        assert_eq!(grid.seq, seq_before.wrapping_add(1));
+        // No-op resize (same dims) must NOT bump seq.
+        let seq_after_resize = grid.seq;
+        grid.resize(2, 5);
+        assert_eq!(grid.seq, seq_after_resize);
     }
 }
