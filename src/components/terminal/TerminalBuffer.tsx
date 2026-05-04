@@ -300,6 +300,28 @@ export const TerminalBuffer: Component = () => {
   let canvasPixelHeight = 0;
   let canvasCssWidth = 0;
   let canvasCssHeight = 0;
+  // Diff coalescing. The Rust side caps emits to ~60fps, but on a
+  // maximized terminal each diff still carries up to ~20k cells and the
+  // canvas repaint is O(grid_size). Without coalescing, sustained
+  // torrents (find ~) overflow the webview event queue: per-event work
+  // exceeds frame budget, events pile up unbounded, GC pressure mounts,
+  // throughput collapses. The handler enqueues; a single rAF drains the
+  // queue and triggers one paint per frame.
+  let pendingDiffs: GridDiffEvent[] = [];
+  // Rows that changed since the last paint. Lets the painter redraw
+  // only those rows instead of all 12k+ cells.
+  const pendingRepaintRows = new Set<number>();
+  // Scroll regions that can be shifted in the canvas backing store before
+  // repainting inserted/dirty rows. This avoids repainting the whole visible
+  // scroll region for every bottom scroll.
+  let pendingCanvasScrolls: GridScroll[] = [];
+  // Forces the next paint to redraw every cell. Set on snapshot reset,
+  // resize, selection change, cell-metric change, and overflow recovery.
+  let needsFullRepaint = true;
+  let rafHandle: number | null = null;
+  // Hard cap on queued diffs. If rAF is starved (background tab) we
+  // drop the queue and resync via snapshot instead of growing forever.
+  const MAX_PENDING_DIFFS = 240;
   // Selection drag tracking. dragAnchor non-null means a left-button
   // drag is in progress. dragMoved distinguishes drag-to-select from
   // a plain click (which clears the selection).
@@ -324,8 +346,16 @@ export const TerminalBuffer: Component = () => {
         { bufferId: id },
       );
       if (snap.kind === "grid" && id === threadStore.activeThreadId) {
+        // Snapshot supersedes any queued diffs - they're either older
+        // (already in the snapshot) or newer (will arrive after the
+        // emitter's next tick and apply cleanly on top).
+        pendingDiffs = [];
+        pendingRepaintRows.clear();
+        pendingCanvasScrolls = [];
+        needsFullRepaint = true;
         setGrid(snap.payload);
         setGridSeq(snap.seq);
+        scheduleFrame();
       }
     } catch {
       // Buffer may have been killed between trigger and fetch.
@@ -338,32 +368,118 @@ export const TerminalBuffer: Component = () => {
     }
   };
 
+  type ApplyResult = "ok" | "noop" | "resync";
+
   /**
-   * Apply an incremental grid diff to the local grid signal. Returns
-   * true on success; false when the diff does not cover the local seq
-   * (caller should resync via fetchGridSnapshot).
+   * Apply an incremental grid diff in place and record which rows need
+   * repainting. Mutates the existing cells array (no slice) to avoid
+   * allocating ~20k objects per diff under torrent load - that
+   * allocation rate was the dominant source of GC pressure and the
+   * compounding slowdown.
+   *
+   * Returns "noop" when the diff is older than current state, "resync"
+   * when the diff's baseSeq is past current (we missed a diff and have
+   * to refetch), and "ok" when applied. Caller should NOT call setGrid
+   * for "ok" results - the snapshot reference stays the same and the
+   * paint loop reads its updated fields directly.
    */
-  const applyDiff = (diff: GridDiffEvent): boolean => {
+  const applyDiffInternal = (diff: GridDiffEvent): ApplyResult => {
     const current = grid();
-    if (!current) return false;
+    if (!current) return "resync";
     const currentSeq = gridSeq();
-    if (diff.seq <= currentSeq) return true;
-    if (diff.baseSeq > currentSeq) return false;
+    if (diff.seq <= currentSeq) return "noop";
+    if (diff.baseSeq > currentSeq) return "resync";
     const dimsChanged =
       diff.rowsTotal !== current.rows || diff.colsTotal !== current.cols;
-    let cells: GridCell[];
     if (dimsChanged) {
-      // Resize: every row is dirty in this case so the diff carries
-      // enough info to rebuild from scratch.
-      cells = new Array(diff.rowsTotal * diff.colsTotal);
+      // Dim changes invalidate every cached row; rebuild from scratch
+      // and force a full repaint on the next frame. Resize is rare
+      // (window edge drag, font change) so the alloc here is fine.
+      const cells: GridCell[] = new Array(diff.rowsTotal * diff.colsTotal);
       for (let i = 0; i < cells.length; i++) {
         cells[i] = { ch: 0, width: 1 };
       }
-    } else {
-      cells = current.cells.slice();
+      const cols = diff.colsTotal;
+      applyScrolls(cells, cols, diff);
+      for (const row of diff.rows) {
+        const base = row.row * cols;
+        for (let i = 0; i < row.cells.length; i++) {
+          cells[base + i] = row.cells[i];
+        }
+      }
+      setGrid({
+        ...current,
+        rows: diff.rowsTotal,
+        cols: diff.colsTotal,
+        cells,
+        cursorRow: diff.cursorRow,
+        cursorCol: diff.cursorCol,
+        cursorVisible: diff.cursorVisible,
+        cursorKeysApp: diff.cursorKeysApp,
+        bracketedPaste: diff.bracketedPaste,
+      });
+      setGridSeq(diff.seq);
+      needsFullRepaint = true;
+      pendingRepaintRows.clear();
+      pendingCanvasScrolls = [];
+      return "ok";
     }
-    const cols = diff.colsTotal;
-    for (const scroll of diff.scrolls ?? []) {
+    // Same dims: mutate the existing cells in place. Track every row
+    // touched (scrolled, written, or holding the old/new cursor) so the
+    // partial-repaint pass redraws exactly those rows and nothing else.
+    const cells = current.cells;
+    const cols = current.cols;
+    const scrolls = diff.scrolls;
+    if (scrolls && scrolls.length > 0) {
+      applyScrolls(cells, cols, diff);
+      if (selection()) {
+        // Keep selection overlays anchored to screen coordinates. Blitting
+        // would copy the old translucent pixels along with the scrolled
+        // content, so fall back to repainting the affected region.
+        for (const scroll of scrolls) {
+          const top = Math.max(0, Math.min(scroll.top, current.rows - 1));
+          const bottom = Math.max(0, Math.min(scroll.bottom, current.rows - 1));
+          for (let r = top; r <= bottom; r++) {
+            pendingRepaintRows.add(r);
+          }
+        }
+      } else {
+        for (const scroll of scrolls) {
+          shiftPendingRepaintRowsForScroll(scroll, current.rows);
+        }
+        pendingCanvasScrolls.push(...scrolls);
+      }
+    }
+    for (const row of diff.rows) {
+      const base = row.row * cols;
+      for (let i = 0; i < row.cells.length; i++) {
+        cells[base + i] = row.cells[i];
+      }
+      pendingRepaintRows.add(row.row);
+    }
+    // Cursor moves between cells without dirtying either row's contents.
+    // Both the previous and new cursor rows must repaint so the old
+    // cursor block clears and the new one shows up.
+    pendingRepaintRows.add(current.cursorRow);
+    pendingRepaintRows.add(diff.cursorRow);
+    current.cursorRow = diff.cursorRow;
+    current.cursorCol = diff.cursorCol;
+    current.cursorVisible = diff.cursorVisible;
+    current.cursorKeysApp = diff.cursorKeysApp;
+    current.bracketedPaste = diff.bracketedPaste;
+    setGridSeq(diff.seq);
+    return "ok";
+  };
+
+  // Apply scroll deltas to a flat cells array in place. Shared between
+  // the dim-changed (fresh array) and same-dim (existing array) paths.
+  const applyScrolls = (
+    cells: GridCell[],
+    cols: number,
+    diff: GridDiffEvent,
+  ) => {
+    if (!diff.scrolls || diff.scrolls.length === 0) return;
+    for (const scroll of diff.scrolls) {
       const top = Math.max(0, Math.min(scroll.top, diff.rowsTotal - 1));
       const bottom = Math.max(0, Math.min(scroll.bottom, diff.rowsTotal - 1));
       if (bottom < top || scroll.delta === 0) continue;
@@ -384,25 +500,70 @@ export const TerminalBuffer: Component = () => {
         }
       }
     }
-    for (const row of diff.rows) {
-      const base = row.row * cols;
-      for (let i = 0; i < row.cells.length; i++) {
-        cells[base + i] = row.cells[i];
+  };
+
+  const shiftPendingRepaintRowsForScroll = (
+    scroll: GridScroll,
+    rowsTotal: number,
+  ) => {
+    const top = Math.max(0, Math.min(scroll.top, rowsTotal - 1));
+    const bottom = Math.max(0, Math.min(scroll.bottom, rowsTotal - 1));
+    if (bottom < top || scroll.delta === 0) return;
+    const height = bottom - top + 1;
+    const count = Math.min(Math.abs(scroll.delta), height);
+    const shifted = new Set<number>();
+    for (const row of pendingRepaintRows) {
+      if (row < top || row > bottom) {
+        shifted.add(row);
+      } else if (scroll.delta > 0) {
+        const next = row - count;
+        if (next >= top) shifted.add(next);
+      } else {
+        const next = row + count;
+        if (next <= bottom) shifted.add(next);
       }
     }
-    setGrid({
-      ...current,
-      rows: diff.rowsTotal,
-      cols: diff.colsTotal,
-      cells,
-      cursorRow: diff.cursorRow,
-      cursorCol: diff.cursorCol,
-      cursorVisible: diff.cursorVisible,
-      cursorKeysApp: diff.cursorKeysApp,
-      bracketedPaste: diff.bracketedPaste,
+    pendingRepaintRows.clear();
+    for (const row of shifted) {
+      pendingRepaintRows.add(row);
+    }
+  };
+
+  /**
+   * Schedule a single rAF that drains queued diffs and paints. Multiple
+   * scheduleFrame calls within one animation frame collapse to one
+   * paint - this is the load-bearing piece of the coalescing fix.
+   */
+  const scheduleFrame = () => {
+    if (rafHandle !== null) return;
+    rafHandle = requestAnimationFrame(() => {
+      rafHandle = null;
+      runFrame();
     });
-    setGridSeq(diff.seq);
-    return true;
+  };
+
+  const runFrame = () => {
+    if (pendingDiffs.length > 0) {
+      const queued = pendingDiffs;
+      pendingDiffs = [];
+      let resync = false;
+      for (const diff of queued) {
+        const result = applyDiffInternal(diff);
+        if (result === "resync") {
+          resync = true;
+          break;
+        }
+      }
+      if (resync) {
+        pendingDiffs = [];
+        pendingRepaintRows.clear();
+        pendingCanvasScrolls = [];
+        needsFullRepaint = true;
+        void fetchGridSnapshot();
+        return;
+      }
+    }
+    paintCanvas();
   };
 
   const measureCell = () => {
@@ -505,7 +666,10 @@ export const TerminalBuffer: Component = () => {
 
   const onSurfaceMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return; // left button only; right opens context menu
-    surfaceRef?.focus();
+    // preventScroll: the surface can be a sub-pixel taller than its flex
+    // container; without this, the first focus call after open scrolls
+    // the canvas up and clips the top rows out of view.
+    surfaceRef?.focus({ preventScroll: true });
     const cell = canvasMouseToCell(e);
     if (!cell) return;
     dragAnchor = cell;
@@ -528,17 +692,22 @@ export const TerminalBuffer: Component = () => {
     canvasRef.style.height = "0px";
   };
 
-  // Re-render the canvas whenever the grid snapshot or cell metrics
-  // change. Two passes: backgrounds first (so adjacent cells with bg
-  // fills have no seams), then glyphs + decorations (underline, strike).
-  // Per-cell font/fillStyle changes are batched against the previous
-  // cell's state so homogeneous runs don't thrash the context.
-  createEffect(() => {
+  // Paint logic. Called from the rAF in runFrame() and from the
+  // signal-watching effect below for selection/metric changes. Repaints
+  // ALL rows when needsFullRepaint is set (snapshot reset, resize,
+  // selection change, cell-metric change); otherwise only the rows in
+  // pendingRepaintRows. The partial path is the primary win for
+  // sustained torrents - it bounds frame work to O(changed_rows × cols)
+  // instead of O(rows × cols).
+  const paintCanvas = () => {
     const g = grid();
     const w = cellW();
     const h = cellH();
     if (!g) {
       clearCanvas();
+      pendingRepaintRows.clear();
+      pendingCanvasScrolls = [];
+      needsFullRepaint = true;
       return;
     }
     if (!canvasRef || w === 0 || h === 0) return;
@@ -547,6 +716,8 @@ export const TerminalBuffer: Component = () => {
     const pxH = g.rows * h;
     const nextPixelWidth = Math.round(pxW * dpr);
     const nextPixelHeight = Math.round(pxH * dpr);
+    // Resizing the canvas backing store clears its contents, so it
+    // implicitly forces a full repaint of every row.
     if (
       canvasPixelWidth !== nextPixelWidth ||
       canvasPixelHeight !== nextPixelHeight
@@ -555,6 +726,7 @@ export const TerminalBuffer: Component = () => {
       canvasRef.height = nextPixelHeight;
       canvasPixelWidth = nextPixelWidth;
       canvasPixelHeight = nextPixelHeight;
+      needsFullRepaint = true;
     }
     if (canvasCssWidth !== pxW) {
       canvasRef.style.width = `${pxW}px`;
@@ -567,25 +739,96 @@ export const TerminalBuffer: Component = () => {
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = COLOR_BG;
-    ctx.fillRect(0, 0, pxW, pxH);
+
+    // Decide which rows to paint this frame. A full repaint clears the
+    // entire backing store first; a partial repaint clears only the
+    // strip for each dirty row before painting it.
+    const sel = selection();
+    let rowsToPaint: Iterable<number>;
+    if (needsFullRepaint) {
+      pendingCanvasScrolls = [];
+      ctx.fillStyle = COLOR_BG;
+      ctx.fillRect(0, 0, pxW, pxH);
+      rowsToPaint = Array.from({ length: g.rows }, (_, row) => row);
+    } else {
+      for (const scroll of pendingCanvasScrolls) {
+        const top = Math.max(0, Math.min(scroll.top, g.rows - 1));
+        const bottom = Math.max(0, Math.min(scroll.bottom, g.rows - 1));
+        if (bottom < top || scroll.delta === 0) continue;
+        const height = bottom - top + 1;
+        const count = Math.min(Math.abs(scroll.delta), height);
+        const rowsToCopy = height - count;
+        const sourceRow = scroll.delta > 0 ? top + count : top;
+        const destRow = scroll.delta > 0 ? top : top + count;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (rowsToCopy > 0) {
+          ctx.drawImage(
+            canvasRef,
+            0,
+            Math.round(sourceRow * h * dpr),
+            canvasPixelWidth,
+            Math.round(rowsToCopy * h * dpr),
+            0,
+            Math.round(destRow * h * dpr),
+            canvasPixelWidth,
+            Math.round(rowsToCopy * h * dpr),
+          );
+        }
+        if (scroll.delta > 0) {
+          for (let r = bottom - count + 1; r <= bottom; r++) {
+            pendingRepaintRows.add(r);
+          }
+        } else {
+          for (let r = top; r < top + count; r++) {
+            pendingRepaintRows.add(r);
+          }
+        }
+        // Clear any uncovered source strip immediately. The row repaint below
+        // paints inserted rows, but this keeps the backing store correct even
+        // if the backend emits a scroll without explicit row payloads.
+        ctx.fillStyle = COLOR_BG;
+        ctx.fillRect(
+          0,
+          Math.round((scroll.delta > 0 ? bottom - count + 1 : top) * h * dpr),
+          canvasPixelWidth,
+          Math.round(count * h * dpr),
+        );
+        ctx.restore();
+      }
+      pendingCanvasScrolls = [];
+      // The selection overlay has to repaint along with any row in its
+      // range, otherwise scrolled-in rows under a live selection lose
+      // the highlight. Cheap: a Set merge.
+      if (sel) {
+        const [s, e] = normalizeSelection(sel);
+        for (let r = s.row; r <= e.row && r < g.rows; r++) {
+          pendingRepaintRows.add(r);
+        }
+      }
+      rowsToPaint = pendingRepaintRows;
+    }
 
     // Pass 1: backgrounds. For non-reverse cells, skip default-bg so we
     // don't repaint over the cleared canvas. For reverse cells, the
     // background is the cell's foreground (or COLOR_FG when fg is also
     // default) - ALWAYS paint it, even when fg is default, otherwise
     // `\x1b[7mtext` would render with the canvas's normal background
-    // and the swap would be invisible.
-    for (let r = 0; r < g.rows; r++) {
+    // and the swap would be invisible. Partial repaints clear the row
+    // strip first since we no longer have a clean canvas under it.
+    for (const r of rowsToPaint) {
+      if (r >= g.rows) continue;
       const rowOffset = r * g.cols;
       const y = r * h;
+      if (!needsFullRepaint) {
+        ctx.fillStyle = COLOR_BG;
+        ctx.fillRect(0, y, pxW, h);
+      }
       for (let c = 0; c < g.cols; c++) {
         const cell = g.cells[rowOffset + c];
         if (!cell) continue;
         const reverse = ((cell.attrs ?? 0) & ATTR_REVERSE) !== 0;
         if (reverse) {
-          // Reverse: bg is the resolved foreground. Paint unconditionally
-          // so the swap shows even on default-fg/default-bg cells.
           ctx.fillStyle = resolveColor(cell.fg, COLOR_FG);
           ctx.fillRect(c * w, y, w, h);
         } else {
@@ -601,7 +844,8 @@ export const TerminalBuffer: Component = () => {
     ctx.textBaseline = "top";
     let lastFont = "";
     let lastFill = "";
-    for (let r = 0; r < g.rows; r++) {
+    for (const r of rowsToPaint) {
+      if (r >= g.rows) continue;
       const rowOffset = r * g.cols;
       const y = r * h;
       for (let c = 0; c < g.cols; c++) {
@@ -617,21 +861,11 @@ export const TerminalBuffer: Component = () => {
           ctx.font = font;
           lastFont = font;
         }
-        // Reverse swaps the role of default colors too: a reverse cell
-        // with default fg/bg should render the glyph in COLOR_BG (the
-        // canvas background) on top of the COLOR_FG block painted in
-        // pass 1, so the inverted text reads correctly.
         const defaultFill = reverse ? COLOR_BG : COLOR_FG;
         const fill = resolveColor(fgPacked, defaultFill);
-        // Dim halves alpha on the foreground; a real terminal would
-        // shift toward grey. Acceptable approximation.
         if ((attrs & ATTR_DIM) !== 0) {
           ctx.globalAlpha = 0.6;
         }
-        // Skip drawing the glyph for empty cells and wide-continuation
-        // slots, but still emit underline/strike if the attr is set
-        // (rare but possible if the prev paint left an underlined blank
-        // - matches xterm behavior).
         const drawGlyph = cell.ch !== 0 && cell.width !== 0;
         if (drawGlyph) {
           if (fill !== lastFill) {
@@ -660,16 +894,13 @@ export const TerminalBuffer: Component = () => {
       }
     }
 
-    // Selection overlay: translucent fill over selected cells, drawn
-    // AFTER cell glyphs so the highlight blends with text but BEFORE
-    // the cursor block so the cursor stays visible on top. The fill
-    // is rectangular per-row: full width for fully-spanned rows,
-    // partial for the start and end rows.
-    const sel = selection();
+    // Selection overlay over repainted rows. Drawn AFTER glyphs so the
+    // highlight blends with text but BEFORE the cursor block.
     if (sel) {
       const [start, end] = normalizeSelection(sel);
       ctx.fillStyle = SELECTION_OVERLAY_FILL;
-      for (let r = start.row; r <= end.row && r < g.rows; r++) {
+      for (const r of rowsToPaint) {
+        if (r < start.row || r > end.row || r >= g.rows) continue;
         const startCol = r === start.row ? start.col : 0;
         const endCol = r === end.row ? end.col : g.cols - 1;
         const x = startCol * w;
@@ -681,12 +912,9 @@ export const TerminalBuffer: Component = () => {
       }
     }
 
-    // Cursor: inverted block at (cursorRow, cursorCol). For a wide
-    // cursor cell, paint two columns wide so the cursor matches the
-    // glyph. The cursor background overrides any cell bg below it.
-    // Respect DECSET 25 (cursor_visible). Apps like vim, less, and
-    // tmux hide the cursor in alt-screen UI; default true when the
-    // backend skip-serializes the field.
+    // Cursor: inverted block at (cursorRow, cursorCol). The cursor row
+    // is always in pendingRepaintRows after applyDiffInternal so it
+    // gets cleared and repainted along with everything else.
     const cursorVisible = g.cursorVisible ?? true;
     if (cursorVisible && g.cursorRow < g.rows && g.cursorCol < g.cols) {
       const cell = g.cells[g.cursorRow * g.cols + g.cursorCol];
@@ -701,6 +929,23 @@ export const TerminalBuffer: Component = () => {
         ctx.fillText(String.fromCodePoint(cell.ch), cx, cy);
       }
     }
+
+    pendingRepaintRows.clear();
+    needsFullRepaint = false;
+  };
+
+  // Trigger a full repaint when something orthogonal to the diff stream
+  // changes: snapshot reset (grid signal swapped), selection change,
+  // cell-metric change. The effect doesn't paint inline - it just
+  // schedules a frame, so multiple signal changes in one tick collapse
+  // to one paint.
+  createEffect(() => {
+    void grid();
+    void selection();
+    void cellW();
+    void cellH();
+    needsFullRepaint = true;
+    scheduleFrame();
   });
 
   // Refetch immediately when the active buffer changes (thread switch),
@@ -713,12 +958,14 @@ export const TerminalBuffer: Component = () => {
       () => threadStore.activeThreadId,
       (id) => {
         // Clear local grid + seq so a stale diff for the previous
-        // buffer can't apply to the new one. The fetch below seeds
-        // the new buffer's seq from the snapshot.
+        // buffer can't apply to the new one. Also drop any queued
+        // diffs - they belong to the old buffer.
+        pendingDiffs = [];
+        pendingRepaintRows.clear();
+        pendingCanvasScrolls = [];
+        needsFullRepaint = true;
         setGrid(null);
         setGridSeq(0);
-        // Drop any active selection - it referred to the previous
-        // buffer's content.
         setSelection(null);
         if (!id) return;
         pushResize();
@@ -894,16 +1141,31 @@ export const TerminalBuffer: Component = () => {
 
     // Subscribe to incremental grid diffs. Filter by active buffer
     // (a background terminal's diffs are still emitted but the
-    // foreground canvas doesn't render them). On seq mismatch, fall
-    // back to a full snapshot fetch to resync.
+    // foreground canvas doesn't render them). The handler is hot under
+    // torrent loads; do NOTHING expensive here - just enqueue and let
+    // rAF drain on the next frame. This is the load-bearing piece of
+    // the coalescing fix: without it, every IPC event triggered a full
+    // canvas repaint synchronously, the JS thread fell behind the emit
+    // rate, the webview event queue grew without bound, and throughput
+    // collapsed.
     unlistenDiff = await listen<GridDiffEvent>(
       "terminal://grid-diff",
       (event) => {
         const diff = event.payload;
         if (diff.bufferId !== threadStore.activeThreadId) return;
-        if (!applyDiff(diff)) {
+        // Overflow guard: if rAF is starved (background tab, devtools
+        // paused, etc) drop everything and fall back to snapshot resync
+        // when the tab becomes active again.
+        if (pendingDiffs.length >= MAX_PENDING_DIFFS) {
+          pendingDiffs = [];
+          pendingRepaintRows.clear();
+          pendingCanvasScrolls = [];
+          needsFullRepaint = true;
           void fetchGridSnapshot();
+          return;
         }
+        pendingDiffs.push(diff);
+        scheduleFrame();
       },
     );
 
@@ -920,6 +1182,13 @@ export const TerminalBuffer: Component = () => {
   onCleanup(() => {
     unlistenDiff?.();
     resizeObserver?.disconnect();
+    if (rafHandle !== null) {
+      cancelAnimationFrame(rafHandle);
+      rafHandle = null;
+    }
+    pendingDiffs = [];
+    pendingRepaintRows.clear();
+    pendingCanvasScrolls = [];
     // If the user unmounts mid-drag, the window-level mouse listeners
     // would otherwise leak. Removing them is a no-op when not bound.
     window.removeEventListener("mousemove", onWindowMouseMove);

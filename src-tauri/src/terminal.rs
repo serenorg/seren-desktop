@@ -451,17 +451,24 @@ impl TerminalGrid {
     fn drain_diff(&mut self) -> GridDiff {
         let base_seq = self.last_diff_seq;
         let scrolls = std::mem::take(&mut self.pending_scrolls);
-        let mut rows = Vec::new();
-        for (r, dirty) in self.dirty_rows.iter().enumerate() {
+        // Count first so the rows vec gets one allocation. Under torrent
+        // load (find ~) most rows are dirty and the previous push-loop
+        // realloced log2(n) times per drain.
+        let dirty_count = self.dirty_rows.iter().filter(|d| **d).count();
+        let mut rows = Vec::with_capacity(dirty_count);
+        // Disjoint borrow: hold an immutable reference to `cells` and a
+        // mutable reference to `dirty_rows` so the loop both reads cells
+        // and clears dirty bits in a single pass without re-walking.
+        let cells = &self.cells;
+        let dirty_rows = &mut self.dirty_rows;
+        for (r, dirty) in dirty_rows.iter_mut().enumerate() {
             if *dirty {
                 rows.push(DiffRow {
                     row: r as u16,
-                    cells: self.cells[r].clone(),
+                    cells: cells[r].clone(),
                 });
+                *dirty = false;
             }
-        }
-        for d in self.dirty_rows.iter_mut() {
-            *d = false;
         }
         self.last_diff_seq = self.seq;
         GridDiff {
