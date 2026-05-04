@@ -4,7 +4,7 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     env,
     io::{Read, Write},
     path::PathBuf,
@@ -44,6 +44,12 @@ const TERMINAL_GRID_DIFF_EVENT: &str = "terminal://grid-diff";
 /// drain_diff naturally returns the union of all rows dirtied since
 /// the last drain, so collapsing N feeds into one diff is lossless.
 const GRID_DIFF_INTERVAL: Duration = Duration::from_millis(16);
+/// Maximum number of historical rows preserved above the visible
+/// viewport. When the main screen scrolls a row off the top, the row
+/// goes into this ring buffer; the renderer fetches windows on demand
+/// when the user wheels up. 10k rows at typical width is ~30MB worst
+/// case; daily-driver sweet spot.
+const SCROLLBACK_LIMIT: usize = 10_000;
 
 #[derive(Default)]
 pub struct TerminalState {
@@ -154,6 +160,12 @@ struct TerminalGrid {
     /// cover many feed seqs; the frontend accepts it when its local seq is
     /// at or after this base.
     last_diff_seq: u32,
+    /// History rows that have scrolled off the top of the main screen.
+    /// Only populated when (a) we are NOT in the alt screen and (b) the
+    /// scroll happened against the full screen scroll region (DECSTBM
+    /// not narrowed). New rows push to the back; oldest pop off the
+    /// front when the cap is hit. Index 0 = oldest available row.
+    scrollback: VecDeque<Vec<GridCell>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,6 +296,12 @@ pub struct GridSnapshot {
     /// in `\x1b[200~ ... \x1b[201~` when true.
     #[serde(skip_serializing_if = "GridSnapshot::bracketed_paste_is_default")]
     pub bracketed_paste: bool,
+    /// Number of rows currently held in scrollback history. The frontend
+    /// uses this as an upper bound for the scroll-up viewport. Skipped
+    /// on the wire when zero so the typical empty-history case stays
+    /// compact.
+    #[serde(skip_serializing_if = "GridSnapshot::scrollback_len_is_default")]
+    pub scrollback_len: u32,
 }
 
 impl GridSnapshot {
@@ -295,6 +313,9 @@ impl GridSnapshot {
     }
     fn bracketed_paste_is_default(value: &bool) -> bool {
         !*value
+    }
+    fn scrollback_len_is_default(value: &u32) -> bool {
+        *value == 0
     }
 }
 
@@ -328,6 +349,17 @@ pub struct GridDiff {
     /// content) carries the new size to the renderer.
     pub rows_total: u16,
     pub cols_total: u16,
+    /// Current scrollback length. Frontend uses this to bound the
+    /// scroll-up viewport and to know when new history rows became
+    /// available (e.g. user can keep wheeling up further).
+    #[serde(skip_serializing_if = "GridDiff::scrollback_len_is_default")]
+    pub scrollback_len: u32,
+}
+
+impl GridDiff {
+    fn scrollback_len_is_default(value: &u32) -> bool {
+        *value == 0
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -401,6 +433,7 @@ impl TerminalGrid {
             // whole grid.
             dirty_rows: vec![true; rows as usize],
             last_diff_seq: 0,
+            scrollback: VecDeque::new(),
         }
     }
 
@@ -439,6 +472,7 @@ impl TerminalGrid {
             cursor_visible: self.cursor_visible,
             cursor_keys_app: self.cursor_keys_app,
             bracketed_paste: self.bracketed_paste,
+            scrollback_len: self.scrollback.len() as u32,
         }
     }
 
@@ -483,6 +517,7 @@ impl TerminalGrid {
             bracketed_paste: self.bracketed_paste,
             rows_total: self.rows,
             cols_total: self.cols,
+            scrollback_len: self.scrollback.len() as u32,
         }
     }
 
@@ -510,6 +545,21 @@ impl TerminalGrid {
             alt.saved_scroll_bottom = rows.saturating_sub(1);
         }
         self.cells = new_cells;
+        // Reflow scrollback rows to the new column count. No content
+        // wrap/unwrap (would need word-aware reflow); just truncate
+        // when shrinking and pad with blanks when growing so each
+        // history row matches the live grid width and the renderer
+        // can index it with the same cols.
+        if self.cols != cols {
+            let blank = GridCell::default();
+            for row in self.scrollback.iter_mut() {
+                if row.len() > cols as usize {
+                    row.truncate(cols as usize);
+                } else if row.len() < cols as usize {
+                    row.resize(cols as usize, blank);
+                }
+            }
+        }
         self.rows = rows;
         self.cols = cols;
         self.cursor_row = self.cursor_row.min(rows.saturating_sub(1));
@@ -1342,11 +1392,25 @@ impl TerminalGrid {
         let bot = self.scroll_bottom as usize;
         let height = bot.saturating_sub(top).saturating_add(1);
         let count = (n as usize).min(height);
+        // Capture rows scrolling off the top into history. Only when on
+        // the main screen (alt screen is intentionally non-scrollback)
+        // and the scroll region covers the full screen - DECSTBM
+        // sub-region scrolls move content within a vt100-style window
+        // and would corrupt history if treated as discarded lines.
+        let capture_history = self.alt_state.is_none()
+            && self.scroll_top == 0
+            && self.scroll_bottom == self.rows.saturating_sub(1);
         for _ in 0..count {
             if bot >= self.cells.len() {
                 break;
             }
-            self.cells.remove(top);
+            let removed = self.cells.remove(top);
+            if capture_history {
+                if self.scrollback.len() >= SCROLLBACK_LIMIT {
+                    self.scrollback.pop_front();
+                }
+                self.scrollback.push_back(removed);
+            }
             self.cells.insert(bot, vec![blank; cols]);
             self.dirty_rows.remove(top);
             self.dirty_rows.insert(bot, true);
@@ -1770,6 +1834,66 @@ pub fn terminal_kill(
         let _ = app.emit(TERMINAL_EXIT_EVENT, TerminalExitEvent { buffer_id });
     }
     Ok(())
+}
+
+/// Window of scrollback rows. `start` indexes from the OLDEST row
+/// preserved (0 = earliest still in history); the response lists up to
+/// `count` rows in oldest-first order. The current scrollback length is
+/// returned so the caller can trust the upper bound without a separate
+/// trip - the live emitter may grow scrollback between snapshot and
+/// fetch, and the frontend uses this to gate further wheel-up requests.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrollbackWindow {
+    pub start: u32,
+    pub rows: Vec<Vec<GridCell>>,
+    pub scrollback_len: u32,
+}
+
+/// Fetch a slice of historical rows that have scrolled off the top of
+/// the main screen. Returns an empty `rows` vec when `start` is past
+/// the current scrollback length (e.g. the buffer was cleared between
+/// the request and the fetch). The frontend calls this on wheel-up to
+/// populate the off-screen viewport.
+#[tauri::command]
+pub fn terminal_grid_scrollback(
+    state: State<'_, TerminalState>,
+    buffer_id: String,
+    start: u32,
+    count: u32,
+) -> Result<ScrollbackWindow, String> {
+    let buffers = state
+        .buffers
+        .lock()
+        .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
+    let process = buffers
+        .get(&buffer_id)
+        .ok_or_else(|| format!("Terminal buffer not found: {buffer_id}"))?;
+    let grid = Arc::clone(&process.grid);
+    drop(buffers);
+
+    let grid = grid
+        .lock()
+        .map_err(|err| format!("Terminal grid mutex poisoned: {err}"))?;
+    let total = grid.scrollback.len();
+    let start_usize = start as usize;
+    let count_usize = count as usize;
+    let rows = if start_usize >= total {
+        Vec::new()
+    } else {
+        let end = start_usize.saturating_add(count_usize).min(total);
+        grid.scrollback
+            .iter()
+            .skip(start_usize)
+            .take(end - start_usize)
+            .cloned()
+            .collect()
+    };
+    Ok(ScrollbackWindow {
+        start,
+        rows,
+        scrollback_len: total as u32,
+    })
 }
 
 /// Returns the parsed grid snapshot. The frontend canvas calls this
@@ -3100,6 +3224,84 @@ mod tests {
         assert_eq!(diff.scrolls[0].delta, 1);
         assert_eq!(dirty_rows, vec![0, 2]);
         assert_eq!(row_string_from_cells(&diff.rows[0].cells), "xxBB");
+    }
+
+    #[test]
+    fn grid_scroll_off_top_pushes_into_scrollback() {
+        // A LF at the bottom of the full-screen scroll region drops the
+        // top row off; that row goes into history so wheel-up can show
+        // it. Alt screen and DECSTBM sub-region scrolls do NOT
+        // contribute (covered by the next two tests).
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC");
+        // After the LF triggered by `\r\nBBBB`, AAAA scrolled out;
+        // CCCC writes into the new bottom row.
+        let snap = grid.snapshot();
+        assert_eq!(snap.scrollback_len, 1);
+        assert_eq!(row_string_from_cells(&grid.scrollback[0]), "AAAA");
+    }
+
+    #[test]
+    fn grid_alt_screen_scroll_does_not_capture_history() {
+        let mut grid = TerminalGrid::new(2, 4);
+        // Enter alt screen via DECSET 1049, then write enough lines to
+        // force a scroll. Nothing should land in scrollback.
+        grid.feed(b"\x1b[?1049h");
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC");
+        assert_eq!(grid.scrollback.len(), 0);
+    }
+
+    #[test]
+    fn grid_decstbm_subregion_scroll_does_not_capture_history() {
+        let mut grid = TerminalGrid::new(4, 4);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC\r\nDDDD");
+        // Set scroll region to rows 1..3 (1-based 2..3). Scrolling
+        // here moves content within a sub-window; treating the
+        // displaced row as scrollback would corrupt history with vim's
+        // / less's status-line redraws.
+        grid.feed(b"\x1b[2;3r\x1b[3HEEEE\r\nFFFF\r\nGGGG");
+        assert_eq!(grid.scrollback.len(), 0);
+    }
+
+    #[test]
+    fn grid_scrollback_caps_at_limit_dropping_oldest() {
+        let mut grid = TerminalGrid::new(2, 2);
+        // Force 3 rows past the cap - oldest 3 should drop, len stays
+        // at SCROLLBACK_LIMIT.
+        for _ in 0..(SCROLLBACK_LIMIT + 3) {
+            grid.feed(b"x\r\n");
+        }
+        assert_eq!(grid.scrollback.len(), SCROLLBACK_LIMIT);
+    }
+
+    #[test]
+    fn grid_resize_truncates_scrollback_rows_to_new_cols() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"WIDE\r\nXXXX\r\nYYYY");
+        assert_eq!(grid.scrollback.len(), 1);
+        assert_eq!(grid.scrollback[0].len(), 4);
+        grid.resize(2, 2);
+        assert_eq!(grid.scrollback[0].len(), 2);
+        assert_eq!(row_string_from_cells(&grid.scrollback[0]), "WI");
+    }
+
+    #[test]
+    fn grid_resize_pads_scrollback_rows_when_growing() {
+        let mut grid = TerminalGrid::new(2, 2);
+        grid.feed(b"AB\r\nCD\r\nEF");
+        assert_eq!(grid.scrollback[0].len(), 2);
+        grid.resize(2, 4);
+        assert_eq!(grid.scrollback[0].len(), 4);
+    }
+
+    #[test]
+    fn grid_diff_carries_scrollback_len_when_nonzero() {
+        let mut grid = TerminalGrid::new(2, 4);
+        let baseline = grid.drain_diff();
+        assert_eq!(baseline.scrollback_len, 0);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC");
+        let diff = grid.drain_diff();
+        assert_eq!(diff.scrollback_len, 1);
     }
 
     #[test]

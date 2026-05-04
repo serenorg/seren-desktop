@@ -39,6 +39,9 @@ interface GridSnapshot {
   cursorVisible?: boolean;
   cursorKeysApp?: boolean;
   bracketedPaste?: boolean;
+  // Number of rows preserved in scrollback above the live screen.
+  // Backend skips serializing when zero.
+  scrollbackLen?: number;
 }
 
 interface TerminalSnapshotGrid {
@@ -78,6 +81,15 @@ interface GridDiffEvent {
   bracketedPaste: boolean;
   rowsTotal: number;
   colsTotal: number;
+  // Current scrollback length. Frontend uses the delta between diffs
+  // to keep the viewport anchored when in scroll-back mode.
+  scrollbackLen?: number;
+}
+
+interface ScrollbackWindow {
+  start: number;
+  rows: GridCell[][];
+  scrollbackLen: number;
 }
 
 const CELL_FONT_FAMILY =
@@ -328,6 +340,22 @@ export const TerminalBuffer: Component = () => {
   let dragAnchor: CellPos | null = null;
   let dragMoved = false;
 
+  // Scrollback viewport. `viewportOffset` is the number of rows above
+  // the live bottom that the user has scrolled up; 0 means the live
+  // grid is fully visible. `scrollbackLen` mirrors the backend's
+  // current history length and is the upper bound on viewportOffset.
+  // The cache is keyed by absolute scrollback row index (0 = oldest)
+  // so the same row stays valid even as the live screen scrolls.
+  const [viewportOffset, setViewportOffset] = createSignal(0);
+  const [scrollbackLen, setScrollbackLen] = createSignal(0);
+  const scrollbackCache = new Map<number, GridCell[]>();
+  const scrollbackInFlight = new Set<number>();
+  // How many wheel-delta units accumulate to one row of scroll. Wheel
+  // events report deltaY in pixels (line/page modes are normalized by
+  // the browser); 40px per cell row matches macOS / Linux defaults.
+  const WHEEL_PIXELS_PER_ROW = 40;
+  let wheelAccumulator = 0;
+
   const buffer = createMemo(() =>
     terminalStore.getBuffer(threadStore.activeThreadId),
   );
@@ -355,6 +383,7 @@ export const TerminalBuffer: Component = () => {
         needsFullRepaint = true;
         setGrid(snap.payload);
         setGridSeq(snap.seq);
+        setScrollbackLen(snap.payload.scrollbackLen ?? 0);
         scheduleFrame();
       }
     } catch {
@@ -468,6 +497,29 @@ export const TerminalBuffer: Component = () => {
     current.cursorKeysApp = diff.cursorKeysApp;
     current.bracketedPaste = diff.bracketedPaste;
     setGridSeq(diff.seq);
+    // Track scrollback growth and keep the user's view anchored to the
+    // same historical rows. When new lines scroll off in the live grid,
+    // the absolute scrollback row indices we are showing should not
+    // move - so bump the offset by however much the history grew. If
+    // the user is at the live view (offset 0), this is a no-op.
+    const nextLen = diff.scrollbackLen ?? 0;
+    const prevLen = scrollbackLen();
+    if (nextLen !== prevLen) {
+      setScrollbackLen(nextLen);
+      const offset = viewportOffset();
+      if (offset > 0 && nextLen > prevLen) {
+        const delta = nextLen - prevLen;
+        const next = Math.min(offset + delta, nextLen);
+        if (next !== offset) {
+          setViewportOffset(next);
+          needsFullRepaint = true;
+        }
+      } else if (offset > nextLen) {
+        // Scrollback shrank past our position (e.g. resize trim). Clamp.
+        setViewportOffset(nextLen);
+        needsFullRepaint = true;
+      }
+    }
     return "ok";
   };
 
@@ -526,6 +578,110 @@ export const TerminalBuffer: Component = () => {
     pendingRepaintRows.clear();
     for (const row of shifted) {
       pendingRepaintRows.add(row);
+    }
+  };
+
+  /**
+   * Snap the viewport back to the live screen. Called whenever user
+   * input would target the live grid (typing, paste, Ctrl+C signal),
+   * matching xterm's sticky-bottom behavior.
+   */
+  const snapToBottom = () => {
+    if (viewportOffset() === 0) return;
+    setViewportOffset(0);
+    needsFullRepaint = true;
+    scheduleFrame();
+  };
+
+  /**
+   * Fetch a window of scrollback rows starting at absolute index
+   * `start`. Skipped when an overlapping window is already in flight
+   * (the next paint will pick up cached rows when they land).
+   */
+  const fetchScrollbackWindow = async (start: number, count: number) => {
+    const id = threadStore.activeThreadId;
+    if (!id || count <= 0) return;
+    if (scrollbackInFlight.has(start)) return;
+    scrollbackInFlight.add(start);
+    try {
+      const win = await invoke<ScrollbackWindow>("terminal_grid_scrollback", {
+        bufferId: id,
+        start,
+        count,
+      });
+      if (id !== threadStore.activeThreadId) return;
+      // Trust the window's own start - the live emitter may have
+      // grown scrollback between request and reply, but absolute
+      // indices remain stable until the cap evicts.
+      for (let i = 0; i < win.rows.length; i++) {
+        scrollbackCache.set(win.start + i, win.rows[i]);
+      }
+      if (win.scrollbackLen !== scrollbackLen()) {
+        setScrollbackLen(win.scrollbackLen);
+      }
+      if (viewportOffset() > 0) {
+        needsFullRepaint = true;
+        scheduleFrame();
+      }
+    } catch {
+      // Buffer killed mid-flight; nothing useful to do.
+    } finally {
+      scrollbackInFlight.delete(start);
+    }
+  };
+
+  /**
+   * Ensure the cache covers every scrollback row visible in the
+   * current viewport. Issues at most one fetch per call (covering the
+   * contiguous missing window) - the IPC overhead per round-trip is
+   * higher than fetching slightly more rows than strictly needed.
+   */
+  const ensureScrollbackForViewport = () => {
+    const offset = viewportOffset();
+    if (offset === 0) return;
+    const len = scrollbackLen();
+    const g = grid();
+    if (!g || len === 0) return;
+    const visibleRows = Math.min(offset, g.rows);
+    const firstAbsolute = Math.max(0, len - offset);
+    let missingStart = -1;
+    let missingEnd = -1;
+    for (let i = 0; i < visibleRows; i++) {
+      const abs = firstAbsolute + i;
+      if (abs >= len) break;
+      if (!scrollbackCache.has(abs) && !scrollbackInFlight.has(abs)) {
+        if (missingStart === -1) missingStart = abs;
+        missingEnd = abs;
+      }
+    }
+    if (missingStart !== -1) {
+      void fetchScrollbackWindow(missingStart, missingEnd - missingStart + 1);
+    }
+  };
+
+  const onSurfaceWheel = (e: WheelEvent) => {
+    const len = scrollbackLen();
+    const offset = viewportOffset();
+    // No history and already at live: nothing to consume; let the page
+    // scroll if any ancestor cares. We don't preventDefault unless we
+    // actually changed the viewport.
+    if (len === 0 && offset === 0) return;
+    // Browsers report deltaY in pixels for line/page wheel modes when
+    // the event target is a non-scrollable element; the values are
+    // already normalized. Negative = wheel-up = scroll back into history.
+    wheelAccumulator += e.deltaY;
+    const rowsDelta = Math.trunc(wheelAccumulator / WHEEL_PIXELS_PER_ROW);
+    if (rowsDelta === 0) return;
+    wheelAccumulator -= rowsDelta * WHEEL_PIXELS_PER_ROW;
+    // Up (negative deltaY) increases offset toward len; down decreases
+    // toward 0. clamp.
+    const next = Math.max(0, Math.min(len, offset - rowsDelta));
+    if (next !== offset) {
+      e.preventDefault();
+      setViewportOffset(next);
+      needsFullRepaint = true;
+      ensureScrollbackForViewport();
+      scheduleFrame();
     }
   };
 
@@ -740,6 +896,29 @@ export const TerminalBuffer: Component = () => {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    // Scrollback view: when offset > 0 the top `offset` visible rows
+    // come from history and the bottom rows come from the live grid.
+    // Defer to full repaint and skip the blit/partial paths - they
+    // assume a 1:1 visible<->live mapping.
+    const offset = viewportOffset();
+    const inScrollback = offset > 0;
+    if (inScrollback) {
+      pendingCanvasScrolls = [];
+      pendingRepaintRows.clear();
+      needsFullRepaint = true;
+    }
+    const cellAt = (visibleRow: number, col: number): GridCell | undefined => {
+      if (!inScrollback) return g.cells[visibleRow * g.cols + col];
+      if (visibleRow < offset) {
+        const absolute = scrollbackLen() - offset + visibleRow;
+        if (absolute < 0) return undefined;
+        return scrollbackCache.get(absolute)?.[col];
+      }
+      const liveRow = visibleRow - offset;
+      if (liveRow >= g.rows) return undefined;
+      return g.cells[liveRow * g.cols + col];
+    };
+
     // Decide which rows to paint this frame. A full repaint clears the
     // entire backing store first; a partial repaint clears only the
     // strip for each dirty row before painting it.
@@ -818,14 +997,13 @@ export const TerminalBuffer: Component = () => {
     // strip first since we no longer have a clean canvas under it.
     for (const r of rowsToPaint) {
       if (r >= g.rows) continue;
-      const rowOffset = r * g.cols;
       const y = r * h;
       if (!needsFullRepaint) {
         ctx.fillStyle = COLOR_BG;
         ctx.fillRect(0, y, pxW, h);
       }
       for (let c = 0; c < g.cols; c++) {
-        const cell = g.cells[rowOffset + c];
+        const cell = cellAt(r, c);
         if (!cell) continue;
         const reverse = ((cell.attrs ?? 0) & ATTR_REVERSE) !== 0;
         if (reverse) {
@@ -846,10 +1024,9 @@ export const TerminalBuffer: Component = () => {
     let lastFill = "";
     for (const r of rowsToPaint) {
       if (r >= g.rows) continue;
-      const rowOffset = r * g.cols;
       const y = r * h;
       for (let c = 0; c < g.cols; c++) {
-        const cell = g.cells[rowOffset + c];
+        const cell = cellAt(r, c);
         if (!cell) continue;
         const attrs = cell.attrs ?? 0;
         const reverse = (attrs & ATTR_REVERSE) !== 0;
@@ -914,8 +1091,10 @@ export const TerminalBuffer: Component = () => {
 
     // Cursor: inverted block at (cursorRow, cursorCol). The cursor row
     // is always in pendingRepaintRows after applyDiffInternal so it
-    // gets cleared and repainted along with everything else.
-    const cursorVisible = g.cursorVisible ?? true;
+    // gets cleared and repainted along with everything else. In
+    // scrollback view the cursor is hidden - it tracks the LIVE
+    // bottom and would be misleading if drawn over historical text.
+    const cursorVisible = (g.cursorVisible ?? true) && !inScrollback;
     if (cursorVisible && g.cursorRow < g.rows && g.cursorCol < g.cols) {
       const cell = g.cells[g.cursorRow * g.cols + g.cursorCol];
       const cursorWidth = (cell?.width ?? 1) === 2 ? 2 * w : w;
@@ -959,11 +1138,18 @@ export const TerminalBuffer: Component = () => {
       (id) => {
         // Clear local grid + seq so a stale diff for the previous
         // buffer can't apply to the new one. Also drop any queued
-        // diffs - they belong to the old buffer.
+        // diffs - they belong to the old buffer. Scrollback cache is
+        // per-buffer too; flush it so the new buffer doesn't render
+        // history rows from the previous one.
         pendingDiffs = [];
         pendingRepaintRows.clear();
         pendingCanvasScrolls = [];
         needsFullRepaint = true;
+        scrollbackCache.clear();
+        scrollbackInFlight.clear();
+        setScrollbackLen(0);
+        setViewportOffset(0);
+        wheelAccumulator = 0;
         setGrid(null);
         setGridSeq(0);
         setSelection(null);
@@ -1013,6 +1199,7 @@ export const TerminalBuffer: Component = () => {
     // ignores.
     if (event.ctrlKey && !event.shiftKey && (k === "c" || k === "C")) {
       event.preventDefault();
+      snapToBottom();
       await terminalStore.signal(id, "interrupt");
       return;
     }
@@ -1020,6 +1207,7 @@ export const TerminalBuffer: Component = () => {
     // Other Ctrl-letter chords map to control bytes 0x01-0x1A.
     if (event.ctrlKey && k.length === 1 && /[a-zA-Z]/.test(k)) {
       event.preventDefault();
+      snapToBottom();
       const code = k.toUpperCase().charCodeAt(0) - 64;
       await terminalStore.write(id, String.fromCharCode(code));
       return;
@@ -1091,6 +1279,7 @@ export const TerminalBuffer: Component = () => {
     }
     if (bytes !== null) {
       event.preventDefault();
+      snapToBottom();
       await terminalStore.write(id, bytes);
     }
   };
@@ -1110,6 +1299,7 @@ export const TerminalBuffer: Component = () => {
     const text = event.clipboardData?.getData("text") ?? "";
     if (!text) return;
     event.preventDefault();
+    snapToBottom();
     // Strip embedded paste-end markers so a malicious or malformed
     // clipboard cannot inject \x1b[201~ mid-content and have the
     // receiving app treat the trailing bytes as typed input. split+join
@@ -1124,6 +1314,7 @@ export const TerminalBuffer: Component = () => {
   const sendInterrupt = async () => {
     const current = buffer();
     if (!current || current.status !== "running") return;
+    snapToBottom();
     await terminalStore.signal(current.id, "interrupt");
   };
 
@@ -1249,6 +1440,7 @@ export const TerminalBuffer: Component = () => {
               onKeyDown={(e) => void handleKeyDown(e)}
               onPaste={(e) => void handlePaste(e)}
               onMouseDown={onSurfaceMouseDown}
+              onWheel={onSurfaceWheel}
             >
               <canvas ref={canvasRef} class="block" />
             </div>
