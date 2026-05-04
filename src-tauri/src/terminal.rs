@@ -149,12 +149,16 @@ struct TerminalGrid {
     /// mode) which matches xterm's default and what readline-based
     /// shells expect.
     insert_mode: bool,
-    /// Active mouse-tracking mode (DECSET 1000 / 1002 / 1003). The
-    /// frontend reads this on every mouse event and synthesizes the
-    /// escape sequence when non-Off; falls through to selection /
-    /// scrollback otherwise. The three modes are mutually exclusive:
-    /// setting one implicitly clears the others, matching xterm.
-    mouse_tracking: MouseTracking,
+    /// DECSET 1000 / 1002 / 1003 are independent enable bits in xterm
+    /// (an app can enable several; the highest active wins for which
+    /// events get reported). The wire-format `mouse_tracking` enum
+    /// collapses them to the highest-active for the frontend (see
+    /// `effective_mouse_tracking`); these fields are the source of
+    /// truth so a `?1002l` after `?1000h;?1002h` correctly leaves
+    /// vt200 active rather than going dark.
+    mouse_vt200: bool,
+    mouse_button_event: bool,
+    mouse_any_event: bool,
     /// DECSET 1006 (SGR mouse encoding). Required for grid widths past
     /// 223 columns (legacy X10 encoding overflows there). Modern apps
     /// (vim, tmux, htop) all enable it alongside the tracking mode.
@@ -567,10 +571,28 @@ impl TerminalGrid {
             last_diff_seq: 0,
             scrollback: VecDeque::new(),
             scrollback_base: 0,
-            mouse_tracking: MouseTracking::Off,
+            mouse_vt200: false,
+            mouse_button_event: false,
+            mouse_any_event: false,
             mouse_sgr: false,
             pending_title: None,
             current_title: None,
+        }
+    }
+
+    /// Collapse the three independent mouse-tracking flag bits into
+    /// the wire enum. Highest active mode wins because the events it
+    /// emits are a strict superset of the lower modes - the frontend
+    /// only needs to know which superset to honor.
+    fn effective_mouse_tracking(&self) -> MouseTracking {
+        if self.mouse_any_event {
+            MouseTracking::AnyEvent
+        } else if self.mouse_button_event {
+            MouseTracking::ButtonEvent
+        } else if self.mouse_vt200 {
+            MouseTracking::Vt200
+        } else {
+            MouseTracking::Off
         }
     }
 
@@ -588,6 +610,12 @@ impl TerminalGrid {
         let mut actions: Vec<Action> = Vec::new();
         self.parser
             .parse(bytes, |action| actions.push(action));
+        if actions.is_empty() {
+            // Empty chunk or partial-state parse (e.g. mid-UTF-8). No
+            // observable change, so don't bump seq - that would fire
+            // an empty diff every read on the keepalive idle path.
+            return;
+        }
         for action in actions {
             self.apply_action(action);
         }
@@ -611,7 +639,7 @@ impl TerminalGrid {
             bracketed_paste: self.bracketed_paste,
             scrollback_len: self.scrollback.len() as u32,
             scrollback_base: self.scrollback_base,
-            mouse_tracking: self.mouse_tracking,
+            mouse_tracking: self.effective_mouse_tracking(),
             mouse_sgr: self.mouse_sgr,
             title: self.current_title.clone(),
         }
@@ -660,7 +688,7 @@ impl TerminalGrid {
             cols_total: self.cols,
             scrollback_len: self.scrollback.len() as u32,
             scrollback_base: self.scrollback_base,
-            mouse_tracking: self.mouse_tracking,
+            mouse_tracking: self.effective_mouse_tracking(),
             mouse_sgr: self.mouse_sgr,
             title: self.pending_title.take(),
         }
@@ -677,6 +705,40 @@ impl TerminalGrid {
         let cols = cols.max(1);
         if rows == self.rows && cols == self.cols {
             return;
+        }
+        // Shrinking row count on the main screen: the rows that drop
+        // off should come from the TOP and land in scrollback, so the
+        // bottom (where the active prompt usually lives) stays
+        // visible. resize_cells preserves the top, which is wrong for
+        // a shrink - manually shift here first so the subsequent
+        // resize_cells call sees a grid of exactly `rows` rows. Alt
+        // screen has no scrollback semantics, so its shrink keeps the
+        // existing resize_cells behavior (top-anchored).
+        if self.alt_state.is_none() && (rows as usize) < self.cells.len() {
+            let drop_count = self.cells.len() - rows as usize;
+            for _ in 0..drop_count {
+                if self.cells.is_empty() {
+                    break;
+                }
+                let mut row = self.cells.remove(0);
+                if (cols as usize) < row.len() {
+                    row.truncate(cols as usize);
+                } else if (cols as usize) > row.len() {
+                    row.resize(cols as usize, GridCell::default());
+                }
+                if self.scrollback.len() >= SCROLLBACK_LIMIT {
+                    self.scrollback.pop_front();
+                    self.scrollback_base = self.scrollback_base.wrapping_add(1);
+                }
+                self.scrollback.push_back(row);
+            }
+            // Cursor + DECSC saved cursor were positioned relative to
+            // the old top; shift up by drop_count so they still point
+            // at the same content row.
+            self.cursor_row = self.cursor_row.saturating_sub(drop_count as u16);
+            if let Some(saved) = self.saved_cursor.as_mut() {
+                saved.row = saved.row.saturating_sub(drop_count as u16);
+            }
         }
         let new_cells = resize_cells(&self.cells, rows, cols);
         // If we're in alt mode, the saved main screen also needs to track
@@ -1160,36 +1222,18 @@ impl TerminalGrid {
                     self.exit_alt_screen();
                 }
             }
-            // Mouse tracking modes are mutually exclusive: setting one
-            // implicitly clears the others (matches xterm). Reset only
-            // clears the matching mode so apps that toggle 1002 off
-            // without touching 1000 don't accidentally lose VT200.
+            // 1000/1002/1003 are independent flag bits per xterm.
+            // Setting one leaves the others untouched; resetting one
+            // only clears that bit. The wire-format enum is computed
+            // from the active set in `effective_mouse_tracking`.
             DecPrivateModeCode::MouseTracking => {
-                self.mouse_tracking = if on {
-                    MouseTracking::Vt200
-                } else if matches!(self.mouse_tracking, MouseTracking::Vt200) {
-                    MouseTracking::Off
-                } else {
-                    self.mouse_tracking
-                };
+                self.mouse_vt200 = on;
             }
             DecPrivateModeCode::ButtonEventMouse => {
-                self.mouse_tracking = if on {
-                    MouseTracking::ButtonEvent
-                } else if matches!(self.mouse_tracking, MouseTracking::ButtonEvent) {
-                    MouseTracking::Off
-                } else {
-                    self.mouse_tracking
-                };
+                self.mouse_button_event = on;
             }
             DecPrivateModeCode::AnyEventMouse => {
-                self.mouse_tracking = if on {
-                    MouseTracking::AnyEvent
-                } else if matches!(self.mouse_tracking, MouseTracking::AnyEvent) {
-                    MouseTracking::Off
-                } else {
-                    self.mouse_tracking
-                };
+                self.mouse_any_event = on;
             }
             DecPrivateModeCode::SGRMouse => {
                 self.mouse_sgr = on;
@@ -2646,8 +2690,17 @@ mod tests {
         let snap = grid.snapshot();
         assert_eq!(snap.rows, 2);
         assert_eq!(snap.cols, 5);
-        assert_eq!(row_string(&snap, 0), "abcde");
-        // Cursor was at (2, 9); now clamped to (1, 4).
+        // Shrinking on main screen drops the top row into scrollback
+        // (col-truncated to the new width) so the bottom of the live
+        // grid - where the active prompt lives - stays visible. The
+        // visible rows are therefore both blank (the original rows 1
+        // and 2 of a 3-row grid that only had content on row 0).
+        assert_eq!(snap.scrollback_len, 1);
+        assert_eq!(row_string_from_cells(&grid.scrollback[0]), "abcde");
+        assert_eq!(row_string(&snap, 0), "");
+        assert_eq!(row_string(&snap, 1), "");
+        // Cursor was at (2, 9); shifted up by drop_count=1 to (1, 9),
+        // then col clamped to (1, 4).
         assert_eq!(snap.cursor_row, 1);
         assert_eq!(snap.cursor_col, 4);
     }
@@ -3576,6 +3629,54 @@ mod tests {
     }
 
     #[test]
+    fn grid_shrink_rows_pushes_displaced_top_rows_into_scrollback() {
+        // Shrinking the row count must drop rows from the TOP into
+        // scrollback, not from the bottom. Active prompt at the
+        // bottom row should stay visible after the shrink. The
+        // displaced rows are reflowed to the new col count first so
+        // the scrollback width invariant holds.
+        let mut grid = TerminalGrid::new(4, 4);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC\r\nDDDD");
+        // Cursor should be at (3, 3) after the writes; resize down to
+        // 2 rows + 2 cols.
+        grid.resize(2, 2);
+        assert_eq!(grid.scrollback.len(), 2);
+        assert_eq!(row_string_from_cells(&grid.scrollback[0]), "AA");
+        assert_eq!(row_string_from_cells(&grid.scrollback[1]), "BB");
+        let snap = grid.snapshot();
+        assert_eq!(row_string(&snap, 0), "CC");
+        assert_eq!(row_string(&snap, 1), "DD");
+        // Cursor was at (3, 3); shifted up by 2 to (1, 3), then col
+        // clamped to (1, 1).
+        assert_eq!(snap.cursor_row, 1);
+        assert_eq!(snap.cursor_col, 1);
+    }
+
+    #[test]
+    fn grid_shrink_on_alt_screen_does_not_capture_history() {
+        let mut grid = TerminalGrid::new(4, 4);
+        grid.feed(b"\x1b[?1049h"); // enter alt screen
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC\r\nDDDD");
+        let before = grid.scrollback.len();
+        grid.resize(2, 4);
+        assert_eq!(grid.scrollback.len(), before);
+    }
+
+    #[test]
+    fn grid_feed_does_not_bump_seq_when_no_actions() {
+        // Empty feeds and partial-state parses (e.g. mid-UTF-8) emit
+        // no actions; bumping seq there would fire empty diffs every
+        // tick on idle PTY traffic.
+        let mut grid = TerminalGrid::new(2, 4);
+        let before = grid.seq;
+        grid.feed(b"");
+        assert_eq!(grid.seq, before);
+        // A real action does bump seq.
+        grid.feed(b"x");
+        assert_eq!(grid.seq, before.wrapping_add(1));
+    }
+
+    #[test]
     fn grid_osc_2_sets_window_title() {
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b]2;hello\x07");
@@ -3634,7 +3735,7 @@ mod tests {
     fn grid_decset_1000_enables_vt200_mouse_tracking() {
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b[?1000h");
-        assert!(matches!(grid.mouse_tracking, MouseTracking::Vt200));
+        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::Vt200));
         assert!(!grid.mouse_sgr);
         let snap = grid.snapshot();
         assert!(matches!(snap.mouse_tracking, MouseTracking::Vt200));
@@ -3647,7 +3748,7 @@ mod tests {
         // newer set wins, matching xterm.
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b[?1000h\x1b[?1002h");
-        assert!(matches!(grid.mouse_tracking, MouseTracking::ButtonEvent));
+        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::ButtonEvent));
     }
 
     #[test]
@@ -3659,9 +3760,71 @@ mod tests {
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b[?1000h");
         grid.feed(b"\x1b[?1002l");
-        assert!(matches!(grid.mouse_tracking, MouseTracking::Vt200));
+        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::Vt200));
         grid.feed(b"\x1b[?1000l");
-        assert!(matches!(grid.mouse_tracking, MouseTracking::Off));
+        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::Off));
+    }
+
+    #[test]
+    fn grid_decset_1003_enables_any_event_mouse_tracking() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?1003h");
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::AnyEvent
+        ));
+        grid.feed(b"\x1b[?1003l");
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::Off
+        ));
+    }
+
+    #[test]
+    fn grid_decrst_1002_keeps_independently_enabled_1000() {
+        // xterm models 1000/1002/1003 as independent flag bits; an app
+        // that enables both 1000 and 1002 and then resets 1002 must
+        // still have vt200 reporting active. This was a real bug in
+        // the previous mutually-exclusive enum model.
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?1000h\x1b[?1002h");
+        assert!(grid.mouse_vt200);
+        assert!(grid.mouse_button_event);
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::ButtonEvent
+        ));
+        grid.feed(b"\x1b[?1002l");
+        assert!(grid.mouse_vt200);
+        assert!(!grid.mouse_button_event);
+        assert!(matches!(
+            grid.effective_mouse_tracking(),
+            MouseTracking::Vt200
+        ));
+    }
+
+    #[test]
+    fn mouse_tracking_serializes_as_numeric_decset_code() {
+        // The wire format pins MouseTracking to its DECSET code via
+        // `serde(into = "u16")`. If anyone changes the repr (e.g. to
+        // a string variant name) the frontend silently breaks - this
+        // test fails loudly first.
+        assert_eq!(
+            serde_json::to_value(MouseTracking::Off).unwrap(),
+            serde_json::json!(0)
+        );
+        assert_eq!(
+            serde_json::to_value(MouseTracking::Vt200).unwrap(),
+            serde_json::json!(1000)
+        );
+        assert_eq!(
+            serde_json::to_value(MouseTracking::ButtonEvent).unwrap(),
+            serde_json::json!(1002)
+        );
+        assert_eq!(
+            serde_json::to_value(MouseTracking::AnyEvent).unwrap(),
+            serde_json::json!(1003)
+        );
     }
 
     #[test]
@@ -3669,7 +3832,7 @@ mod tests {
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"\x1b[?1006h");
         assert!(grid.mouse_sgr);
-        assert!(matches!(grid.mouse_tracking, MouseTracking::Off));
+        assert!(matches!(grid.effective_mouse_tracking(), MouseTracking::Off));
     }
 
     #[test]
