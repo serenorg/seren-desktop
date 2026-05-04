@@ -1,4 +1,4 @@
-// ABOUTME: Stage 3 canvas-based UI for the Rust-backed terminal grid.
+// ABOUTME: Canvas-based UI for the Rust-backed terminal grid.
 // ABOUTME: Reads parsed grid snapshots from terminal_grid_snapshot and pipes raw key input back to the PTY.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -19,8 +19,8 @@ import { threadStore } from "@/stores/thread.store";
 interface GridCell {
   ch: number;
   width: number;
-  // Stage 2.5 SGR fields. Backend skips serializing these when default,
-  // so a missing field means "use the renderer default".
+  // SGR fields. Backend skips serializing these when default, so a
+  // missing field means "use the renderer default".
   fg?: number;
   bg?: number;
   attrs?: number;
@@ -33,8 +33,8 @@ interface GridSnapshot {
   cursorRow: number;
   cursorCol: number;
   unhandledActions: number;
-  // Stage 4 mode-tracking fields. Backend skips serializing each when
-  // it equals its default (cursorVisible=true, cursorKeysApp=false,
+  // Mode-tracking fields. Backend skips serializing each when it
+  // equals its default (cursorVisible=true, cursorKeysApp=false,
   // bracketedPaste=false), so a missing field means "default".
   cursorVisible?: boolean;
   cursorKeysApp?: boolean;
@@ -45,6 +45,30 @@ interface TerminalSnapshotGrid {
   seq: number;
   kind: "grid";
   payload: GridSnapshot;
+}
+
+/**
+ * Incremental update from terminal://grid-diff. Carries only the
+ * rows that changed since the last drain plus the current cursor +
+ * mode flags. The frontend applies the diff to its local grid
+ * signal and tracks the seq so it can detect a missed diff and
+ * resync via a full snapshot.
+ */
+interface GridDiffRow {
+  row: number;
+  cells: GridCell[];
+}
+interface GridDiffEvent {
+  bufferId: string;
+  seq: number;
+  rows: GridDiffRow[];
+  cursorRow: number;
+  cursorCol: number;
+  cursorVisible: boolean;
+  cursorKeysApp: boolean;
+  bracketedPaste: boolean;
+  rowsTotal: number;
+  colsTotal: number;
 }
 
 const CELL_FONT_FAMILY =
@@ -145,7 +169,7 @@ function resolveColor(
 
 /**
  * Pick the right canvas font string for a cell's bold/italic combo.
- * Stage 2.5 ignores Dim's font effect; we render Dim by halving the
+ * Dim's font effect is not used; we render Dim by halving the
  * foreground alpha at draw time instead of using a thin font weight.
  */
 function fontForAttrs(attrs: number): string {
@@ -156,29 +180,23 @@ function fontForAttrs(attrs: number): string {
   if (italic) return CELL_FONT_ITALIC;
   return CELL_FONT;
 }
-// 32ms = ~30fps. Stage 3 polls the grid via terminal_grid_snapshot on a
-// debounced trigger from terminal://output events. Stage 4 will swap this
-// for a Rust-side coalesced grid-diff event channel.
-const SNAPSHOT_DEBOUNCE_MS = 32;
-
 export const TerminalBuffer: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let surfaceRef: HTMLDivElement | undefined;
   const [grid, setGrid] = createSignal<GridSnapshot | null>(null);
+  // Last grid seq applied to the local grid signal. Diff events that
+  // are not exactly seq+1 trigger a full snapshot resync; the seq is
+  // monotonic per-feed in Rust so a gap means we missed an event.
+  const [gridSeq, setGridSeq] = createSignal(0);
   const [cellW, setCellW] = createSignal(0);
   const [cellH, setCellH] = createSignal(0);
 
-  let unlistenOutput: UnlistenFn | null = null;
+  let unlistenDiff: UnlistenFn | null = null;
   let resizeObserver: ResizeObserver | null = null;
-  let snapshotTimer: number | null = null;
+  // Snapshot fetch in flight - serialize to one outstanding so a burst
+  // of resync requests doesn't pile up IPC.
   let inFlightSnapshot = false;
-  // Set when a fetch is requested while one is already in flight. The
-  // in-flight fetch's `finally` re-arms the debounced timer so the
-  // latest grid state always lands on the canvas, even when the source
-  // event burst stops before the in-flight resolves. Without this a
-  // burst of `terminal://output` events that all collapse into a single
-  // bailed scheduleFetch leaves the canvas stale until the next chunk.
-  let pendingFetch = false;
+  let pendingResync = false;
 
   const buffer = createMemo(() =>
     terminalStore.getBuffer(threadStore.activeThreadId),
@@ -188,7 +206,7 @@ export const TerminalBuffer: Component = () => {
     const id = threadStore.activeThreadId;
     if (!id) return;
     if (inFlightSnapshot) {
-      pendingFetch = true;
+      pendingResync = true;
       return;
     }
     inFlightSnapshot = true;
@@ -199,24 +217,61 @@ export const TerminalBuffer: Component = () => {
       );
       if (snap.kind === "grid" && id === threadStore.activeThreadId) {
         setGrid(snap.payload);
+        setGridSeq(snap.seq);
       }
     } catch {
       // Buffer may have been killed between trigger and fetch.
     } finally {
       inFlightSnapshot = false;
-      if (pendingFetch) {
-        pendingFetch = false;
-        scheduleFetch();
+      if (pendingResync) {
+        pendingResync = false;
+        void fetchGridSnapshot();
       }
     }
   };
 
-  const scheduleFetch = () => {
-    if (snapshotTimer !== null) return;
-    snapshotTimer = window.setTimeout(() => {
-      snapshotTimer = null;
-      void fetchGridSnapshot();
-    }, SNAPSHOT_DEBOUNCE_MS);
+  /**
+   * Apply an incremental grid diff to the local grid signal. Returns
+   * true on success; false when the diff's seq doesn't match the
+   * expected next seq (caller should resync via fetchGridSnapshot).
+   */
+  const applyDiff = (diff: GridDiffEvent): boolean => {
+    const current = grid();
+    if (!current) return false;
+    if (diff.seq !== gridSeq() + 1) return false;
+    const dimsChanged =
+      diff.rowsTotal !== current.rows || diff.colsTotal !== current.cols;
+    let cells: GridCell[];
+    if (dimsChanged) {
+      // Resize: every row is dirty in this case so the diff carries
+      // enough info to rebuild from scratch.
+      cells = new Array(diff.rowsTotal * diff.colsTotal);
+      for (let i = 0; i < cells.length; i++) {
+        cells[i] = { ch: 0, width: 1 };
+      }
+    } else {
+      cells = current.cells.slice();
+    }
+    const cols = diff.colsTotal;
+    for (const row of diff.rows) {
+      const base = row.row * cols;
+      for (let i = 0; i < row.cells.length; i++) {
+        cells[base + i] = row.cells[i];
+      }
+    }
+    setGrid({
+      ...current,
+      rows: diff.rowsTotal,
+      cols: diff.colsTotal,
+      cells,
+      cursorRow: diff.cursorRow,
+      cursorCol: diff.cursorCol,
+      cursorVisible: diff.cursorVisible,
+      cursorKeysApp: diff.cursorKeysApp,
+      bracketedPaste: diff.bracketedPaste,
+    });
+    setGridSeq(diff.seq);
+    return true;
   };
 
   const measureCell = () => {
@@ -265,7 +320,10 @@ export const TerminalBuffer: Component = () => {
     if (current && current.cols === cols && current.rows === rows) {
       return;
     }
-    void terminalStore.resize(id, cols, rows).then(scheduleFetch);
+    // Resize bumps grid.seq on the Rust side and marks every row
+    // dirty; the next diff event carries the new dimensions. No need
+    // to manually fetch a snapshot afterwards.
+    void terminalStore.resize(id, cols, rows);
   };
 
   const clearCanvas = () => {
@@ -357,7 +415,7 @@ export const TerminalBuffer: Component = () => {
         const defaultFill = reverse ? COLOR_BG : COLOR_FG;
         const fill = resolveColor(fgPacked, defaultFill);
         // Dim halves alpha on the foreground; a real terminal would
-        // shift toward grey. Acceptable approximation for Stage 2.5.
+        // shift toward grey. Acceptable approximation.
         if ((attrs & ATTR_DIM) !== 0) {
           ctx.globalAlpha = 0.6;
         }
@@ -396,8 +454,8 @@ export const TerminalBuffer: Component = () => {
     // Cursor: inverted block at (cursorRow, cursorCol). For a wide
     // cursor cell, paint two columns wide so the cursor matches the
     // glyph. The cursor background overrides any cell bg below it.
-    // Stage 4: respect DECSET 25 (cursor_visible). Apps like vim, less,
-    // and tmux hide the cursor in alt-screen UI; default true when the
+    // Respect DECSET 25 (cursor_visible). Apps like vim, less, and
+    // tmux hide the cursor in alt-screen UI; default true when the
     // backend skip-serializes the field.
     const cursorVisible = g.cursorVisible ?? true;
     if (cursorVisible && g.cursorRow < g.rows && g.cursorCol < g.cols) {
@@ -424,11 +482,12 @@ export const TerminalBuffer: Component = () => {
     on(
       () => threadStore.activeThreadId,
       (id) => {
+        // Clear local grid + seq so a stale diff for the previous
+        // buffer can't apply to the new one. The fetch below seeds
+        // the new buffer's seq from the snapshot.
         setGrid(null);
+        setGridSeq(0);
         if (!id) return;
-        // Re-measure pushes resize; pushResize calls scheduleFetch on its
-        // own success. Always also do an immediate fetch so a switched-to
-        // idle buffer (no resize delta) still paints.
         pushResize();
         void fetchGridSnapshot();
       },
@@ -436,12 +495,12 @@ export const TerminalBuffer: Component = () => {
   );
 
   /**
-   * Translate a KeyboardEvent into the byte sequence the PTY expects and
-   * write it to the active buffer. Stage 3 minimum coverage: printable
-   * chars, Enter, Backspace, Tab, Esc, arrow keys (no DECCKM mode tracking
-   * yet so xterm-default sequences only), and Ctrl+C via the signal API.
-   * Stage 4 will swap this for terminput-driven encoding with full
-   * modifier and Kitty keyboard protocol support.
+   * Translate a KeyboardEvent into the byte sequence the PTY expects
+   * and write it to the active buffer. Covers printable chars, Enter,
+   * Backspace, Tab, Esc, arrow keys (DECCKM-aware), Home/End/PageUp/
+   * PageDown/Delete, Ctrl+letter chords, and Ctrl+C via the signal
+   * API. Modifier-rich combinations (Shift+Arrow etc.) and the Kitty
+   * keyboard protocol are not yet handled.
    */
   const handleKeyDown = async (event: KeyboardEvent) => {
     const current = buffer();
@@ -465,19 +524,18 @@ export const TerminalBuffer: Component = () => {
       return;
     }
 
-    // Stage 4: arrow keys + Home/End honor DECSET 1 (DECCKM application
-    // cursor keys) when the backend has it on. vim sets DECCKM as part
-    // of its alt-screen entry; without this branch its cursor keys do
+    // Arrow keys + Home/End honor DECSET 1 (DECCKM application cursor
+    // keys) when the backend has it on. vim sets DECCKM as part of
+    // its alt-screen entry; without this branch its cursor keys do
     // nothing. PageUp/PageDown/Delete are xterm tilde sequences
     // (`\x1b[5~`, `\x1b[6~`, `\x1b[3~`) and have no app-mode variants
     // in standard xterm, so they stay constant below.
     //
     // Modifier+arrow (Shift+Up, Ctrl+Up, etc.) currently falls through
     // to plain arrow encoding - the xterm modifyOtherKeys / CSI 1;mod
-    // sequences (e.g. `\x1b[1;5A` for Ctrl+Up) are deferred to the
-    // Stage 4 terminput integration. Apps that key off modifier+arrow
-    // (tmux pane resize, some vim plugins) will see only the bare
-    // arrow until then.
+    // sequences (e.g. `\x1b[1;5A` for Ctrl+Up) are not yet generated.
+    // Apps that key off modifier+arrow (tmux pane resize, some vim
+    // plugins) will see only the bare arrow.
     const decckm = grid()?.cursorKeysApp ?? false;
     const arrowPrefix = decckm ? "\x1bO" : "\x1b[";
 
@@ -537,13 +595,13 @@ export const TerminalBuffer: Component = () => {
   };
 
   /**
-   * Handle a paste from the clipboard. Stage 4: when DECSET 2004
-   * (bracketed paste) is on, wrap the pasted text in
-   * `\x1b[200~ ... \x1b[201~` so the receiving app can distinguish
-   * pasted content from typed input. Otherwise send the raw text.
-   * Strips a single embedded `\x1b[201~` from pasted content as a
-   * safety measure - apps would otherwise see a paste-end marker
-   * mid-content and treat the trailing bytes as typed.
+   * Handle a paste from the clipboard. When DECSET 2004 (bracketed
+   * paste) is on, wrap the pasted text in `\x1b[200~ ... \x1b[201~`
+   * so the receiving app can distinguish pasted content from typed
+   * input. Otherwise send the raw text. Strips embedded `\x1b[201~`
+   * markers from pasted content as a safety measure - apps would
+   * otherwise see a paste-end marker mid-content and treat the
+   * trailing bytes as typed.
    */
   const handlePaste = async (event: ClipboardEvent) => {
     const current = buffer();
@@ -580,14 +638,18 @@ export const TerminalBuffer: Component = () => {
     pushResize();
     void fetchGridSnapshot();
 
-    // Filter to the active buffer: a noisy background terminal would
-    // otherwise force repeated snapshots/repaints of the foreground
-    // terminal even though its grid hasn't changed.
-    unlistenOutput = await listen<{ bufferId: string }>(
-      "terminal://output",
+    // Subscribe to incremental grid diffs. Filter by active buffer
+    // (a background terminal's diffs are still emitted but the
+    // foreground canvas doesn't render them). On seq mismatch, fall
+    // back to a full snapshot fetch to resync.
+    unlistenDiff = await listen<GridDiffEvent>(
+      "terminal://grid-diff",
       (event) => {
-        if (event.payload.bufferId !== threadStore.activeThreadId) return;
-        scheduleFetch();
+        const diff = event.payload;
+        if (diff.bufferId !== threadStore.activeThreadId) return;
+        if (!applyDiff(diff)) {
+          void fetchGridSnapshot();
+        }
       },
     );
 
@@ -602,12 +664,8 @@ export const TerminalBuffer: Component = () => {
   });
 
   onCleanup(() => {
-    unlistenOutput?.();
+    unlistenDiff?.();
     resizeObserver?.disconnect();
-    if (snapshotTimer !== null) {
-      clearTimeout(snapshotTimer);
-      snapshotTimer = null;
-    }
   });
 
   return (

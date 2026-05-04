@@ -28,6 +28,13 @@ use uuid::Uuid;
 
 const TERMINAL_OUTPUT_EVENT: &str = "terminal://output";
 const TERMINAL_EXIT_EVENT: &str = "terminal://exit";
+/// Per-feed grid-diff event channel. The reader thread emits this
+/// after each `feed` if any rows were dirtied; the frontend canvas
+/// applies the diff to its local grid signal incrementally instead
+/// of re-fetching a full snapshot on every chunk. Snapshots remain
+/// the authoritative ground truth (used on initial mount + on seq
+/// mismatch).
+const TERMINAL_GRID_DIFF_EVENT: &str = "terminal://grid-diff";
 const TERMINAL_BUFFER_CAP: usize = 200_000;
 
 #[derive(Default)]
@@ -45,17 +52,16 @@ struct TerminalProcess {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Arc<Mutex<Box<dyn Child + Send>>>,
     output: Arc<Mutex<RawOutputBuffer>>,
-    /// Stage 2 parsed grid, fed in parallel with the raw output buffer. The
-    /// raw buffer remains the authoritative source for the existing <pre>
-    /// renderer; the grid is what Stage 3's canvas renderer will read.
+    /// Parsed grid, fed in parallel with the raw output buffer. The
+    /// raw buffer is kept as a future-affordance for selection / copy
+    /// semantics; the grid is what the canvas renderer reads.
     grid: Arc<Mutex<TerminalGrid>>,
 }
 
-/// Authoritative rolling buffer of decoded PTY output. Stage 1 holds raw text
-/// behind a sequence counter so the frontend can rehydrate after a remount
-/// without losing chunks that arrived between snapshot and event-listener
-/// install. Stage 2 will swap the body for parsed terminal grid state behind
-/// the same snapshot/diff API.
+/// Authoritative rolling buffer of decoded PTY output, holding raw
+/// text behind a sequence counter so the frontend can rehydrate after
+/// a remount without losing chunks that arrived between snapshot and
+/// event-listener install.
 struct RawOutputBuffer {
     data: String,
     seq: u32,
@@ -98,14 +104,15 @@ impl RawOutputBuffer {
     }
 }
 
-/// Stage 2 emulator grid. Owns a termwiz `Parser` that turns raw PTY bytes
-/// into structured `Action`s, and an apply loop that mutates a 2D cell grid.
-/// The action set we interpret is intentionally limited for Stage 2 (see
-/// `apply_action`); unhandled actions are dropped and noted in `unhandled`
-/// counters so we can grow coverage as Stage 3's renderer surfaces real
-/// output gaps. The parser is a pure function of byte history, so dropping
-/// an action only loses that one mutation - the next action that arrives
-/// applies cleanly against the current state.
+/// Emulator grid. Owns a termwiz `Parser` that turns raw PTY bytes
+/// into structured `Action`s, and an apply loop that mutates a 2D
+/// cell grid. The action interpreter is intentionally selective (see
+/// `apply_action`); deliberately-ignored actions are silently
+/// swallowed, while actions we'd want to handle but don't yet bump
+/// the `unhandled_actions` counter for diagnostics. The parser is a
+/// pure function of byte history, so dropping an action only loses
+/// that one mutation - the next action applies cleanly against the
+/// current state.
 struct TerminalGrid {
     parser: Parser,
     rows: u16,
@@ -116,9 +123,8 @@ struct TerminalGrid {
     cursor_row: u16,
     cursor_col: u16,
     seq: u32,
-    /// Counts actions we received but did not interpret. Surfaced in the
-    /// snapshot so Stage 3 can warn the user when the rendered grid is
-    /// expected to be incomplete versus the source PTY stream.
+    /// Counts actions we received but did not interpret. Carried in
+    /// the snapshot for diagnostics; not surfaced to the user.
     unhandled_actions: u32,
     /// Current SGR (Select Graphic Rendition) state. Each subsequent
     /// `write_char` stamps these onto the new cell. Reset by Sgr::Reset
@@ -126,7 +132,7 @@ struct TerminalGrid {
     current_fg: u32,
     current_bg: u32,
     current_attrs: u8,
-    // --- Stage 4 mode state -----------------------------------------
+    // --- Mode state -------------------------------------------------
     /// DECSET 25 - false hides the cursor (renderer must not paint it).
     cursor_visible: bool,
     /// DECSET 1 (DECCKM) - when true, arrow keys are expected in the
@@ -159,10 +165,10 @@ struct TerminalGrid {
     /// the terminal being incompatible.
     pending_responses: Vec<u8>,
     /// G0 / G1 character set designations and the currently shifted-in
-    /// set. Stage 4.4 honors DEC special-graphics line drawing so
-    /// older TUIs that emit `\x1b(0qqq` for box characters render the
-    /// real glyphs (U+250C / U+2500 / U+2510 corners and lines) instead
-    /// of literal letters.
+    /// set. We honor DEC special-graphics line drawing so older TUIs
+    /// that emit `\x1b(0qqq` for box characters render the real glyphs
+    /// (U+250C / U+2500 / U+2510 corners and lines) instead of literal
+    /// letters.
     g0_charset: CharSet,
     g1_charset: CharSet,
     /// false = G0 active (default), true = G1 active. Toggled by
@@ -174,6 +180,13 @@ struct TerminalGrid {
     /// mode) which matches xterm's default and what readline-based
     /// shells expect.
     insert_mode: bool,
+    /// Per-row dirty bitmap. `dirty_rows[r] == true` means row `r`'s
+    /// cells (or cursor presence) changed since the last `drain_diff`
+    /// call. The diff event ships only marked rows; cursor + mode
+    /// state are always included on every diff regardless of dirty
+    /// rows so the renderer never goes stale on a cursor move without
+    /// cell content changes.
+    dirty_rows: Vec<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -318,6 +331,48 @@ impl GridSnapshot {
     }
 }
 
+/// Incremental grid update. Carries only the rows that changed since
+/// the last `drain_diff` plus the current cursor + mode flags (always
+/// included, since they're tiny and the renderer needs them every
+/// tick to redraw the cursor and stay in sync with input-encoder
+/// state). Wire shape:
+///   { bufferId, seq, rows: [{row, cells}], cursorRow, cursorCol,
+///     cursorVisible, cursorKeysApp, bracketedPaste }
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridDiff {
+    /// Same monotonic counter as `GridSnapshot.seq` (TerminalGrid.seq).
+    /// Frontend tracks the last-applied seq; if a diff arrives where
+    /// `seq != last + 1` it re-fetches a full snapshot to resync.
+    pub seq: u32,
+    pub rows: Vec<DiffRow>,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+    pub cursor_visible: bool,
+    pub cursor_keys_app: bool,
+    pub bracketed_paste: bool,
+    /// Total grid dimensions. Included on every diff so a resize-only
+    /// change (which marks every row dirty but doesn't change cell
+    /// content) carries the new size to the renderer.
+    pub rows_total: u16,
+    pub cols_total: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffRow {
+    pub row: u16,
+    pub cells: Vec<GridCell>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GridDiffEvent {
+    buffer_id: String,
+    #[serde(flatten)]
+    diff: GridDiff,
+}
+
 impl TerminalGrid {
     fn new(rows: u16, cols: u16) -> Self {
         let rows = rows.max(1);
@@ -347,6 +402,10 @@ impl TerminalGrid {
             g1_charset: CharSet::Ascii,
             active_g1: false,
             insert_mode: false,
+            // Mark every row dirty initially so the first diff (or
+            // snapshot, if the consumer asked for that) carries the
+            // whole grid.
+            dirty_rows: vec![true; rows as usize],
         }
     }
 
@@ -389,11 +448,43 @@ impl TerminalGrid {
         }
     }
 
-    /// Resize the grid, preserving overlapping cells. New cells are blank,
-    /// dropped cells are gone. Cursor clamps to the new bounds. Bumps `seq`
-    /// because rows/cols/cells/cursor have all visibly changed - Stage 3's
-    /// snapshot/diff dedupe must observe a resize-only state change as a
-    /// new revision rather than a no-op tied to the last byte chunk's seq.
+    /// Drain the dirty-row bitmap into a `GridDiff`. Returns the diff
+    /// even when no rows are dirty (the cursor or modes may still have
+    /// changed) so the renderer always sees fresh cursor/mode state.
+    /// Clears the bitmap as a side effect; callers are expected to
+    /// call this exactly once per `feed`.
+    fn drain_diff(&mut self) -> GridDiff {
+        let mut rows = Vec::new();
+        for (r, dirty) in self.dirty_rows.iter().enumerate() {
+            if *dirty {
+                rows.push(DiffRow {
+                    row: r as u16,
+                    cells: self.cells[r].clone(),
+                });
+            }
+        }
+        for d in self.dirty_rows.iter_mut() {
+            *d = false;
+        }
+        GridDiff {
+            seq: self.seq,
+            rows,
+            cursor_row: self.cursor_row,
+            cursor_col: self.cursor_col,
+            cursor_visible: self.cursor_visible,
+            cursor_keys_app: self.cursor_keys_app,
+            bracketed_paste: self.bracketed_paste,
+            rows_total: self.rows,
+            cols_total: self.cols,
+        }
+    }
+
+    /// Resize the grid, preserving overlapping cells. New cells are
+    /// blank, dropped cells are gone. Cursor clamps to the new bounds.
+    /// Bumps `seq` because rows/cols/cells/cursor have all visibly
+    /// changed - the snapshot/diff dedupe must observe a resize-only
+    /// state change as a new revision rather than a no-op tied to the
+    /// last byte chunk's seq.
     fn resize(&mut self, rows: u16, cols: u16) {
         let rows = rows.max(1);
         let cols = cols.max(1);
@@ -425,7 +516,29 @@ impl TerminalGrid {
             saved.row = saved.row.min(rows.saturating_sub(1));
             saved.col = saved.col.min(cols.saturating_sub(1));
         }
+        // Resize visually changes the whole grid; mark every row dirty
+        // so the next diff (or snapshot fallback) carries the full new
+        // dimensions to the renderer.
+        self.dirty_rows = vec![true; rows as usize];
         self.seq = self.seq.wrapping_add(1);
+    }
+
+    /// Mark a single row as dirty so the next diff includes its cells.
+    /// Defensive bounds: silently skips if the row is out of range
+    /// rather than panicking.
+    fn mark_dirty(&mut self, row: u16) {
+        let r = row as usize;
+        if r < self.dirty_rows.len() {
+            self.dirty_rows[r] = true;
+        }
+    }
+
+    /// Mark every row dirty. Used by alt-screen toggle, full-screen
+    /// erase, and anything that touches all rows at once.
+    fn mark_all_dirty(&mut self) {
+        for d in self.dirty_rows.iter_mut() {
+            *d = true;
+        }
     }
 
     fn apply_action(&mut self, action: Action) {
@@ -455,13 +568,12 @@ impl TerminalGrid {
             Esc::Code(EscCode::DecRestoreCursorPosition) => self.restore_cursor(),
             // Application / normal keypad mode (ESC = / ESC >). Every
             // shell sends one or the other on startup; silently
-            // acknowledge so diagnostics stay focused. Stage 5 will track
-            // and consume the mode in the key encoder when we wire
-            // numeric-keypad-aware sequences.
+            // acknowledge so diagnostics stay focused. Numeric-keypad-
+            // aware sequences are not yet wired through the encoder.
             Esc::Code(EscCode::DecApplicationKeyPad) => {}
             Esc::Code(EscCode::DecNormalKeyPad) => {}
-            // Character set designation. Stage 4.4 actually tracks G0
-            // and G1 so DEC special-graphics line drawing renders as
+            // Character set designation. We track G0 and G1 so DEC
+            // special-graphics line drawing renders as
             // real box characters when the active set is shifted to
             // it. UK character set is treated as ASCII for our purposes
             // (the only difference is the # vs pound sign mapping
@@ -488,7 +600,7 @@ impl TerminalGrid {
             // implement a full RIS today (would need to reset every
             // mode + saved cursor + scroll region + alt screen + pen
             // + grid contents), but silently acknowledge so diagnostics
-            // don't count routine recovery noise. Stage 5 candidate.
+            // don't count routine recovery noise.
             Esc::Code(EscCode::FullReset) => {}
             _ => {
                 self.unhandled_actions = self.unhandled_actions.saturating_add(1);
@@ -496,14 +608,13 @@ impl TerminalGrid {
         }
     }
 
-    /// Acknowledge OS Command sequences. Stage 4.2 silently swallows the
-    /// common-and-known variants (titles, cwd, color theme set/reset,
-    /// hyperlinks, notifications, semantic prompts, vendor-proprietary)
-    /// without bumping `unhandled_actions` - every shell sends a handful
-    /// of these on startup and counting them as "unhandled" alarms users
-    /// when nothing visible is broken. Only `Unspecified` (an OSC
-    /// termwiz couldn't classify) bumps the counter, since that is what
-    /// "the emulator didn't recognize this" actually means.
+    /// Acknowledge OS Command sequences. The common-and-known variants
+    /// (titles, cwd, color theme set/reset, hyperlinks, notifications,
+    /// semantic prompts, vendor-proprietary) silently swallow without
+    /// bumping `unhandled_actions` - every shell sends a handful of
+    /// these on startup. Only `Unspecified` (an OSC termwiz couldn't
+    /// classify) bumps the counter, since that is what "the emulator
+    /// didn't recognize this" actually means.
     ///
     /// Future stages will lift title and cwd into TerminalGrid state so
     /// the frontend can surface them in the buffer's tab; for now the
@@ -557,12 +668,13 @@ impl TerminalGrid {
         };
         let width = UnicodeWidthChar::width(c).unwrap_or(1) as u16;
         if width == 0 {
-            // Combining marks / zero-width-joiner / variation selectors. A
-            // proper emulator merges these onto the previous cell as part of
-            // the same grapheme cluster; Stage 2's flat one-codepoint-per-
-            // cell DTO can't represent that yet, so we drop them rather
-            // than corrupting the next cell with an invisible mark.
-            // Counted so the gap is visible in snapshots.
+            // Combining marks / zero-width-joiner / variation
+            // selectors. A proper emulator merges these onto the
+            // previous cell as part of the same grapheme cluster; the
+            // flat one-codepoint-per-cell DTO can't represent that
+            // yet, so we drop them rather than corrupting the next
+            // cell with an invisible mark. Counted so the gap is
+            // visible in diagnostics.
             self.unhandled_actions = self.unhandled_actions.saturating_add(1);
             return;
         }
@@ -635,6 +747,8 @@ impl TerminalGrid {
                     attrs: self.current_attrs,
                 };
             }
+            // Mark this row dirty so the diff includes it.
+            self.mark_dirty(row as u16);
         }
         self.cursor_col = self.cursor_col.saturating_add(width);
     }
@@ -692,14 +806,14 @@ impl TerminalGrid {
         }
     }
 
-    /// Reply to terminal capability queries. Stage 4.1 covers the
-    /// queries every modern shell sends on startup: DA1 (`\x1b[c`),
-    /// DA2 (`\x1b[>c`), DA3 (`\x1b[=c`), DSR (`\x1b[5n`), and
-    /// XTVERSION (`\x1b[>q`). Without responses fish prints a 10s
-    /// timeout warning ("could not read response to Primary Device
-    /// Attribute query") and disables its progressive features.
-    /// SoftReset (DECSTR) and XtSmGraphics deferred to the unhandled
-    /// bucket - they don't gate startup the way the queries do.
+    /// Reply to terminal capability queries every modern shell sends
+    /// on startup: DA1 (`\x1b[c`), DA2 (`\x1b[>c`), DA3 (`\x1b[=c`),
+    /// DSR (`\x1b[5n`), and XTVERSION (`\x1b[>q`). Without responses
+    /// fish prints a 10s timeout warning ("could not read response to
+    /// Primary Device Attribute query") and disables its progressive
+    /// features. SoftReset (DECSTR) and XtSmGraphics fall through to
+    /// the unhandled bucket - they don't gate startup the way the
+    /// queries do.
     fn apply_device(&mut self, dev: termwiz::escape::csi::Device) {
         use termwiz::escape::csi::Device;
         match dev {
@@ -738,7 +852,7 @@ impl TerminalGrid {
         }
     }
 
-    /// Apply DEC private and ANSI mode set/reset. Stage 4 covers DECCKM
+    /// Apply DEC private and ANSI mode set/reset. We handle DECCKM
     /// (1, application cursor keys), ShowCursor (25), the alt-screen
     /// trio (47, 1047, 1049 - all collapsed to "switch to alt + clear"
     /// because that's what every modern TUI uses), and BracketedPaste
@@ -763,10 +877,10 @@ impl TerminalGrid {
             Mode::SaveDecPrivateMode(_) | Mode::RestoreDecPrivateMode(_) => {}
             // ANSI mode 4 (IRM): insert/replace toggle. When set, the
             // next character at the cursor pushes existing cells right
-            // instead of overwriting. Stage 4.4 honors this so non-
-            // readline line editors (mostly older shells, some custom
-            // REPLs) render correctly. KAM and SRM are silently
-            // swallowed since apps very rarely depend on them in 2024.
+            // instead of overwriting. We honor this so non-readline
+            // line editors (mostly older shells, some custom REPLs)
+            // render correctly. KAM and SRM are silently swallowed
+            // since apps very rarely depend on them in 2024.
             Mode::SetMode(TerminalMode::Code(TerminalModeCode::Insert)) => {
                 self.insert_mode = true;
             }
@@ -871,6 +985,9 @@ impl TerminalGrid {
         self.cursor_col = 0;
         self.scroll_top = 0;
         self.scroll_bottom = self.rows.saturating_sub(1);
+        // Whole grid swapped; the renderer's local copy is now stale
+        // for every row.
+        self.mark_all_dirty();
     }
 
     /// DECRST 1049 exit: drop alt cells, restore the saved main state.
@@ -890,14 +1007,16 @@ impl TerminalGrid {
             .saved_scroll_bottom
             .min(self.rows.saturating_sub(1));
         self.cursor_visible = alt.saved_cursor_visible;
+        self.mark_all_dirty();
     }
 
     /// Apply a Select Graphic Rendition update to the current pen state.
     /// Subsequent `write_char` calls stamp these onto each new cell.
-    /// Stage 2.5 covers Reset, Foreground, Background, Intensity (Bold +
-    /// Dim), Italic, Underline (any non-None counts), Inverse, and
+    /// We honor Reset, Foreground, Background, Intensity (Bold + Dim),
+    /// Italic, Underline (any non-None counts), Inverse, and
     /// StrikeThrough. Blink, Invisible, Font, UnderlineColor, Overline,
-    /// VerticalAlign go into the unhandled bucket.
+    /// VerticalAlign render correctly without the requested attribute
+    /// and silently swallow.
     fn apply_sgr(&mut self, sgr: Sgr) {
         match sgr {
             Sgr::Reset => {
@@ -926,10 +1045,10 @@ impl TerminalGrid {
                 self.current_attrs &= !ATTR_UNDERLINE;
             }
             Sgr::Underline(_) => {
-                // Stage 2.5 collapses all underline variants (Single,
-                // Double, Curly, Dotted, Dashed) to a single underline
-                // attr; the renderer draws one straight line under the
-                // cell. Per-style underlines are a Stage 4+ refinement.
+                // All underline variants (Single, Double, Curly,
+                // Dotted, Dashed) collapse to a single underline attr;
+                // the renderer draws one straight line under the cell.
+                // Per-style underlines are a future refinement.
                 self.current_attrs |= ATTR_UNDERLINE;
             }
             Sgr::Inverse(true) => self.current_attrs |= ATTR_REVERSE,
@@ -1018,8 +1137,8 @@ impl TerminalGrid {
             // DECSCUSR `\x1b[N q`: set cursor style (block / underline /
             // bar, blinking or steady). Fish sets a bar cursor in insert
             // mode on startup; vim toggles between styles by mode. We
-            // always render a steady block; silently acknowledge so the
-            // diagnostics stay focused. Stage 5 candidate for actually honoring.
+            // always render a steady block; silently acknowledge so
+            // diagnostics stay focused.
             Cursor::CursorStyle(_) => {}
             // CHT/CBT (forward/backward tab) and tabulation
             // set/clear/control. We don't track tab stops (cursor jumps
@@ -1120,6 +1239,7 @@ impl TerminalGrid {
                 }
             }
         }
+        self.mark_dirty(row as u16);
     }
 
     fn erase_in_display(&mut self, mode: EraseInDisplay) {
@@ -1132,6 +1252,7 @@ impl TerminalGrid {
                     for c in 0..self.cols as usize {
                         self.cells[r][c] = blank;
                     }
+                    self.mark_dirty(r as u16);
                 }
             }
             EraseInDisplay::EraseToStartOfDisplay => {
@@ -1140,6 +1261,7 @@ impl TerminalGrid {
                     for c in 0..self.cols as usize {
                         self.cells[r][c] = blank;
                     }
+                    self.mark_dirty(r as u16);
                 }
                 self.erase_in_line(EraseInLine::EraseToStartOfLine);
             }
@@ -1149,6 +1271,7 @@ impl TerminalGrid {
                         *cell = blank;
                     }
                 }
+                self.mark_all_dirty();
             }
         }
     }
@@ -1199,6 +1322,11 @@ impl TerminalGrid {
             self.cells.remove(top);
             self.cells.insert(bot, vec![blank; cols]);
         }
+        // Every row in the scroll region shifted; mark them all dirty
+        // so the diff carries the new contents.
+        for r in top..=bot.min(self.dirty_rows.len().saturating_sub(1)) {
+            self.dirty_rows[r] = true;
+        }
     }
 
     /// Scroll the DECSTBM region down by `n` rows. Lines outside the region
@@ -1218,6 +1346,9 @@ impl TerminalGrid {
             }
             self.cells.insert(top, vec![blank; cols]);
             self.cells.remove(bot + 1);
+        }
+        for r in top..=bot.min(self.dirty_rows.len().saturating_sub(1)) {
+            self.dirty_rows[r] = true;
         }
     }
 
@@ -1295,13 +1426,12 @@ struct TerminalExitEvent {
     buffer_id: String,
 }
 
-/// Versioned snapshot envelope. Stage 1 only emits `RawText`; Stage 2 will
-/// add a `Grid` variant carrying parsed cell state, cursor, modes, and
-/// image placements. The discriminator + payload split keeps that future
-/// addition from being a breaking IPC change for callers that already
-/// pattern-match on `kind`.
+/// Versioned snapshot envelope. The discriminator + payload split
+/// keeps adding new payload kinds (image placements etc.) from being
+/// a breaking IPC change for callers that already pattern-match on
+/// `kind`.
 ///
-/// Wire shape (Stage 1):
+/// Wire shape:
 ///   { "seq": 5, "kind": "raw-text", "payload": { "data": "..." } }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1315,7 +1445,7 @@ pub struct TerminalSnapshot {
 #[serde(tag = "kind", content = "payload", rename_all = "kebab-case")]
 pub enum TerminalSnapshotBody {
     RawText { data: String },
-    /// Stage 2: parsed grid. Wire shape:
+    /// Parsed grid. Wire shape:
     /// { kind: "grid", payload: { rows, cols, cells, cursorRow, cursorCol, unhandledActions } }
     Grid(GridSnapshot),
 }
@@ -1532,6 +1662,7 @@ pub fn terminal_write(
 
 #[tauri::command]
 pub fn terminal_resize(
+    app: AppHandle,
     state: State<'_, TerminalState>,
     buffer_id: String,
     cols: u16,
@@ -1559,11 +1690,29 @@ pub fn terminal_resize(
     process.info.rows = rows;
     process.info.updated_at = unix_millis();
     // Keep the parsed grid in sync with the PTY's WINSIZE so the renderer
-    // reads cells at the new dimensions on the next snapshot.
-    if let Ok(mut g) = process.grid.lock() {
+    // reads cells at the new dimensions on the next snapshot. Drain the
+    // diff under the same lock and emit it - the reader thread only
+    // emits diffs after a PTY read, so a resize that lands while the
+    // PTY is idle would otherwise leave the renderer drawing at the
+    // old dims until the next byte arrives. The grid.resize call bumps
+    // seq and marks every row dirty, so this diff carries the new
+    // dimensions and a full grid repaint to the renderer.
+    let diff = process.grid.lock().ok().map(|mut g| {
         g.resize(rows, cols);
+        g.drain_diff()
+    });
+    let info = process.info.clone();
+    drop(buffers);
+    if let Some(diff) = diff {
+        let _ = app.emit(
+            TERMINAL_GRID_DIFF_EVENT,
+            GridDiffEvent {
+                buffer_id: buffer_id.clone(),
+                diff,
+            },
+        );
     }
-    Ok(process.info.clone())
+    Ok(info)
 }
 
 #[tauri::command]
@@ -1619,10 +1768,11 @@ pub fn terminal_snapshot(
     Ok(snapshot)
 }
 
-/// Stage 2: returns the parsed grid snapshot. Stage 3's canvas renderer
-/// will call this on mount and then subscribe to grid diff events; the
-/// existing `terminal_snapshot` (raw text) stays alive so the current
-/// `<pre>` renderer keeps working unchanged during the migration.
+/// Returns the parsed grid snapshot. The frontend canvas calls this
+/// on mount + on diff-event seq mismatch, then subscribes to
+/// `terminal://grid-diff` events for incremental updates. The
+/// existing raw-text `terminal_snapshot` stays alive as a fallback
+/// data path.
 #[tauri::command]
 pub fn terminal_grid_snapshot(
     state: State<'_, TerminalState>,
@@ -1746,17 +1896,38 @@ fn spawn_reader_thread(
                         // partial-sequence carry internally and does not care
                         // about UTF-8 chunk boundaries). The grid mutation is
                         // independent of the raw-text path's UTF-8 buffering.
-                        // Drain any query responses (DA1, DSR, XTVERSION,
-                        // CPR) the emulator owes back to the PTY. Released
-                        // grid lock before taking the writer lock so a
-                        // blocked PTY write can't stall snapshot calls.
-                        let responses = grid
+                        // After feed: drain (a) the diff so the frontend can
+                        // apply incremental updates instead of re-fetching a
+                        // full snapshot, and (b) any query responses (DA1,
+                        // DSR, XTVERSION, CPR) the emulator owes back to
+                        // the PTY. Both drains happen under the same grid
+                        // lock; the writer lock is taken AFTER releasing
+                        // grid so a blocked PTY write can't stall snapshot
+                        // or diff callers.
+                        let (responses, diff) = grid
                             .lock()
                             .map(|mut g| {
                                 g.feed(&buf[..n]);
-                                g.drain_responses()
+                                (g.drain_responses(), g.drain_diff())
                             })
-                            .unwrap_or_default();
+                            .unwrap_or_else(|_| (Vec::new(), GridDiff {
+                                seq: 0,
+                                rows: Vec::new(),
+                                cursor_row: 0,
+                                cursor_col: 0,
+                                cursor_visible: true,
+                                cursor_keys_app: false,
+                                bracketed_paste: false,
+                                rows_total: 0,
+                                cols_total: 0,
+                            }));
+                        let _ = app.emit(
+                            TERMINAL_GRID_DIFF_EVENT,
+                            GridDiffEvent {
+                                buffer_id: buffer_id.clone(),
+                                diff,
+                            },
+                        );
                         if !responses.is_empty() {
                             if let Ok(mut w) = writer.lock() {
                                 let _ = w.write_all(&responses);
@@ -2129,8 +2300,8 @@ mod tests {
     #[test]
     fn snapshot_serializes_with_versioned_envelope() {
         // Wire shape contract: { seq, kind: "raw-text", payload: { data } }.
-        // Stage 2's grid variant will plug in as another `kind` without
-        // breaking callers that pattern-match on this discriminator.
+        // Other variants of the discriminator plug in as additional
+        // `kind` values without breaking callers that pattern-match.
         let mut buf = RawOutputBuffer::new(1024);
         buf.append("hello");
         let snap = buf.snapshot();
@@ -2138,9 +2309,9 @@ mod tests {
         assert_eq!(json["seq"], 1);
         assert_eq!(json["kind"], "raw-text");
         assert_eq!(json["payload"]["data"], "hello");
-        // The pre-1.5 flat shape (`{ seq, data }`) must NOT round-trip; if
-        // the envelope flattens accidentally callers won't notice until
-        // Stage 2 lands and breaks.
+        // The flat shape (`{ seq, data }`) must NOT round-trip; if the
+        // envelope flattens accidentally callers won't notice until a
+        // new variant is added.
         assert!(json.get("data").is_none());
     }
 
@@ -2327,8 +2498,8 @@ mod tests {
     #[test]
     fn grid_backspace_at_col_zero_holds() {
         // BS at the left margin must not underflow; cursor stays at col 0 and
-        // does not jump back to the previous row (we don't implement reverse
-        // wrap in Stage 2 - matches xterm default for plain BS).
+        // does not jump back to the previous row (no reverse wrap -
+        // matches xterm default for plain BS).
         let mut grid = TerminalGrid::new(2, 5);
         grid.feed(b"\nx\x08\x08\x08");
         let snap = grid.snapshot();
@@ -2407,9 +2578,9 @@ mod tests {
 
     #[test]
     fn grid_combining_mark_is_dropped_and_counted() {
-        // U+0301 (combining acute accent, width 0). Stage 2's flat cell DTO
-        // can't merge it with the previous cell, so we drop it and bump the
-        // unhandled counter rather than corrupting the grid.
+        // U+0301 (combining acute accent, width 0). The flat cell DTO
+        // can't merge it with the previous cell, so we drop it and
+        // bump the unhandled counter rather than corrupting the grid.
         let mut grid = TerminalGrid::new(1, 4);
         grid.feed("e\u{0301}".as_bytes());
         let snap = grid.snapshot();
@@ -2506,10 +2677,9 @@ mod tests {
 
     #[test]
     fn grid_erase_preserves_current_background() {
-        // xterm semantics: EL/ED stamp the current pen's background into
-        // erased cells (a TUI that paints a colored row then erases it must
-        // keep the color). Stage 2.5 originally erased to default-bg, which
-        // dropped the color; this test pins the corrected behavior.
+        // xterm semantics: EL/ED stamp the current pen's background
+        // into erased cells (a TUI that paints a colored row then
+        // erases it must keep the color).
         let mut grid = TerminalGrid::new(1, 6);
         // Set bg to ANSI red (palette 1), write "abc", then erase to EOL.
         grid.feed(b"\x1b[41mabc\x1b[K");
@@ -2538,8 +2708,8 @@ mod tests {
 
     #[test]
     fn grid_resize_bumps_seq() {
-        // Stage 3's snapshot/diff dedupe will key on seq; a resize-only
-        // state change (rows/cols/cursor clamp) must observe a new seq or
+        // The snapshot/diff dedupe keys on seq; a resize-only state
+        // change (rows/cols/cursor clamp) must observe a new seq or
         // dedupe will drop the visible change.
         let mut grid = TerminalGrid::new(3, 10);
         grid.feed(b"hi");
@@ -2554,11 +2724,11 @@ mod tests {
 
     #[test]
     fn grid_scroll_at_bottom_preserves_current_background() {
-        // Stage 2.5: line_feed at the bottom row scrolls and appends a
-        // blank line. That blank line must inherit current_bg, otherwise
-        // a TUI streaming colored output at the bottom row gets default-bg
-        // stripes whenever the scroll fires (same xterm/ECMA-48 invariant
-        // erase preserves).
+        // line_feed at the bottom row scrolls and appends a blank
+        // line. That blank line must inherit current_bg, otherwise a
+        // TUI streaming colored output at the bottom row gets
+        // default-bg stripes whenever the scroll fires (same
+        // xterm/ECMA-48 invariant erase preserves).
         let mut grid = TerminalGrid::new(2, 4);
         // Fill row 0 with a colored bg, scroll once via LF at bottom.
         grid.feed(b"\x1b[42mAAAA\r\nBBBB\r\n");
@@ -2632,7 +2802,7 @@ mod tests {
         assert_eq!(snap.cells[3].width, 1);
     }
 
-    // --- Stage 4 mode-tracking tests ---------------------------------
+    // --- Mode-tracking tests -----------------------------------------
 
     #[test]
     fn grid_decset_show_cursor_toggles_visibility() {
@@ -2861,7 +3031,7 @@ mod tests {
         assert_eq!(grid.cursor_col, 2);
     }
 
-    // --- Stage 4.1 device-query response tests -----------------------
+    // --- Device-query response tests ---------------------------------
 
     #[test]
     fn grid_da1_responds_with_vt220() {
@@ -2925,7 +3095,7 @@ mod tests {
         assert_eq!(snap.cells[1].ch, b'i' as u32);
     }
 
-    // --- Stage 4.4 DEC line drawing + IRM tests ----------------------
+    // --- DEC line drawing + IRM tests --------------------------------
 
     #[test]
     fn grid_dec_line_drawing_via_so_si_renders_box_glyphs() {
@@ -2992,5 +3162,105 @@ mod tests {
         // After insert: "abXcd". Cursor at col 3. Reset IRM. Write 'Y'
         // at col 3 in replace mode overwrites the 'c'.
         assert_eq!(row_string(&snap, 0), "abXYd");
+    }
+
+    // --- Grid-diff tests ---------------------------------------------
+
+    #[test]
+    fn grid_initial_drain_diff_marks_every_row() {
+        // Fresh grid has all rows dirty so the first diff carries the
+        // whole grid. After drain, all rows are clean.
+        let mut grid = TerminalGrid::new(3, 5);
+        let diff = grid.drain_diff();
+        assert_eq!(diff.rows.len(), 3);
+        assert_eq!(diff.rows_total, 3);
+        assert_eq!(diff.cols_total, 5);
+        // Second drain (no mutations) returns no rows but still
+        // includes cursor + mode state.
+        let diff2 = grid.drain_diff();
+        assert!(diff2.rows.is_empty());
+        assert_eq!(diff2.cursor_row, 0);
+        assert_eq!(diff2.cursor_col, 0);
+    }
+
+    #[test]
+    fn grid_write_marks_only_cursor_row_dirty() {
+        let mut grid = TerminalGrid::new(3, 5);
+        let _ = grid.drain_diff(); // clear initial all-dirty
+        grid.feed(b"hi");
+        let diff = grid.drain_diff();
+        // Only row 0 should be dirty; cursor stayed on row 0.
+        assert_eq!(diff.rows.len(), 1);
+        assert_eq!(diff.rows[0].row, 0);
+        assert_eq!(diff.rows[0].cells[0].ch, b'h' as u32);
+        assert_eq!(diff.rows[0].cells[1].ch, b'i' as u32);
+    }
+
+    #[test]
+    fn grid_line_feed_into_scroll_marks_all_region_rows_dirty() {
+        // Scroll-on-LF at the bottom row shifts every row in the
+        // region; the diff must carry them all so the renderer sees
+        // the shifted content.
+        let mut grid = TerminalGrid::new(3, 5);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC");
+        let _ = grid.drain_diff();
+        grid.feed(b"\r\n"); // CR then LF at bottom triggers scroll
+        let diff = grid.drain_diff();
+        // Default scroll region = full grid (0..=2). All three rows
+        // were rewritten by the scroll.
+        let dirty_rows: Vec<u16> = diff.rows.iter().map(|r| r.row).collect();
+        assert_eq!(dirty_rows, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn grid_resize_marks_every_row_dirty_and_carries_dims() {
+        let mut grid = TerminalGrid::new(3, 5);
+        grid.feed(b"x");
+        let _ = grid.drain_diff();
+        grid.resize(2, 4);
+        let diff = grid.drain_diff();
+        assert_eq!(diff.rows.len(), 2);
+        assert_eq!(diff.rows_total, 2);
+        assert_eq!(diff.cols_total, 4);
+    }
+
+    #[test]
+    fn grid_resize_diff_is_contiguous_with_prior_seq() {
+        // terminal_resize emits a diff inline so the renderer sees the
+        // new dims without waiting for the next PTY read. That diff's
+        // seq must be exactly prior_seq + 1 so the frontend's seq-gap
+        // check accepts it instead of triggering a resync.
+        let mut grid = TerminalGrid::new(3, 5);
+        grid.feed(b"x");
+        let prior = grid.drain_diff();
+        grid.resize(2, 4);
+        let diff = grid.drain_diff();
+        assert_eq!(diff.seq, prior.seq + 1);
+    }
+
+    #[test]
+    fn grid_diff_seq_matches_grid_seq() {
+        // The diff's seq must equal the grid's current seq so the
+        // frontend can detect a missed diff via simple seq math.
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"a");
+        let diff1 = grid.drain_diff();
+        assert_eq!(diff1.seq, grid.seq);
+        grid.feed(b"b");
+        let diff2 = grid.drain_diff();
+        assert_eq!(diff2.seq, grid.seq);
+        // feed bumps seq by exactly 1, so consecutive diffs are
+        // contiguous.
+        assert_eq!(diff2.seq, diff1.seq + 1);
+    }
+
+    #[test]
+    fn grid_diff_carries_current_mode_state() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?25l\x1b[?1h\x1b[?2004h");
+        let diff = grid.drain_diff();
+        assert!(!diff.cursor_visible);
+        assert!(diff.cursor_keys_app);
+        assert!(diff.bracketed_paste);
     }
 }
