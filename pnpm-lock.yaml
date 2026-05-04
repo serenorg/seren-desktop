@@ -12,8 +12,8 @@ importers:
         specifier: ^1.7.0
         version: 1.7.0
       '@playwright/mcp':
-        specifier: ^0.0.70
-        version: 0.0.70
+        specifier: ^0.0.73
+        version: 0.0.73
       '@tailwindcss/vite':
         specifier: '4'
         version: 4.2.4(vite@8.0.10(@types/node@25.6.0)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
@@ -975,8 +975,8 @@ packages:
     resolution: {integrity: sha512-IHnV6A+zxU7XwmKFinmYjUcwlyK9+xkG3/s9KcQhI9BjQKycrJ1JRO+FbNYPwZiPKW3je/DR0k7w8/gLa5eaxQ==}
     deprecated: 'The package is now available as "qr": npm install qr'
 
-  '@playwright/mcp@0.0.70':
-    resolution: {integrity: sha512-Kl0a6l9VL8rvT1oBou3hS5yArjwWV9UlwAkq+0skfK1YVg8XfmmNaAmwZhMeNx/ZhGiWXfCllo6rD/jvZz+WuA==}
+  '@playwright/mcp@0.0.73':
+    resolution: {integrity: sha512-2hq+nPq8esA3mi3bjEpBH5A3LkVqnSCJXw7NO2N7frJTzKsu8qdTQyvPl1jk83rPuIY6ALCdEBI60tdTODeNEA==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -3605,8 +3605,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  playwright-core@1.60.0-alpha-1774999321000:
-    resolution: {integrity: sha512-ams3Zo4VXxeOg5ZTTh16GkE8g48Bmxo/9pg9gXl9SVKlVohCU7Jaog7XntY8yFuzENA6dJc1Fz7Z/NNTm9nGEw==}
+  playwright-core@1.60.0-alpha-1777669338000:
+    resolution: {integrity: sha512-CbBF+YtjGGK2mWKdH6iiSNIB9v9Sq8owcUrTy1cw6FgMZavspM6ZSpidQQgQXz/1scQFrM110jrtJqTYwnjbeA==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -3615,8 +3615,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  playwright@1.60.0-alpha-1774999321000:
-    resolution: {integrity: sha512-Bd5DkzYKG+2g1jLO6NeTXmGLbBYSFffJIOsR4l4hUBkJvzvGGdLZ7jZb2tOtb0WIoWXQKdQj3Ap6WthV4DBS8w==}
+  playwright@1.60.0-alpha-1777669338000:
+    resolution: {integrity: sha512-r5G2ZvpIJZHj53GKmUfoQiXHix5bjeObqysV4flfmFNykTjebI9bwdRBuW37pOQP25yjbArkxlsnT5APaWT8zg==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -4207,10 +4207,12 @@ packages:
 
   uuid@8.3.2:
     resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   uuid@9.0.1:
     resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   valtio@1.13.2:
@@ -5500,10 +5502,10 @@ snapshots:
 
   '@paulmillr/qr@0.2.1': {}
 
-  '@playwright/mcp@0.0.70':
+  '@playwright/mcp@0.0.73':
     dependencies:
-      playwright: 1.60.0-alpha-1774999321000
-      playwright-core: 1.60.0-alpha-1774999321000
+      playwright: 1.60.0-alpha-1777669338000
+      playwright-core: 1.60.0-alpha-1777669338000
 
   '@playwright/test@1.59.1':
     dependencies:
@@ -9117,7 +9119,7 @@ snapshots:
 
   playwright-core@1.59.1: {}
 
-  playwright-core@1.60.0-alpha-1774999321000: {}
+  playwright-core@1.60.0-alpha-1777669338000: {}
 
   playwright@1.59.1:
     dependencies:
@@ -9125,9 +9127,9 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.2
 
-  playwright@1.60.0-alpha-1774999321000:
+  playwright@1.60.0-alpha-1777669338000:
     dependencies:
-      playwright-core: 1.60.0-alpha-1774999321000
+      playwright-core: 1.60.0-alpha-1777669338000
     optionalDependencies:
       fsevents: 2.3.2
 
