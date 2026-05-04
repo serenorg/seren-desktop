@@ -4,7 +4,7 @@
 import { API_BASE } from "@/lib/config";
 import { openExternalLink } from "@/lib/external-link";
 import { appFetch } from "@/lib/fetch";
-import { unwrapPublisherBody } from "@/lib/publisher-response";
+import { publisherStatus, unwrapPublisherBody } from "@/lib/publisher-response";
 import { shouldUseRustGatewayAuth } from "@/lib/tauri-fetch";
 import { getToken } from "@/services/auth";
 
@@ -89,6 +89,25 @@ export async function saveToSerenNotes(
     }
 
     const result = await response.json();
+
+    // Publisher-inner 408: Gateway returns transport 200 with the upstream
+    // status carried inside the {data:{status,body,cost}} envelope. The
+    // transport-408 branch above never fires for this case, so the original
+    // cold-start retry was a no-op every time. Treat inner 408 the same as
+    // transport 408 — and surface other inner-error statuses without
+    // attempting to extract a note id we know is not there.
+    const innerStatus = publisherStatus(result);
+    if (innerStatus === 408) {
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+        continue;
+      }
+      throw new Error("Seren Notes timed out");
+    }
+    if (innerStatus !== undefined && innerStatus >= 400) {
+      throw new Error(`Notes API returned ${innerStatus}`);
+    }
+
     // Try the documented envelope first; fall back to a tolerant walk that
     // covers proxy variants (string-encoded body, missing `status` key, extra
     // top-level siblings) so a saved note still resolves to a usable URL.
