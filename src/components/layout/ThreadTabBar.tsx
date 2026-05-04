@@ -216,7 +216,7 @@ export const ThreadTabBar: Component = () => {
                 }
               >
                 <span class="text-[13px] w-[18px] text-center">🤖</span>
-                Claude Agent
+                Claude Code Agent
               </button>
             </Show>
             <Show when={allowsCodexAgent(authStore.privateChatPolicy)}>

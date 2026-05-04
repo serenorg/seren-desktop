@@ -1632,7 +1632,7 @@ export const agentStore = {
         ? "Codex Agent"
         : resolvedAgentType === "gemini"
           ? "Gemini Agent"
-          : "Claude Agent");
+          : "Claude Code Agent");
 
     // Prevent concurrent spawns for the same conversation. Internal retries
     // (initRetryAttempt > 0) are allowed through because they are sequential
@@ -1797,7 +1797,7 @@ export const agentStore = {
                     ? "Gemini Agent"
                     : data.agentType === "codex"
                       ? "Codex Agent"
-                      : "Claude Agent"
+                      : "Claude Code Agent"
                 } again.`,
               );
               providerService

@@ -469,72 +469,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               </button>
             </Show>
 
-            <button
-              type="button"
-              class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-              onClick={() => void handleNewTerminal({ title: "Terminal" })}
-            >
-              <TerminalIcon />
-              <span class="font-medium">Terminal</span>
-            </button>
-
-            <button
-              type="button"
-              class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-              onClick={() =>
-                void handleNewTerminal({
-                  title: "Codex CLI",
-                  command: "codex",
-                })
-              }
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                role="img"
-                aria-label="Codex CLI"
-              >
-                <path d="M8 2.5l5 3v5l-5 3-5-3v-5l5-3z" />
-                <path d="M6 6.5h4M6 9.5h4" />
-              </svg>
-              <span class="font-medium">Codex CLI</span>
-            </button>
-
-            <button
-              type="button"
-              class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-              onClick={() =>
-                void handleNewTerminal({
-                  title: "Claude Code CLI",
-                  command: "claude",
-                })
-              }
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                role="img"
-                aria-label="Claude Code CLI"
-              >
-                <path d="M8 2.5l4.5 2.75v5.5L8 13.5l-4.5-2.75v-5.5L8 2.5z" />
-                <path d="M6.2 6.5h3.6v3H6.2z" />
-              </svg>
-              <span class="font-medium">Claude Code CLI</span>
-            </button>
-
-            {/* Claude Agent */}
+            {/* Claude Code Agent */}
             <Show
               when={
                 allowsClaudeAgent(authStore.privateChatPolicy) &&
@@ -559,7 +494,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                 }}
               >
                 <span class="text-[14px]">{"\u{1F916}"}</span>
-                <span class="font-medium">Claude Agent</span>
+                <span class="font-medium">Claude Code Agent</span>
               </button>
             </Show>
 
@@ -620,6 +555,60 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                 <span class="font-medium">Gemini Agent</span>
               </button>
             </Show>
+
+            {/* Terminal section - kept at the bottom of the launcher.
+                The CLI shortcuts are gated on the same availability
+                signal that gates the matching agent above. */}
+            <Show
+              when={agentStore.availableAgents.some(
+                (a) => a.type === "claude-code" && a.available,
+              )}
+            >
+              <button
+                type="button"
+                class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                onClick={() =>
+                  void handleNewTerminal({
+                    title: "Claude Code CLI",
+                    command: "claude",
+                  })
+                }
+              >
+                <span class="text-[14px]">{"\u{1F916}"}</span>
+                <span class="font-medium">Claude Code CLI</span>
+                <TerminalIcon size={11} />
+              </button>
+            </Show>
+
+            <Show
+              when={agentStore.availableAgents.some(
+                (a) => a.type === "codex" && a.available,
+              )}
+            >
+              <button
+                type="button"
+                class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                onClick={() =>
+                  void handleNewTerminal({
+                    title: "Codex CLI",
+                    command: "codex",
+                  })
+                }
+              >
+                <span class="text-[14px]">{"⚡"}</span>
+                <span class="font-medium">Codex CLI</span>
+                <TerminalIcon size={11} />
+              </button>
+            </Show>
+
+            <button
+              type="button"
+              class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+              onClick={() => void handleNewTerminal({ title: "Terminal" })}
+            >
+              <TerminalIcon />
+              <span class="font-medium">Terminal</span>
+            </button>
           </div>
         </Show>
       </div>
