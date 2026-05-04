@@ -4501,11 +4501,17 @@ Structured summary:`;
               sess?.info?.agentType ?? "",
               sess?.currentModelId,
             );
-            if (
-              !sess?.contextWindowMismatchReported &&
+            // The denominator of the auto-compact gauge. Mirror of the
+            // cache-layer guard in modelContextCache.ts (#1769) at the
+            // in-memory layer: when the CLI echoes a sub-1M window for a
+            // [1m]-suffixed session, refuse the in-memory overwrite so the
+            // spawn-time 1M denominator survives the whole session. Without
+            // this, compaction fires at ~178K (89% of 200K) instead of
+            // ~890K — exactly 5x too early — for every 1M-tier user. #1798.
+            const isOneMTierMismatch =
               expectedFromPicker > reportedContextWindow &&
-              /\[1m\]$/i.test(sess?.currentModelId ?? "")
-            ) {
+              /\[1m\]$/i.test(sess?.currentModelId ?? "");
+            if (isOneMTierMismatch && !sess?.contextWindowMismatchReported) {
               setState(
                 "sessions",
                 sessionId,
@@ -4523,23 +4529,25 @@ Structured summary:`;
                 },
               });
             }
-            setState(
-              "sessions",
-              sessionId,
-              "contextWindowSize",
-              reportedContextWindow,
-            );
-            // Persist (provider, modelId) -> contextWindow so next spawn of
-            // this model starts with the correct value instead of the
-            // agent-type default. Fire-and-forget; failures are non-fatal.
-            const modelKey = sess?.currentModelId;
-            const provider = sess?.info?.agentType;
-            if (modelKey && provider) {
-              void recordModelContextWindow(
-                provider,
-                modelKey,
+            if (!isOneMTierMismatch) {
+              setState(
+                "sessions",
+                sessionId,
+                "contextWindowSize",
                 reportedContextWindow,
               );
+              // Persist (provider, modelId) -> contextWindow so next spawn of
+              // this model starts with the correct value instead of the
+              // agent-type default. Fire-and-forget; failures are non-fatal.
+              const modelKey = sess?.currentModelId;
+              const provider = sess?.info?.agentType;
+              if (modelKey && provider) {
+                void recordModelContextWindow(
+                  provider,
+                  modelKey,
+                  reportedContextWindow,
+                );
+              }
             }
           }
           if (inputTokens != null) {
