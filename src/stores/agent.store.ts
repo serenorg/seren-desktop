@@ -2923,14 +2923,23 @@ export const agentStore = {
 
       // Generate a structured summary via Gateway API (not via the agent —
       // its context is what's overloaded). Uses a hard-capped schema to keep
-      // the summary under 200 tokens, down from ~700 with freeform "500 words".
+      // the summary under ~200 tokens, down from ~700 with freeform "500 words".
       // This reduces prompt tokens on every subsequent call by ~70%.
-      const summaryPrompt = `Summarize this AI agent conversation into EXACTLY this structured format. Each field must be 1-2 short sentences max. Total output must be under 150 tokens.
+      //
+      // #1800 — anti-fabrication: the prior single-bucket state field and
+      // unconstrained file-mention field invited the model to collapse
+      // intent expressed during the conversation into claims about
+      // completed artifacts on disk. Replace them with explicit
+      // evidence-bucketed fields and require an explicit "none" when empty,
+      // so the model can no longer satisfy the template shape with
+      // confabulations. The `NEXT:` agent-action wording from #1733 is kept.
+      const summaryPrompt = `Summarize this AI agent conversation into EXACTLY this structured format. Each field must be 1-2 short sentences max. Total output must be under 200 tokens. If a field has nothing to report, write 'none' — DO NOT invent content to fill the shape.
 
 GOAL: <what the user is trying to accomplish>
-FILES: <files created or modified, comma-separated paths only>
+FILES_TOUCHED: <files actually created or modified by tool calls executed in this conversation; comma-separated paths only; write 'none' if no file-mutating tool call ran>
 DECISIONS: <key technical decisions made>
-STATE: <what is done vs in progress>
+DONE: <only items with explicit verifiable artifacts; format 'item — at <path or db.table>'; write 'none' if no artifact has been produced>
+DISCUSSED_NOT_DONE: <intent statements, plans, todos with no artifact yet; write 'none' if everything discussed has been done>
 NEXT: <what the agent should do next to continue the work>
 
 Conversation:
@@ -2959,6 +2968,15 @@ Structured summary:`;
           throw firstErr;
         }
       }
+
+      // Post-generation verify-before-acting banner. Travels with `summary`
+      // itself so BOTH downstream consumers carry it: the seed-prompt path
+      // a few lines below AND the synthetic-transcript JSONL path that
+      // `buildSyntheticTranscript()` writes to disk. A banner placed only
+      // on the seedPrompt would miss the synthetic path entirely (which is
+      // the default for claude-code agents, gated by
+      // `compactSyntheticTranscript`). #1800.
+      summary = `${summary.trim()}\n\nVERIFY-BEFORE-ACTING: Files, projects, and databases mentioned above may not exist on disk. Re-read the workspace, list .worktrees/, and resolve SerenDB projects/tables before acting on any claim.`;
 
       const compactedSummary: AgentCompactedSummary = {
         content: summary,
