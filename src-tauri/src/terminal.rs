@@ -8,9 +8,12 @@ use std::{
     env,
     io::{Read, Write},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use termwiz::cell::Intensity;
@@ -26,16 +29,21 @@ use termwiz::escape::{
 use unicode_width::UnicodeWidthChar;
 use uuid::Uuid;
 
-const TERMINAL_OUTPUT_EVENT: &str = "terminal://output";
 const TERMINAL_EXIT_EVENT: &str = "terminal://exit";
-/// Per-feed grid-diff event channel. The reader thread emits this
-/// after each `feed` if any rows were dirtied; the frontend canvas
-/// applies the diff to its local grid signal incrementally instead
-/// of re-fetching a full snapshot on every chunk. Snapshots remain
-/// the authoritative ground truth (used on initial mount + on seq
-/// mismatch).
+/// Coalesced grid-diff event channel. The reader thread feeds the grid
+/// as bytes arrive; a separate emitter drains dirty rows at a bounded
+/// cadence and the frontend applies the diff to its local grid signal
+/// incrementally. Snapshots remain the authoritative ground truth (used
+/// on initial mount + on seq mismatch).
 const TERMINAL_GRID_DIFF_EVENT: &str = "terminal://grid-diff";
-const TERMINAL_BUFFER_CAP: usize = 200_000;
+/// Minimum interval between grid-diff emits. The reader thread feeds
+/// the grid as fast as the PTY produces bytes, but a separate emitter
+/// thread drains + emits at most once per tick. A torrent of output
+/// (`find ~/big-tree`, `yes`, large build logs) coalesces into a
+/// bounded ~60 events/sec instead of saturating the IPC channel.
+/// drain_diff naturally returns the union of all rows dirtied since
+/// the last drain, so collapsing N feeds into one diff is lossless.
+const GRID_DIFF_INTERVAL: Duration = Duration::from_millis(16);
 
 #[derive(Default)]
 pub struct TerminalState {
@@ -51,57 +59,8 @@ struct TerminalProcess {
     // command (snapshot, resize, signal, list, kill) across all buffers.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Arc<Mutex<Box<dyn Child + Send>>>,
-    output: Arc<Mutex<RawOutputBuffer>>,
-    /// Parsed grid, fed in parallel with the raw output buffer. The
-    /// raw buffer is kept as a future-affordance for selection / copy
-    /// semantics; the grid is what the canvas renderer reads.
+    /// Parsed terminal grid consumed by the canvas renderer.
     grid: Arc<Mutex<TerminalGrid>>,
-}
-
-/// Authoritative rolling buffer of decoded PTY output, holding raw
-/// text behind a sequence counter so the frontend can rehydrate after
-/// a remount without losing chunks that arrived between snapshot and
-/// event-listener install.
-struct RawOutputBuffer {
-    data: String,
-    seq: u32,
-    cap: usize,
-}
-
-impl RawOutputBuffer {
-    fn new(cap: usize) -> Self {
-        Self {
-            data: String::new(),
-            seq: 0,
-            cap,
-        }
-    }
-
-    /// Append a chunk and return the new sequence number. Trims the head when
-    /// the buffer exceeds `cap`, aligning the new start to a UTF-8 char
-    /// boundary so subsequent slices stay valid.
-    fn append(&mut self, chunk: &str) -> u32 {
-        self.data.push_str(chunk);
-        if self.data.len() > self.cap {
-            let target_start = self.data.len() - self.cap;
-            let mut start = target_start;
-            while start < self.data.len() && !self.data.is_char_boundary(start) {
-                start += 1;
-            }
-            self.data.replace_range(..start, "");
-        }
-        self.seq = self.seq.wrapping_add(1);
-        self.seq
-    }
-
-    fn snapshot(&self) -> TerminalSnapshot {
-        TerminalSnapshot {
-            seq: self.seq,
-            body: TerminalSnapshotBody::RawText {
-                data: self.data.clone(),
-            },
-        }
-    }
 }
 
 /// Emulator grid. Owns a termwiz `Parser` that turns raw PTY bytes
@@ -120,6 +79,10 @@ struct TerminalGrid {
     /// Active screen cells. Either the main screen or the alternate
     /// screen depending on whether `alt_state` is set.
     cells: Vec<Vec<GridCell>>,
+    /// Scroll operations since the last diff drain. These let the
+    /// frontend shift clean rows locally and receive only rows whose
+    /// cell content actually changed.
+    pending_scrolls: Vec<GridScroll>,
     cursor_row: u16,
     cursor_col: u16,
     seq: u32,
@@ -187,6 +150,10 @@ struct TerminalGrid {
     /// rows so the renderer never goes stale on a cursor move without
     /// cell content changes.
     dirty_rows: Vec<bool>,
+    /// Grid seq included by the previous diff drain. A coalesced diff may
+    /// cover many feed seqs; the frontend accepts it when its local seq is
+    /// at or after this base.
+    last_diff_seq: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -336,15 +303,20 @@ impl GridSnapshot {
 /// included, since they're tiny and the renderer needs them every
 /// tick to redraw the cursor and stay in sync with input-encoder
 /// state). Wire shape:
-///   { bufferId, seq, rows: [{row, cells}], cursorRow, cursorCol,
-///     cursorVisible, cursorKeysApp, bracketedPaste }
+///   { bufferId, baseSeq, seq, scrolls, rows: [{row, cells}], cursorRow,
+///     cursorCol, cursorVisible, cursorKeysApp, bracketedPaste }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GridDiff {
+    /// Grid seq included by the previous diff drain. A coalesced diff covers
+    /// `(base_seq, seq]`; consumers with local seq >= base_seq can apply it.
+    pub base_seq: u32,
     /// Same monotonic counter as `GridSnapshot.seq` (TerminalGrid.seq).
-    /// Frontend tracks the last-applied seq; if a diff arrives where
-    /// `seq != last + 1` it re-fetches a full snapshot to resync.
+    /// Frontend tracks the last-applied seq; if it is older than base_seq,
+    /// it re-fetches a full snapshot to resync.
     pub seq: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scrolls: Vec<GridScroll>,
     pub rows: Vec<DiffRow>,
     pub cursor_row: u16,
     pub cursor_col: u16,
@@ -365,12 +337,33 @@ pub struct DiffRow {
     pub cells: Vec<GridCell>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridScroll {
+    pub top: u16,
+    pub bottom: u16,
+    /// Positive values scroll the region up; negative values scroll down.
+    pub delta: i16,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GridDiffEvent {
     buffer_id: String,
     #[serde(flatten)]
     diff: GridDiff,
+}
+
+fn diff_has_changes(diff: &GridDiff) -> bool {
+    diff.seq != diff.base_seq || !diff.rows.is_empty()
+}
+
+struct ClearAliveOnDrop(Arc<AtomicBool>);
+
+impl Drop for ClearAliveOnDrop {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 impl TerminalGrid {
@@ -383,6 +376,7 @@ impl TerminalGrid {
             rows,
             cols,
             cells,
+            pending_scrolls: Vec::new(),
             cursor_row: 0,
             cursor_col: 0,
             seq: 0,
@@ -406,6 +400,7 @@ impl TerminalGrid {
             // snapshot, if the consumer asked for that) carries the
             // whole grid.
             dirty_rows: vec![true; rows as usize],
+            last_diff_seq: 0,
         }
     }
 
@@ -417,9 +412,8 @@ impl TerminalGrid {
     }
 
     /// Parse `bytes` and apply each emitted Action against the grid. Each
-    /// chunk increments seq once regardless of how many actions it produced
-    /// so callers can dedupe at chunk granularity (matches the RawOutputBuffer
-    /// model).
+    /// chunk increments seq once regardless of how many actions it produced,
+    /// giving snapshots and diffs a common monotonic version.
     fn feed(&mut self, bytes: &[u8]) {
         let mut actions: Vec<Action> = Vec::new();
         self.parser
@@ -451,9 +445,12 @@ impl TerminalGrid {
     /// Drain the dirty-row bitmap into a `GridDiff`. Returns the diff
     /// even when no rows are dirty (the cursor or modes may still have
     /// changed) so the renderer always sees fresh cursor/mode state.
-    /// Clears the bitmap as a side effect; callers are expected to
-    /// call this exactly once per `feed`.
+    /// Clears the bitmap as a side effect and advances `last_diff_seq`.
+    /// A single diff may cover many feed seqs when the emitter coalesces
+    /// high-throughput output.
     fn drain_diff(&mut self) -> GridDiff {
+        let base_seq = self.last_diff_seq;
+        let scrolls = std::mem::take(&mut self.pending_scrolls);
         let mut rows = Vec::new();
         for (r, dirty) in self.dirty_rows.iter().enumerate() {
             if *dirty {
@@ -466,8 +463,11 @@ impl TerminalGrid {
         for d in self.dirty_rows.iter_mut() {
             *d = false;
         }
+        self.last_diff_seq = self.seq;
         GridDiff {
+            base_seq,
             seq: self.seq,
+            scrolls,
             rows,
             cursor_row: self.cursor_row,
             cursor_col: self.cursor_col,
@@ -519,6 +519,7 @@ impl TerminalGrid {
         // Resize visually changes the whole grid; mark every row dirty
         // so the next diff (or snapshot fallback) carries the full new
         // dimensions to the renderer.
+        self.pending_scrolls.clear();
         self.dirty_rows = vec![true; rows as usize];
         self.seq = self.seq.wrapping_add(1);
     }
@@ -536,9 +537,26 @@ impl TerminalGrid {
     /// Mark every row dirty. Used by alt-screen toggle, full-screen
     /// erase, and anything that touches all rows at once.
     fn mark_all_dirty(&mut self) {
+        self.pending_scrolls.clear();
         for d in self.dirty_rows.iter_mut() {
             *d = true;
         }
+    }
+
+    fn push_scroll(&mut self, top: u16, bottom: u16, delta: i16) {
+        if delta == 0 {
+            return;
+        }
+        if let Some(last) = self.pending_scrolls.last_mut() {
+            if last.top == top
+                && last.bottom == bottom
+                && last.delta.signum() == delta.signum()
+            {
+                last.delta = last.delta.saturating_add(delta);
+                return;
+            }
+        }
+        self.pending_scrolls.push(GridScroll { top, bottom, delta });
     }
 
     fn apply_action(&mut self, action: Action) {
@@ -1315,17 +1333,23 @@ impl TerminalGrid {
         let cols = self.cols as usize;
         let top = self.scroll_top as usize;
         let bot = self.scroll_bottom as usize;
-        for _ in 0..n {
+        let height = bot.saturating_sub(top).saturating_add(1);
+        let count = (n as usize).min(height);
+        for _ in 0..count {
             if bot >= self.cells.len() {
                 break;
             }
             self.cells.remove(top);
             self.cells.insert(bot, vec![blank; cols]);
+            self.dirty_rows.remove(top);
+            self.dirty_rows.insert(bot, true);
         }
-        // Every row in the scroll region shifted; mark them all dirty
-        // so the diff carries the new contents.
-        for r in top..=bot.min(self.dirty_rows.len().saturating_sub(1)) {
-            self.dirty_rows[r] = true;
+        if count > 0 {
+            self.push_scroll(
+                self.scroll_top,
+                self.scroll_bottom,
+                (count.min(i16::MAX as usize)) as i16,
+            );
         }
     }
 
@@ -1340,15 +1364,23 @@ impl TerminalGrid {
         let cols = self.cols as usize;
         let top = self.scroll_top as usize;
         let bot = self.scroll_bottom as usize;
-        for _ in 0..n {
+        let height = bot.saturating_sub(top).saturating_add(1);
+        let count = (n as usize).min(height);
+        for _ in 0..count {
             if bot >= self.cells.len() {
                 break;
             }
             self.cells.insert(top, vec![blank; cols]);
             self.cells.remove(bot + 1);
+            self.dirty_rows.insert(top, true);
+            self.dirty_rows.remove(bot + 1);
         }
-        for r in top..=bot.min(self.dirty_rows.len().saturating_sub(1)) {
-            self.dirty_rows[r] = true;
+        if count > 0 {
+            self.push_scroll(
+                self.scroll_top,
+                self.scroll_bottom,
+                -((count.min(i16::MAX as usize)) as i16),
+            );
         }
     }
 
@@ -1414,14 +1446,6 @@ pub struct CreateTerminalBufferRequest {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TerminalOutputEvent {
-    buffer_id: String,
-    seq: u32,
-    data: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct TerminalExitEvent {
     buffer_id: String,
 }
@@ -1432,7 +1456,7 @@ struct TerminalExitEvent {
 /// `kind`.
 ///
 /// Wire shape:
-///   { "seq": 5, "kind": "raw-text", "payload": { "data": "..." } }
+///   { "seq": 5, "kind": "grid", "payload": { ... } }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSnapshot {
@@ -1444,7 +1468,6 @@ pub struct TerminalSnapshot {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "kebab-case")]
 pub enum TerminalSnapshotBody {
-    RawText { data: String },
     /// Parsed grid. Wire shape:
     /// { kind: "grid", payload: { rows, cols, cells, cursorRow, cursorCol, unhandledActions } }
     Grid(GridSnapshot),
@@ -1570,7 +1593,6 @@ pub fn terminal_create_buffer(
         updated_at: created_at,
     };
 
-    let output = Arc::new(Mutex::new(RawOutputBuffer::new(TERMINAL_BUFFER_CAP)));
     let grid = Arc::new(Mutex::new(TerminalGrid::new(rows, cols)));
     let writer_arc = Arc::new(Mutex::new(writer));
 
@@ -1591,7 +1613,6 @@ pub fn terminal_create_buffer(
                 master: pair.master,
                 writer: Arc::clone(&writer_arc),
                 child: Arc::new(Mutex::new(child)),
-                output: Arc::clone(&output),
                 grid: Arc::clone(&grid),
             },
         );
@@ -1600,9 +1621,7 @@ pub fn terminal_create_buffer(
     // Pass the writer Arc to the reader thread too so it can write
     // emulator query responses (DA1, DSR, XTVERSION) back to the PTY
     // without going through the global buffers lock.
-    if let Err(spawn_err) =
-        spawn_reader_thread(app.clone(), id.clone(), reader, output, grid, writer_arc)
-    {
+    if let Err(spawn_err) = spawn_reader_thread(app.clone(), id.clone(), reader, grid, writer_arc) {
         if let Ok(mut buffers) = state.buffers.lock() {
             if let Some(rolled_back) = buffers.remove(&id) {
                 if let Ok(mut child) = rolled_back.child.lock() {
@@ -1703,7 +1722,7 @@ pub fn terminal_resize(
     });
     let info = process.info.clone();
     drop(buffers);
-    if let Some(diff) = diff {
+    if let Some(diff) = diff.filter(diff_has_changes) {
         let _ = app.emit(
             TERMINAL_GRID_DIFF_EVENT,
             GridDiffEvent {
@@ -1746,33 +1765,9 @@ pub fn terminal_kill(
     Ok(())
 }
 
-#[tauri::command]
-pub fn terminal_snapshot(
-    state: State<'_, TerminalState>,
-    buffer_id: String,
-) -> Result<TerminalSnapshot, String> {
-    let buffers = state
-        .buffers
-        .lock()
-        .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
-    let process = buffers
-        .get(&buffer_id)
-        .ok_or_else(|| format!("Terminal buffer not found: {buffer_id}"))?;
-    let output = Arc::clone(&process.output);
-    drop(buffers);
-
-    let snapshot = output
-        .lock()
-        .map(|buffer| buffer.snapshot())
-        .map_err(|err| format!("Terminal output mutex poisoned: {err}"))?;
-    Ok(snapshot)
-}
-
 /// Returns the parsed grid snapshot. The frontend canvas calls this
 /// on mount + on diff-event seq mismatch, then subscribes to
-/// `terminal://grid-diff` events for incremental updates. The
-/// existing raw-text `terminal_snapshot` stays alive as a fallback
-/// data path.
+/// `terminal://grid-diff` events for incremental updates.
 #[tauri::command]
 pub fn terminal_grid_snapshot(
     state: State<'_, TerminalState>,
@@ -1876,51 +1871,37 @@ fn spawn_reader_thread(
     app: AppHandle,
     buffer_id: String,
     mut reader: Box<dyn Read + Send>,
-    output: Arc<Mutex<RawOutputBuffer>>,
     grid: Arc<Mutex<TerminalGrid>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
 ) -> std::io::Result<()> {
-    thread::Builder::new()
-        .name(format!("terminal-reader-{buffer_id}"))
-        .spawn(move || {
-            let mut buf = [0u8; 8192];
-            // Carries trailing bytes that look like an incomplete UTF-8 sequence
-            // across PTY reads, so multi-byte characters split at chunk boundaries
-            // do not surface as replacement characters.
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        // Feed the parser the RAW bytes (it manages its own
-                        // partial-sequence carry internally and does not care
-                        // about UTF-8 chunk boundaries). The grid mutation is
-                        // independent of the raw-text path's UTF-8 buffering.
-                        // After feed: drain (a) the diff so the frontend can
-                        // apply incremental updates instead of re-fetching a
-                        // full snapshot, and (b) any query responses (DA1,
-                        // DSR, XTVERSION, CPR) the emulator owes back to
-                        // the PTY. Both drains happen under the same grid
-                        // lock; the writer lock is taken AFTER releasing
-                        // grid so a blocked PTY write can't stall snapshot
-                        // or diff callers.
-                        let (responses, diff) = grid
-                            .lock()
-                            .map(|mut g| {
-                                g.feed(&buf[..n]);
-                                (g.drain_responses(), g.drain_diff())
-                            })
-                            .unwrap_or_else(|_| (Vec::new(), GridDiff {
-                                seq: 0,
-                                rows: Vec::new(),
-                                cursor_row: 0,
-                                cursor_col: 0,
-                                cursor_visible: true,
-                                cursor_keys_app: false,
-                                bracketed_paste: false,
-                                rows_total: 0,
-                                cols_total: 0,
-                            }));
+    // Coordinated shutdown + diff coalescing flags shared with the
+    // emitter thread spawned below. `pending_diff` is set after every
+    // feed; the emitter swaps it false when it drains. `reader_alive`
+    // is cleared on EOF so the emitter exits its tick loop instead of
+    // running forever.
+    let pending_diff = Arc::new(AtomicBool::new(false));
+    let reader_alive = Arc::new(AtomicBool::new(true));
+
+    // Spawn the diff-emitter first. It owns the cadence: drains the
+    // grid + emits a diff event at most every GRID_DIFF_INTERVAL.
+    // Multiple feeds in one tick collapse because drain_diff returns
+    // the union of all rows dirtied since the last drain.
+    {
+        let pending = Arc::clone(&pending_diff);
+        let alive = Arc::clone(&reader_alive);
+        let grid = Arc::clone(&grid);
+        let app = app.clone();
+        let buffer_id = buffer_id.clone();
+        thread::Builder::new()
+            .name(format!("terminal-diff-{buffer_id}"))
+            .spawn(move || {
+                while alive.load(Ordering::Acquire) {
+                    thread::sleep(GRID_DIFF_INTERVAL);
+                    if !pending.swap(false, Ordering::AcqRel) {
+                        continue;
+                    }
+                    let diff = grid.lock().ok().map(|mut g| g.drain_diff());
+                    if let Some(diff) = diff.filter(diff_has_changes) {
                         let _ = app.emit(
                             TERMINAL_GRID_DIFF_EVENT,
                             GridDiffEvent {
@@ -1928,51 +1909,68 @@ fn spawn_reader_thread(
                                 diff,
                             },
                         );
+                    }
+                }
+                // Reader signaled EOF; flush one final diff if anything
+                // landed between the last tick and shutdown so the
+                // renderer's last-paint state matches the PTY's.
+                if pending.swap(false, Ordering::AcqRel) {
+                    if let Ok(mut g) = grid.lock() {
+                        let diff = g.drain_diff();
+                        if diff_has_changes(&diff) {
+                            let _ = app.emit(
+                                TERMINAL_GRID_DIFF_EVENT,
+                                GridDiffEvent { buffer_id, diff },
+                            );
+                        }
+                    }
+                }
+            })?;
+    }
+
+    thread::Builder::new()
+        .name(format!("terminal-reader-{buffer_id}"))
+        .spawn(move || {
+            let _reader_alive_guard = ClearAliveOnDrop(Arc::clone(&reader_alive));
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        // Feed the parser the RAW bytes. Drain query
+                        // responses (DA1, DSR, XTVERSION, CPR) inline
+                        // because apps wait for those replies and lag
+                        // there shows up as 10s timeout warnings.
+                        // The diff drain runs on the emitter thread's
+                        // cadence so a torrent of output (e.g. find ~)
+                        // doesn't saturate the IPC channel.
+                        let responses = grid
+                            .lock()
+                            .map(|mut g| {
+                                g.feed(&buf[..n]);
+                                g.drain_responses()
+                            })
+                            .unwrap_or_default();
                         if !responses.is_empty() {
                             if let Ok(mut w) = writer.lock() {
                                 let _ = w.write_all(&responses);
                                 let _ = w.flush();
                             }
                         }
-                        let data = drain_utf8(&mut carry, &buf[..n]);
-                        if !data.is_empty() {
-                            // Append to the authoritative buffer first so a
-                            // concurrent terminal_snapshot caller observes the
-                            // chunk before the same chunk's event reaches the
-                            // frontend; the seq returned here is what the
-                            // frontend uses to dedupe against the snapshot.
-                            let seq = output
-                                .lock()
-                                .map_or(0, |mut buffer| buffer.append(&data));
-                            let _ = app.emit(
-                                TERMINAL_OUTPUT_EVENT,
-                                TerminalOutputEvent {
-                                    buffer_id: buffer_id.clone(),
-                                    seq,
-                                    data,
-                                },
-                            );
-                        }
+                        // Signal the emitter that the grid changed; it
+                        // will pick up the dirty rows on its next tick.
+                        pending_diff.store(true, Ordering::Release);
                     }
                     Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(_) => break,
                 }
             }
 
-            if !carry.is_empty() {
-                let tail = String::from_utf8_lossy(&carry).into_owned();
-                let seq = output
-                    .lock()
-                    .map_or(0, |mut buffer| buffer.append(&tail));
-                let _ = app.emit(
-                    TERMINAL_OUTPUT_EVENT,
-                    TerminalOutputEvent {
-                        buffer_id: buffer_id.clone(),
-                        seq,
-                        data: tail,
-                    },
-                );
-            }
+            // Signal the diff emitter to exit its tick loop. It will
+            // do one final flush + drain before terminating. The drop
+            // guard above repeats this on unwind so the emitter does not
+            // leak if the reader exits unexpectedly.
+            reader_alive.store(false, Ordering::Release);
 
             // Reap the child and finalize status. Skip the exit event when the
             // entry has already been removed (terminal_kill emitted) or when
@@ -2090,55 +2088,6 @@ fn color_spec_to_packed(spec: ColorSpec) -> u32 {
     }
 }
 
-fn drain_utf8(carry: &mut Vec<u8>, chunk: &[u8]) -> String {
-    carry.extend_from_slice(chunk);
-    let split = utf8_complete_prefix(carry);
-    if split == 0 {
-        return String::new();
-    }
-    let complete: Vec<u8> = carry.drain(..split).collect();
-    String::from_utf8_lossy(&complete).into_owned()
-}
-
-/// Returns the length of the prefix of `buf` that contains only complete UTF-8
-/// sequences. The remaining suffix (length 0..=3) may be the start of a
-/// multi-byte character whose continuation bytes have not arrived yet.
-fn utf8_complete_prefix(buf: &[u8]) -> usize {
-    let len = buf.len();
-    if len == 0 {
-        return 0;
-    }
-    // Walk back at most 3 bytes from the end to find the start of the last
-    // potentially incomplete codepoint.
-    let max_back = len.min(4);
-    for i in 1..=max_back {
-        let idx = len - i;
-        let b = buf[idx];
-        if b < 0x80 {
-            // Single-byte ASCII codepoint; the trailing region after it
-            // contains only ASCII bytes (i == 1) or continuation bytes that
-            // belong to no leader, which lossy decode will replace.
-            return len;
-        }
-        if b < 0xC0 {
-            // Continuation byte; keep walking back to the lead byte.
-            continue;
-        }
-        let needed = if b < 0xE0 {
-            1
-        } else if b < 0xF0 {
-            2
-        } else {
-            3
-        };
-        let trailing = len - idx - 1;
-        return if trailing >= needed { len } else { idx };
-    }
-    // Buffer is all continuation bytes with no lead in range; let lossy decode
-    // handle them rather than buffering forever.
-    len
-}
-
 fn normalize_cwd(cwd: Option<String>) -> Result<Option<PathBuf>, String> {
     let Some(raw) = cwd else {
         return Ok(None);
@@ -2225,108 +2174,6 @@ mod tests {
         assert!(normalize_cwd(Some(" ".to_string())).unwrap().is_none());
     }
 
-    #[test]
-    fn utf8_prefix_full_when_only_ascii() {
-        assert_eq!(utf8_complete_prefix(b"hello"), 5);
-    }
-
-    #[test]
-    fn utf8_prefix_holds_back_partial_lead() {
-        // 0xE2 starts a 3-byte sequence but only 1 of 2 continuation bytes is here.
-        let buf = [b'a', 0xE2, 0x82];
-        assert_eq!(utf8_complete_prefix(&buf), 1);
-    }
-
-    #[test]
-    fn utf8_prefix_releases_when_sequence_complete() {
-        // Full euro sign: 0xE2 0x82 0xAC
-        let buf = [b'a', 0xE2, 0x82, 0xAC];
-        assert_eq!(utf8_complete_prefix(&buf), 4);
-    }
-
-    fn snapshot_data(snap: &TerminalSnapshot) -> &str {
-        match &snap.body {
-            TerminalSnapshotBody::RawText { data } => data.as_str(),
-            TerminalSnapshotBody::Grid(_) => panic!("expected raw-text snapshot"),
-        }
-    }
-
-    #[test]
-    fn raw_buffer_increments_seq_per_append() {
-        let mut buf = RawOutputBuffer::new(1024);
-        assert_eq!(buf.append("hello"), 1);
-        assert_eq!(buf.append(" world"), 2);
-        let snap = buf.snapshot();
-        assert_eq!(snap.seq, 2);
-        assert_eq!(snapshot_data(&snap), "hello world");
-    }
-
-    #[test]
-    fn raw_buffer_trims_at_char_boundary() {
-        // cap=4 forces a trim. Multi-byte chars must not be split mid-codepoint.
-        let mut buf = RawOutputBuffer::new(4);
-        let seq1 = buf.append("ab");
-        let seq2 = buf.append("\u{20AC}\u{20AC}"); // two euro signs, 3 bytes each
-        assert_eq!(seq1, 1);
-        assert_eq!(seq2, 2);
-        let snap = buf.snapshot();
-        // Buffer was "ab\u{20AC}\u{20AC}" (8 bytes). target_start = 8 - 4 = 4
-        // lands inside the first euro (bytes 2..5); the loop walks forward to
-        // index 5, the start of the second euro. Result: a single euro,
-        // exactly 3 bytes - within the cap, never overshooting by more than
-        // (largest UTF-8 codepoint - 1) = 3 bytes.
-        let data = snapshot_data(&snap);
-        assert_eq!(data, "\u{20AC}");
-        assert_eq!(data.len(), 3);
-        assert!(data.len() <= 4 + 3);
-        assert!(data.is_char_boundary(0));
-        assert!(data.is_char_boundary(data.len()));
-        assert_eq!(snap.seq, 2);
-    }
-
-    #[test]
-    fn raw_buffer_trim_overshoots_cap_by_at_most_three() {
-        // Pathological case: append a single 4-byte codepoint to a cap=1
-        // buffer. target_start = 4 - 1 = 3 falls inside the codepoint; the
-        // loop walks to index 4 (== data.len(), always a char boundary), so
-        // the buffer is emptied rather than producing an over-cap result.
-        let mut buf = RawOutputBuffer::new(1);
-        buf.append("\u{1F600}"); // 4-byte UTF-8
-        let snap = buf.snapshot();
-        // After trim the codepoint is gone - we don't keep partial chars.
-        assert_eq!(snapshot_data(&snap), "");
-    }
-
-    #[test]
-    fn snapshot_serializes_with_versioned_envelope() {
-        // Wire shape contract: { seq, kind: "raw-text", payload: { data } }.
-        // Other variants of the discriminator plug in as additional
-        // `kind` values without breaking callers that pattern-match.
-        let mut buf = RawOutputBuffer::new(1024);
-        buf.append("hello");
-        let snap = buf.snapshot();
-        let json = serde_json::to_value(&snap).unwrap();
-        assert_eq!(json["seq"], 1);
-        assert_eq!(json["kind"], "raw-text");
-        assert_eq!(json["payload"]["data"], "hello");
-        // The flat shape (`{ seq, data }`) must NOT round-trip; if the
-        // envelope flattens accidentally callers won't notice until a
-        // new variant is added.
-        assert!(json.get("data").is_none());
-    }
-
-    #[test]
-    fn drain_utf8_carries_partial_then_releases() {
-        let mut carry = Vec::new();
-        let first = drain_utf8(&mut carry, &[b'a', 0xE2, 0x82]);
-        assert_eq!(first, "a");
-        assert_eq!(carry, vec![0xE2, 0x82]);
-
-        let second = drain_utf8(&mut carry, &[0xAC, b'b']);
-        assert_eq!(second, "\u{20AC}b");
-        assert!(carry.is_empty());
-    }
-
     fn cell_at(snap: &GridSnapshot, row: u16, col: u16) -> char {
         let idx = row as usize * snap.cols as usize + col as usize;
         let ch = snap.cells[idx].ch;
@@ -2340,6 +2187,21 @@ mod tests {
     fn row_string(snap: &GridSnapshot, row: u16) -> String {
         (0..snap.cols)
             .map(|c| cell_at(snap, row, c))
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    fn row_string_from_cells(cells: &[GridCell]) -> String {
+        cells
+            .iter()
+            .map(|cell| {
+                if cell.ch == 0 {
+                    ' '
+                } else {
+                    char::from_u32(cell.ch).unwrap_or('?')
+                }
+            })
             .collect::<String>()
             .trim_end()
             .to_string()
@@ -3172,6 +3034,8 @@ mod tests {
         // whole grid. After drain, all rows are clean.
         let mut grid = TerminalGrid::new(3, 5);
         let diff = grid.drain_diff();
+        assert_eq!(diff.base_seq, 0);
+        assert_eq!(diff.seq, 0);
         assert_eq!(diff.rows.len(), 3);
         assert_eq!(diff.rows_total, 3);
         assert_eq!(diff.cols_total, 5);
@@ -3197,19 +3061,49 @@ mod tests {
     }
 
     #[test]
-    fn grid_line_feed_into_scroll_marks_all_region_rows_dirty() {
-        // Scroll-on-LF at the bottom row shifts every row in the
-        // region; the diff must carry them all so the renderer sees
-        // the shifted content.
+    fn grid_line_feed_into_scroll_emits_scroll_op_and_inserted_row() {
+        // Scroll-on-LF shifts clean rows via a scroll op instead of
+        // shipping the whole region. The diff only needs the inserted
+        // blank row unless some shifted row was already dirty.
         let mut grid = TerminalGrid::new(3, 5);
         grid.feed(b"AAAA\r\nBBBB\r\nCCCC");
         let _ = grid.drain_diff();
         grid.feed(b"\r\n"); // CR then LF at bottom triggers scroll
         let diff = grid.drain_diff();
-        // Default scroll region = full grid (0..=2). All three rows
-        // were rewritten by the scroll.
+        assert_eq!(diff.scrolls.len(), 1);
+        assert_eq!(diff.scrolls[0].top, 0);
+        assert_eq!(diff.scrolls[0].bottom, 2);
+        assert_eq!(diff.scrolls[0].delta, 1);
         let dirty_rows: Vec<u16> = diff.rows.iter().map(|r| r.row).collect();
-        assert_eq!(dirty_rows, vec![0, 1, 2]);
+        assert_eq!(dirty_rows, vec![2]);
+    }
+
+    #[test]
+    fn grid_scroll_dirty_rows_shift_with_scroll_op() {
+        // If a row was dirty before a scroll, its dirty bit moves with the
+        // row. The frontend applies the scroll op first, then patches this
+        // final row index.
+        let mut grid = TerminalGrid::new(3, 5);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC");
+        let _ = grid.drain_diff();
+        grid.feed(b"\x1b[2;1Hxx\x1b[3;5H\n");
+        let diff = grid.drain_diff();
+        let dirty_rows: Vec<u16> = diff.rows.iter().map(|r| r.row).collect();
+        assert_eq!(diff.scrolls.len(), 1);
+        assert_eq!(diff.scrolls[0].delta, 1);
+        assert_eq!(dirty_rows, vec![0, 2]);
+        assert_eq!(row_string_from_cells(&diff.rows[0].cells), "xxBB");
+    }
+
+    #[test]
+    fn grid_consecutive_scrolls_coalesce() {
+        let mut grid = TerminalGrid::new(3, 5);
+        grid.feed(b"AAAA\r\nBBBB\r\nCCCC");
+        let _ = grid.drain_diff();
+        grid.feed(b"\n\n");
+        let diff = grid.drain_diff();
+        assert_eq!(diff.scrolls.len(), 1);
+        assert_eq!(diff.scrolls[0].delta, 2);
     }
 
     #[test]
@@ -3227,31 +3121,35 @@ mod tests {
     #[test]
     fn grid_resize_diff_is_contiguous_with_prior_seq() {
         // terminal_resize emits a diff inline so the renderer sees the
-        // new dims without waiting for the next PTY read. That diff's
-        // seq must be exactly prior_seq + 1 so the frontend's seq-gap
-        // check accepts it instead of triggering a resync.
+        // new dims without waiting for the next PTY read. The diff range
+        // must start at the prior drained seq and end at the resize seq.
         let mut grid = TerminalGrid::new(3, 5);
         grid.feed(b"x");
         let prior = grid.drain_diff();
         grid.resize(2, 4);
         let diff = grid.drain_diff();
+        assert_eq!(diff.base_seq, prior.seq);
         assert_eq!(diff.seq, prior.seq + 1);
     }
 
     #[test]
-    fn grid_diff_seq_matches_grid_seq() {
+    fn grid_diff_range_covers_coalesced_feed_seqs() {
         // The diff's seq must equal the grid's current seq so the
-        // frontend can detect a missed diff via simple seq math.
+        // frontend can advance to the latest state. base_seq records the
+        // seq covered by the previous drain, so one diff may safely cover
+        // several feed seqs coalesced by the 60fps emitter.
         let mut grid = TerminalGrid::new(2, 4);
         grid.feed(b"a");
         let diff1 = grid.drain_diff();
+        assert_eq!(diff1.base_seq, 0);
         assert_eq!(diff1.seq, grid.seq);
         grid.feed(b"b");
+        grid.feed(b"c");
+        grid.feed(b"d");
         let diff2 = grid.drain_diff();
+        assert_eq!(diff2.base_seq, diff1.seq);
         assert_eq!(diff2.seq, grid.seq);
-        // feed bumps seq by exactly 1, so consecutive diffs are
-        // contiguous.
-        assert_eq!(diff2.seq, diff1.seq + 1);
+        assert_eq!(diff2.seq, diff1.seq + 3);
     }
 
     #[test]

@@ -52,15 +52,24 @@ interface TerminalSnapshotGrid {
  * rows that changed since the last drain plus the current cursor +
  * mode flags. The frontend applies the diff to its local grid
  * signal and tracks the seq so it can detect a missed diff and
- * resync via a full snapshot.
+ * resync via a full snapshot. A diff may cover multiple feed seqs
+ * when Rust coalesces high-throughput output; baseSeq is the grid
+ * seq included by the previous diff drain.
  */
 interface GridDiffRow {
   row: number;
   cells: GridCell[];
 }
+interface GridScroll {
+  top: number;
+  bottom: number;
+  delta: number;
+}
 interface GridDiffEvent {
   bufferId: string;
+  baseSeq: number;
   seq: number;
+  scrolls?: GridScroll[];
   rows: GridDiffRow[];
   cursorRow: number;
   cursorCol: number;
@@ -272,9 +281,10 @@ export const TerminalBuffer: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let surfaceRef: HTMLDivElement | undefined;
   const [grid, setGrid] = createSignal<GridSnapshot | null>(null);
-  // Last grid seq applied to the local grid signal. Diff events that
-  // are not exactly seq+1 trigger a full snapshot resync; the seq is
-  // monotonic per-feed in Rust so a gap means we missed an event.
+  // Last grid seq applied to the local grid signal. Rust may coalesce
+  // many feed seqs into one diff, so applyDiff accepts any diff whose
+  // baseSeq is already covered by this local seq; a baseSeq newer than
+  // this local seq means we missed a diff and must resync.
   const [gridSeq, setGridSeq] = createSignal(0);
   const [cellW, setCellW] = createSignal(0);
   const [cellH, setCellH] = createSignal(0);
@@ -286,6 +296,10 @@ export const TerminalBuffer: Component = () => {
   // of resync requests doesn't pile up IPC.
   let inFlightSnapshot = false;
   let pendingResync = false;
+  let canvasPixelWidth = 0;
+  let canvasPixelHeight = 0;
+  let canvasCssWidth = 0;
+  let canvasCssHeight = 0;
   // Selection drag tracking. dragAnchor non-null means a left-button
   // drag is in progress. dragMoved distinguishes drag-to-select from
   // a plain click (which clears the selection).
@@ -326,13 +340,15 @@ export const TerminalBuffer: Component = () => {
 
   /**
    * Apply an incremental grid diff to the local grid signal. Returns
-   * true on success; false when the diff's seq doesn't match the
-   * expected next seq (caller should resync via fetchGridSnapshot).
+   * true on success; false when the diff does not cover the local seq
+   * (caller should resync via fetchGridSnapshot).
    */
   const applyDiff = (diff: GridDiffEvent): boolean => {
     const current = grid();
     if (!current) return false;
-    if (diff.seq !== gridSeq() + 1) return false;
+    const currentSeq = gridSeq();
+    if (diff.seq <= currentSeq) return true;
+    if (diff.baseSeq > currentSeq) return false;
     const dimsChanged =
       diff.rowsTotal !== current.rows || diff.colsTotal !== current.cols;
     let cells: GridCell[];
@@ -347,6 +363,27 @@ export const TerminalBuffer: Component = () => {
       cells = current.cells.slice();
     }
     const cols = diff.colsTotal;
+    for (const scroll of diff.scrolls ?? []) {
+      const top = Math.max(0, Math.min(scroll.top, diff.rowsTotal - 1));
+      const bottom = Math.max(0, Math.min(scroll.bottom, diff.rowsTotal - 1));
+      if (bottom < top || scroll.delta === 0) continue;
+      const height = bottom - top + 1;
+      const count = Math.min(Math.abs(scroll.delta), height);
+      const start = top * cols;
+      const end = (bottom + 1) * cols;
+      const blankCount = count * cols;
+      if (scroll.delta > 0) {
+        cells.copyWithin(start, start + blankCount, end);
+        for (let i = end - blankCount; i < end; i++) {
+          cells[i] = { ch: 0, width: 1 };
+        }
+      } else {
+        cells.copyWithin(start + blankCount, start, end - blankCount);
+        for (let i = start; i < start + blankCount; i++) {
+          cells[i] = { ch: 0, width: 1 };
+        }
+      }
+    }
     for (const row of diff.rows) {
       const base = row.row * cols;
       for (let i = 0; i < row.cells.length; i++) {
@@ -481,6 +518,10 @@ export const TerminalBuffer: Component = () => {
 
   const clearCanvas = () => {
     if (!canvasRef) return;
+    canvasPixelWidth = 0;
+    canvasPixelHeight = 0;
+    canvasCssWidth = 0;
+    canvasCssHeight = 0;
     canvasRef.width = 0;
     canvasRef.height = 0;
     canvasRef.style.width = "0px";
@@ -504,10 +545,25 @@ export const TerminalBuffer: Component = () => {
     const dpr = window.devicePixelRatio || 1;
     const pxW = g.cols * w;
     const pxH = g.rows * h;
-    canvasRef.width = Math.round(pxW * dpr);
-    canvasRef.height = Math.round(pxH * dpr);
-    canvasRef.style.width = `${pxW}px`;
-    canvasRef.style.height = `${pxH}px`;
+    const nextPixelWidth = Math.round(pxW * dpr);
+    const nextPixelHeight = Math.round(pxH * dpr);
+    if (
+      canvasPixelWidth !== nextPixelWidth ||
+      canvasPixelHeight !== nextPixelHeight
+    ) {
+      canvasRef.width = nextPixelWidth;
+      canvasRef.height = nextPixelHeight;
+      canvasPixelWidth = nextPixelWidth;
+      canvasPixelHeight = nextPixelHeight;
+    }
+    if (canvasCssWidth !== pxW) {
+      canvasRef.style.width = `${pxW}px`;
+      canvasCssWidth = pxW;
+    }
+    if (canvasCssHeight !== pxH) {
+      canvasRef.style.height = `${pxH}px`;
+      canvasCssHeight = pxH;
+    }
     const ctx = canvasRef.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
