@@ -96,10 +96,16 @@ describe("#1625 — post-compaction re-bootstrap (via spawnSession)", () => {
     expect(compactFnStart, "compactAgentConversation must exist").toBeGreaterThan(
       0,
     );
-    const compactBody = agentStoreSource.slice(
+    // Slice to the next function so growth in compactAgentConversation
+    // doesn't push the spawnSession call past a fixed window.
+    const compactFnEnd = agentStoreSource.indexOf(
+      "async compactAndRetry(",
       compactFnStart,
-      compactFnStart + 8000,
     );
+    expect(compactFnEnd, "compactAndRetry must exist").toBeGreaterThan(
+      compactFnStart,
+    );
+    const compactBody = agentStoreSource.slice(compactFnStart, compactFnEnd);
     expect(compactBody).toContain("await this.spawnSession(");
   });
 });
