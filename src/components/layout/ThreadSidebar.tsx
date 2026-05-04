@@ -114,6 +114,20 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     }
   };
 
+  const handleNewTerminal = async (options?: {
+    title?: string;
+    command?: string;
+  }) => {
+    setShowLauncher(false);
+    setLauncherQuery("");
+    setSpawning(true);
+    try {
+      await threadStore.createTerminalThread(options);
+    } finally {
+      setSpawning(false);
+    }
+  };
+
   const handleSkillThread = async (skill: InstalledSkill | Skill) => {
     // Skills can only be toggled on an active thread
     const activeThread = threadStore.activeThread;
@@ -303,6 +317,27 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
     </svg>
   );
 
+  const TerminalIcon: Component<{ size?: number; strokeWidth?: number }> = (
+    iconProps,
+  ) => (
+    <svg
+      width={iconProps.size ?? 14}
+      height={iconProps.size ?? 14}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width={iconProps.strokeWidth ?? 1.3}
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      role="img"
+      aria-label="Terminal"
+    >
+      <path d="M2.5 3.5h11v9h-11z" />
+      <path d="M5 6l2 2-2 2" />
+      <path d="M8.5 10h3" />
+    </svg>
+  );
+
   return (
     <aside
       data-testid="thread-sidebar"
@@ -433,6 +468,71 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                 <span class="font-medium">Seren Agent (Private)</span>
               </button>
             </Show>
+
+            <button
+              type="button"
+              class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+              onClick={() => void handleNewTerminal({ title: "Terminal" })}
+            >
+              <TerminalIcon />
+              <span class="font-medium">Terminal</span>
+            </button>
+
+            <button
+              type="button"
+              class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+              onClick={() =>
+                void handleNewTerminal({
+                  title: "Codex CLI",
+                  command: "codex",
+                })
+              }
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                role="img"
+                aria-label="Codex CLI"
+              >
+                <path d="M8 2.5l5 3v5l-5 3-5-3v-5l5-3z" />
+                <path d="M6 6.5h4M6 9.5h4" />
+              </svg>
+              <span class="font-medium">Codex CLI</span>
+            </button>
+
+            <button
+              type="button"
+              class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+              onClick={() =>
+                void handleNewTerminal({
+                  title: "Claude Code CLI",
+                  command: "claude",
+                })
+              }
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                role="img"
+                aria-label="Claude Code CLI"
+              >
+                <path d="M8 2.5l4.5 2.75v5.5L8 13.5l-4.5-2.75v-5.5L8 2.5z" />
+                <path d="M6.2 6.5h3.6v3H6.2z" />
+              </svg>
+              <span class="font-medium">Claude Code CLI</span>
+            </button>
 
             {/* Claude Agent */}
             <Show
@@ -1090,7 +1190,14 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                           <Show
                             when={thread.kind === "agent"}
                             fallback={
-                              <span class="text-xs">{"\u{1F4AC}"}</span>
+                              <Show
+                                when={thread.kind === "terminal"}
+                                fallback={
+                                  <span class="text-xs">{"\u{1F4AC}"}</span>
+                                }
+                              >
+                                <TerminalIcon size={13} strokeWidth={1.4} />
+                              </Show>
                             }
                           >
                             <span class="text-xs">

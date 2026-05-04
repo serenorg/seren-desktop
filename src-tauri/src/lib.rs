@@ -44,6 +44,7 @@ mod shell;
 mod skills;
 mod support;
 mod sync;
+mod terminal;
 mod wallet;
 
 const AUTH_STORE: &str = "auth.json";
@@ -685,6 +686,7 @@ pub fn run() {
 
             // Track Rust-bridged Gateway HTTP requests so the frontend can abort streams.
             app.manage(commands::gateway_http::GatewayHttpState::default());
+            app.manage(terminal::TerminalState::default());
 
             // Initialize memory state for cloud + local cache operations.
             // Token is read fresh from the auth store on each request.
@@ -732,6 +734,14 @@ pub fn run() {
             // Shell command execution (requires frontend approval)
             shell::execute_shell_command,
             shell::diagnose_shell_network,
+            // Interactive terminal buffers
+            terminal::terminal_create_buffer,
+            terminal::terminal_list_buffers,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_kill,
+            terminal::terminal_snapshot,
+            terminal::terminal_signal,
             // Web fetch command
             commands::web::web_fetch,
             // Rust-backed Gateway API bridge

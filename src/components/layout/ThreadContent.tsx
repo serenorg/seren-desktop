@@ -4,6 +4,7 @@
 import { type Component, Match, Show, Switch } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
+import { TerminalBuffer } from "@/components/terminal/TerminalBuffer";
 import { openFolder } from "@/lib/files/service";
 import { fileTreeState } from "@/stores/fileTree";
 import { threadStore } from "@/stores/thread.store";
@@ -22,6 +23,9 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
           </Match>
           <Match when={threadStore.activeThreadKind === "agent"}>
             <AgentChat />
+          </Match>
+          <Match when={threadStore.activeThreadKind === "terminal"}>
+            <TerminalBuffer />
           </Match>
         </Switch>
       </div>

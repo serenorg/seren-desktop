@@ -17,10 +17,13 @@ import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState, setRootPath } from "@/stores/fileTree";
 import { AUTO_MODEL_ID, providerStore } from "@/stores/provider.store";
 import { skillsStore } from "@/stores/skills.store";
+import { terminalStore } from "@/stores/terminal.store";
 
 const LAST_ACTIVE_THREAD_KEY = "seren:lastActiveThread";
 
-function persistLastActiveThread(id: string, kind: "chat" | "agent"): void {
+export type ThreadKind = "chat" | "agent" | "terminal";
+
+function persistLastActiveThread(id: string, kind: ThreadKind): void {
   try {
     localStorage.setItem(LAST_ACTIVE_THREAD_KEY, JSON.stringify({ id, kind }));
   } catch {
@@ -30,7 +33,7 @@ function persistLastActiveThread(id: string, kind: "chat" | "agent"): void {
 
 function loadLastActiveThread(): {
   id: string;
-  kind: "chat" | "agent";
+  kind: ThreadKind;
 } | null {
   try {
     const raw = localStorage.getItem(LAST_ACTIVE_THREAD_KEY);
@@ -38,9 +41,11 @@ function loadLastActiveThread(): {
     const parsed = JSON.parse(raw);
     if (
       typeof parsed?.id === "string" &&
-      (parsed?.kind === "chat" || parsed?.kind === "agent")
+      (parsed?.kind === "chat" ||
+        parsed?.kind === "agent" ||
+        parsed?.kind === "terminal")
     ) {
-      return parsed as { id: string; kind: "chat" | "agent" };
+      return parsed as { id: string; kind: ThreadKind };
     }
   } catch {
     // Ignore
@@ -57,7 +62,7 @@ export type ThreadStatus = "idle" | "running" | "waiting-input" | "error";
 export interface Thread {
   id: string;
   title: string;
-  kind: "chat" | "agent";
+  kind: ThreadKind;
   agentType?: AgentType;
   status: ThreadStatus;
   projectRoot: string | null;
@@ -74,7 +79,7 @@ export interface ThreadGroup {
 
 interface ThreadState {
   activeThreadId: string | null;
-  activeThreadKind: "chat" | "agent" | null;
+  activeThreadKind: ThreadKind | null;
   /** When true, new threads prefer Seren Chat over any available agent. */
   preferChat: boolean;
 }
@@ -179,7 +184,7 @@ export const threadStore = {
     return state.activeThreadId;
   },
 
-  get activeThreadKind(): "chat" | "agent" | null {
+  get activeThreadKind(): ThreadKind | null {
     return state.activeThreadKind;
   },
 
@@ -197,7 +202,7 @@ export const threadStore = {
    * from agentStore into a single unified list.
    */
   get threads(): Thread[] {
-    // Chat conversations → Thread
+    // Chat conversations -> Thread
     const chatThreads: Thread[] = conversationStore.conversations
       .filter((c) => !c.isArchived)
       .map((c) => ({
@@ -210,7 +215,7 @@ export const threadStore = {
         isLive: false,
       }));
 
-    // Agent conversations → Thread
+    // Agent conversations -> Thread
     const agentThreads: Thread[] = agentStore.recentAgentConversations
       .filter((a) => !a.is_archived)
       .map((a) => {
@@ -231,8 +236,21 @@ export const threadStore = {
         };
       });
 
+    const terminalThreads: Thread[] = terminalStore.buffers.map((buffer) => ({
+      id: buffer.id,
+      title: buffer.title,
+      kind: "terminal" as const,
+      status:
+        buffer.status === "running"
+          ? ("running" as ThreadStatus)
+          : ("idle" as ThreadStatus),
+      projectRoot: buffer.cwd ?? null,
+      timestamp: buffer.createdAt,
+      isLive: buffer.status === "running",
+    }));
+
     // Merge and sort by recency
-    const all = [...chatThreads, ...agentThreads];
+    const all = [...chatThreads, ...agentThreads, ...terminalThreads];
 
     return all.sort((a, b) => b.timestamp - a.timestamp);
   },
@@ -318,7 +336,7 @@ export const threadStore = {
    * Select a thread by ID. Updates the underlying store (conversation or agent)
    * to match.
    */
-  selectThread(id: string, kind: "chat" | "agent") {
+  selectThread(id: string, kind: ThreadKind) {
     setState({ activeThreadId: id, activeThreadKind: kind });
     persistLastActiveThread(id, kind);
 
@@ -342,7 +360,7 @@ export const threadStore = {
         );
         chatStore.setModel(conversation.selectedModel || AUTO_MODEL_ID);
       }
-    } else {
+    } else if (kind === "agent") {
       if (
         thread?.agentType &&
         thread.agentType !== agentStore.selectedAgentType
@@ -378,7 +396,7 @@ export const threadStore = {
             console.warn(
               "[Thread] Session",
               liveSession.info.id,
-              "exists in store but not in backend — resuming",
+              "exists in store but not in backend - resuming",
             );
             agentStore.setActiveSession(null);
             await agentStore.terminateSession(liveSession.info.id);
@@ -395,7 +413,7 @@ export const threadStore = {
           }
         });
       } else {
-        // No live session — clear active and auto-resume the agent conversation.
+        // No live session - clear active and auto-resume the agent conversation.
         // The spawn lock in the Rust backend prevents SIGKILL collisions.
         agentStore.setActiveSession(null);
         const cwd = thread?.projectRoot || fileTreeState.rootPath;
@@ -403,6 +421,9 @@ export const threadStore = {
           void agentStore.resumeAgentConversation(id, cwd);
         }
       }
+    } else {
+      conversationStore.setActiveConversation(null);
+      agentStore.setActiveSession(null);
     }
   },
 
@@ -459,6 +480,18 @@ export const threadStore = {
       }
     }
     return null;
+  },
+
+  async createTerminalThread(
+    options: { title?: string; command?: string } = {},
+  ): Promise<string | null> {
+    const buffer = await terminalStore.createBuffer({
+      title: options.title,
+      command: options.command,
+      cwd: fileTreeState.rootPath,
+    });
+    this.selectThread(buffer.id, "terminal");
+    return buffer.id;
   },
 
   /**
@@ -545,12 +578,15 @@ export const threadStore = {
   /**
    * Archive a thread.
    */
-  async archiveThread(id: string, kind: "chat" | "agent") {
+  async archiveThread(id: string, kind: ThreadKind) {
     if (kind === "chat") {
       await conversationStore.archiveConversation(id);
-    } else {
+    } else if (kind === "agent") {
       await archiveAgentConversation(id);
       await agentStore.refreshRecentAgentConversations(200);
+    } else {
+      await terminalStore.kill(id);
+      terminalStore.removeLocal(id);
     }
 
     // Clear selection if this was active
@@ -586,6 +622,7 @@ export const threadStore = {
   async refresh() {
     await conversationStore.loadHistory();
     await agentStore.refreshRecentAgentConversations(200);
+    await terminalStore.init();
 
     // Only restore if no thread is already active (e.g. deep-linked navigation).
     if (state.activeThreadId) return;
