@@ -180,6 +180,94 @@ function fontForAttrs(attrs: number): string {
   if (italic) return CELL_FONT_ITALIC;
   return CELL_FONT;
 }
+
+interface CellPos {
+  row: number;
+  col: number;
+}
+interface SelectionRange {
+  /** Cell where the user pressed mousedown. Stays put across drag. */
+  anchor: CellPos;
+  /** Cell where the mouse currently is (or last was on mouseup). */
+  head: CellPos;
+}
+
+const SELECTION_OVERLAY_FILL = "rgba(80, 130, 200, 0.4)";
+
+/**
+ * Normalize a SelectionRange so the returned [start, end] pair is in
+ * row-major order regardless of which way the user dragged.
+ */
+function normalizeSelection(sel: SelectionRange): [CellPos, CellPos] {
+  const a = sel.anchor;
+  const b = sel.head;
+  if (a.row < b.row || (a.row === b.row && a.col <= b.col)) {
+    return [a, b];
+  }
+  return [b, a];
+}
+
+/**
+ * Walk the selected cells row-by-row and build a string. Wide-char
+ * continuation cells (width=0) are skipped so a CJK glyph counts
+ * once. Empty cells (ch=0) become spaces. Trailing whitespace per
+ * line is trimmed; rows are joined with newlines.
+ */
+function selectionText(grid: GridSnapshot, sel: SelectionRange): string {
+  const [start, end] = normalizeSelection(sel);
+  const lines: string[] = [];
+  for (let r = start.row; r <= end.row && r < grid.rows; r++) {
+    const startCol = r === start.row ? start.col : 0;
+    const endCol = r === end.row ? end.col : grid.cols - 1;
+    let line = "";
+    for (let c = startCol; c <= endCol && c < grid.cols; c++) {
+      const cell = grid.cells[r * grid.cols + c];
+      if (!cell) continue;
+      if (cell.width === 0) continue;
+      line += cell.ch ? String.fromCodePoint(cell.ch) : " ";
+    }
+    lines.push(line.trimEnd());
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Best-effort clipboard write. Tauri's webview generally exposes the
+ * Async Clipboard API, but some platforms / configurations don't, so
+ * fall back to a hidden textarea + execCommand("copy").
+ */
+async function writeClipboard(text: string): Promise<void> {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    // Fall through to execCommand fallback.
+  }
+  // Capture the current focus so we can restore it after the textarea
+  // hijack. Without this, the user's next keystroke after a copy would
+  // be lost - the surface div lost focus when the textarea took it.
+  const previousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-1000px";
+  ta.style.top = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    document.execCommand("copy");
+  } catch {
+    // Out of options; nothing to do.
+  }
+  document.body.removeChild(ta);
+  previousFocus?.focus();
+}
+
 export const TerminalBuffer: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   let surfaceRef: HTMLDivElement | undefined;
@@ -190,6 +278,7 @@ export const TerminalBuffer: Component = () => {
   const [gridSeq, setGridSeq] = createSignal(0);
   const [cellW, setCellW] = createSignal(0);
   const [cellH, setCellH] = createSignal(0);
+  const [selection, setSelection] = createSignal<SelectionRange | null>(null);
 
   let unlistenDiff: UnlistenFn | null = null;
   let resizeObserver: ResizeObserver | null = null;
@@ -197,6 +286,11 @@ export const TerminalBuffer: Component = () => {
   // of resync requests doesn't pile up IPC.
   let inFlightSnapshot = false;
   let pendingResync = false;
+  // Selection drag tracking. dragAnchor non-null means a left-button
+  // drag is in progress. dragMoved distinguishes drag-to-select from
+  // a plain click (which clears the selection).
+  let dragAnchor: CellPos | null = null;
+  let dragMoved = false;
 
   const buffer = createMemo(() =>
     terminalStore.getBuffer(threadStore.activeThreadId),
@@ -326,6 +420,65 @@ export const TerminalBuffer: Component = () => {
     void terminalStore.resize(id, cols, rows);
   };
 
+  /**
+   * Translate a mouse event's clientX/clientY into grid (row, col)
+   * coordinates. Returns null if cell metrics aren't known yet (font
+   * not measured) or the surface element is gone. Both row and col
+   * are clamped to grid bounds so a drag past the canvas edges
+   * extends to the row/col edge instead of going negative.
+   */
+  const canvasMouseToCell = (e: MouseEvent): CellPos | null => {
+    if (!surfaceRef) return null;
+    const w = cellW();
+    const h = cellH();
+    if (w === 0 || h === 0) return null;
+    const g = grid();
+    const rect = surfaceRef.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const maxRow = g ? g.rows - 1 : Number.MAX_SAFE_INTEGER;
+    const maxCol = g ? g.cols - 1 : Number.MAX_SAFE_INTEGER;
+    return {
+      row: Math.max(0, Math.min(maxRow, Math.floor(y / h))),
+      col: Math.max(0, Math.min(maxCol, Math.floor(x / w))),
+    };
+  };
+
+  const onWindowMouseMove = (e: MouseEvent) => {
+    if (!dragAnchor) return;
+    const cell = canvasMouseToCell(e);
+    if (!cell) return;
+    if (cell.row !== dragAnchor.row || cell.col !== dragAnchor.col) {
+      dragMoved = true;
+    }
+    setSelection({ anchor: dragAnchor, head: cell });
+  };
+
+  const onWindowMouseUp = () => {
+    window.removeEventListener("mousemove", onWindowMouseMove);
+    window.removeEventListener("mouseup", onWindowMouseUp);
+    if (!dragMoved) {
+      // Plain click without drag - clear any prior selection so the
+      // user can dismiss a selection by clicking on the canvas.
+      setSelection(null);
+    }
+    dragAnchor = null;
+    dragMoved = false;
+  };
+
+  const onSurfaceMouseDown = (e: MouseEvent) => {
+    if (e.button !== 0) return; // left button only; right opens context menu
+    surfaceRef?.focus();
+    const cell = canvasMouseToCell(e);
+    if (!cell) return;
+    dragAnchor = cell;
+    dragMoved = false;
+    setSelection({ anchor: cell, head: cell });
+    // Listen on window so a drag that leaves the canvas still tracks.
+    window.addEventListener("mousemove", onWindowMouseMove);
+    window.addEventListener("mouseup", onWindowMouseUp);
+  };
+
   const clearCanvas = () => {
     if (!canvasRef) return;
     canvasRef.width = 0;
@@ -451,6 +604,27 @@ export const TerminalBuffer: Component = () => {
       }
     }
 
+    // Selection overlay: translucent fill over selected cells, drawn
+    // AFTER cell glyphs so the highlight blends with text but BEFORE
+    // the cursor block so the cursor stays visible on top. The fill
+    // is rectangular per-row: full width for fully-spanned rows,
+    // partial for the start and end rows.
+    const sel = selection();
+    if (sel) {
+      const [start, end] = normalizeSelection(sel);
+      ctx.fillStyle = SELECTION_OVERLAY_FILL;
+      for (let r = start.row; r <= end.row && r < g.rows; r++) {
+        const startCol = r === start.row ? start.col : 0;
+        const endCol = r === end.row ? end.col : g.cols - 1;
+        const x = startCol * w;
+        const y = r * h;
+        const width = (Math.min(endCol, g.cols - 1) - startCol + 1) * w;
+        if (width > 0) {
+          ctx.fillRect(x, y, width, h);
+        }
+      }
+    }
+
     // Cursor: inverted block at (cursorRow, cursorCol). For a wide
     // cursor cell, paint two columns wide so the cursor matches the
     // glyph. The cursor background overrides any cell bg below it.
@@ -487,6 +661,9 @@ export const TerminalBuffer: Component = () => {
         // the new buffer's seq from the snapshot.
         setGrid(null);
         setGridSeq(0);
+        // Drop any active selection - it referred to the previous
+        // buffer's content.
+        setSelection(null);
         if (!id) return;
         pushResize();
         void fetchGridSnapshot();
@@ -508,9 +685,30 @@ export const TerminalBuffer: Component = () => {
     const id = current.id;
     const k = event.key;
 
-    // Ctrl+C goes through the signal path so raw-mode TUIs receive SIGINT
-    // rather than just a 0x03 byte the line discipline ignores.
-    if (event.ctrlKey && (k === "c" || k === "C")) {
+    // Cmd+C (macOS) or Ctrl+Shift+C (Linux/Windows) is a copy chord.
+    // Always swallow it so it never falls through to the SIGINT or
+    // Ctrl-letter chord branches below - critical for Ctrl+Shift+C
+    // without a selection, which would otherwise match the
+    // Ctrl-letter chord at the bottom and erroneously send 0x03 to
+    // the PTY. With no selection there's nothing to write; we simply
+    // preventDefault and return.
+    const isCopyChord =
+      (k === "c" || k === "C") &&
+      (event.metaKey || (event.ctrlKey && event.shiftKey));
+    if (isCopyChord) {
+      event.preventDefault();
+      const sel = selection();
+      const g = grid();
+      if (sel && g) {
+        await writeClipboard(selectionText(g, sel));
+      }
+      return;
+    }
+
+    // Ctrl+C (no shift) goes through the signal path so raw-mode TUIs
+    // receive SIGINT rather than just a 0x03 byte the line discipline
+    // ignores.
+    if (event.ctrlKey && !event.shiftKey && (k === "c" || k === "C")) {
       event.preventDefault();
       await terminalStore.signal(id, "interrupt");
       return;
@@ -666,6 +864,10 @@ export const TerminalBuffer: Component = () => {
   onCleanup(() => {
     unlistenDiff?.();
     resizeObserver?.disconnect();
+    // If the user unmounts mid-drag, the window-level mouse listeners
+    // would otherwise leak. Removing them is a no-op when not bound.
+    window.removeEventListener("mousemove", onWindowMouseMove);
+    window.removeEventListener("mouseup", onWindowMouseUp);
   });
 
   return (
@@ -721,9 +923,7 @@ export const TerminalBuffer: Component = () => {
               tabIndex={0}
               onKeyDown={(e) => void handleKeyDown(e)}
               onPaste={(e) => void handlePaste(e)}
-              onMouseDown={(e) => {
-                (e.currentTarget as HTMLDivElement).focus();
-              }}
+              onMouseDown={onSurfaceMouseDown}
             >
               <canvas ref={canvasRef} class="block" />
             </div>
