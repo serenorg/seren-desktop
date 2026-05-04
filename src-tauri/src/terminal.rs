@@ -149,6 +149,20 @@ struct TerminalGrid {
     /// mode) which matches xterm's default and what readline-based
     /// shells expect.
     insert_mode: bool,
+    /// Active mouse-tracking mode (DECSET 1000 / 1002 / 1003). The
+    /// frontend reads this on every mouse event and synthesizes the
+    /// escape sequence when non-Off; falls through to selection /
+    /// scrollback otherwise. The three modes are mutually exclusive:
+    /// setting one implicitly clears the others, matching xterm.
+    mouse_tracking: MouseTracking,
+    /// DECSET 1006 (SGR mouse encoding). Required for grid widths past
+    /// 223 columns (legacy X10 encoding overflows there). Modern apps
+    /// (vim, tmux, htop) all enable it alongside the tracking mode.
+    /// Frontend always emits SGR-form regardless because the legacy
+    /// encoding is broken on wide terminals; this flag is tracked only
+    /// so the frontend can refuse to send mouse reports when an app
+    /// asked for tracking but didn't enable a compatible encoding.
+    mouse_sgr: bool,
     /// Per-row dirty bitmap. `dirty_rows[r] == true` means row `r`'s
     /// cells (or cursor presence) changed since the last `drain_diff`
     /// call. The diff event ships only marked rows; cursor + mode
@@ -172,6 +186,33 @@ struct TerminalGrid {
 enum CharSet {
     Ascii,
     DecLineDrawing,
+}
+
+/// Mouse-tracking mode requested by the running app. Mutually
+/// exclusive: enabling one disables the others. The wire enum is
+/// numeric to match the underlying DECSET code so the frontend can
+/// branch on it without a string compare.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(into = "u16")]
+pub enum MouseTracking {
+    Off,
+    /// DECSET 1000 - press + release only.
+    Vt200,
+    /// DECSET 1002 - press + release + drag while a button is held.
+    ButtonEvent,
+    /// DECSET 1003 - press + release + every motion event.
+    AnyEvent,
+}
+
+impl From<MouseTracking> for u16 {
+    fn from(value: MouseTracking) -> Self {
+        match value {
+            MouseTracking::Off => 0,
+            MouseTracking::Vt200 => 1000,
+            MouseTracking::ButtonEvent => 1002,
+            MouseTracking::AnyEvent => 1003,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -302,6 +343,16 @@ pub struct GridSnapshot {
     /// compact.
     #[serde(skip_serializing_if = "GridSnapshot::scrollback_len_is_default")]
     pub scrollback_len: u32,
+    /// Mouse-tracking mode requested by the running app (DECSET 1000 /
+    /// 1002 / 1003). Skipped when Off so the typical no-mouse case
+    /// stays compact.
+    #[serde(skip_serializing_if = "GridSnapshot::mouse_tracking_is_default")]
+    pub mouse_tracking: MouseTracking,
+    /// DECSET 1006 SGR mouse encoding. Frontend refuses to emit
+    /// reports unless this is on (legacy encoding overflows past
+    /// column 223; better to stay silent than send garbage).
+    #[serde(skip_serializing_if = "GridSnapshot::mouse_sgr_is_default")]
+    pub mouse_sgr: bool,
 }
 
 impl GridSnapshot {
@@ -316,6 +367,12 @@ impl GridSnapshot {
     }
     fn scrollback_len_is_default(value: &u32) -> bool {
         *value == 0
+    }
+    fn mouse_tracking_is_default(value: &MouseTracking) -> bool {
+        matches!(value, MouseTracking::Off)
+    }
+    fn mouse_sgr_is_default(value: &bool) -> bool {
+        !*value
     }
 }
 
@@ -354,11 +411,21 @@ pub struct GridDiff {
     /// available (e.g. user can keep wheeling up further).
     #[serde(skip_serializing_if = "GridDiff::scrollback_len_is_default")]
     pub scrollback_len: u32,
+    #[serde(skip_serializing_if = "GridDiff::mouse_tracking_is_default")]
+    pub mouse_tracking: MouseTracking,
+    #[serde(skip_serializing_if = "GridDiff::mouse_sgr_is_default")]
+    pub mouse_sgr: bool,
 }
 
 impl GridDiff {
     fn scrollback_len_is_default(value: &u32) -> bool {
         *value == 0
+    }
+    fn mouse_tracking_is_default(value: &MouseTracking) -> bool {
+        matches!(value, MouseTracking::Off)
+    }
+    fn mouse_sgr_is_default(value: &bool) -> bool {
+        !*value
     }
 }
 
@@ -434,6 +501,8 @@ impl TerminalGrid {
             dirty_rows: vec![true; rows as usize],
             last_diff_seq: 0,
             scrollback: VecDeque::new(),
+            mouse_tracking: MouseTracking::Off,
+            mouse_sgr: false,
         }
     }
 
@@ -473,6 +542,8 @@ impl TerminalGrid {
             cursor_keys_app: self.cursor_keys_app,
             bracketed_paste: self.bracketed_paste,
             scrollback_len: self.scrollback.len() as u32,
+            mouse_tracking: self.mouse_tracking,
+            mouse_sgr: self.mouse_sgr,
         }
     }
 
@@ -518,6 +589,8 @@ impl TerminalGrid {
             rows_total: self.rows,
             cols_total: self.cols,
             scrollback_len: self.scrollback.len() as u32,
+            mouse_tracking: self.mouse_tracking,
+            mouse_sgr: self.mouse_sgr,
         }
     }
 
@@ -998,6 +1071,40 @@ impl TerminalGrid {
                 } else {
                     self.exit_alt_screen();
                 }
+            }
+            // Mouse tracking modes are mutually exclusive: setting one
+            // implicitly clears the others (matches xterm). Reset only
+            // clears the matching mode so apps that toggle 1002 off
+            // without touching 1000 don't accidentally lose VT200.
+            DecPrivateModeCode::MouseTracking => {
+                self.mouse_tracking = if on {
+                    MouseTracking::Vt200
+                } else if matches!(self.mouse_tracking, MouseTracking::Vt200) {
+                    MouseTracking::Off
+                } else {
+                    self.mouse_tracking
+                };
+            }
+            DecPrivateModeCode::ButtonEventMouse => {
+                self.mouse_tracking = if on {
+                    MouseTracking::ButtonEvent
+                } else if matches!(self.mouse_tracking, MouseTracking::ButtonEvent) {
+                    MouseTracking::Off
+                } else {
+                    self.mouse_tracking
+                };
+            }
+            DecPrivateModeCode::AnyEventMouse => {
+                self.mouse_tracking = if on {
+                    MouseTracking::AnyEvent
+                } else if matches!(self.mouse_tracking, MouseTracking::AnyEvent) {
+                    MouseTracking::Off
+                } else {
+                    self.mouse_tracking
+                };
+            }
+            DecPrivateModeCode::SGRMouse => {
+                self.mouse_sgr = on;
             }
             _ => {
                 self.unhandled_actions = self.unhandled_actions.saturating_add(1);
@@ -2411,13 +2518,13 @@ mod tests {
     #[test]
     fn grid_unhandled_actions_are_counted_not_panicked() {
         let mut grid = TerminalGrid::new(3, 10);
-        // Pick a sequence that genuinely falls outside the action
-        // interpreter's coverage. DECSET 1000 (X10 mouse reporting) is
-        // a real visible-functionality gap (htop column-drag fails) so
-        // it MUST bump the counter rather than getting silently
-        // swallowed. Sgr::Blink and friends are now silent-swallowed
-        // because text still renders correctly without the attribute.
-        grid.feed(b"text\x1b[?1000h");
+        // Pick a DEC private mode that genuinely still falls outside
+        // the action interpreter. 1004 (FocusTracking) is a real gap
+        // and MUST bump the counter rather than getting silently
+        // swallowed - the diagnostic only catches gaps if real gaps
+        // increment it. (1000 used to be the probe here but is now
+        // a tracked mouse-tracking mode.)
+        grid.feed(b"text\x1b[?1004h");
         let snap = grid.snapshot();
         assert!(row_string(&snap, 0).contains("text"));
         assert!(snap.unhandled_actions > 0);
@@ -3292,6 +3399,57 @@ mod tests {
         assert_eq!(grid.scrollback[0].len(), 2);
         grid.resize(2, 4);
         assert_eq!(grid.scrollback[0].len(), 4);
+    }
+
+    #[test]
+    fn grid_decset_1000_enables_vt200_mouse_tracking() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?1000h");
+        assert!(matches!(grid.mouse_tracking, MouseTracking::Vt200));
+        assert!(!grid.mouse_sgr);
+        let snap = grid.snapshot();
+        assert!(matches!(snap.mouse_tracking, MouseTracking::Vt200));
+    }
+
+    #[test]
+    fn grid_decset_1002_replaces_1000() {
+        // Real apps (vim, tmux) often DECSET 1002 without first
+        // resetting 1000 - the modes are mutually exclusive and the
+        // newer set wins, matching xterm.
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?1000h\x1b[?1002h");
+        assert!(matches!(grid.mouse_tracking, MouseTracking::ButtonEvent));
+    }
+
+    #[test]
+    fn grid_decrst_1002_does_not_clear_1000() {
+        // Resetting a mode the app did not enable must not clobber
+        // the active mode. Otherwise a paranoid teardown like
+        // `?1002l;?1003l;?1000l` from a tracked-mouse app would lose
+        // the user's actual setting partway through.
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?1000h");
+        grid.feed(b"\x1b[?1002l");
+        assert!(matches!(grid.mouse_tracking, MouseTracking::Vt200));
+        grid.feed(b"\x1b[?1000l");
+        assert!(matches!(grid.mouse_tracking, MouseTracking::Off));
+    }
+
+    #[test]
+    fn grid_decset_1006_sets_sgr_encoding_independently() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?1006h");
+        assert!(grid.mouse_sgr);
+        assert!(matches!(grid.mouse_tracking, MouseTracking::Off));
+    }
+
+    #[test]
+    fn grid_diff_carries_mouse_state_when_nondefault() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b[?1002h\x1b[?1006h");
+        let diff = grid.drain_diff();
+        assert!(matches!(diff.mouse_tracking, MouseTracking::ButtonEvent));
+        assert!(diff.mouse_sgr);
     }
 
     #[test]

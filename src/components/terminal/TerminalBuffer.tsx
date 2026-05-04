@@ -42,6 +42,12 @@ interface GridSnapshot {
   // Number of rows preserved in scrollback above the live screen.
   // Backend skips serializing when zero.
   scrollbackLen?: number;
+  // Mouse-tracking mode requested by the running app. 0 = off,
+  // 1000 = press/release, 1002 = + drag, 1003 = + all motion.
+  mouseTracking?: number;
+  // DECSET 1006 SGR encoding. Frontend refuses to emit reports
+  // unless this is set.
+  mouseSgr?: boolean;
 }
 
 interface TerminalSnapshotGrid {
@@ -84,6 +90,8 @@ interface GridDiffEvent {
   // Current scrollback length. Frontend uses the delta between diffs
   // to keep the viewport anchored when in scroll-back mode.
   scrollbackLen?: number;
+  mouseTracking?: number;
+  mouseSgr?: boolean;
 }
 
 interface ScrollbackWindow {
@@ -446,6 +454,8 @@ export const TerminalBuffer: Component = () => {
         cursorVisible: diff.cursorVisible,
         cursorKeysApp: diff.cursorKeysApp,
         bracketedPaste: diff.bracketedPaste,
+        mouseTracking: diff.mouseTracking ?? 0,
+        mouseSgr: diff.mouseSgr ?? false,
       });
       setGridSeq(diff.seq);
       needsFullRepaint = true;
@@ -496,6 +506,8 @@ export const TerminalBuffer: Component = () => {
     current.cursorVisible = diff.cursorVisible;
     current.cursorKeysApp = diff.cursorKeysApp;
     current.bracketedPaste = diff.bracketedPaste;
+    current.mouseTracking = diff.mouseTracking ?? 0;
+    current.mouseSgr = diff.mouseSgr ?? false;
     setGridSeq(diff.seq);
     // Track scrollback growth and keep the user's view anchored to the
     // same historical rows. When new lines scroll off in the live grid,
@@ -659,7 +671,120 @@ export const TerminalBuffer: Component = () => {
     }
   };
 
+  /**
+   * Build the SGR-1006 mouse report for `(button, x, y)`. `released`
+   * picks the trailing letter (M for press/motion, m for release).
+   * Coordinates are 1-based in the protocol.
+   *
+   * Button encoding:
+   *   0=left, 1=middle, 2=right, 3=release-of-any (legacy x10 only)
+   *   64=wheel-up, 65=wheel-down
+   *   +4 shift, +8 meta/alt, +16 ctrl
+   *   +32 motion (added by caller for drag/move events)
+   */
+  const encodeMouseSgr = (
+    button: number,
+    col: number,
+    row: number,
+    released: boolean,
+  ): string => {
+    const x = Math.max(1, col + 1);
+    const y = Math.max(1, row + 1);
+    return `\x1b[<${button};${x};${y}${released ? "m" : "M"}`;
+  };
+
+  const mouseEventModifiers = (e: MouseEvent): number => {
+    let m = 0;
+    if (e.shiftKey) m += 4;
+    if (e.metaKey || e.altKey) m += 8;
+    if (e.ctrlKey) m += 16;
+    return m;
+  };
+
+  const sendMouseReport = (
+    bufferId: string,
+    button: number,
+    col: number,
+    row: number,
+    released: boolean,
+  ) => {
+    void terminalStore.write(
+      bufferId,
+      encodeMouseSgr(button, col, row, released),
+    );
+  };
+
+  // Tracks the button currently held during a mouse-tracking drag.
+  // null when no button is down. Used for 1002/1003 drag reports and
+  // to know which release code to send on mouseup.
+  let mouseTrackingButton: number | null = null;
+  let mouseTrackingLastCell: CellPos | null = null;
+
+  const onWindowMouseMoveTracking = (e: MouseEvent) => {
+    const g = grid();
+    if (!g) return;
+    const tracking = g.mouseTracking ?? 0;
+    if (tracking === 0 || !(g.mouseSgr ?? false)) {
+      detachMouseTracking();
+      return;
+    }
+    // 1002 reports motion only while a button is held; 1003 reports
+    // any motion. Either way, dedupe by cell so a fast drag doesn't
+    // flood the PTY with one report per pixel.
+    if (tracking === 1002 && mouseTrackingButton === null) return;
+    const cell = canvasMouseToCell(e);
+    if (!cell) return;
+    if (
+      mouseTrackingLastCell &&
+      cell.row === mouseTrackingLastCell.row &&
+      cell.col === mouseTrackingLastCell.col
+    ) {
+      return;
+    }
+    mouseTrackingLastCell = cell;
+    const id = threadStore.activeThreadId;
+    if (!id) return;
+    const baseButton = mouseTrackingButton ?? 3; // 3 = no-button motion
+    const button = baseButton + 32 + mouseEventModifiers(e);
+    sendMouseReport(id, button, cell.col, cell.row, false);
+  };
+
+  const onWindowMouseUpTracking = (e: MouseEvent) => {
+    const g = grid();
+    const id = threadStore.activeThreadId;
+    if (g && id && (g.mouseTracking ?? 0) !== 0 && (g.mouseSgr ?? false)) {
+      const cell = canvasMouseToCell(e) ??
+        mouseTrackingLastCell ?? { row: 0, col: 0 };
+      const button = (mouseTrackingButton ?? e.button) + mouseEventModifiers(e);
+      sendMouseReport(id, button, cell.col, cell.row, true);
+    }
+    detachMouseTracking();
+  };
+
+  const detachMouseTracking = () => {
+    mouseTrackingButton = null;
+    mouseTrackingLastCell = null;
+    window.removeEventListener("mousemove", onWindowMouseMoveTracking);
+    window.removeEventListener("mouseup", onWindowMouseUpTracking);
+  };
+
   const onSurfaceWheel = (e: WheelEvent) => {
+    const g = grid();
+    const tracking = g?.mouseTracking ?? 0;
+    const sgr = g?.mouseSgr ?? false;
+    // App is mouse-tracking AND has SGR encoding on (without 1006 we
+    // can't deliver wheel buttons safely beyond column 223). Forward
+    // wheel as button 64 (up) / 65 (down) and stay out of scrollback.
+    if (tracking !== 0 && sgr) {
+      const id = threadStore.activeThreadId;
+      const cell = canvasMouseToCell(e);
+      if (id && cell) {
+        const wheelButton = (e.deltaY < 0 ? 64 : 65) + mouseEventModifiers(e);
+        e.preventDefault();
+        sendMouseReport(id, wheelButton, cell.col, cell.row, false);
+      }
+      return;
+    }
     const len = scrollbackLen();
     const offset = viewportOffset();
     // No history and already at live: nothing to consume; let the page
@@ -821,13 +946,34 @@ export const TerminalBuffer: Component = () => {
   };
 
   const onSurfaceMouseDown = (e: MouseEvent) => {
-    if (e.button !== 0) return; // left button only; right opens context menu
     // preventScroll: the surface can be a sub-pixel taller than its flex
     // container; without this, the first focus call after open scrolls
     // the canvas up and clips the top rows out of view.
     surfaceRef?.focus({ preventScroll: true });
     const cell = canvasMouseToCell(e);
     if (!cell) return;
+    const g = grid();
+    const tracking = g?.mouseTracking ?? 0;
+    const sgr = g?.mouseSgr ?? false;
+    // Mouse tracking takes priority over selection - that's how vim,
+    // tmux, htop receive clicks. Shift bypasses tracking so the user
+    // can still drag-select text in a tracked app (xterm convention).
+    if (tracking !== 0 && sgr && !e.shiftKey) {
+      const id = threadStore.activeThreadId;
+      if (id) {
+        e.preventDefault();
+        const button = e.button + mouseEventModifiers(e);
+        sendMouseReport(id, button, cell.col, cell.row, false);
+        mouseTrackingButton = button & 0x03; // strip modifiers for state
+        mouseTrackingLastCell = cell;
+        // Always listen for release so the app sees the matching m.
+        // Drag motion only fires for 1002 / 1003 modes (handler checks).
+        window.addEventListener("mousemove", onWindowMouseMoveTracking);
+        window.addEventListener("mouseup", onWindowMouseUpTracking);
+      }
+      return;
+    }
+    if (e.button !== 0) return; // left button only for selection
     dragAnchor = cell;
     dragMoved = false;
     setSelection({ anchor: cell, head: cell });
@@ -1150,6 +1296,7 @@ export const TerminalBuffer: Component = () => {
         setScrollbackLen(0);
         setViewportOffset(0);
         wheelAccumulator = 0;
+        detachMouseTracking();
         setGrid(null);
         setGridSeq(0);
         setSelection(null);
@@ -1384,6 +1531,7 @@ export const TerminalBuffer: Component = () => {
     // would otherwise leak. Removing them is a no-op when not bound.
     window.removeEventListener("mousemove", onWindowMouseMove);
     window.removeEventListener("mouseup", onWindowMouseUp);
+    detachMouseTracking();
   });
 
   return (
