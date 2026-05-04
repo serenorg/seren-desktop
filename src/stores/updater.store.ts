@@ -1,4 +1,5 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { message } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import { createStore } from "solid-js/store";
@@ -63,7 +64,7 @@ async function initUpdater(): Promise<void> {
   }
 
   if (isDevRuntime()) {
-    console.log("[Updater] Dev build — skipping update check");
+    console.info("[Updater] Dev build — skipping update check");
     setState({ status: "unsupported" });
     return;
   }
@@ -72,8 +73,12 @@ async function initUpdater(): Promise<void> {
 
   // Auto-install on startup only (#1720). Mid-session interval re-checks keep
   // today's manual-pill behavior so the user is not forced to restart while
-  // working.
+  // working. The acknowledgement modal (#1794) sets expectations about the
+  // 2–7 minute install window during which Seren is killed and has no UI —
+  // without it users see "app stopped, nothing happens" and assume failure.
+  // OK is the only choice: skipped upgrades mean users on old broken builds.
   if (state.status === "available") {
+    await acknowledgeAutoInstall(state.availableVersion);
     await installAvailableUpdate();
   }
 
@@ -97,11 +102,11 @@ async function checkForUpdates(_manual = false): Promise<void> {
   setState({ status: "checking", error: null });
 
   try {
-    console.log("[Updater] Checking for updates...");
+    console.info("[Updater] Checking for updates...");
     const update = await check();
 
     if (update) {
-      console.log("[Updater] Update available:", update.version);
+      console.info("[Updater] Update available:", update.version);
       pendingUpdate = update;
       setState({
         status: "available",
@@ -110,7 +115,7 @@ async function checkForUpdates(_manual = false): Promise<void> {
         error: null,
       });
     } else {
-      console.log("[Updater] No update available");
+      console.info("[Updater] No update available");
       pendingUpdate = null;
       setState({
         status: "up_to_date",
@@ -129,9 +134,9 @@ async function checkForUpdates(_manual = false): Promise<void> {
 
 async function clearBrowsingDataBeforeRestart(): Promise<void> {
   try {
-    console.log("[Updater] Clearing webview browsing data before restart...");
+    console.info("[Updater] Clearing webview browsing data before restart...");
     await getCurrentWebview().clearAllBrowsingData();
-    console.log("[Updater] Webview browsing data cleared");
+    console.info("[Updater] Webview browsing data cleared");
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     console.warn(
@@ -142,6 +147,25 @@ async function clearBrowsingDataBeforeRestart(): Promise<void> {
       type: "updater",
       phase: "clear_browsing_data",
     });
+  }
+}
+
+async function acknowledgeAutoInstall(
+  version: string | undefined,
+): Promise<void> {
+  const headline = version
+    ? `Seren is updating to v${version}.`
+    : "Seren is installing an update.";
+  try {
+    await message(
+      `${headline}\n\nThe app will close for ~3 minutes during install, then reopen automatically. Don't worry if the window disappears — it will come back.`,
+      { title: "Update starting", kind: "info", okLabel: "OK" },
+    );
+  } catch (error) {
+    // Dialog plugin failure must not block the install path. Telemetry only.
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.warn("[Updater] Acknowledgement dialog failed:", err.message);
+    telemetry.captureError(err, { type: "updater", phase: "acknowledge" });
   }
 }
 
@@ -159,7 +183,7 @@ async function installAvailableUpdate(): Promise<void> {
     return;
   }
 
-  console.log("[Updater] Starting download and install...");
+  console.info("[Updater] Starting download and install...");
   let downloaded = 0;
   setState({
     status: "downloading",
@@ -174,7 +198,7 @@ async function installAvailableUpdate(): Promise<void> {
       if (progress.event === "Started") {
         const total = progress.data.contentLength ?? 0;
         if (total > 0) {
-          console.log(`[Updater] Download started, size: ${total} bytes`);
+          console.info(`[Updater] Download started, size: ${total} bytes`);
           setState({ totalBytes: total });
         }
         return;
@@ -190,12 +214,12 @@ async function installAvailableUpdate(): Promise<void> {
         return;
       }
 
-      console.log("[Updater] Download finished, installing...");
+      console.info("[Updater] Download finished, installing...");
       setState({ status: "installing", progressPercent: 100 });
     });
-    console.log("[Updater] Install complete");
+    console.info("[Updater] Install complete");
     await clearBrowsingDataBeforeRestart();
-    console.log("[Updater] Relaunching after install...");
+    console.info("[Updater] Relaunching after install...");
     await relaunch();
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
