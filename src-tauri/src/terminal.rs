@@ -163,6 +163,11 @@ struct TerminalGrid {
     /// so the frontend can refuse to send mouse reports when an app
     /// asked for tracking but didn't enable a compatible encoding.
     mouse_sgr: bool,
+    /// Latest title set via OSC 0/2 (or Sun variants), if any. The
+    /// next `drain_diff` ships this and clears the slot so a single
+    /// title change rides one diff and isn't replayed forever. None
+    /// means the title hasn't changed since the last drain.
+    pending_title: Option<String>,
     /// Per-row dirty bitmap. `dirty_rows[r] == true` means row `r`'s
     /// cells (or cursor presence) changed since the last `drain_diff`
     /// call. The diff event ships only marked rows; cursor + mode
@@ -415,6 +420,12 @@ pub struct GridDiff {
     pub mouse_tracking: MouseTracking,
     #[serde(skip_serializing_if = "GridDiff::mouse_sgr_is_default")]
     pub mouse_sgr: bool,
+    /// Latest window title set via OSC 0/2 since the last diff, or
+    /// None when nothing changed. Frontend updates the buffer's
+    /// display title from this field. Skipped on the wire when None
+    /// so steady-state diffs stay compact.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 impl GridDiff {
@@ -454,7 +465,29 @@ struct GridDiffEvent {
 }
 
 fn diff_has_changes(diff: &GridDiff) -> bool {
-    diff.seq != diff.base_seq || !diff.rows.is_empty()
+    diff.seq != diff.base_seq || !diff.rows.is_empty() || diff.title.is_some()
+}
+
+/// Mirror an OSC-derived title onto the per-buffer info so the buffer
+/// list IPC reflects the change. No-op when `title` is None or the
+/// buffers state is gone (app shutting down). The lock is taken
+/// briefly and only when a title actually changed - no contention
+/// during steady-state torrents.
+fn sync_title_to_buffer(app: &AppHandle, buffer_id: &str, title: Option<&str>) {
+    let Some(title) = title else { return };
+    if title.is_empty() {
+        return;
+    }
+    if let Some(state) = app.try_state::<TerminalState>() {
+        if let Ok(mut buffers) = state.buffers.lock() {
+            if let Some(process) = buffers.get_mut(buffer_id) {
+                if process.info.title != title {
+                    process.info.title = title.to_string();
+                    process.info.updated_at = unix_millis();
+                }
+            }
+        }
+    }
 }
 
 struct ClearAliveOnDrop(Arc<AtomicBool>);
@@ -503,6 +536,7 @@ impl TerminalGrid {
             scrollback: VecDeque::new(),
             mouse_tracking: MouseTracking::Off,
             mouse_sgr: false,
+            pending_title: None,
         }
     }
 
@@ -591,6 +625,7 @@ impl TerminalGrid {
             scrollback_len: self.scrollback.len() as u32,
             mouse_tracking: self.mouse_tracking,
             mouse_sgr: self.mouse_sgr,
+            title: self.pending_title.take(),
         }
     }
 
@@ -770,10 +805,16 @@ impl TerminalGrid {
     fn apply_osc(&mut self, osc: termwiz::escape::OperatingSystemCommand) {
         use termwiz::escape::OperatingSystemCommand as Osc;
         match osc {
-            Osc::SetIconNameAndWindowTitle(_)
-            | Osc::SetWindowTitle(_)
-            | Osc::SetWindowTitleSun(_)
-            | Osc::SetIconName(_)
+            // OSC 0 (icon + title), 2 (title), and the Sun-legacy
+            // variant. Shells emit these on every prompt redraw to
+            // surface the cwd / running command, so the latest one
+            // wins; the diff drain ships and clears the slot.
+            Osc::SetIconNameAndWindowTitle(t)
+            | Osc::SetWindowTitle(t)
+            | Osc::SetWindowTitleSun(t) => {
+                self.pending_title = Some(sanitize_title(&t));
+            }
+            Osc::SetIconName(_)
             | Osc::SetIconNameSun(_)
             | Osc::CurrentWorkingDirectory(_)
             | Osc::SetHyperlink(_)
@@ -2140,6 +2181,7 @@ fn spawn_reader_thread(
                     }
                     let diff = grid.lock().ok().map(|mut g| g.drain_diff());
                     if let Some(diff) = diff.filter(diff_has_changes) {
+                        sync_title_to_buffer(&app, &buffer_id, diff.title.as_deref());
                         let _ = app.emit(
                             TERMINAL_GRID_DIFF_EVENT,
                             GridDiffEvent {
@@ -2156,6 +2198,7 @@ fn spawn_reader_thread(
                     if let Ok(mut g) = grid.lock() {
                         let diff = g.drain_diff();
                         if diff_has_changes(&diff) {
+                            sync_title_to_buffer(&app, &buffer_id, diff.title.as_deref());
                             let _ = app.emit(
                                 TERMINAL_GRID_DIFF_EVENT,
                                 GridDiffEvent { buffer_id, diff },
@@ -2385,6 +2428,26 @@ fn title_from_command(command: &str) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("Terminal")
         .to_string()
+}
+
+/// Bound and sanitize a title received via OSC. Strips C0 control
+/// characters and DEL (would corrupt the renderer's tab title), clamps
+/// to a reasonable length so a runaway shell can't blow the IPC
+/// payload, and trims whitespace. Empty results round-trip as None at
+/// the call site (treated as "no change").
+const MAX_TITLE_BYTES: usize = 256;
+fn sanitize_title(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(MAX_TITLE_BYTES));
+    for ch in raw.chars() {
+        if ch.is_control() {
+            continue;
+        }
+        if out.len() + ch.len_utf8() > MAX_TITLE_BYTES {
+            break;
+        }
+        out.push(ch);
+    }
+    out.trim().to_string()
 }
 
 fn unix_millis() -> i64 {
@@ -3399,6 +3462,45 @@ mod tests {
         assert_eq!(grid.scrollback[0].len(), 2);
         grid.resize(2, 4);
         assert_eq!(grid.scrollback[0].len(), 4);
+    }
+
+    #[test]
+    fn grid_osc_2_sets_window_title() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b]2;hello\x07");
+        let diff = grid.drain_diff();
+        assert_eq!(diff.title.as_deref(), Some("hello"));
+        // Drain consumed the slot; next diff has no title.
+        let again = grid.drain_diff();
+        assert!(again.title.is_none());
+    }
+
+    #[test]
+    fn grid_osc_0_sets_window_title_and_icon_combo() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b]0;build: pass\x1b\\");
+        let diff = grid.drain_diff();
+        assert_eq!(diff.title.as_deref(), Some("build: pass"));
+    }
+
+    #[test]
+    fn sanitize_title_strips_controls_clamps_and_trims() {
+        // termwiz already terminates OSC strings on BEL/ST so the
+        // grid never sees embedded control bytes from the wire, but
+        // sanitize is defense-in-depth: any bypass that lets a stray
+        // control byte through still gets cleaned. Exercise it
+        // directly so the contract is testable.
+        assert_eq!(sanitize_title("  hello\u{007F}world  "), "helloworld");
+        let long = "x".repeat(MAX_TITLE_BYTES + 50);
+        assert_eq!(sanitize_title(&long).len(), MAX_TITLE_BYTES);
+    }
+
+    #[test]
+    fn grid_osc_repeated_title_keeps_latest_only() {
+        let mut grid = TerminalGrid::new(2, 4);
+        grid.feed(b"\x1b]2;first\x07\x1b]2;second\x07");
+        let diff = grid.drain_diff();
+        assert_eq!(diff.title.as_deref(), Some("second"));
     }
 
     #[test]

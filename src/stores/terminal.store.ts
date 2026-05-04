@@ -135,6 +135,23 @@ export const terminalStore = {
     }
   },
 
+  /**
+   * Update the displayed title for an existing buffer. Driven by OSC
+   * 0/2 escape sequences captured in the Rust grid and shipped on
+   * grid-diff events; the buffer header in TerminalBuffer reads this
+   * field so the title visibly tracks `cd`, running command, etc.
+   * No-op if the buffer is gone or the title is unchanged.
+   */
+  setBufferTitle(bufferId: string, title: string) {
+    const buffer = state.buffers[bufferId];
+    if (!buffer || buffer.title === title) return;
+    setState("buffers", bufferId, {
+      ...buffer,
+      title,
+      updatedAt: Date.now(),
+    });
+  },
+
   removeLocal(bufferId: string) {
     setState(
       produce((s: TerminalState) => {

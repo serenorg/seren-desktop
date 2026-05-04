@@ -92,6 +92,9 @@ interface GridDiffEvent {
   scrollbackLen?: number;
   mouseTracking?: number;
   mouseSgr?: boolean;
+  // Window title set via OSC 0/2 since the previous diff. Backend
+  // skip-serializes when nothing changed.
+  title?: string;
 }
 
 interface ScrollbackWindow {
@@ -426,6 +429,11 @@ export const TerminalBuffer: Component = () => {
     const currentSeq = gridSeq();
     if (diff.seq <= currentSeq) return "noop";
     if (diff.baseSeq > currentSeq) return "resync";
+    // Apply title side-effect early so it lands regardless of which
+    // branch (dim-changed vs same-dims) takes the cells path.
+    if (diff.title !== undefined) {
+      terminalStore.setBufferTitle(diff.bufferId, diff.title);
+    }
     const dimsChanged =
       diff.rowsTotal !== current.rows || diff.colsTotal !== current.cols;
     if (dimsChanged) {
