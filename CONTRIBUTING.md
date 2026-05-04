@@ -92,6 +92,11 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - `test:` Adding tests
 - `chore:` Maintenance
 
+The **subject line** (first line) must be ≤72 characters. Put implementation
+detail — file paths, line numbers, rationale, trade-offs — in the commit
+**body**, separated from the subject by a blank line. CI enforces both rules
+on every PR commit via `scripts/check-commit-msg.sh` (see #1778).
+
 Examples:
 
 - `feat: add model selection dropdown`
