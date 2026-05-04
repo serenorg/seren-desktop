@@ -102,7 +102,12 @@ Rules (from CLAUDE.md):
 - Make the smallest reasonable change.
 - Never skip pre-commit hooks (never use --no-verify).
 - All new branches must follow the pattern: fix/issue-{{number}}.
-- Commit message must end with:
+- Commit subject (first line) MUST be a Conventional Commit ≤72 chars
+  (CI enforces via scripts/check-commit-msg.sh, see #1778). Put any
+  implementation detail, file paths, line numbers, and rationale in the
+  commit body — separated from the subject by a blank line. Do NOT bundle
+  multi-paragraph summaries into the subject line.
+- Commit body must end with:
   Taariq Lewis, SerenAI, Paloma, and Volume at https://serendb.com
   Email: hello@serendb.com
 

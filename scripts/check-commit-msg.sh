@@ -9,6 +9,12 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
+# Subject length cap. #1778 made this a hard rule after multi-thousand-char
+# subjects landed on main from the agent harness bundling full implementation
+# summaries into the subject line. Override with MAX_SUBJECT_LEN=<n> for local
+# experiments — CI pins the cap.
+MAX_SUBJECT_LEN="${MAX_SUBJECT_LEN:-72}"
+
 # Accept either a file path (local hook passes the .git/COMMIT_EDITMSG path)
 # or a literal message string (CI passes the line via xargs -I or process subst).
 # An empty-string arg is allowed — git aborts before the hook ever runs on
@@ -39,11 +45,8 @@ esac
 # Types: feat, fix, chore, docs, style, refactor, perf, test, build, ci, revert, hotfix
 pattern='^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert|hotfix)(\([^)]+\))?!?: .+'
 
-if echo "$msg" | grep -Eq "$pattern"; then
-  exit 0
-fi
-
-cat >&2 <<EOF
+if ! echo "$msg" | grep -Eq "$pattern"; then
+  cat >&2 <<EOF
 ✗ Commit message does not follow conventional-commit format.
 
   Got: $msg
@@ -60,5 +63,28 @@ cat >&2 <<EOF
   See https://www.conventionalcommits.org/ for the full spec.
   Bypass with --no-verify only in emergencies.
 EOF
+  exit 1
+fi
 
-exit 1
+# Format passed; now enforce subject length (#1778).
+subject_len="${#msg}"
+if [ "$subject_len" -gt "$MAX_SUBJECT_LEN" ]; then
+  cat >&2 <<EOF
+✗ Commit subject is $subject_len chars; max is $MAX_SUBJECT_LEN.
+
+  Got: $msg
+
+  Move implementation detail into the commit body (a blank line below the
+  subject), keeping the first line a short Conventional Commit summary.
+
+  Examples:
+    fix(agent): close #1234 — short summary here
+    (blank line)
+    Long-form rationale, file paths, line numbers, and trade-offs go here.
+
+  See https://www.conventionalcommits.org/ §1 (subject) and §2 (body).
+EOF
+  exit 1
+fi
+
+exit 0

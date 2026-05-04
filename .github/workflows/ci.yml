@@ -26,6 +26,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-commit-subjects:
+    # Validates each non-merge commit subject in the PR diff against
+    # scripts/check-commit-msg.sh — same script the local commit-msg hook uses.
+    # Catches what the local hook misses when a contributor hasn't opted in.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Validate PR commit subjects
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -e
+          subjects=$(git log --no-merges --format='%s' "$BASE_SHA..$HEAD_SHA")
+          if [ -z "$subjects" ]; then
+            echo "No non-merge commits in PR diff; nothing to validate."
+            exit 0
+          fi
+          fail=0
+          while IFS= read -r line; do
+            if ! bash scripts/check-commit-msg.sh "$line"; then
+              fail=1
+            fi
+          done <<< "$subjects"
+          exit "$fail"
+
   lint:
     runs-on: ubuntu-latest
     steps:
