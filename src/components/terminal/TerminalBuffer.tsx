@@ -1707,6 +1707,9 @@ export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
               class="flex-1 min-h-0 overflow-hidden bg-[#090b0f] outline-none cursor-text"
               role="application"
               aria-label="Terminal"
+              data-workspace-default-focus={
+                current().status === "running" ? "true" : undefined
+              }
               // biome-ignore lint/a11y/noNoninteractiveTabindex: terminal surfaces are interactive widgets that own their keyboard model (matches xterm.js, vscode terminal pattern)
               tabIndex={0}
               onKeyDown={(e) => void handleKeyDown(e)}

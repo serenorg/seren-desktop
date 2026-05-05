@@ -3,8 +3,10 @@
 
 import {
   type Component,
+  createEffect,
   createSignal,
   Match,
+  on,
   onCleanup,
   onMount,
   Switch,
@@ -103,12 +105,117 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   const handleOpenSettings = () => setSlidePanel("settings");
 
+  // Per-workspace focus memory. Track focus as it changes so clicking
+  // the workspace switcher does not overwrite the previous workspace's
+  // last meaningful input with the tab button itself.
+  const focusByWorkspace = new Map<number, WeakRef<HTMLElement>>();
+  let restoreFocusFrame: number | null = null;
+  let suppressFocusMemory = false;
+  const isRestorableFocusTarget = (target: HTMLElement) => {
+    if (target === document.body || target === document.documentElement) {
+      return false;
+    }
+    if (target.matches(":disabled")) {
+      return false;
+    }
+    if (target.closest("[data-workspace-focus-ignore='true']")) {
+      return false;
+    }
+    if (target.closest("[aria-hidden='true']")) {
+      return false;
+    }
+    return true;
+  };
+  const rememberFocus = (workspaceNumber = workspaceStore.activeNumber) => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && isRestorableFocusTarget(focused)) {
+      focusByWorkspace.set(workspaceNumber, new WeakRef(focused));
+    }
+  };
+  const focusWorkspacePanel = () => {
+    const panel = document.getElementById("workspace-content-panel");
+    if (panel instanceof HTMLElement) {
+      suppressFocusMemory = true;
+      panel.focus({ preventScroll: true });
+      suppressFocusMemory = false;
+    } else if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  };
+  const focusDefaultWindowTarget = () => {
+    if (workspaceStore.activeWorkspace.windows.length !== 1) return false;
+    const panel = document.getElementById("workspace-content-panel");
+    if (!(panel instanceof HTMLElement)) return false;
+
+    const candidates = panel.querySelectorAll<HTMLElement>(
+      "[data-workspace-default-focus='true']",
+    );
+    for (const candidate of candidates) {
+      if (document.contains(candidate) && isRestorableFocusTarget(candidate)) {
+        candidate.focus({ preventScroll: true });
+        return true;
+      }
+    }
+    return false;
+  };
+  const handleFocusIn = (event: FocusEvent) => {
+    if (suppressFocusMemory) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && isRestorableFocusTarget(target)) {
+      focusByWorkspace.set(workspaceStore.activeNumber, new WeakRef(target));
+    }
+  };
+  const unsubscribeWorkspaceRemoved = workspaceStore.onWorkspaceRemoved(
+    (number) => {
+      focusByWorkspace.delete(number);
+    },
+  );
+  createEffect(
+    on(
+      () => workspaceStore.activeNumber,
+      (current, previous) => {
+        if (previous !== undefined) {
+          rememberFocus(previous);
+        }
+
+        if (restoreFocusFrame !== null) {
+          cancelAnimationFrame(restoreFocusFrame);
+        }
+        if (
+          document.activeElement instanceof HTMLElement &&
+          document.activeElement.closest("[aria-hidden='true']")
+        ) {
+          focusWorkspacePanel();
+        }
+        restoreFocusFrame = requestAnimationFrame(() => {
+          restoreFocusFrame = null;
+          if (workspaceStore.activeNumber !== current) return;
+
+          const target = focusByWorkspace.get(current)?.deref();
+          if (
+            target &&
+            document.contains(target) &&
+            isRestorableFocusTarget(target)
+          ) {
+            target.focus({ preventScroll: true });
+            return;
+          }
+
+          focusByWorkspace.delete(current);
+          if (focusDefaultWindowTarget()) return;
+          focusWorkspacePanel();
+        });
+      },
+    ),
+  );
+
   // Register global listeners and keyboard shortcuts
   onMount(() => {
     initWorkspaceStore();
 
     window.addEventListener("seren:open-panel", handleOpenPanel);
     window.addEventListener("seren:open-settings", handleOpenSettings);
+    document.addEventListener("focusin", handleFocusIn);
     // Capture phase so descendants calling stopPropagation (Monaco)
     // can't swallow the workspace-switch chord.
     window.addEventListener("keydown", handleKeyDown, true);
@@ -123,9 +230,15 @@ export const AppShell: Component<AppShellProps> = (props) => {
   });
 
   onCleanup(() => {
+    unsubscribeWorkspaceRemoved();
     window.removeEventListener("seren:open-panel", handleOpenPanel);
     window.removeEventListener("seren:open-settings", handleOpenSettings);
+    document.removeEventListener("focusin", handleFocusIn);
     window.removeEventListener("keydown", handleKeyDown, true);
+    if (restoreFocusFrame !== null) {
+      cancelAnimationFrame(restoreFocusFrame);
+      restoreFocusFrame = null;
+    }
 
     shortcuts.unregister("focusChat");
     shortcuts.unregister("openSettings");

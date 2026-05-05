@@ -132,6 +132,24 @@ describe("workspaceStore", () => {
     expect(workspaceStore.workspaces.map((w) => w.number)).toEqual([1]);
   });
 
+  it("notifies listeners when an empty workspace auto-deletes", async () => {
+    const { workspaceStore } = await setup();
+    const removed = vi.fn();
+    const unsubscribe = workspaceStore.onWorkspaceRemoved(removed);
+
+    workspaceStore.addWorkspace();
+    workspaceStore.switchTo(1);
+
+    expect(removed).toHaveBeenCalledOnce();
+    expect(removed).toHaveBeenCalledWith(2);
+
+    unsubscribe();
+    workspaceStore.switchOrCreate(3);
+    workspaceStore.switchTo(1);
+
+    expect(removed).toHaveBeenCalledOnce();
+  });
+
   it("keeps a workspace that had content after its live thread mirror clears", async () => {
     const { threadStore, workspaceStore } = await setup();
 

@@ -14,6 +14,7 @@ interface ResizableTextareaProps {
   disabled?: boolean;
   minHeight?: number;
   maxHeight?: number;
+  workspaceDefaultFocus?: boolean;
 }
 
 export const ResizableTextarea: Component<ResizableTextareaProps> = (props) => {
@@ -127,6 +128,9 @@ export const ResizableTextarea: Component<ResizableTextareaProps> = (props) => {
         onInput={props.onInput}
         onKeyDown={props.onKeyDown}
         disabled={props.disabled}
+        data-workspace-default-focus={
+          props.workspaceDefaultFocus && !props.disabled ? "true" : undefined
+        }
       />
     </div>
   );

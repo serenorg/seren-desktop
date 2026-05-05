@@ -1800,6 +1800,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                 }}
               />
               <ResizableTextarea
+                workspaceDefaultFocus={hasSession()}
                 ref={(el) => (inputRef = el)}
                 value={input() ?? ""}
                 placeholder={

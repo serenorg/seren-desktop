@@ -20,7 +20,10 @@ export const WorkspaceBar: Component = () => {
   return (
     // The "+" button stays a sibling of the tablist (not a child) so
     // ARIA tablist children are all role=tab.
-    <div class="flex items-center gap-1 select-none">
+    <div
+      class="flex items-center gap-1 select-none"
+      data-workspace-focus-ignore="true"
+    >
       <div
         class="flex items-center gap-1"
         role="tablist"

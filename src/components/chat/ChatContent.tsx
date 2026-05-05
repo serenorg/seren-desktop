@@ -407,7 +407,9 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       setInput(pending);
       chatStore.setPendingInput(null);
       // Focus the input after a short delay to ensure panel is visible
-      setTimeout(() => inputRef?.focus(), 100);
+      setTimeout(() => {
+        if (isPaneActive()) inputRef?.focus();
+      }, 100);
     }
   });
 
@@ -1485,6 +1487,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 }}
               />
               <ResizableTextarea
+                workspaceDefaultFocus={true}
                 ref={(el) => {
                   inputRef = el;
                   console.log(

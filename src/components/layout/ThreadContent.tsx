@@ -35,6 +35,8 @@ export const ThreadContent: Component<ThreadContentProps> = (props) => {
     <div
       id="workspace-content-panel"
       role="tabpanel"
+      aria-label="Workspace content"
+      tabIndex={-1}
       class="relative flex flex-col h-full overflow-hidden"
     >
       <div class="relative flex-1 overflow-hidden min-h-0">

@@ -33,8 +33,11 @@ interface WorkspaceState {
   activeNumber: number;
 }
 
+type WorkspaceRemovedListener = (number: number) => void;
+
 // Workspace 1 is permanent: never auto-deleted, even when empty.
 const PERMANENT_WORKSPACE_NUMBER = 1;
+const workspaceRemovedListeners = new Set<WorkspaceRemovedListener>();
 
 const [state, setState] = createStore<WorkspaceState>({
   workspaces: [
@@ -140,6 +143,12 @@ function pruneMissingThreadWindows(threadIds: Set<string>): void {
   );
 }
 
+function notifyWorkspaceRemoved(number: number): void {
+  for (const listener of workspaceRemovedListeners) {
+    listener(number);
+  }
+}
+
 /**
  * Bind `threadStore.activeThreadId` to the focused window in the
  * active workspace. Must run inside a Solid root so the effects are
@@ -237,6 +246,7 @@ export const workspaceStore = {
       !prev.hasHadContent
     ) {
       setState("workspaces", (ws) => ws.filter((w) => w.number !== previous));
+      notifyWorkspaceRemoved(previous);
     }
   },
 
@@ -270,5 +280,10 @@ export const workspaceStore = {
       workspaces: [emptyWorkspace(PERMANENT_WORKSPACE_NUMBER)],
       activeNumber: PERMANENT_WORKSPACE_NUMBER,
     });
+  },
+
+  onWorkspaceRemoved(listener: WorkspaceRemovedListener): () => void {
+    workspaceRemovedListeners.add(listener);
+    return () => workspaceRemovedListeners.delete(listener);
   },
 };
