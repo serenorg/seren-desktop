@@ -9,12 +9,17 @@ import {
   threadStore,
 } from "@/stores/thread.store";
 
+export type SplitDirection = "row" | "column";
+
 export interface WorkspaceWindow {
   /** Stable identity for the pane inside a workspace. */
   id: string;
-  /** Thread displayed by this window. */
-  threadId: string;
-  kind: ThreadKind;
+  /** Thread displayed by this window. Null = empty placeholder pane. */
+  threadId: string | null;
+  /** Mirrors thread kind once bound. Null when placeholder. */
+  kind: ThreadKind | null;
+  /** Flex-grow weight when laid out in the workspace. Defaults to 1. */
+  size: number;
 }
 
 export interface Workspace {
@@ -22,6 +27,8 @@ export interface Workspace {
   number: number;
   windows: WorkspaceWindow[];
   focusedWindowId: string | null;
+  /** Tile layout direction: row = side by side, column = stacked. */
+  splitDirection: SplitDirection;
   /** Sticky: auto-cleanup spares workspaces that ever had a window. */
   hasHadContent: boolean;
   /** Set when a thread here goes running -> not-running while inactive. */
@@ -45,6 +52,7 @@ const [state, setState] = createStore<WorkspaceState>({
       number: 1,
       windows: [],
       focusedWindowId: null,
+      splitDirection: "row",
       hasHadContent: false,
       needsAttention: false,
     },
@@ -57,6 +65,7 @@ function emptyWorkspace(number: number): Workspace {
     number,
     windows: [],
     focusedWindowId: null,
+    splitDirection: "row",
     hasHadContent: false,
     needsAttention: false,
   };
@@ -66,6 +75,12 @@ function primaryWindowId(number: number): string {
   return `workspace-${number}-primary`;
 }
 
+let paneIdCounter = 0;
+function newPaneId(workspaceNumber: number): string {
+  paneIdCounter += 1;
+  return `workspace-${workspaceNumber}-pane-${paneIdCounter}`;
+}
+
 function focusedWindow(workspace: Workspace): WorkspaceWindow | null {
   if (!workspace.focusedWindowId) return null;
   return (
@@ -73,7 +88,11 @@ function focusedWindow(workspace: Workspace): WorkspaceWindow | null {
   );
 }
 
-function bindThreadToWorkspace(number: number, threadId: string | null): void {
+function bindThreadToWorkspace(
+  number: number,
+  threadId: string | null,
+  options: { activeThreadChanged: boolean } = { activeThreadChanged: true },
+): void {
   if (threadId === null) return;
 
   const thread = threadStore.threads.find((t) => t.id === threadId);
@@ -83,21 +102,41 @@ function bindThreadToWorkspace(number: number, threadId: string | null): void {
   if (idx < 0) return;
 
   const workspace = state.workspaces[idx];
-  const existingWindow = focusedWindow(workspace) ?? workspace.windows[0];
-  const windowId = existingWindow?.id ?? primaryWindowId(number);
 
-  if (!existingWindow) {
+  // Same thread already in another pane in this workspace? Just refocus
+  // it - we enforce one pane per thread per workspace so the singleton
+  // mounting in ThreadContent stays valid. Skip the refocus when this
+  // call was triggered by a thread-list change (rather than a deliberate
+  // activeThreadId change), so background thread additions cannot snap
+  // focus away from a placeholder the user just split into.
+  const existingPaneWithThread = workspace.windows.find(
+    (w) => w.threadId === threadId,
+  );
+  if (existingPaneWithThread) {
+    if (
+      options.activeThreadChanged &&
+      workspace.focusedWindowId !== existingPaneWithThread.id
+    ) {
+      setState("workspaces", idx, "focusedWindowId", existingPaneWithThread.id);
+    }
+    if (!workspace.hasHadContent) {
+      setState("workspaces", idx, "hasHadContent", true);
+    }
+    return;
+  }
+
+  const focused = focusedWindow(workspace) ?? workspace.windows[0];
+  const windowId = focused?.id ?? primaryWindowId(number);
+
+  if (!focused) {
     setState("workspaces", idx, "windows", [
-      { id: windowId, threadId, kind: thread.kind },
+      { id: windowId, threadId, kind: thread.kind, size: 1 },
     ]);
-  } else if (
-    existingWindow.threadId !== threadId ||
-    existingWindow.kind !== thread.kind
-  ) {
+  } else {
     const windowIdx = workspace.windows.findIndex((w) => w.id === windowId);
     if (windowIdx >= 0) {
       setState("workspaces", idx, "windows", windowIdx, {
-        ...existingWindow,
+        ...focused,
         threadId,
         kind: thread.kind,
       });
@@ -114,11 +153,12 @@ function bindThreadToWorkspace(number: number, threadId: string | null): void {
 
 function pruneMissingThreadWindows(threadIds: Set<string>): void {
   // Steady state must be a no-op: setState on `workspaces` cascades
-  // reactivity to every consumer.
+  // reactivity to every consumer. Placeholder panes (threadId === null)
+  // are kept - the user just hasn't filled them yet.
   let needsPrune = false;
   for (const workspace of state.workspaces) {
     for (const window of workspace.windows) {
-      if (!threadIds.has(window.threadId)) {
+      if (window.threadId !== null && !threadIds.has(window.threadId)) {
         needsPrune = true;
         break;
       }
@@ -129,8 +169,8 @@ function pruneMissingThreadWindows(threadIds: Set<string>): void {
 
   setState("workspaces", (workspaces) =>
     workspaces.map((workspace) => {
-      const windows = workspace.windows.filter((window) =>
-        threadIds.has(window.threadId),
+      const windows = workspace.windows.filter(
+        (window) => window.threadId === null || threadIds.has(window.threadId),
       );
       if (windows.length === workspace.windows.length) return workspace;
       const focusedWindowId = windows.some(
@@ -158,12 +198,20 @@ export function initWorkspaceStore(): void {
   // Untracked workspace lookup: this effect must only fire on
   // activeThreadId changes, not activeNumber flips, or switchTo's
   // "set activeNumber, then setActiveThread" sequence races itself.
+  // Track the previous activeThreadId so we can distinguish a
+  // user-driven thread switch from a thread-list change that just
+  // re-runs the effect.
+  let previousActiveThread: string | null | undefined;
   createEffect(() => {
     const active = threadStore.activeThreadId;
     const threadIds = new Set(threadStore.threads.map((thread) => thread.id));
     untrack(() => {
+      const activeThreadChanged = previousActiveThread !== active;
+      previousActiveThread = active;
       pruneMissingThreadWindows(threadIds);
-      bindThreadToWorkspace(state.activeNumber, active);
+      bindThreadToWorkspace(state.activeNumber, active, {
+        activeThreadChanged,
+      });
     });
   });
 
@@ -272,6 +320,123 @@ export const workspaceStore = {
       return next;
     });
     this.switchTo(number);
+  },
+
+  /**
+   * Split the focused pane in `direction`, inserting a new empty
+   * placeholder pane after it. The new pane becomes focused; the
+   * next thread the user opens (sidebar click, "+ New") fills it.
+   * Sets the workspace's split direction to match.
+   */
+  splitFocusedPane(direction: SplitDirection): void {
+    const wsIdx = state.workspaces.findIndex(
+      (w) => w.number === state.activeNumber,
+    );
+    if (wsIdx < 0) return;
+    const ws = state.workspaces[wsIdx];
+    const newId = newPaneId(ws.number);
+    const placeholder: WorkspaceWindow = {
+      id: newId,
+      threadId: null,
+      kind: null,
+      size: 1,
+    };
+    if (ws.windows.length === 0) {
+      // No windows yet - the placeholder becomes the only pane.
+      setState("workspaces", wsIdx, "windows", [placeholder]);
+    } else {
+      const focusedIdx = ws.windows.findIndex(
+        (w) => w.id === ws.focusedWindowId,
+      );
+      const insertAt = focusedIdx >= 0 ? focusedIdx + 1 : ws.windows.length;
+      setState("workspaces", wsIdx, "windows", (windows) => [
+        ...windows.slice(0, insertAt),
+        placeholder,
+        ...windows.slice(insertAt),
+      ]);
+    }
+    // Direction is locked once the workspace has more than one pane.
+    // Splitting the other way past that point would silently re-flow
+    // every existing tile (e.g. 3 horizontal panes flipping to a stack
+    // of 3), which is more surprising than honoring the lock.
+    if (ws.windows.length <= 1) {
+      setState("workspaces", wsIdx, "splitDirection", direction);
+    }
+    setState("workspaces", wsIdx, "focusedWindowId", newId);
+    if (!state.workspaces[wsIdx].hasHadContent) {
+      setState("workspaces", wsIdx, "hasHadContent", true);
+    }
+  },
+
+  /**
+   * Close the focused pane in the active workspace. If the pane held
+   * a thread, the underlying thread is NOT deleted - it just leaves
+   * this workspace. Focus moves to the previous (or next) pane.
+   */
+  closeFocusedWindow(): void {
+    const wsIdx = state.workspaces.findIndex(
+      (w) => w.number === state.activeNumber,
+    );
+    if (wsIdx < 0) return;
+    const ws = state.workspaces[wsIdx];
+    const focusedIdx = ws.windows.findIndex((w) => w.id === ws.focusedWindowId);
+    if (focusedIdx < 0) return;
+    const nextWindows = [
+      ...ws.windows.slice(0, focusedIdx),
+      ...ws.windows.slice(focusedIdx + 1),
+    ];
+    setState("workspaces", wsIdx, "windows", nextWindows);
+    const nextFocusIdx = Math.min(focusedIdx, nextWindows.length - 1);
+    const nextFocusId = nextFocusIdx >= 0 ? nextWindows[nextFocusIdx].id : null;
+    setState("workspaces", wsIdx, "focusedWindowId", nextFocusId);
+    if (nextFocusId !== null) {
+      const nextThreadId = nextWindows[nextFocusIdx].threadId;
+      if (nextThreadId !== threadStore.activeThreadId) {
+        threadStore.setActiveThread(nextThreadId);
+      }
+    } else if (threadStore.activeThreadId !== null) {
+      threadStore.setActiveThread(null);
+    }
+  },
+
+  /** Set the focused pane within the active workspace. */
+  focusWindow(windowId: string): void {
+    const wsIdx = state.workspaces.findIndex(
+      (w) => w.number === state.activeNumber,
+    );
+    if (wsIdx < 0) return;
+    const ws = state.workspaces[wsIdx];
+    const window = ws.windows.find((w) => w.id === windowId);
+    if (!window) return;
+    if (ws.focusedWindowId !== windowId) {
+      setState("workspaces", wsIdx, "focusedWindowId", windowId);
+    }
+    if (window.threadId !== threadStore.activeThreadId) {
+      threadStore.setActiveThread(window.threadId);
+    }
+  },
+
+  /**
+   * Update pane sizes from a drag-resize. Sizes are flex-grow values;
+   * relative magnitudes determine each pane's share of the workspace.
+   * Updates each pane's `size` field in place so the underlying window
+   * proxy identity is preserved - any consumer iterating windows (e.g.
+   * the singleton-per-thread mount in ThreadContent) keeps the same
+   * row references and does not re-mount on every drag tick.
+   */
+  resizePanes(updates: Array<{ id: string; size: number }>): void {
+    const wsIdx = state.workspaces.findIndex(
+      (w) => w.number === state.activeNumber,
+    );
+    if (wsIdx < 0) return;
+    const windows = state.workspaces[wsIdx].windows;
+    for (const update of updates) {
+      const windowIdx = windows.findIndex((w) => w.id === update.id);
+      if (windowIdx < 0) continue;
+      const nextSize = Math.max(0.05, update.size);
+      if (windows[windowIdx].size === nextSize) continue;
+      setState("workspaces", wsIdx, "windows", windowIdx, "size", nextSize);
+    }
   },
 
   /** Reset to the initial single-workspace state (called on logout). */

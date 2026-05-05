@@ -238,9 +238,11 @@ describe("workspaceStore", () => {
             id: "workspace-1-primary",
             threadId: "restored-thread",
             kind: "chat",
+            size: 1,
           },
         ],
         focusedWindowId: "workspace-1-primary",
+        splitDirection: "row",
         hasHadContent: true,
         needsAttention: false,
       },
@@ -318,6 +320,7 @@ describe("workspaceStore", () => {
         number: 1,
         windows: [],
         focusedWindowId: null,
+        splitDirection: "row",
         hasHadContent: false,
         needsAttention: false,
       },
@@ -369,5 +372,152 @@ describe("workspaceStore", () => {
     workspaceStore.switchTo(2);
 
     expect(workspaceStore.activeWorkspace.needsAttention).toBe(false);
+  });
+
+  it("splits the focused pane and inserts an empty placeholder", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    expect(workspaceStore.activeWorkspace.windows).toHaveLength(1);
+
+    workspaceStore.splitFocusedPane("row");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.splitDirection).toBe("row");
+    expect(ws.windows).toHaveLength(2);
+    expect(ws.windows[0].threadId).toBe("thread-1");
+    expect(ws.windows[1].threadId).toBeNull();
+    expect(ws.focusedWindowId).toBe(ws.windows[1].id);
+  });
+
+  it("fills a focused empty placeholder when a thread is selected", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    threadStore.setActiveThread("thread-2");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows.map((w) => w.threadId)).toEqual([
+      "thread-1",
+      "thread-2",
+    ]);
+  });
+
+  it("refocuses an existing pane instead of binding the same thread twice", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    threadStore.setActiveThread("thread-2");
+
+    const beforeWindowCount = workspaceStore.activeWorkspace.windows.length;
+    workspaceStore.focusWindow(workspaceStore.activeWorkspace.windows[1].id);
+    threadStore.setActiveThread("thread-1");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(beforeWindowCount);
+    expect(ws.focusedWindowId).toBe(ws.windows[0].id);
+  });
+
+  it("closes the focused pane and shifts focus to a sibling", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    threadStore.setActiveThread("thread-2");
+
+    workspaceStore.closeFocusedWindow();
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows.map((w) => w.threadId)).toEqual(["thread-1"]);
+    expect(ws.focusedWindowId).toBe(ws.windows[0].id);
+  });
+
+  it("clears the active thread when the last pane closes", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.closeFocusedWindow();
+
+    expect(workspaceStore.activeWorkspace.windows).toEqual([]);
+    expect(threadStore.setActiveThread).toHaveBeenLastCalledWith(null);
+  });
+
+  it("resizes panes by id", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    const [a, b] = workspaceStore.activeWorkspace.windows;
+    workspaceStore.resizePanes([
+      { id: a.id, size: 0.7 },
+      { id: b.id, size: 0.3 },
+    ]);
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows[0].size).toBeCloseTo(0.7);
+    expect(ws.windows[1].size).toBeCloseTo(0.3);
+  });
+
+  it("creates a placeholder when splitting an empty workspace", async () => {
+    const { workspaceStore } = await setup();
+
+    workspaceStore.splitFocusedPane("column");
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(1);
+    expect(ws.windows[0].threadId).toBeNull();
+    expect(ws.windows[0].kind).toBeNull();
+    expect(ws.focusedWindowId).toBe(ws.windows[0].id);
+    expect(ws.splitDirection).toBe("column");
+  });
+
+  it("closes a focused placeholder without touching sibling threads", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    expect(workspaceStore.activeWorkspace.windows).toHaveLength(2);
+    const placeholder = workspaceStore.activeWorkspace.windows.find(
+      (w) => w.id === workspaceStore.activeWorkspace.focusedWindowId,
+    );
+    expect(placeholder?.threadId).toBeNull();
+
+    workspaceStore.closeFocusedWindow();
+
+    const ws = workspaceStore.activeWorkspace;
+    expect(ws.windows).toHaveLength(1);
+    expect(ws.windows[0].threadId).toBe("thread-1");
+    expect(ws.focusedWindowId).toBe(ws.windows[0].id);
+    expect(threadStore.activeThreadId).toBe("thread-1");
+  });
+
+  it("locks split direction once the workspace has multiple panes", async () => {
+    const { threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    expect(workspaceStore.activeWorkspace.splitDirection).toBe("row");
+
+    workspaceStore.splitFocusedPane("column");
+    expect(workspaceStore.activeWorkspace.windows).toHaveLength(3);
+    expect(workspaceStore.activeWorkspace.splitDirection).toBe("row");
+  });
+
+  it("preserves placeholder focus when an unrelated thread is added", async () => {
+    const { threadModule, threadStore, workspaceStore } = await setup();
+
+    threadStore.setActiveThread("thread-1");
+    workspaceStore.splitFocusedPane("row");
+    const placeholder = workspaceStore.activeWorkspace.windows[1];
+    expect(workspaceStore.activeWorkspace.focusedWindowId).toBe(placeholder.id);
+
+    // A new thread arriving in the store (e.g. background session
+    // creation) re-runs the mirror effect. Focus on the placeholder
+    // must not snap back to the existing pane that holds thread-1.
+    threadModule.__addMockThread("unrelated-thread", "agent");
+
+    expect(workspaceStore.activeWorkspace.focusedWindowId).toBe(placeholder.id);
   });
 });

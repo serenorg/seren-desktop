@@ -96,10 +96,34 @@ export const AppShell: Component<AppShellProps> = (props) => {
     const modOnly = isMac
       ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
       : e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    const modShift = isMac
+      ? e.metaKey && !e.ctrlKey && !e.altKey && e.shiftKey
+      : e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey;
     if (modOnly && e.key >= "0" && e.key <= "9") {
       const number = e.key === "0" ? 10 : Number.parseInt(e.key, 10);
       e.preventDefault();
       workspaceStore.switchOrCreate(number);
+      return;
+    }
+    // Tile chords: \ splits right, - splits down, Shift+W closes
+    // focused pane. The Shift on close avoids Cmd+W's collision with
+    // the native "Close Window" menu accelerator.
+    if (modOnly) {
+      if (e.key === "\\") {
+        e.preventDefault();
+        workspaceStore.splitFocusedPane("row");
+        return;
+      }
+      if (e.key === "-") {
+        e.preventDefault();
+        workspaceStore.splitFocusedPane("column");
+        return;
+      }
+    }
+    if (modShift && (e.key === "w" || e.key === "W")) {
+      e.preventDefault();
+      workspaceStore.closeFocusedWindow();
+      return;
     }
   };
 
