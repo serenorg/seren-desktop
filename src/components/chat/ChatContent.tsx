@@ -1456,21 +1456,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
               onRemove={handleRemoveImage}
               isLoading={isAttaching()}
             />
-            <Show when={messageQueue().length > 0}>
-              <div class="flex items-center gap-2 px-3 py-2 bg-surface-2 border border-border rounded-lg text-xs text-muted-foreground">
-                <span>
-                  {messageQueue().length} message
-                  {messageQueue().length > 1 ? "s" : ""} queued
-                </span>
-                <button
-                  type="button"
-                  class="ml-auto bg-transparent border border-border text-muted-foreground px-2 py-0.5 rounded text-xs cursor-pointer hover:bg-surface-2 hover:text-foreground"
-                  onClick={() => setMessageQueue([])}
-                >
-                  Clear Queue
-                </button>
-              </div>
-            </Show>
             <div class="relative">
               <SlashCommandPopup
                 input={input()}
@@ -1641,6 +1626,19 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 </Show>
                 <Show when={conversationIsLoading()}>
                   <ThinkingStatus />
+                </Show>
+                <Show when={messageQueue().length > 0}>
+                  <span class="flex items-center gap-2 px-2 py-1 bg-surface-2 border border-border rounded text-xs text-muted-foreground">
+                    {messageQueue().length} message
+                    {messageQueue().length > 1 ? "s" : ""} queued
+                    <button
+                      type="button"
+                      class="text-destructive hover:underline"
+                      onClick={() => setMessageQueue([])}
+                    >
+                      Clear
+                    </button>
+                  </span>
                 </Show>
                 <Show
                   when={
