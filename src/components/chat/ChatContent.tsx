@@ -995,7 +995,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   };
 
   return (
-    <section class="relative flex flex-col h-full bg-background text-foreground border-l border-surface-2">
+    <section class="relative flex flex-col h-full bg-background text-foreground">
       <Show when={isDragging()}>
         <div class="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary/50 rounded-sm z-50 pointer-events-none flex items-center justify-center">
           <span class="text-primary text-sm font-medium bg-background/90 px-3 py-1.5 rounded-md shadow-sm">
