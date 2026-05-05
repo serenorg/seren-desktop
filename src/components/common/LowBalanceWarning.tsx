@@ -102,34 +102,21 @@ export const LowBalanceWarning: Component<LowBalanceWarningProps> = (props) => {
   );
 };
 
-/**
- * Low balance modal that shows when balance first drops below threshold.
- */
+/** Modal fires at most once per JS context: invariant for "session". */
+let lowBalanceModalShownThisSession = false;
+
 export const LowBalanceModal: Component = () => {
   const [isVisible, setIsVisible] = createSignal(false);
-  const [lastNotifiedBalance, setLastNotifiedBalance] = createSignal<
-    number | null
-  >(null);
 
   const threshold = () => settingsStore.get("lowBalanceThreshold");
 
-  // Show modal when balance drops below threshold for the first time
   createEffect(() => {
+    if (lowBalanceModalShownThisSession) return;
     const balance = walletState.balance;
-    const thresh = threshold();
-    const lastNotified = lastNotifiedBalance();
-
     if (balance === null) return;
-
-    // Show if balance dropped below threshold and we haven't shown for this level
-    if (balance < thresh) {
-      if (lastNotified === null || balance < lastNotified) {
-        setIsVisible(true);
-        setLastNotifiedBalance(balance);
-      }
-    } else {
-      // Reset when balance goes above threshold
-      setLastNotifiedBalance(null);
+    if (balance < threshold()) {
+      lowBalanceModalShownThisSession = true;
+      setIsVisible(true);
     }
   });
 

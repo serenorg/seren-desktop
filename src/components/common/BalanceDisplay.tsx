@@ -29,13 +29,12 @@ export const BalanceDisplay: Component = () => {
     return "normal";
   };
 
-  // Get state-specific classes
   const stateClasses = () => {
     switch (balanceState()) {
       case "critical":
-        return "text-destructive border-destructive animate-pulse";
+        return "text-destructive";
       case "low":
-        return "text-warning border-warning";
+        return "text-warning";
       case "unknown":
         return "text-muted-foreground";
       default:
@@ -64,33 +63,27 @@ export const BalanceDisplay: Component = () => {
     <Show when={showBalance()}>
       <div class="flex items-center gap-1">
         <button
-          class={`flex items-center gap-1.5 py-1.5 px-3 bg-muted border border-border rounded-md text-sm font-medium cursor-pointer transition-all duration-150 hover:bg-secondary hover:border-secondary ${stateClasses()}`}
+          type="button"
+          class={`flex items-center gap-1.5 py-1 px-2 bg-transparent border-none rounded-md text-sm font-medium cursor-pointer transition-colors duration-100 hover:bg-surface-2 ${stateClasses()}`}
           onClick={handleClick}
           title={lastUpdatedText()}
           aria-label={`SerenBucks balance: ${walletStore.formattedBalance}. Click to add funds.`}
         >
-          <Show when={walletState.isLoading}>
-            <span class="flex items-center justify-center w-[60px]">
-              <span class="w-3.5 h-3.5 border-2 border-border border-t-primary rounded-full animate-spin" />
-            </span>
-          </Show>
-
+          {/* Refresh is silent - last-known balance stays visible. */}
           <Show when={!walletState.isLoading && walletState.error}>
             <span class="text-destructive mr-1" title={walletState.error || ""}>
               &#9888;
             </span>
           </Show>
-
-          <Show when={!walletState.isLoading}>
-            <span class="text-base" aria-hidden="true">
-              &#128176;
-            </span>
-            <span class="tabular-nums">{walletStore.formattedBalance}</span>
-          </Show>
+          <span class="text-base" aria-hidden="true">
+            &#128176;
+          </span>
+          <span class="tabular-nums">{walletStore.formattedBalance}</span>
         </button>
 
         <button
-          class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-none rounded text-base text-secondary-foreground cursor-pointer transition-all duration-150 hover:bg-secondary hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+          type="button"
+          class="flex items-center justify-center w-7 h-7 p-0 bg-transparent border-none rounded text-base text-secondary-foreground cursor-pointer transition-colors duration-100 hover:bg-surface-2 hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={handleRefresh}
           title="Refresh balance"
           aria-label="Refresh balance"
