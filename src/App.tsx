@@ -51,6 +51,7 @@ import {
   startDailyClaimPolling,
   stopAutoRefresh,
 } from "@/stores/wallet.store";
+import { workspaceStore } from "@/stores/workspace.store";
 import "./styles.css";
 
 // Initialize telemetry early to capture startup errors
@@ -202,6 +203,8 @@ function App() {
         }
         stopAutoRefresh();
         resetWalletState();
+        threadStore.clear();
+        workspaceStore.reset();
         autocompleteStore.disable();
       });
     }

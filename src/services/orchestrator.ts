@@ -122,11 +122,11 @@ interface ToolExecutionRequest {
 // Internal state for the active orchestration
 // =============================================================================
 
-/** ID of the assistant message being streamed into. */
-let activeMessageId: string | null = null;
-
-/** Start time for duration tracking. */
-let streamStartTime = 0;
+const activeStreams = new Map<
+  string,
+  { messageId: string; startTime: number }
+>();
+const activeToolRequests = new Set<string>();
 
 /** Last orchestration params for retry support. */
 let lastOrchestrationParams: {
@@ -152,7 +152,7 @@ export async function orchestrate(
 ): Promise<void> {
   // Show loading indicator immediately so the user sees feedback right
   // after hitting Enter — before history, memory, and skill context load.
-  conversationStore.setLoading(true);
+  conversationStore.setLoading(true, conversationId);
 
   // Save params for retry support
   lastOrchestrationParams = { conversationId, prompt, images };
@@ -194,8 +194,10 @@ export async function orchestrate(
   const capabilities = buildCapabilities(conversationId);
 
   // 3. Prepare streaming state (message added on completion)
-  activeMessageId = crypto.randomUUID();
-  streamStartTime = Date.now();
+  activeStreams.set(conversationId, {
+    messageId: crypto.randomUUID(),
+    startTime: Date.now(),
+  });
 
   // 4. Listen for events
   let unlistenTransition: UnlistenFn | null = null;
@@ -205,12 +207,20 @@ export async function orchestrate(
   try {
     unlistenTransition = await listen<TransitionEvent>(
       "orchestrator://transition",
-      (event) => handleTransition(event.payload),
+      (event) => {
+        if (event.payload.conversation_id === conversationId) {
+          handleTransition(event.payload);
+        }
+      },
     );
 
     unlistenEvent = await listen<OrchestratorEvent>(
       "orchestrator://event",
-      (event) => handleWorkerEvent(event.payload),
+      (event) => {
+        if (event.payload.conversation_id === conversationId) {
+          handleWorkerEvent(event.payload);
+        }
+      },
     );
 
     unlistenToolRequest = await listen<ToolExecutionRequest>(
@@ -233,16 +243,17 @@ export async function orchestrate(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    handleError(message);
+    handleError(message, conversationId);
   } finally {
     unlistenTransition?.();
     unlistenEvent?.();
     unlistenToolRequest?.();
 
     // Ensure loading state is cleared
-    conversationStore.setLoading(false);
-    conversationStore.finalizeStreaming();
-    activeMessageId = null;
+    conversationStore.setLoading(false, conversationId);
+    conversationStore.setRLMProcessing(false, conversationId);
+    conversationStore.finalizeStreaming(conversationId);
+    activeStreams.delete(conversationId);
   }
 }
 
@@ -290,8 +301,8 @@ function handleTransition(event: TransitionEvent): void {
     modelId: event.model_name,
   };
 
-  conversationStore.addMessage(transitionMessage);
-  conversationStore.persistMessage(transitionMessage);
+  conversationStore.addMessage(transitionMessage, event.conversation_id);
+  conversationStore.persistMessage(transitionMessage, event.conversation_id);
 }
 
 function handleWorkerEvent(event: OrchestratorEvent): void {
@@ -299,22 +310,23 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
 
   switch (workerEvent.type) {
     case "content":
-      handleContent(workerEvent.text);
+      handleContent(event.conversation_id, workerEvent.text);
       break;
     case "thinking":
-      handleThinking(workerEvent.text);
+      handleThinking(event.conversation_id, workerEvent.text);
       break;
     case "tool_call":
-      handleToolCall(workerEvent);
+      handleToolCall(event.conversation_id, workerEvent);
       break;
     case "tool_result":
-      handleToolResult(workerEvent);
+      handleToolResult(event.conversation_id, workerEvent);
       break;
     case "diff":
-      handleDiff(workerEvent);
+      handleDiff(event.conversation_id, workerEvent);
       break;
     case "complete":
       handleComplete(
+        event.conversation_id,
         workerEvent.final_content,
         workerEvent.thinking,
         workerEvent.cost,
@@ -322,13 +334,13 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
       );
       break;
     case "error":
-      handleError(workerEvent.message);
+      handleError(workerEvent.message, event.conversation_id);
       break;
     case "reroute":
-      handleReroute(workerEvent);
+      handleReroute(event.conversation_id, workerEvent);
       break;
     case "rlm_start":
-      conversationStore.setRLMProcessing(true);
+      conversationStore.setRLMProcessing(true, event.conversation_id);
       break;
     case "rlm_chunk_complete":
       // Steps are collected in the Complete event payload; nothing to do here.
@@ -336,22 +348,25 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
   }
 }
 
-function handleContent(text: string): void {
-  conversationStore.appendStreamingContent(text);
+function handleContent(conversationId: string, text: string): void {
+  conversationStore.appendStreamingContent(text, conversationId);
 }
 
-function handleThinking(text: string): void {
-  conversationStore.appendStreamingThinking(text);
+function handleThinking(conversationId: string, text: string): void {
+  conversationStore.appendStreamingThinking(text, conversationId);
 }
 
-function handleToolCall(event: {
-  tool_call_id: string;
-  name: string;
-  arguments: string;
-  title: string;
-}): void {
+function handleToolCall(
+  conversationId: string,
+  event: {
+    tool_call_id: string;
+    name: string;
+    arguments: string;
+    title: string;
+  },
+): void {
   // Flush any pending streaming content into the assistant message
-  flushStreamingToMessage();
+  flushStreamingToMessage(conversationId);
 
   // Parse arguments JSON for display in ToolCallCard
   let parameters: Record<string, unknown> | undefined;
@@ -386,32 +401,39 @@ function handleToolCall(event: {
     },
   };
 
-  conversationStore.addMessage(toolMessage);
-  conversationStore.persistMessage(toolMessage);
+  conversationStore.addMessage(toolMessage, conversationId);
+  conversationStore.persistMessage(toolMessage, conversationId);
 }
 
-function handleToolResult(event: {
-  tool_call_id: string;
-  content: string;
-  is_error: boolean;
-}): void {
+function handleToolResult(
+  conversationId: string,
+  event: {
+    tool_call_id: string;
+    content: string;
+    is_error: boolean;
+  },
+): void {
   // Update the original tool_call message's status so the ToolCallCard
   // transitions from "Running" to "Completed" or "Failed".
-  const messages = conversationStore.messages;
+  const messages = conversationStore.getMessagesFor(conversationId);
   const toolCallMsg = messages.find(
     (m) => m.toolCallId === event.tool_call_id && m.type === "tool_call",
   );
   if (toolCallMsg?.toolCall) {
     const newStatus = event.is_error ? "error" : "completed";
-    conversationStore.updateMessage(toolCallMsg.id, {
-      status: "complete",
-      toolCall: {
-        ...toolCallMsg.toolCall,
-        status: newStatus,
-        result: event.content,
-        isError: event.is_error,
+    conversationStore.updateMessage(
+      toolCallMsg.id,
+      {
+        status: "complete",
+        toolCall: {
+          ...toolCallMsg.toolCall,
+          status: newStatus,
+          result: event.content,
+          isError: event.is_error,
+        },
       },
-    });
+      conversationId,
+    );
   }
 
   const resultMessage: UnifiedMessage = {
@@ -433,16 +455,19 @@ function handleToolResult(event: {
     },
   };
 
-  conversationStore.addMessage(resultMessage);
-  conversationStore.persistMessage(resultMessage);
+  conversationStore.addMessage(resultMessage, conversationId);
+  conversationStore.persistMessage(resultMessage, conversationId);
 }
 
-function handleDiff(event: {
-  path: string;
-  old_text: string;
-  new_text: string;
-  tool_call_id: string | null;
-}): void {
+function handleDiff(
+  conversationId: string,
+  event: {
+    path: string;
+    old_text: string;
+    new_text: string;
+    tool_call_id: string | null;
+  },
+): void {
   const diffMessage: UnifiedMessage = {
     id: crypto.randomUUID(),
     type: "diff",
@@ -460,19 +485,21 @@ function handleDiff(event: {
     },
   };
 
-  conversationStore.addMessage(diffMessage);
-  conversationStore.persistMessage(diffMessage);
+  conversationStore.addMessage(diffMessage, conversationId);
+  conversationStore.persistMessage(diffMessage, conversationId);
 }
 
 function handleComplete(
+  conversationId: string,
   finalContent: string,
   thinking: string | null,
   cost?: number,
   rlmStepsJson?: string | null,
 ): void {
-  if (!activeMessageId) return;
+  const stream = activeStreams.get(conversationId);
+  if (!stream) return;
 
-  const duration = Date.now() - streamStartTime;
+  const duration = Date.now() - stream.startTime;
 
   console.debug(
     "[orchestrator] complete — duration=%dms, cost=%s",
@@ -481,9 +508,12 @@ function handleComplete(
   );
 
   // Use accumulated streaming content or fall back to final_content
-  const content = conversationStore.streamingContent || finalContent;
+  const content =
+    conversationStore.getStreamingContentFor(conversationId) || finalContent;
   const thinkingContent =
-    conversationStore.streamingThinking || thinking || undefined;
+    conversationStore.getStreamingThinkingFor(conversationId) ||
+    thinking ||
+    undefined;
 
   // Parse RLM steps from JSON if present
   let rlmSteps: UnifiedMessage["rlmSteps"] | undefined;
@@ -496,7 +526,7 @@ function handleComplete(
   }
 
   const assistantMessage: UnifiedMessage = {
-    id: activeMessageId,
+    id: stream.messageId,
     type: "assistant",
     role: "assistant",
     content,
@@ -509,10 +539,10 @@ function handleComplete(
     rlmSteps,
   };
 
-  conversationStore.setRLMProcessing(false);
-  conversationStore.finalizeStreaming();
-  conversationStore.addMessage(assistantMessage);
-  conversationStore.persistMessage(assistantMessage);
+  conversationStore.setRLMProcessing(false, conversationId);
+  conversationStore.finalizeStreaming(conversationId);
+  conversationStore.addMessage(assistantMessage, conversationId);
+  conversationStore.persistMessage(assistantMessage, conversationId);
 
   // Store conversation to memory if enabled
   const model = providerStore.activeModel || "unknown";
@@ -521,10 +551,11 @@ function handleComplete(
   });
 }
 
-function handleError(message: string): void {
-  if (activeMessageId) {
+function handleError(message: string, conversationId?: string): void {
+  const stream = conversationId ? activeStreams.get(conversationId) : null;
+  if (conversationId && stream) {
     const errorMessage: UnifiedMessage = {
-      id: activeMessageId,
+      id: stream.messageId,
       type: "assistant",
       role: "assistant",
       content: "",
@@ -533,8 +564,9 @@ function handleError(message: string): void {
       error: message,
       workerType: "orchestrator",
     };
-    conversationStore.finalizeStreaming();
-    conversationStore.addMessage(errorMessage);
+    conversationStore.setRLMProcessing(false, conversationId);
+    conversationStore.finalizeStreaming(conversationId);
+    conversationStore.addMessage(errorMessage, conversationId);
   } else {
     conversationStore.setError(message);
   }
@@ -547,6 +579,9 @@ function handleError(message: string): void {
  * and is waiting for the frontend to execute it and submit the result back.
  */
 async function handleToolRequest(request: ToolExecutionRequest): Promise<void> {
+  if (activeToolRequests.has(request.tool_call_id)) return;
+  activeToolRequests.add(request.tool_call_id);
+
   console.log(
     "[orchestrator] Tool request: %s (id: %s)",
     request.name,
@@ -577,32 +612,36 @@ async function handleToolRequest(request: ToolExecutionRequest): Promise<void> {
       content: `Tool execution error: ${message}`,
       isError: true,
     });
+  } finally {
+    activeToolRequests.delete(request.tool_call_id);
   }
 }
 
-function handleReroute(event: {
-  from_model: string;
-  to_model: string;
-  reason: string;
-}): void {
+function handleReroute(
+  conversationId: string,
+  event: {
+    from_model: string;
+    to_model: string;
+    reason: string;
+  },
+): void {
   // Flush any partial streaming content from the failed model
-  flushStreamingToMessage();
+  flushStreamingToMessage(conversationId);
 
   // Reset streaming state for the new model attempt
-  activeMessageId = crypto.randomUUID();
-  streamStartTime = Date.now();
+  activeStreams.set(conversationId, {
+    messageId: crypto.randomUUID(),
+    startTime: Date.now(),
+  });
 
   // Update UI to reflect the actual model being used after automatic fallback
   providerStore.setActiveModel(event.to_model);
   chatStore.setModel(event.to_model);
-  const conversationId = conversationStore.activeConversationId;
-  if (conversationId) {
-    void conversationStore.updateConversationSelection(
-      conversationId,
-      event.to_model,
-      providerStore.activeProvider,
-    );
-  }
+  void conversationStore.updateConversationSelection(
+    conversationId,
+    event.to_model,
+    providerStore.activeProvider,
+  );
 
   // Add a reroute announcement message to the conversation
   const rerouteMessage: UnifiedMessage = {
@@ -617,8 +656,8 @@ function handleReroute(event: {
     error: event.from_model,
   };
 
-  conversationStore.addMessage(rerouteMessage);
-  conversationStore.persistMessage(rerouteMessage);
+  conversationStore.addMessage(rerouteMessage, conversationId);
+  conversationStore.persistMessage(rerouteMessage, conversationId);
 }
 
 // =============================================================================
@@ -629,15 +668,16 @@ function handleReroute(event: {
  * Flush accumulated streaming content into a completed assistant message
  * before tool calls or diffs create new messages.
  */
-function flushStreamingToMessage(): void {
-  if (!activeMessageId) return;
+function flushStreamingToMessage(conversationId: string): void {
+  const stream = activeStreams.get(conversationId);
+  if (!stream) return;
 
-  const content = conversationStore.streamingContent;
-  const thinking = conversationStore.streamingThinking;
+  const content = conversationStore.getStreamingContentFor(conversationId);
+  const thinking = conversationStore.getStreamingThinkingFor(conversationId);
 
   if (content || thinking) {
     const flushedMessage: UnifiedMessage = {
-      id: activeMessageId,
+      id: stream.messageId,
       type: "assistant",
       role: "assistant",
       content: content || "",
@@ -646,12 +686,15 @@ function flushStreamingToMessage(): void {
       status: "complete",
       workerType: "orchestrator",
     };
-    conversationStore.addMessage(flushedMessage);
-    conversationStore.persistMessage(flushedMessage);
-    conversationStore.finalizeStreaming();
+    conversationStore.addMessage(flushedMessage, conversationId);
+    conversationStore.persistMessage(flushedMessage, conversationId);
+    conversationStore.finalizeStreaming(conversationId);
 
     // Generate a new ID for the next streaming segment
-    activeMessageId = crypto.randomUUID();
+    activeStreams.set(conversationId, {
+      messageId: crypto.randomUUID(),
+      startTime: Date.now(),
+    });
   }
 }
 

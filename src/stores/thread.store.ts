@@ -427,6 +427,25 @@ export const threadStore = {
     }
   },
 
+  /** Select by id alone; resolves kind from the unified list. */
+  setActiveThread(id: string | null): void {
+    if (id === null) {
+      setState({ activeThreadId: null, activeThreadKind: null });
+      conversationStore.setActiveConversation(null);
+      agentStore.setActiveSession(null);
+      return;
+    }
+    const thread = this.threads.find((t) => t.id === id);
+    if (!thread) {
+      // Stale id - clear so downstream stores don't keep dangling pointers.
+      setState({ activeThreadId: null, activeThreadKind: null });
+      conversationStore.setActiveConversation(null);
+      agentStore.setActiveSession(null);
+      return;
+    }
+    this.selectThread(id, thread.kind);
+  },
+
   /**
    * Create a new chat thread.
    */

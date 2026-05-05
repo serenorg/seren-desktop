@@ -1,33 +1,73 @@
 // ABOUTME: Routes to the correct content view based on the active thread type.
 // ABOUTME: Shows ChatContent for chat threads, AgentChat for agent threads, or empty state.
 
-import { type Component, Match, Show, Switch } from "solid-js";
+import { type Component, createMemo, For, Show } from "solid-js";
 import { AgentChat } from "@/components/chat/AgentChat";
 import { ChatContent } from "@/components/chat/ChatContent";
 import { TerminalBuffer } from "@/components/terminal/TerminalBuffer";
 import { openFolder } from "@/lib/files/service";
 import { fileTreeState } from "@/stores/fileTree";
-import { threadStore } from "@/stores/thread.store";
+import { type WorkspaceWindow, workspaceStore } from "@/stores/workspace.store";
 
 interface ThreadContentProps {
   onSignInClick: () => void;
 }
 
 export const ThreadContent: Component<ThreadContentProps> = (props) => {
+  const activeWindow = () => workspaceStore.activeWindow;
+  const mountedWindows = createMemo(() => {
+    const byThreadId = new Map<string, WorkspaceWindow>();
+    for (const workspace of workspaceStore.workspaces) {
+      for (const workspaceWindow of workspace.windows) {
+        if (!byThreadId.has(workspaceWindow.threadId)) {
+          byThreadId.set(workspaceWindow.threadId, workspaceWindow);
+        }
+      }
+    }
+    return [...byThreadId.values()];
+  });
+  const paneClass = (workspaceWindow: WorkspaceWindow) =>
+    workspaceWindow.threadId === activeWindow()?.threadId
+      ? "absolute inset-0 flex flex-col min-h-0 h-full w-full"
+      : "absolute inset-0 flex flex-col min-h-0 h-full w-full invisible pointer-events-none";
+
   return (
-    <div class="flex flex-col h-full overflow-hidden">
-      <div class="flex-1 flex flex-col overflow-hidden min-h-0">
-        <Switch fallback={<EmptyState />}>
-          <Match when={threadStore.activeThreadKind === "chat"}>
-            <ChatContent onSignInClick={props.onSignInClick} />
-          </Match>
-          <Match when={threadStore.activeThreadKind === "agent"}>
-            <AgentChat />
-          </Match>
-          <Match when={threadStore.activeThreadKind === "terminal"}>
-            <TerminalBuffer />
-          </Match>
-        </Switch>
+    <div
+      id="workspace-content-panel"
+      role="tabpanel"
+      class="relative flex flex-col h-full overflow-hidden"
+    >
+      <div class="relative flex-1 overflow-hidden min-h-0">
+        <For each={mountedWindows()}>
+          {(workspaceWindow) => (
+            <div
+              class={paneClass(workspaceWindow)}
+              aria-hidden={
+                workspaceWindow.threadId !== activeWindow()?.threadId
+              }
+            >
+              <Show when={workspaceWindow.kind === "chat"}>
+                <ChatContent
+                  threadId={workspaceWindow.threadId}
+                  active={workspaceWindow.threadId === activeWindow()?.threadId}
+                  onSignInClick={props.onSignInClick}
+                />
+              </Show>
+              <Show when={workspaceWindow.kind === "agent"}>
+                <AgentChat
+                  threadId={workspaceWindow.threadId}
+                  active={workspaceWindow.threadId === activeWindow()?.threadId}
+                />
+              </Show>
+              <Show when={workspaceWindow.kind === "terminal"}>
+                <TerminalBuffer threadId={workspaceWindow.threadId} />
+              </Show>
+            </div>
+          )}
+        </For>
+        <Show when={!activeWindow()}>
+          <EmptyState />
+        </Show>
       </div>
     </div>
   );

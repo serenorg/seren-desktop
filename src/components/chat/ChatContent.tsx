@@ -170,12 +170,14 @@ const SUGGESTION_KEYWORDS = [
 
 interface ChatContentProps {
   onSignInClick?: () => void;
+  threadId?: string;
+  active?: boolean;
 }
 
 // Per-thread input drafts so switching threads doesn't leak text between them.
 const chatDrafts = new Map<string, string>();
 
-export const ChatContent: Component<ChatContentProps> = (_props) => {
+export const ChatContent: Component<ChatContentProps> = (props) => {
   const [input, setInput] = createSignal("");
   const [suggestions, setSuggestions] = createSignal<Publisher[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = createSignal(false);
@@ -208,6 +210,29 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // DOM update. Mirrors the same pattern used in AgentChat.tsx.
   const markdownWorker = new RenderMarkdownWorker();
   const [htmlCache, setHtmlCache] = createStore<Record<string, string>>({});
+  const conversationId = () =>
+    props.threadId ?? conversationStore.activeConversationId;
+  const conversationMessages = createMemo(() => {
+    const id = conversationId();
+    return id ? conversationStore.getMessagesFor(id) : [];
+  });
+  const conversationIsLoading = () => {
+    const id = conversationId();
+    return id ? conversationStore.getLoadingFor(id) : false;
+  };
+  const conversationIsRLMProcessing = () => {
+    const id = conversationId();
+    return id ? conversationStore.getRLMProcessingFor(id) : false;
+  };
+  const streamingContent = () => {
+    const id = conversationId();
+    return id ? conversationStore.getStreamingContentFor(id) : "";
+  };
+  const streamingThinking = () => {
+    const id = conversationId();
+    return id ? conversationStore.getStreamingThinkingFor(id) : "";
+  };
+  const isPaneActive = () => props.active ?? true;
   markdownWorker.onmessage = (
     e: MessageEvent<{ id: string; html: string; error?: boolean }>,
   ) => {
@@ -225,7 +250,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Enqueue finalized assistant messages to the render worker.
   createEffect(() => {
-    for (const msg of conversationStore.messages) {
+    for (const msg of conversationMessages()) {
       if (
         msg.role === "assistant" &&
         msg.status !== "streaming" &&
@@ -238,7 +263,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Save/restore per-thread input drafts when switching conversations
   createEffect(() => {
-    const currentId = conversationStore.activeConversationId;
+    const currentId = conversationId();
     if (currentId !== prevConversationId) {
       // Save draft for the thread we're leaving
       if (prevConversationId) {
@@ -258,6 +283,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // Suppress the native browser context menu on file links so "Open Link"
   // doesn't navigate the WebView. The JS click handler opens the editor instead.
   const handleContextMenu = (event: MouseEvent) => {
+    if (!isPaneActive()) return;
     if ((event.target as HTMLElement).closest(".external-link")) {
       event.preventDefault();
     }
@@ -265,6 +291,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   // Click handler for copy buttons and external links (event delegation)
   const handleCopyClick = (event: MouseEvent) => {
+    if (!isPaneActive()) return;
     const target = event.target as HTMLElement;
 
     // Handle external link clicks
@@ -345,7 +372,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   onMount(async () => {
     console.log(
       "[ChatContent] Mounting, conversationStore.isLoading:",
-      conversationStore.isLoading,
+      conversationIsLoading(),
     );
 
     // Register copy button handler on document for better reliability
@@ -368,12 +395,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   createEffect(() => {
     console.log(
       "[ChatContent] conversationStore.isLoading changed to:",
-      conversationStore.isLoading,
+      conversationIsLoading(),
     );
   });
 
   // Watch for pending input from store (e.g., from catalog "Let's Chat" button)
   createEffect(() => {
+    if (!isPaneActive()) return;
     const pending = chatStore.pendingInput;
     if (pending) {
       setInput(pending);
@@ -388,8 +416,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   // grows after messages first load. Without tracking htmlCache, the scroll fires
   // once on empty content and never again as worker responses fill in the HTML.
   createEffect(() => {
-    void conversationStore.messages;
-    void conversationStore.streamingContent;
+    void conversationMessages();
+    void streamingContent();
     void Object.keys(htmlCache).length;
     requestAnimationFrame(scrollToBottom);
   });
@@ -489,16 +517,22 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   const [persistedInputs, setPersistedInputs] = createSignal<string[]>([]);
 
   createEffect(() => {
-    const convId = conversationStore.activeConversationId;
+    const convId = conversationId();
     if (!convId) {
       setPersistedInputs([]);
       return;
     }
     getInputHistory(convId)
-      .then(setPersistedInputs)
+      .then((history) => {
+        if (conversationId() === convId) {
+          setPersistedInputs(history);
+        }
+      })
       .catch((err) => {
         console.warn("[ChatContent] Failed to load input history:", err);
-        setPersistedInputs([]);
+        if (conversationId() === convId) {
+          setPersistedInputs([]);
+        }
       });
   });
 
@@ -544,10 +578,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   // Event handler for slash command - must be defined after handleAttachImages
-  const handlePickImages = () => handleAttachImages();
+  const handlePickImages = () => {
+    if (!isPaneActive()) return;
+    handleAttachImages();
+  };
 
   // Event handler for setting chat input (e.g., from skill invocation)
   const handleSetChatInput = (event: Event) => {
+    if (!isPaneActive()) return;
     // Skip if another handler already processed this event (prevents
     // duplicate sends when both AgentChat and ChatContent are mounted).
     if ((event as CustomEvent & { _handled?: boolean })._handled) return;
@@ -615,9 +653,9 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
   };
 
   const cancelStreaming = () => {
-    const conversationId = conversationStore.activeConversationId;
-    if (conversationId) {
-      cancelOrchestration(conversationId);
+    const id = conversationId();
+    if (id) {
+      cancelOrchestration(id);
     }
     setMessageQueue([]);
   };
@@ -632,7 +670,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
     // Record the prompt in the persisted input-history buffer so up-arrow
     // recall survives thread switches, compaction, and app restarts.
-    const convId = conversationStore.activeConversationId;
+    const convId = conversationId();
     if (trimmed && convId) {
       setPersistedInputs((prev) => {
         const next = [...prev, trimmed];
@@ -719,20 +757,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     }
 
     // If currently streaming, queue the message instead
-    if (conversationStore.isLoading) {
+    if (conversationIsLoading()) {
       setMessageQueue((queue) => [...queue, trimmed]);
-      // Persist to input history even on the queued path — the user typed and
-      // submitted this, so up-arrow recall must see it (#1624).
-      const convId = conversationStore.activeConversationId;
-      if (convId) {
-        setPersistedInputs((prev) => {
-          const next = [...prev, trimmed];
-          return next.length > 200 ? next.slice(-200) : next;
-        });
-        void appendInputHistory(convId, trimmed).catch((err) => {
-          console.warn("[ChatContent] Failed to persist input history:", err);
-        });
-      }
       setInput("");
       setHistoryIndex(-1);
       setSavedInput("");
@@ -750,8 +776,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     images?: Attachment[],
     displayContent?: string,
   ) => {
-    const conversationId = conversationStore.activeConversationId;
-    if (!conversationId) return;
+    const id = conversationId();
+    if (!id) return;
 
     // Defensive auth gate: matches sendMessage()'s gate but also covers the
     // skill-invocation branch and queue-drain path that bypass it. Without
@@ -776,8 +802,8 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       status: "complete",
     };
 
-    conversationStore.addMessage(userMessage);
-    await conversationStore.persistMessage(userMessage);
+    conversationStore.addMessage(userMessage, id);
+    await conversationStore.persistMessage(userMessage, id);
 
     conversationStore.setError(null);
     setInput("");
@@ -795,7 +821,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       prompt = `Context from ${fileLabel}${rangeLabel}:\n\`\`\`\n${context.content}\n\`\`\`\n\n${messageContent}`;
     }
 
-    await orchestrate(conversationId, prompt, images);
+    await orchestrate(id, prompt, images);
 
     // Check if auto-compact should be triggered
     await chatStore.checkAutoCompact(
@@ -807,14 +833,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     // Process message queue if there are queued messages.
     // Capture the conversation ID to ensure the drain targets the same
     // conversation even if the user switched threads during orchestration.
-    const drainConversationId = conversationId;
+    const drainConversationId = id;
     const queue = messageQueue();
     if (queue.length > 0) {
       const [nextMessage, ...remainingQueue] = queue;
       setMessageQueue(remainingQueue);
       console.log("[ChatContent] Processing queued message:", nextMessage);
       setTimeout(() => {
-        if (conversationStore.activeConversationId === drainConversationId) {
+        if (conversationId() === drainConversationId) {
           sendMessageImmediate(nextMessage);
         } else {
           console.warn(
@@ -829,31 +855,39 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
     if (!message.request) return;
 
     chatStore.setRetrying(message.id);
-    conversationStore.updateMessage(message.id, {
-      status: "pending",
-      attemptCount: message.attemptCount ?? 1,
-    });
+    const id = conversationId();
+    if (!id) return;
+
+    conversationStore.updateMessage(
+      message.id,
+      {
+        status: "pending",
+        attemptCount: message.attemptCount ?? 1,
+      },
+      id,
+    );
 
     try {
       // Include conversation history up to (but not including) the failed message
       // so the AI can continue from where it left off instead of starting over
-      const messageIndex = conversationStore.messages.findIndex(
-        (m) => m.id === message.id,
-      );
+      const messages = conversationMessages();
+      const messageIndex = messages.findIndex((m) => m.id === message.id);
       const historyBeforeRetry =
-        messageIndex > 0
-          ? conversationStore.messages.slice(0, messageIndex)
-          : undefined;
+        messageIndex > 0 ? messages.slice(0, messageIndex) : undefined;
 
       const content = await sendMessageWithRetry(
         message.request.prompt,
         message.modelId ?? chatStore.selectedModel,
         message.request.context,
         (attempt) => {
-          conversationStore.updateMessage(message.id, {
-            status: "pending",
-            attemptCount: attempt + 1,
-          });
+          conversationStore.updateMessage(
+            message.id,
+            {
+              status: "pending",
+              attemptCount: attempt + 1,
+            },
+            id,
+          );
         },
         historyBeforeRetry,
       );
@@ -866,14 +900,18 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
         timestamp: Date.now(),
       };
 
-      conversationStore.updateMessage(message.id, updated);
-      await conversationStore.persistMessage(updated);
+      conversationStore.updateMessage(message.id, updated, id);
+      await conversationStore.persistMessage(updated, id);
     } catch (error) {
       const messageError = (error as Error).message;
-      conversationStore.updateMessage(message.id, {
-        status: "error",
-        error: messageError,
-      });
+      conversationStore.updateMessage(
+        message.id,
+        {
+          status: "error",
+          error: messageError,
+        },
+        id,
+      );
       if (isManual) {
         conversationStore.setError(messageError);
       }
@@ -892,11 +930,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
       kind: "warning",
     });
     if (!confirmClear) return;
-    await conversationStore.clearHistory();
+    const id = conversationId();
+    if (!id) return;
+    await conversationStore.clearHistory(id);
   };
 
   const copyAllChatHistory = async () => {
-    const messages = conversationStore.messages;
+    const messages = conversationMessages();
     if (messages.length === 0) {
       alert("No chat history to copy");
       return;
@@ -925,7 +965,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
   const downloadChatHistory = async () => {
     if (isSaving()) return;
-    const messages = conversationStore.messages;
+    const messages = conversationMessages();
     if (messages.length === 0) return;
 
     const dateStr = new Date().toISOString().split("T")[0];
@@ -1030,7 +1070,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                 {chatStore.isCompacting ? "Compacting..." : "Compact"}
               </button>
             </Show>
-            <Show when={conversationStore.messages.length > 0}>
+            <Show when={conversationMessages().length > 0}>
               <button
                 type="button"
                 class="bg-transparent border border-border text-muted-foreground p-1.5 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
@@ -1104,8 +1144,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
 
           <Show
             when={
-              conversationStore.messages.length > 0 ||
-              chatStore.compactedSummary
+              conversationMessages().length > 0 || chatStore.compactedSummary
             }
             fallback={
               <div class="flex-1 flex flex-col items-center justify-center p-10 text-muted-foreground">
@@ -1123,7 +1162,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
               </div>
             }
           >
-            <For each={groupConsecutiveToolCalls(conversationStore.messages)}>
+            <For each={groupConsecutiveToolCalls(conversationMessages())}>
               {(item) => {
                 // Render grouped tool calls
                 if (item.type === "tool_group") {
@@ -1328,14 +1367,10 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             </For>
           </Show>
 
-          <Show
-            when={
-              conversationStore.isLoading && !conversationStore.streamingContent
-            }
-          >
+          <Show when={conversationIsLoading() && !streamingContent()}>
             <article class="px-5 py-4 border-b border-surface-2">
               <Show
-                when={conversationStore.isRLMProcessing}
+                when={conversationIsRLMProcessing()}
                 fallback={<ThinkingStatus />}
               >
                 <span class="inline-flex items-center gap-2 text-sm text-foreground">
@@ -1350,24 +1385,24 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
             </article>
           </Show>
 
-          <Show when={conversationStore.streamingThinking}>
+          <Show when={streamingThinking()}>
             <article class="px-5 py-4 border-b border-surface-2">
               <details open class="text-xs text-muted-foreground">
                 <summary class="cursor-pointer select-none mb-1">
                   Thinking…
                 </summary>
                 <div class="whitespace-pre-wrap opacity-70">
-                  {conversationStore.streamingThinking}
+                  {streamingThinking()}
                 </div>
               </details>
             </article>
           </Show>
 
-          <Show when={conversationStore.streamingContent}>
+          <Show when={streamingContent()}>
             <article class="px-5 py-4 border-b border-surface-2">
               <div class="chat-message-content text-[14px] leading-[1.7] text-foreground break-words whitespace-pre-wrap">
-                {conversationStore.streamingContent}
-                <Show when={conversationStore.isLoading}>
+                {streamingContent()}
+                <Show when={conversationIsLoading()}>
                   <span class="inline-block w-[6px] h-[14px] bg-primary ml-0.5 animate-pulse" />
                 </Show>
               </div>
@@ -1456,14 +1491,14 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                     "[ChatContent] Textarea ref set, disabled:",
                     el.disabled,
                     "isLoading:",
-                    conversationStore.isLoading,
+                    conversationIsLoading(),
                   );
                 }}
                 value={input()}
                 placeholder={
-                  conversationStore.isLoading
+                  conversationIsLoading()
                     ? "Type to queue message..."
-                    : "Ask Seren anything… (type / for commands)"
+                    : "Ask Seren anything... (type / for commands)"
                 }
                 class="w-full bg-background border border-border rounded-xl text-foreground px-3.5 py-3 font-inherit text-[14px] leading-normal transition-all duration-150 focus:outline-none focus:border-primary/60 focus:shadow-[var(--input-focus-glow)] placeholder:text-muted-foreground/60"
                 minHeight={72}
@@ -1601,13 +1636,13 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   <ToolsetSelector />
                   <ReasoningEffortSelector />
                 </Show>
-                <Show when={conversationStore.isLoading}>
+                <Show when={conversationIsLoading()}>
                   <ThinkingStatus />
                 </Show>
                 <Show
                   when={
-                    !conversationStore.isLoading &&
-                    conversationStore.messages.length > 0
+                    !conversationIsLoading() &&
+                    conversationMessages().length > 0
                   }
                 >
                   <span class="text-[10px] text-muted-foreground">
@@ -1629,7 +1664,7 @@ export const ChatContent: Component<ChatContentProps> = (_props) => {
                   }}
                 />
                 <Show
-                  when={conversationStore.isLoading}
+                  when={conversationIsLoading()}
                   fallback={
                     <button
                       type="submit"

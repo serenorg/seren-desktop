@@ -78,6 +78,8 @@ import { ToolCallGroup } from "./ToolCallGroup";
 
 interface AgentChatProps {
   onViewDiff?: (diff: DiffEvent) => void;
+  threadId?: string;
+  active?: boolean;
 }
 
 // Draft persistence is through SQLite (`get_thread_draft` / `set_thread_draft`) —
@@ -88,6 +90,7 @@ const DRAFT_DEBOUNCE_MS = 500;
 // so background threads drain automatically on promptComplete.
 
 export const AgentChat: Component<AgentChatProps> = (props) => {
+  const isPaneActive = () => props.active ?? true;
   const [input, setInput] = createSignal("");
   const [attachedImages, setAttachedImages] = createSignal<Attachment[]>([]);
   const { isDragging } = createDragDrop((files) =>
@@ -128,7 +131,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   // Get the active agent thread (must be defined before thread-specific memos)
   const activeAgentThread = createMemo(() => {
-    const thread = threadStore.activeThread;
+    const thread = props.threadId
+      ? threadStore.threads.find((candidate) => candidate.id === props.threadId)
+      : threadStore.activeThread;
     if (!thread || thread.kind !== "agent") return null;
     return thread;
   });
@@ -234,10 +239,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       return;
     }
     getInputHistory(convId)
-      .then(setPersistedInputs)
+      .then((history) => {
+        if (activeAgentThread()?.id === convId) {
+          setPersistedInputs(history);
+        }
+      })
       .catch((err) => {
         console.warn("[AgentChat] Failed to load input history:", err);
-        setPersistedInputs([]);
+        if (activeAgentThread()?.id === convId) {
+          setPersistedInputs([]);
+        }
       });
   });
 
@@ -245,8 +256,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // Reads from persisted history so entries survive compaction + restart.
   const userMessageHistory = createMemo(() => [...persistedInputs()].reverse());
 
-  const onPickImages = () => handleAttachImages();
+  const onPickImages = () => {
+    if (!isPaneActive()) return;
+    handleAttachImages();
+  };
   const onSetChatInput = (event: Event) => {
+    if (!isPaneActive()) return;
     // Skip if another handler already processed this event (prevents
     // duplicate sends when both AgentChat and ChatContent are mounted).
     if ((event as CustomEvent & { _handled?: boolean })._handled) return;
@@ -277,7 +292,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   onMount(() => {
     window.addEventListener("seren:pick-images", onPickImages);
     window.addEventListener("seren:set-chat-input", onSetChatInput);
-    if (fileTreeState.rootPath) {
+    if (isPaneActive() && fileTreeState.rootPath) {
       void agentStore.refreshRemoteSessions(
         fileTreeState.rootPath,
         agentStore.selectedAgentType,
@@ -301,6 +316,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   createEffect(() => {
     const sessionId = threadSessionId();
+    if (!isPaneActive()) return;
     if (sessionId && agentStore.activeSessionId !== sessionId) {
       agentStore.setActiveSession(sessionId);
     }
@@ -314,8 +330,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
 
   const hasSession = () => threadSession() !== null;
   const isPrompting = () => threadSession()?.info.status === "prompting";
-  const messageQueue = () =>
-    threadSessionId() ? agentStore.getPendingPrompts(threadSessionId()!) : [];
+  const messageQueue = () => {
+    const id = threadSessionId();
+    return id ? agentStore.getPendingPrompts(id) : [];
+  };
   const promptStartTime = () => threadSession()?.promptStartTime;
   const sessionError = () => threadSession()?.error ?? agentStore.error;
   const lockedAgentType = createMemo<AgentType>(() => {
@@ -360,14 +378,16 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   // Skip refresh if a prompt is active to avoid backend rejection.
   createEffect(
     on(
-      () => [fileTreeState.rootPath, lockedAgentType()] as const,
-      ([newPath, agentType]) => {
+      () =>
+        [isPaneActive(), fileTreeState.rootPath, lockedAgentType()] as const,
+      ([active, newPath, agentType]) => {
+        if (!active) return;
         if (newPath && !isPrompting()) {
           void agentStore.refreshRemoteSessions(newPath, agentType);
           // Only auto-focus a project session when no thread is selected.
           // When the user already has an active thread, preserve it across
           // folder switches so agents persist regardless of file tree context.
-          if (!threadStore.activeThreadId) {
+          if (isPaneActive() && !threadStore.activeThreadId) {
             agentStore.focusProjectSession(newPath);
           }
         }
@@ -909,6 +929,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   };
 
   const handleGlobalKeyDown = (event: KeyboardEvent) => {
+    if (!isPaneActive()) return;
     if (event.key === "Escape" && isPrompting()) {
       event.preventDefault();
       handleCancel();
@@ -1480,12 +1501,15 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               boundaries (predictive promotion, reactive retry, crash re-dispatch)
               so the user never sees the indicator flicker off mid-restart. #1631. */}
           <Show
-            when={
-              activeAgentThread() &&
-              agentStore.isTurnInFlight(activeAgentThread()!.id) &&
-              !threadStreamingContent() &&
-              !threadStreamingThinking()
-            }
+            when={(() => {
+              const thread = activeAgentThread();
+              return (
+                thread &&
+                agentStore.isTurnInFlight(thread.id) &&
+                !threadStreamingContent() &&
+                !threadStreamingThinking()
+              );
+            })()}
           >
             <article class="px-5 py-4 border-b border-surface-2">
               <ThinkingStatus startTime={promptStartTime} />
@@ -1558,10 +1582,10 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       {/* Agent Fallback Banner (rate limit or context window full) */}
       <Show when={agentStore.agentFallbackNeeded}>
         {(() => {
+          const session = threadSession();
           const agentType =
-            agentStore.activeSession?.info.agentType ??
-            agentStore.selectedAgentType;
-          const agentModelId = agentStore.activeSession?.currentModelId;
+            session?.info.agentType ?? agentStore.selectedAgentType;
+          const agentModelId = session?.currentModelId;
           const chatModelId = mapAgentModelToChat(agentModelId, agentType);
           const modelName = getModelDisplayName(chatModelId);
           const agentName =

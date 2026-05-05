@@ -14,11 +14,13 @@ import { SignIn } from "@/components/auth/SignIn";
 import { StatusBar } from "@/components/common/StatusBar";
 import { EditorContent } from "@/components/editor/EditorContent";
 import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
+import { WorkspaceBar } from "@/components/layout/WorkspaceBar";
 import { SessionPanel } from "@/components/session/SessionPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { DatabasePanel } from "@/components/sidebar/DatabasePanel";
 import { AgentTasksPanel } from "@/components/tasks/AgentTasksPanel";
 import { shortcuts } from "@/lib/shortcuts";
+import { initWorkspaceStore, workspaceStore } from "@/stores/workspace.store";
 import { SlidePanel } from "./SlidePanel";
 import { ThreadContent } from "./ThreadContent";
 import { Titlebar } from "./Titlebar";
@@ -76,10 +78,27 @@ export const AppShell: Component<AppShellProps> = (props) => {
     }
   }) as EventListener;
 
-  // Keyboard: Escape closes slide panel
+  // Cmd on macOS, Ctrl elsewhere; Super/Win is OS-reserved.
+  const isMac =
+    typeof navigator !== "undefined" &&
+    /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape" && slidePanel()) {
       setSlidePanel(null);
+      return;
+    }
+
+    // Workspace switch: Cmd/Ctrl + digit, with 0 mapping to 10.
+    // Modifier-bearing chords fire regardless of focus - inputs only
+    // own bare keystrokes.
+    const modOnly = isMac
+      ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+      : e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    if (modOnly && e.key >= "0" && e.key <= "9") {
+      const number = e.key === "0" ? 10 : Number.parseInt(e.key, 10);
+      e.preventDefault();
+      workspaceStore.switchOrCreate(number);
     }
   };
 
@@ -87,9 +106,13 @@ export const AppShell: Component<AppShellProps> = (props) => {
 
   // Register global listeners and keyboard shortcuts
   onMount(() => {
+    initWorkspaceStore();
+
     window.addEventListener("seren:open-panel", handleOpenPanel);
     window.addEventListener("seren:open-settings", handleOpenSettings);
-    window.addEventListener("keydown", handleKeyDown);
+    // Capture phase so descendants calling stopPropagation (Monaco)
+    // can't swallow the workspace-switch chord.
+    window.addEventListener("keydown", handleKeyDown, true);
 
     shortcuts.register("focusChat", () => setSlidePanel(null));
     shortcuts.register("openSettings", () =>
@@ -103,7 +126,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
   onCleanup(() => {
     window.removeEventListener("seren:open-panel", handleOpenPanel);
     window.removeEventListener("seren:open-settings", handleOpenSettings);
-    window.removeEventListener("keydown", handleKeyDown);
+    window.removeEventListener("keydown", handleKeyDown, true);
 
     shortcuts.unregister("focusChat");
     shortcuts.unregister("openSettings");
@@ -121,6 +144,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
         onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
         sidebarCollapsed={sidebarCollapsed()}
       />
+
+      <WorkspaceBar />
 
       <div class="flex flex-1 overflow-hidden relative">
         <ThreadSidebar

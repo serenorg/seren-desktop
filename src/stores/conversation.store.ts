@@ -34,22 +34,22 @@ interface ConversationState {
   conversations: Conversation[];
   activeConversationId: string | null;
   messages: Record<string, UnifiedMessage[]>;
-  isLoading: boolean;
-  isRLMProcessing: boolean;
+  loading: Record<string, boolean>;
+  rlmProcessing: Record<string, boolean>;
   error: string | null;
-  streamingContent: string;
-  streamingThinking: string;
+  streamingContent: Record<string, string>;
+  streamingThinking: Record<string, string>;
 }
 
 const [state, setState] = createStore<ConversationState>({
   conversations: [],
   activeConversationId: null,
   messages: {},
-  isLoading: false,
-  isRLMProcessing: false,
+  loading: {},
+  rlmProcessing: {},
   error: null,
-  streamingContent: "",
-  streamingThinking: "",
+  streamingContent: {},
+  streamingThinking: {},
 });
 
 function dbToConversation(db: DbConversation): Conversation {
@@ -102,15 +102,29 @@ export const conversationStore = {
   },
 
   get isLoading(): boolean {
-    return state.isLoading;
+    if (!state.activeConversationId) return false;
+    return state.loading[state.activeConversationId] ?? false;
+  },
+
+  getLoadingFor(conversationId: string): boolean {
+    return state.loading[conversationId] ?? false;
   },
 
   get isRLMProcessing(): boolean {
-    return state.isRLMProcessing;
+    if (!state.activeConversationId) return false;
+    return state.rlmProcessing[state.activeConversationId] ?? false;
   },
 
-  setRLMProcessing(value: boolean) {
-    setState("isRLMProcessing", value);
+  getRLMProcessingFor(conversationId: string): boolean {
+    return state.rlmProcessing[conversationId] ?? false;
+  },
+
+  setRLMProcessing(
+    value: boolean,
+    conversationId = state.activeConversationId,
+  ) {
+    if (!conversationId) return;
+    setState("rlmProcessing", conversationId, value);
   },
 
   get error(): string | null {
@@ -118,11 +132,21 @@ export const conversationStore = {
   },
 
   get streamingContent(): string {
-    return state.streamingContent;
+    if (!state.activeConversationId) return "";
+    return state.streamingContent[state.activeConversationId] ?? "";
   },
 
   get streamingThinking(): string {
-    return state.streamingThinking;
+    if (!state.activeConversationId) return "";
+    return state.streamingThinking[state.activeConversationId] ?? "";
+  },
+
+  getStreamingContentFor(conversationId: string): string {
+    return state.streamingContent[conversationId] ?? "";
+  },
+
+  getStreamingThinkingFor(conversationId: string): string {
+    return state.streamingThinking[conversationId] ?? "";
   },
 
   // === Conversation management ===
@@ -242,8 +266,10 @@ export const conversationStore = {
 
   // === Message management ===
 
-  addMessage(message: UnifiedMessage) {
-    const conversationId = state.activeConversationId;
+  addMessage(
+    message: UnifiedMessage,
+    conversationId = state.activeConversationId,
+  ) {
     if (!conversationId) return;
 
     setState("messages", conversationId, (existing = []) => {
@@ -254,7 +280,9 @@ export const conversationStore = {
       return next;
     });
 
-    const conversation = this.activeConversation;
+    const conversation = state.conversations.find(
+      (c) => c.id === conversationId,
+    );
     if (
       conversation &&
       message.role === "user" &&
@@ -265,8 +293,11 @@ export const conversationStore = {
     }
   },
 
-  updateMessage(id: string, patch: Partial<UnifiedMessage>) {
-    const conversationId = state.activeConversationId;
+  updateMessage(
+    id: string,
+    patch: Partial<UnifiedMessage>,
+    conversationId = state.activeConversationId,
+  ) {
     if (!conversationId) return;
 
     setState("messages", conversationId, (msgs = []) =>
@@ -282,31 +313,40 @@ export const conversationStore = {
     );
   },
 
-  clearMessages() {
-    const conversationId = state.activeConversationId;
+  clearMessages(conversationId = state.activeConversationId) {
     if (!conversationId) return;
     setState("messages", conversationId, []);
   },
 
   // === Streaming state ===
 
-  appendStreamingContent(text: string) {
-    setState("streamingContent", (prev) => prev + text);
+  appendStreamingContent(
+    text: string,
+    conversationId = state.activeConversationId,
+  ) {
+    if (!conversationId) return;
+    setState("streamingContent", conversationId, (prev = "") => prev + text);
   },
 
-  appendStreamingThinking(text: string) {
-    setState("streamingThinking", (prev) => prev + text);
+  appendStreamingThinking(
+    text: string,
+    conversationId = state.activeConversationId,
+  ) {
+    if (!conversationId) return;
+    setState("streamingThinking", conversationId, (prev = "") => prev + text);
   },
 
-  finalizeStreaming() {
-    setState("streamingContent", "");
-    setState("streamingThinking", "");
+  finalizeStreaming(conversationId = state.activeConversationId) {
+    if (!conversationId) return;
+    setState("streamingContent", conversationId, "");
+    setState("streamingThinking", conversationId, "");
   },
 
   // === Loading/error ===
 
-  setLoading(loading: boolean) {
-    setState("isLoading", loading);
+  setLoading(loading: boolean, conversationId = state.activeConversationId) {
+    if (!conversationId) return;
+    setState("loading", conversationId, loading);
   },
 
   setError(error: string | null) {
@@ -315,8 +355,10 @@ export const conversationStore = {
 
   // === Persistence ===
 
-  async persistMessage(message: UnifiedMessage) {
-    const conversationId = state.activeConversationId;
+  async persistMessage(
+    message: UnifiedMessage,
+    conversationId = state.activeConversationId,
+  ) {
     if (!conversationId) return;
 
     try {
@@ -403,8 +445,7 @@ export const conversationStore = {
     }
   },
 
-  async clearHistory() {
-    const conversationId = state.activeConversationId;
+  async clearHistory(conversationId = state.activeConversationId) {
     if (!conversationId) return;
 
     try {
@@ -412,7 +453,11 @@ export const conversationStore = {
     } catch (error) {
       console.warn("Unable to clear history", error);
     }
-    this.clearMessages();
+    this.clearMessages(conversationId);
+    setState("streamingContent", conversationId, "");
+    setState("streamingThinking", conversationId, "");
+    setState("loading", conversationId, false);
+    setState("rlmProcessing", conversationId, false);
   },
 
   async clearAllHistory() {
@@ -424,6 +469,10 @@ export const conversationStore = {
 
     setState("conversations", []);
     setState("messages", {});
+    setState("streamingContent", {});
+    setState("streamingThinking", {});
+    setState("loading", {});
+    setState("rlmProcessing", {});
     setState("activeConversationId", null);
 
     await this.createConversation();

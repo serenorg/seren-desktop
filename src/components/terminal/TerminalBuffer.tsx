@@ -309,7 +309,11 @@ async function writeClipboard(text: string): Promise<void> {
   previousFocus?.focus();
 }
 
-export const TerminalBuffer: Component = () => {
+interface TerminalBufferProps {
+  threadId?: string;
+}
+
+export const TerminalBuffer: Component<TerminalBufferProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined;
   let surfaceRef: HTMLDivElement | undefined;
   const [grid, setGrid] = createSignal<GridSnapshot | null>(null);
@@ -359,6 +363,7 @@ export const TerminalBuffer: Component = () => {
   // a plain click (which clears the selection).
   let dragAnchor: CellPos | null = null;
   let dragMoved = false;
+  const activeBufferId = () => props.threadId ?? threadStore.activeThreadId;
 
   // Scrollback viewport. `viewportOffset` is the number of rows above
   // the live bottom that the user has scrolled up; 0 means the live
@@ -378,9 +383,7 @@ export const TerminalBuffer: Component = () => {
   const WHEEL_PIXELS_PER_ROW = 40;
   let wheelAccumulator = 0;
 
-  const buffer = createMemo(() =>
-    terminalStore.getBuffer(threadStore.activeThreadId),
-  );
+  const buffer = createMemo(() => terminalStore.getBuffer(activeBufferId()));
 
   const pruneScrollbackCache = (base: number, len: number) => {
     const end = base + len;
@@ -397,7 +400,7 @@ export const TerminalBuffer: Component = () => {
   };
 
   const fetchGridSnapshot = async () => {
-    const id = threadStore.activeThreadId;
+    const id = activeBufferId();
     if (!id) return;
     if (inFlightSnapshot) {
       pendingResync = true;
@@ -409,7 +412,7 @@ export const TerminalBuffer: Component = () => {
         "terminal_grid_snapshot",
         { bufferId: id },
       );
-      if (snap.kind === "grid" && id === threadStore.activeThreadId) {
+      if (snap.kind === "grid" && id === activeBufferId()) {
         // Snapshot supersedes any queued diffs - they're either older
         // (already in the snapshot) or newer (will arrive after the
         // emitter's next tick and apply cleanly on top).
@@ -691,7 +694,7 @@ export const TerminalBuffer: Component = () => {
    * index space back into stable cache keys.
    */
   const fetchScrollbackWindow = async (startRowId: number, count: number) => {
-    const id = threadStore.activeThreadId;
+    const id = activeBufferId();
     if (!id || count <= 0) return;
     const base = scrollbackBase();
     const len = scrollbackLen();
@@ -712,7 +715,7 @@ export const TerminalBuffer: Component = () => {
         start: relativeStart,
         count: marked,
       });
-      if (id !== threadStore.activeThreadId) return;
+      if (id !== activeBufferId()) return;
       const nextBase = win.scrollbackBase ?? 0;
       const prevBase = scrollbackBase();
       for (let i = 0; i < win.rows.length; i++) {
@@ -855,7 +858,7 @@ export const TerminalBuffer: Component = () => {
       return;
     }
     mouseTrackingLastCell = cell;
-    const id = threadStore.activeThreadId;
+    const id = activeBufferId();
     if (!id) return;
     const baseButton = mouseTrackingButton ?? 3; // 3 = no-button motion
     const button = baseButton + 32 + mouseEventModifiers(e);
@@ -878,7 +881,7 @@ export const TerminalBuffer: Component = () => {
 
   const onWindowMouseUpTracking = (e: MouseEvent) => {
     const g = grid();
-    const id = threadStore.activeThreadId;
+    const id = activeBufferId();
     if (g && id && (g.mouseTracking ?? 0) !== 0 && (g.mouseSgr ?? false)) {
       const cell = canvasMouseToCell(e) ??
         mouseTrackingLastCell ?? { row: 0, col: 0 };
@@ -903,7 +906,7 @@ export const TerminalBuffer: Component = () => {
     // can't deliver wheel buttons safely beyond column 223). Forward
     // wheel as button 64 (up) / 65 (down) and stay out of scrollback.
     if (tracking !== 0 && sgr) {
-      const id = threadStore.activeThreadId;
+      const id = activeBufferId();
       const cell = canvasMouseToCell(e);
       if (id && cell) {
         const wheelButton = (e.deltaY < 0 ? 64 : 65) + mouseEventModifiers(e);
@@ -1012,7 +1015,7 @@ export const TerminalBuffer: Component = () => {
     const w = cellW();
     const h = cellH();
     if (w === 0 || h === 0) return;
-    const id = threadStore.activeThreadId;
+    const id = activeBufferId();
     if (!id) return;
     const cols = Math.max(2, Math.floor(surfaceRef.clientWidth / w));
     const rows = Math.max(1, Math.floor(surfaceRef.clientHeight / h));
@@ -1086,7 +1089,7 @@ export const TerminalBuffer: Component = () => {
     // tmux, htop receive clicks. Shift bypasses tracking so the user
     // can still drag-select text in a tracked app (xterm convention).
     if (tracking !== 0 && sgr && !e.shiftKey) {
-      const id = threadStore.activeThreadId;
+      const id = activeBufferId();
       if (id) {
         e.preventDefault();
         const button = e.button + mouseEventModifiers(e);
@@ -1406,33 +1409,26 @@ export const TerminalBuffer: Component = () => {
   // front so a switch never momentarily shows the previous terminal's
   // content while the new fetch is in flight.
   createEffect(
-    on(
-      () => threadStore.activeThreadId,
-      (id) => {
-        // Clear local grid + seq so a stale diff for the previous
-        // buffer can't apply to the new one. Also drop any queued
-        // diffs - they belong to the old buffer. Scrollback cache is
-        // per-buffer too; flush it so the new buffer doesn't render
-        // history rows from the previous one.
-        pendingDiffs = [];
-        pendingRepaintRows.clear();
-        pendingCanvasScrolls = [];
-        needsFullRepaint = true;
-        scrollbackCache.clear();
-        scrollbackInFlight.clear();
-        setScrollbackLen(0);
-        setScrollbackBase(0);
-        setViewportOffset(0);
-        wheelAccumulator = 0;
-        detachMouseTracking();
-        setGrid(null);
-        setGridSeq(0);
-        setSelection(null);
-        if (!id) return;
-        pushResize();
-        void fetchGridSnapshot();
-      },
-    ),
+    on(activeBufferId, (id) => {
+      // Per-buffer state - flush so the next buffer starts clean.
+      pendingDiffs = [];
+      pendingRepaintRows.clear();
+      pendingCanvasScrolls = [];
+      needsFullRepaint = true;
+      scrollbackCache.clear();
+      scrollbackInFlight.clear();
+      setScrollbackLen(0);
+      setScrollbackBase(0);
+      setViewportOffset(0);
+      wheelAccumulator = 0;
+      detachMouseTracking();
+      setGrid(null);
+      setGridSeq(0);
+      setSelection(null);
+      if (!id) return;
+      pushResize();
+      void fetchGridSnapshot();
+    }),
   );
 
   /**
@@ -1618,7 +1614,7 @@ export const TerminalBuffer: Component = () => {
       "terminal://grid-diff",
       (event) => {
         const diff = event.payload;
-        if (diff.bufferId !== threadStore.activeThreadId) return;
+        if (diff.bufferId !== activeBufferId()) return;
         // Overflow guard: if rAF is starved (background tab, devtools
         // paused, etc) drop everything and fall back to snapshot resync
         // when the tab becomes active again.
